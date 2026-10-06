@@ -230,6 +230,38 @@ describe("docToOps", () => {
     expect(kinds(docToOps("a", parse(A), graphOf({ a: A }), ["blk_one0000000"]))).toEqual([])
   })
 
+  it("a note or board linked under a block is only ever unlinked by a doc edit", () => {
+    // A note is a root of its own: an outline edit can only let go of it —
+    // blank, named to discard (an undo of the step that linked it), or set
+    // loose by a blank row's delete — never delete it. Only `deleteNoteOps`
+    // deletes a note.
+    for (const type of ["note", BOARD_TYPE]) {
+      for (const text of ["", "Kitchen"]) {
+        const snapshot = withRoot("blk_board00000", text, type)
+        expect(docToOps("a", parse(A), snapshot)).toEqual([
+          { op: "unlink", source: "a", destination: "blk_board00000" },
+        ])
+        expect(docToOps("a", parse(A), snapshot, ["blk_board00000"])).toEqual([
+          { op: "unlink", source: "a", destination: "blk_board00000" },
+        ])
+      }
+    }
+    // Beneath a blank row that goes, a blank board stands as it is.
+    const loose = withRoot("blk_blank00000", "", "text", null, ["blk_board00000"], "")
+    const retyped = applyOps(
+      loose,
+      [{ op: "setType", id: "blk_board00000", type: BOARD_TYPE }],
+      NOW,
+    )
+    expect(docToOps("a", parse(A), retyped)).toEqual([
+      { op: "unlink", source: "a", destination: "blk_blank00000" },
+      { op: "delete", id: "blk_blank00000" },
+    ])
+    expect(
+      applyOps(retyped, docToOps("a", parse(A), retyped), NOW).nodes.has("blk_board00000"),
+    ).toBe(true)
+  })
+
   it("an image row with a picture is kept; a placeholder with none is deleted", () => {
     const withPicture = withRoot("blk_pic0000000", "", "image", JSON.stringify({ image: "img_x" }))
     expect(kinds(docToOps("a", parse(A), withPicture))).toEqual(["unlink"])

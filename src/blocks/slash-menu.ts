@@ -6,10 +6,13 @@ import type { BlockType } from "./types"
 
 /**
  * The block editor's **slash menu**: typing `/` at the start of a word opens
- * a picker over the caret with two groups — **dates** (Today, Tomorrow, … or
- * anything the phrase after the `/` resolves to, "friday next week") and
- * **turn into** (the block types). Picking a date replaces the `/phrase` with
- * the date; picking a type swaps the block's marker and drops the `/phrase`.
+ * a picker over the caret with three groups — **dates** (Today, Tomorrow, …
+ * or anything the phrase after the `/` resolves to, "friday next week"),
+ * **turn into** (the block types) and **insert** (the actions that put
+ * something at the row rather than retyping it: a board, docs/boards.md).
+ * Picking a date replaces the `/phrase` with the date; picking a type swaps
+ * the block's marker and drops the `/phrase`; picking an action drops the
+ * `/phrase` and hands the editor the action to carry out.
  *
  * Everything here is pure and DOM-free — the textarea's text and caret come
  * in, a menu model or a new content string comes out — so the grammar and the
@@ -137,6 +140,34 @@ const BLOCK_OPTIONS: readonly BlockTypeDef[] = BLOCK_TYPE_DEFS.filter(
   (def) => def.turnInto || def.slash,
 )
 
+// ── Actions ─────────────────────────────────────────────────────────────────
+
+/**
+ * What an action row asks the editor to do at the row (docs/boards.md, "A
+ * board in a note"): `board` makes a new board and links it where the row
+ * is; `linkBoard` links a board that already exists there. Neither is a
+ * type change — the row's `/phrase` goes and the editor opens the dialog
+ * that finishes the job, as the image row asks for a file.
+ */
+type SlashAction = "board" | "linkBoard"
+
+interface ActionOption {
+  action: SlashAction
+  label: string
+  keywords: string[]
+}
+
+/** The rows under "Insert", offered where the editor has a note of the
+ * reader's own behind it (`options.boards`). */
+const ACTION_OPTIONS: readonly ActionOption[] = [
+  { action: "board", label: "Board", keywords: ["board", "new board"] },
+  {
+    action: "linkBoard",
+    label: "Link board",
+    keywords: ["link board", "existing board", "add board"],
+  },
+]
+
 // ── The menu model ──────────────────────────────────────────────────────────
 
 export type SlashItem =
@@ -151,11 +182,19 @@ export type SlashItem =
       date: string
     }
   | { kind: "block"; id: string; label: string; type: BlockType }
+  | { kind: "action"; id: string; label: string; action: SlashAction }
 
-export type SlashGroup = "Dates" | "Turn into"
+export type SlashGroup = "Dates" | "Turn into" | "Insert"
 
 export function slashGroupOf(item: SlashItem): SlashGroup {
-  return item.kind === "date" ? "Dates" : "Turn into"
+  switch (item.kind) {
+    case "date":
+      return "Dates"
+    case "block":
+      return "Turn into"
+    case "action":
+      return "Insert"
+  }
 }
 
 /** Word-prefix match: `/tom` finds Tomorrow, `/list` finds both lists. */
@@ -167,14 +206,14 @@ function matches(query: string, label: string, keywords: string[] = []): boolean
 
 /**
  * The rows for a query: the fixed dates it matches, then the date its phrase
- * resolves to (when that isn't already listed), then the block types. Empty
- * when nothing matches — the caller closes the menu and the text stays as
- * typed.
+ * resolves to (when that isn't already listed), then the block types, then
+ * the actions (where `boards` allows them). Empty when nothing matches —
+ * the caller closes the menu and the text stays as typed.
  */
 export function slashMenuItems(
   query: string,
   now: Date,
-  options: { images?: boolean } = {},
+  options: { images?: boolean; boards?: boolean } = {},
 ): SlashItem[] {
   const q = query.trim().toLowerCase().replace(/\s+/g, " ")
   const items: SlashItem[] = []
@@ -211,6 +250,18 @@ export function slashMenuItems(
     items.push({ kind: "block", id: `block:${def.id}`, label: def.label, type: def.id })
   }
 
+  if (options.boards) {
+    for (const option of ACTION_OPTIONS) {
+      if (!matches(q, option.label, option.keywords)) continue
+      items.push({
+        kind: "action",
+        id: `action:${option.action}`,
+        label: option.label,
+        action: option.action,
+      })
+    }
+  }
+
   return items
 }
 
@@ -227,6 +278,8 @@ export interface SlashApplyResult {
   text: string
   /** The block's new type, when the pick was a "turn into". */
   type?: BlockType
+  /** What the editor is to do at the row, when the pick was an action. */
+  action?: SlashAction
   /** Where the caret lands, as an offset into the new text. */
   caret: number
 }
@@ -238,6 +291,8 @@ export interface SlashApplyResult {
  * - A date replaces the `/phrase` with the date as `dd-mm-yyyy`, caret after it.
  * - A block type removes the `/phrase` and sets the type, caret where the `/`
  *   was.
+ * - An action removes the `/phrase` and names the action, caret where the
+ *   `/` was; the editor carries it out.
  */
 export function applySlashItem(
   text: string,
@@ -249,6 +304,9 @@ export function applySlashItem(
   if (item.kind === "date") {
     const inserted = toInsertedDate(item.date)
     return { text: before + inserted + after, caret: trigger.start + inserted.length }
+  }
+  if (item.kind === "action") {
+    return { text: before + after, action: item.action, caret: trigger.start }
   }
   return { text: before + after, type: item.type, caret: trigger.start }
 }

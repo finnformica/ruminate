@@ -3,6 +3,7 @@ import {
   applySlashItem,
   findSlashTrigger,
   parseDateShortcut,
+  slashGroupOf,
   slashMenuItems,
   toInsertedDate,
   type SlashItem,
@@ -212,5 +213,40 @@ describe("image option", () => {
     expect(labels(slashMenuItems("ima", NOW))).toEqual([])
     expect(labels(slashMenuItems("ima", NOW, { images: true }))).toEqual(["Image"])
     expect(labels(slashMenuItems("photo", NOW, { images: true }))).toEqual(["Image"])
+  })
+})
+
+describe("board actions", () => {
+  const labels = (items: SlashItem[]) => items.map((item) => item.label)
+
+  test("are offered only where the editor has a note of the reader's own behind it", () => {
+    expect(labels(slashMenuItems("board", NOW))).toEqual([])
+    expect(labels(slashMenuItems("board", NOW, { boards: true }))).toEqual(["Board", "Link board"])
+  })
+
+  test("sit under Insert, after the block types", () => {
+    const items = slashMenuItems("", NOW, { boards: true })
+    expect(slashGroupOf(items[items.length - 1])).toBe("Insert")
+    expect(items.slice(-2)).toEqual([
+      { kind: "action", id: "action:board", label: "Board", action: "board" },
+      { kind: "action", id: "action:linkBoard", label: "Link board", action: "linkBoard" },
+    ])
+  })
+
+  test("answer to their keywords", () => {
+    const on = { boards: true }
+    expect(labels(slashMenuItems("new b", NOW, on))).toEqual(["Board"])
+    expect(labels(slashMenuItems("link b", NOW, on))).toEqual(["Link board"])
+    expect(labels(slashMenuItems("existing", NOW, on))).toEqual(["Link board"])
+    expect(labels(slashMenuItems("add board", NOW, on))).toEqual(["Link board"])
+  })
+
+  test("a pick drops the /phrase and names the action", () => {
+    const board: SlashItem = { kind: "action", id: "action:board", label: "Board", action: "board" }
+    expect(applySlashItem("plan /boa", { start: 5, query: "boa" }, board)).toEqual({
+      text: "plan ",
+      action: "board",
+      caret: 5,
+    })
   })
 })
