@@ -321,7 +321,6 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
         api={context.api}
         title={context.editing || context.block.text.trim() !== "" ? lineOf(content) : null}
         editing={context.editing}
-        pointer={rowPointer(context)}
       />
     )),
   },
@@ -332,23 +331,6 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
  * measured for its lines (in a column it would collapse to one). */
 const lineOf = (content: ReactNode) => <div className="flex min-w-0">{content}</div>
 
-type Pointer = Pick<React.HTMLAttributes<HTMLElement>, "onClick" | "onDoubleClick">
-
-/** What a click on the row does, off its text: select it and, double, edit
- * it — or, read-only, open it (a search result) or select it (a navigable
- * view), as the body's own click does. */
-function rowPointer({ occurrence, api }: RowContext): Pointer {
-  if (api.readOnly) {
-    if (api.activate) return { onClick: () => api.activate?.(occurrence.key) }
-    if (api.navigable) return { onClick: () => api.select(occurrence.key) }
-    return {}
-  }
-  return {
-    onClick: () => api.select(occurrence.key),
-    onDoubleClick: () => api.edit(occurrence.key),
-  }
-}
-
 /**
  * A figure's wrap (a picture, a link block's card): the figure in place of the
  * content line, with the line handed to it to place as its caption or
@@ -357,30 +339,19 @@ function rowPointer({ occurrence, api }: RowContext): Pointer {
  * the figure sits 10px in from the surface's edge all round. Its empty
  * space (beside a narrow figure, around a caption) is the block, so a click
  * there selects the row and a double click edits the text, as clicking
- * text does — the figure itself keeps its own clicks (a picture's lightbox,
- * a card's links) and stops them there.
+ * anywhere on the row does (the row's surface takes the pointer,
+ * block-item.tsx) — the figure itself keeps its own clicks (a picture's
+ * lightbox, a card's links) and stops them there.
  */
 function figureWrap(
   testId: string,
   figure: (content: ReactNode, context: RowContext) => ReactNode,
 ): BlockKind["wrap"] {
-  return (content, context) => {
-    const pointer = rowPointer(context)
-    const own =
-      (handler?: React.MouseEventHandler<HTMLElement>) => (event: React.MouseEvent<HTMLElement>) =>
-        event.target === event.currentTarget && handler?.(event)
-    return (
-      // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
-      <div
-        data-testid={testId}
-        className="flex min-w-0 flex-1 flex-col px-1 py-2"
-        onClick={own(pointer.onClick)}
-        onDoubleClick={own(pointer.onDoubleClick)}
-      >
-        {figure(content, context)}
-      </div>
-    )
-  }
+  return (content, context) => (
+    <div data-testid={testId} className="flex min-w-0 flex-1 flex-col px-1 py-2">
+      {figure(content, context)}
+    </div>
+  )
 }
 
 /** The caption's text alignment, by the picture's. */

@@ -7,3 +7,4 @@
 ### Fixed
 
 - A board listed among the notes shows the board icon. On the Views page, in the palette and wherever a note stands as a row, a board was drawn with the plain note icon; its row now shows the same icon the sidebar gives it.
+- A click anywhere on a block selects it. The bullet, number or `#`, the space where the fold chevron sits, and the padding around the text all select the block now, and a double-click there edits it, from the start of the line when the click was left of the text. Until now only the text itself responded, so a click beside it looked like nothing had happened.

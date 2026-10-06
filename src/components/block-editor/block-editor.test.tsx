@@ -1684,6 +1684,45 @@ describe("collapse toggle", () => {
     expect(plain.querySelector('[data-testid="favicon-default"]')).not.toBeNull()
   })
 
+  it("a click anywhere on the row's surface selects it; a double-click edits it", () => {
+    // The chevron column (empty on a leaf), the key slot and the surface's
+    // padding are the row as much as its text is: a click on any of them
+    // selects, and none of them reads as a dead spot.
+    const { container } = render(<Harness initial={OUTLINE} />)
+    const line = lineOf(container, "blk_leaf")
+    const selected = () => line.className.includes("bg-bg-secondary")
+    expect(selected()).toBe(false)
+    fireEvent.click(line.querySelector('[data-testid="chevron-column"]')!)
+    expect(selected()).toBe(true)
+    // The key slot of another row moves the selection there.
+    const bulletLine = lineOf(container, "blk_bp")
+    fireEvent.click(bulletLine.querySelector(".block-glyph-fill")!)
+    expect(bulletLine.className).toContain("bg-bg-secondary")
+    expect(selected()).toBe(false)
+    // A double-click left of the text edits from the start of the line.
+    fireEvent.doubleClick(bulletLine.querySelector('[data-testid="chevron-column"]')!, {
+      clientX: -5,
+    })
+    const textarea = container.querySelector("textarea")!
+    expect(textarea.value).toBe("Bullet parent")
+    expect(textarea.selectionStart).toBe(0)
+  })
+
+  it("a click on a control is the control's alone, never a selection", () => {
+    const { container } = render(<Harness initial={OUTLINE} />)
+    // Put the selection somewhere known first.
+    fireEvent.click(lineOf(container, "blk_leaf").querySelector('[data-testid="block-body"]')!)
+    expect(lineOf(container, "blk_leaf").className).toContain("bg-bg-secondary")
+    // The chevron folds its row; the selection stays where it was.
+    fireEvent.click(toggleOf(container, "blk_hp")!)
+    expect(container.querySelector('[data-block-row="blk_hc"]')).toBeNull()
+    expect(lineOf(container, "blk_hp").className).not.toContain("bg-bg-secondary")
+    // The checkbox ticks its row; the selection stays where it was.
+    fireEvent.click(lineOf(container, "blk_tp").querySelector('input[type="checkbox"]')!)
+    expect(lineOf(container, "blk_tp").className).not.toContain("bg-bg-secondary")
+    expect(lineOf(container, "blk_leaf").className).toContain("bg-bg-secondary")
+  })
+
   it("clicking the toggle collapses and expands; the chevron turns, the key stays", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
     const open = toggleOf(container, "blk_bp")!

@@ -12,8 +12,10 @@ A mouse has two clicks and a keyboard beside it; a finger has one tap and a
 keyboard that appears and disappears. The block editor
 (`src/components/block-editor/`) reads the two differently.
 
-- **A tap edits.** With a mouse a click selects a row and a double-click edits
-  it. A finger's tap edits the row straight away, with the caret where the tap
+- **A tap edits.** With a mouse a click anywhere on a row's surface that is
+  not a control — its text, its key, the chevron column, the padding — selects
+  the row, and a double-click edits it (from the start of the line when the
+  click fell left of the text). A finger's tap edits the row straight away, with the caret where the tap
   landed when the body's text is the stored text as is (`caretOffsetAtPoint`,
   `caret.ts`); where the rendered text differs from the stored text (`**bold**`,
   a link) the caret goes to the end. The whole row is the tap target — the
