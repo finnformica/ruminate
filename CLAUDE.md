@@ -16,6 +16,7 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 - `npm run preview` - Preview production build locally
 - `npm run deploy` - Deploy the Worker
 - `npm run migrate:remote` - Apply D1 migrations remotely
+- `npm run preview:deploy` - The Workers Builds preview command: clones production D1 per pull request, migrates the clone, uploads the version against it (docs/preview-databases.md)
 
 ### Testing
 
