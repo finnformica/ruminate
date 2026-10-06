@@ -462,7 +462,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
         toast("Nothing to add.")
         return
       }
-      undoable(ops, "Notes suggested")
+      undoable(ops, "Notes updated")
     } catch (error) {
       if (error instanceof SuggestError) failedToast(error.message, error.detail)
       else failedToast("Couldn’t suggest notes.", describeError(error))

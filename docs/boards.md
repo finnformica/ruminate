@@ -170,7 +170,7 @@ means and how to answer it, under 120 characters, no full stop. It does
 not add, rename or remove features. The answer is matched to the features
 by label (`readNotesSuggestion`, src/data/auto-notes.ts) and written only
 where the notes are empty (`notesSuggestionOps`) — a note a person wrote
-is never overwritten — as one batch with one toast, **Notes suggested**,
+is never overwritten — as one batch with one toast, **Notes updated**,
 whose **Undo** takes them all back. Nothing to write is **Nothing to
 add.**; a refusal is the failure toast with its **Copy**.
 
