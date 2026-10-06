@@ -731,7 +731,13 @@ describe("tenant scoping — the adversarial suite", () => {
     const body = (await (
       await get(env, "bob-token", "/api/replica/notes")
     ).json()) as ReplicaCorpusBody
-    expect(body).toEqual({ nodes: [], links: [], views: [], cursor: null })
+    expect(body).toEqual({
+      nodes: [],
+      links: [],
+      views: [],
+      cursor: null,
+      replica_id: "production",
+    })
   })
 
   it("B's since-pull contains none of A's rows", async () => {
@@ -742,7 +748,13 @@ describe("tenant scoping — the adversarial suite", () => {
     // Exhaustive, because a since-pull now carries nothing BUT rows: any of
     // A's ids appearing here would be a cross-tenant disclosure — her views
     // included, which is where a pin on a note she shared would live.
-    expect(body).toEqual({ nodes: [], links: [], views: [], cursor: null })
+    expect(body).toEqual({
+      nodes: [],
+      links: [],
+      views: [],
+      cursor: null,
+      replica_id: "production",
+    })
   })
 
   it("B's status counts none of A's rows", async () => {
@@ -834,6 +846,41 @@ describe("tenant scoping — the adversarial suite", () => {
     const { env } = await testEnv()
     const response = await get(env, "alice-token", "/api/replica/nope")
     expect(response.status).toBe(404)
+  })
+
+  // Which database answered (docs/preview-databases.md): production has no
+  // REPLICA_ID; a preview version carries its clone's id. Every pull and the
+  // status say, so a client can tell a rebuilt clone from the one it last
+  // pulled and discard a cursor that no longer means anything.
+  describe("replica_id", () => {
+    type Labelled = { replica_id?: string; nodes?: unknown[] }
+    const labelled = async (env: Env, path: string) =>
+      (await (await get(env, "alice-token", path)).json()) as Labelled
+
+    it('is "production" without the var, on pulls and status alike', async () => {
+      const { env } = await seededEnv()
+      const full = await labelled(env, "/api/replica/notes")
+      const since = await labelled(env, "/api/replica/notes?since=0")
+      const status = await labelled(env, "/api/replica/status")
+      expect(full.replica_id).toBe("production")
+      expect(since.replica_id).toBe("production")
+      expect(status.replica_id).toBe("production")
+    })
+
+    it("is the REPLICA_ID var when set, and an empty var counts as unset", async () => {
+      const { env } = await seededEnv()
+      const preview = { ...env, REPLICA_ID: "11111111-2222-4333-8444-555555555555" }
+      const full = await labelled(preview, "/api/replica/notes")
+      const status = await labelled(preview, "/api/replica/status")
+      expect(full.replica_id).toBe("11111111-2222-4333-8444-555555555555")
+      expect(status.replica_id).toBe("11111111-2222-4333-8444-555555555555")
+      // The rows are the same rows: the id is a label, not a filter.
+      expect(full.nodes?.length).toBeGreaterThan(0)
+
+      const blank = { ...env, REPLICA_ID: "" }
+      const body = await labelled(blank, "/api/replica/notes")
+      expect(body.replica_id).toBe("production")
+    })
   })
 })
 

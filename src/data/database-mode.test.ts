@@ -511,6 +511,85 @@ describe("database mode lifecycle", () => {
 })
 
 /**
+ * A different database behind the same URL — a preview clone rebuilt from
+ * production (docs/preview-databases.md). The cursor the device holds was
+ * issued by the old database and means nothing against the new one, so the
+ * local copy is wiped and pulled again in full, as for a stale generation.
+ */
+describe("replica identity", () => {
+  it("a changed replica_id wipes the local copy and re-pulls in full", async () => {
+    const seeded = await seededStore({ "note-a": NOTE_A }, "500")
+    await seeded.setMeta("replica_id", "clone-one")
+
+    const { source, calls } = stubSource({
+      // The since-pull answers with the NEW database's id and nothing else
+      // (the new clone's sequence is behind the stored cursor).
+      since: (cursor) => ({ ...remoteChanges({}, 2, cursor), replica_id: "clone-two" }),
+      full: { ...remoteCorpus({ "note-b": NOTE_B }, 1, "900"), replica_id: "clone-two" },
+    })
+    const store = await boot({ store: seeded, source })
+
+    expect(calls.since).toEqual(["500"])
+    expect(calls.full).toBe(1)
+    expect(await notesOf(store)).toEqual({ "note-b": NOTE_B })
+    expect(files()).toEqual({ "note-b.md": NOTE_B })
+    expect(await store.getMeta("d1_pull_cursor")).toBe("900")
+    expect(await store.getMeta("replica_id")).toBe("clone-two")
+  })
+
+  it("the same replica_id, or none at all, leaves the local copy alone", async () => {
+    const seeded = await seededStore({ "note-a": NOTE_A })
+    await seeded.setMeta("replica_id", "production")
+
+    const { source, calls } = stubSource({
+      since: (cursor) => ({ ...remoteChanges({}, 2, cursor), replica_id: "production" }),
+    })
+    const store = await boot({ store: seeded, source })
+    expect(calls.full).toBe(0)
+    expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
+    stopDatabaseMode()
+    await flushDatabaseMode()
+
+    // An older Worker sends no id: not evidence of a swap.
+    const labelled = await seededStore({ "note-a": NOTE_A })
+    await labelled.setMeta("replica_id", "production")
+    const silent = stubSource({ since: (cursor) => remoteChanges({}, 3, cursor) })
+    const kept = await boot({ store: labelled, source: silent.source })
+    expect(silent.calls.full).toBe(0)
+    expect(await notesOf(kept)).toEqual({ "note-a": NOTE_A })
+    expect(await kept.getMeta("replica_id")).toBe("production")
+  })
+
+  it("first contact adopts the id without wiping", async () => {
+    const seeded = await seededStore({ "note-a": NOTE_A })
+    expect(await seeded.getMeta("replica_id")).toBeNull()
+
+    const { source, calls } = stubSource({
+      since: (cursor) => ({ ...remoteChanges({}, 2, cursor), replica_id: "production" }),
+    })
+    const store = await boot({ store: seeded, source })
+    expect(calls.full).toBe(0)
+    expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
+    expect(await store.getMeta("replica_id")).toBe("production")
+  })
+
+  it("a full pull from a changed replica applies once, on a cleared store", async () => {
+    // No usable cursor (a fresh boot after an owner wipe) but rows from the
+    // old clone still local: the full pull is already the right pull, and
+    // the clear must still happen so nothing of the old clone survives it.
+    const seeded = await seededStore({ "note-a": NOTE_A }, "")
+    await seeded.setMeta("replica_id", "clone-one")
+
+    const { source, calls } = stubSource({
+      full: { ...remoteCorpus({ "note-b": NOTE_B }, 1, "900"), replica_id: "clone-two" },
+    })
+    const store = await boot({ store: seeded, source })
+    expect(calls.full).toBe(1)
+    expect(await notesOf(store)).toEqual({ "note-b": NOTE_B })
+  })
+})
+
+/**
  * The local store is a CACHE of D1, never a source of truth, so it is never
  * data-migrated: a copy from an older generation is discarded and rebuilt by a
  * full pull. This is what stops a device that predates a server-side migration
