@@ -26,7 +26,7 @@ import { IconButton } from "../ui/icon-button"
 import { BlockContent } from "./block-content"
 import { LISTED_HEADING_DEPTH, headingScale, kindOf, type RowContext } from "./block-kinds"
 import { caretCoordinates, caretLineFlags, caretOffsetAtPoint } from "./caret"
-import { Hash } from "./hash"
+import { BlockKey } from "./block-key"
 import { LinkActionsContext, type LinkActions } from "./link-actions"
 import { SLASH_MENU_WIDTH, SlashMenu } from "./slash-menu"
 
@@ -778,34 +778,30 @@ export function BlockItem({
   // family: dots, the `#` and the narrow glyphs centre in it; numbers
   // right-align to its edge; a figure's slot is simply empty.
   //
-  // The bullet's dot: faint, like the chevron — pure chrome; content leads.
+  // The key itself is drawn by `BlockKey` (block-key.tsx) — the one glyph
+  // a type has wherever it is listed, the sidebar included; the slots here
+  // only place it. The bullet's dot: faint, like the chevron — pure chrome;
+  // content leads.
   const dotSlot = (
     <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
-      <span aria-hidden className="block-glyph-fill size-1.5 rounded-full bg-text-tertiary" />
+      <BlockKey type={type} />
     </span>
   )
-  // A static text glyph key (the quote's `>`, the paragraph's `¶`) or none
-  // at all (a figure — a picture, a link card, a code block — whose frame or
-  // panel is its own mark): faint, like the dot and the `#` — chrome, not
-  // content. CENTRED in the slot, like the dot, the `#` and the checkbox,
-  // not right-aligned like the numbers: `>` is a narrow glyph, and
-  // right-aligned its ink sat 3px right of the dot's centre. Never a focus
-  // button (no marker is; focus stays on F / Cmd+. and the edit bar). An
-  // empty slot keeps its width so the text stays in the shared column.
-  const glyphSlot = (glyph: string | null, testId: string) => (
+  // A static glyph key (the quote's `>`, the paragraph's `¶`, a note's
+  // favicon) or none at all (a figure — a picture, a link card, a code
+  // block — whose frame or panel is its own mark): faint, like the dot and
+  // the `#` — chrome, not content. CENTRED in the slot, like the dot, the
+  // `#` and the checkbox, not right-aligned like the numbers: `>` is a
+  // narrow glyph, and right-aligned its ink sat 3px right of the dot's
+  // centre. Never a focus button (no marker is; focus stays on F / Cmd+.
+  // and the edit bar). An empty slot keeps its width so the text stays in
+  // the shared column.
+  const glyphSlot = (testId: string) => (
     <span
       data-testid={testId}
       className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center"
     >
-      {kind.glyphNode ? (
-        // A rendered key (a note's favicon). Not `aria-hidden`: unlike the
-        // typographic keys it can carry meaning of its own.
-        <span className="block-glyph flex items-center">{kind.glyphNode(block)}</span>
-      ) : glyph ? (
-        <span aria-hidden className="block-glyph select-none text-text-tertiary">
-          {glyph}
-        </span>
-      ) : null}
+      <BlockKey type={type} block={block} />
     </span>
   )
   // Whether a finger's tap on the checkbox came down to the right of the
@@ -891,18 +887,18 @@ export function BlockItem({
           headingScale(scaleDepth),
         )}
       >
-        <Hash />
+        <BlockKey type={type} />
       </span>
     ) : kind.slot === "number" ? (
       // Numbers are read (they carry order), so they sit one step up the ramp
       // from the dot — muted, not faint — and right-align to the slot edge.
-      <span className="block-glyph flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary">
-        <span aria-hidden>{olNumber}.</span>
+      <span className="flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end">
+        <BlockKey type={type} olNumber={olNumber} />
       </span>
     ) : kind.slot === "none" ? (
-      glyphSlot(null, "figure-slot")
+      glyphSlot("figure-slot")
     ) : (
-      glyphSlot(kind.glyph ?? null, kind.slotTestId ?? "paragraph-slot")
+      glyphSlot(kind.slotTestId ?? "paragraph-slot")
     )
 
   // The wrapper: indented by depth, carrying the guide lines of every row it

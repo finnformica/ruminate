@@ -233,7 +233,10 @@
   border-color: var(--neutral-a8);
 }
 
-.block-checkbox:checked {
+/* `[data-checked]` is the static picture of a ticked box that `BlockKey`
+ * draws where there is no input to tick (a sidebar row). */
+.block-checkbox:checked,
+.block-checkbox[data-checked] {
   border-color: transparent;
   background-color: var(--accent-9);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5.2 4.2 7.4 8 2.8' fill='none' stroke='white' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -243,7 +246,8 @@
 }
 /* The tick grows with the coarse pointer's larger box. */
 @media (pointer: coarse) {
-  .block-checkbox:checked {
+  .block-checkbox:checked,
+  .block-checkbox[data-checked] {
     background-size: 12px 12px;
   }
 }
@@ -255,7 +259,8 @@
 
 /* Amber is the one accent whose step 9 is light, so its checkmark is drawn in
  * the dark contrast color (--accent-contrast: #21201c) instead of white. */
-[data-accent="amber"] .block-checkbox:checked {
+[data-accent="amber"] .block-checkbox:checked,
+[data-accent="amber"] .block-checkbox[data-checked] {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5.2 4.2 7.4 8 2.8' fill='none' stroke='%2321201c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
@@ -263,7 +268,8 @@
   .block-checkbox {
     border-color: var(--color-text);
   }
-  .block-checkbox:checked {
+  .block-checkbox:checked,
+  .block-checkbox[data-checked] {
     background-color: var(--color-text);
   }
 }
