@@ -6,7 +6,7 @@
 // the call, and a day already spent matches nothing, so nothing is written
 // and the caller is refused. An account with no row yet starts at one.
 
-import { AUTO_TAG_DAILY_LIMIT } from "../src/data/auto-tag"
+import { AUTO_TAG_DAILY_LIMIT } from "../src/data/ai-limits"
 import type { SqlDriver } from "../src/data/sql-driver"
 import { dayOf } from "./mcp/rate-limit"
 

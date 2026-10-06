@@ -18,6 +18,8 @@ import {
   inverseOps,
   isBoard,
   linkPreviewOps,
+  notesFeaturesOf,
+  notesSuggestionOps,
   outlineImageIds,
   removeFeatureOps,
   resetImageOps,
@@ -50,7 +52,9 @@ import { fetchLinkPreview } from "../data/link-previews"
 import { notePropsOps } from "../data/note-meta"
 import { applyOps, deleteBlockOps, type Op } from "../data/ops"
 import { useApplyOps } from "../data/store"
-import { requestTagSuggestion, SuggestTagsError } from "../data/suggest-tags"
+import { requestNotesSuggestion } from "../data/suggest-notes"
+import { requestTagSuggestion, SuggestError } from "../data/suggest-tags"
+import { emittedNoteTitle } from "../data/note-identity"
 import { blockIndexAtom, graphSnapshotAtom, isDatabaseModeAtom } from "../global-state"
 import type { NoteId } from "../schema"
 import { BOARD_PROP } from "../utils/board-prop"
@@ -176,6 +180,9 @@ function failedToast(message: string, detail: string): void {
   toast.error(message, { duration: 10000, action: copyControl(detail) })
 }
 
+/** What a suggestion with nothing to write is answered with. */
+const NOTHING_TO_ADD = "Nothing to add."
+
 /** A toast control that puts `detail` on the clipboard. */
 const copyControl = (detail: string) => ({
   label: "Copy",
@@ -225,6 +232,10 @@ export interface BoardWrites {
   /** Ask Claude for a caption and tags for a picture, and apply what it
    * says as one undoable batch. Settles when the toast has been shown. */
   suggestTags: (imageId: string) => Promise<void>
+  /** Ask Claude for notes on the features that lack them — given the
+   * board's name and everything its features already say — and write
+   * them as one undoable batch. Settles when the toast has been shown. */
+  suggestNotes: () => Promise<void>
 }
 
 /**
@@ -422,17 +433,44 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
           Date.now(),
         )
         if (ops.length === 0) {
-          toast("Nothing to add.")
+          toast(NOTHING_TO_ADD)
           return
         }
         undoable(ops, "Picture updated")
       } catch (error) {
-        if (error instanceof SuggestTagsError) failedToast(error.message, error.detail)
+        if (error instanceof SuggestError) failedToast(error.message, error.detail)
         else failedToast("Couldn’t suggest tags.", describeError(error))
       }
     },
     [canSuggest, store, boardId, undoable],
   )
+
+  /**
+   * Notes for the features that lack them (docs/boards.md, "Features"):
+   * the board's name and its features as they stand — label, type, one or
+   * several values, the values in use, the notes already written — go to
+   * the notes route, no picture; the answer is read into the writes it
+   * amounts to (`notesSuggestionOps`: only an empty note is written, a
+   * note a person wrote is never overwritten) and applied as one batch
+   * with one Undo. Nothing to add is a toast that says so.
+   */
+  const suggestNotes = React.useCallback(async () => {
+    if (!canSuggest) return
+    const snapshot = store.get(graphSnapshotAtom)
+    const title = emittedNoteTitle(boardId, snapshot.nodes.get(boardId)?.text ?? "") ?? ""
+    try {
+      const suggestion = await requestNotesSuggestion(title, notesFeaturesOf(snapshot, boardId))
+      const ops = notesSuggestionOps(store.get(graphSnapshotAtom), boardId, suggestion, Date.now())
+      if (ops.length === 0) {
+        toast(NOTHING_TO_ADD)
+        return
+      }
+      undoable(ops, "Notes updated")
+    } catch (error) {
+      if (error instanceof SuggestError) failedToast(error.message, error.detail)
+      else failedToast("Couldn’t suggest notes.", describeError(error))
+    }
+  }, [canSuggest, store, boardId, undoable])
 
   /**
    * Pictures added from the board, the editor's way: every row is on the
@@ -521,6 +559,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       deleteImage,
       canSuggest,
       suggestTags,
+      suggestNotes,
     }),
     [
       canUpload,
@@ -535,6 +574,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       deleteImage,
       canSuggest,
       suggestTags,
+      suggestNotes,
     ],
   )
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
+import { MAX_SUGGESTED_VALUE_LENGTH } from "./ai-limits"
 import {
   AUTO_TAG_SYSTEM_PROMPT,
-  MAX_SUGGESTED_VALUE_LENGTH,
   cloudflareTagPrompt,
   extractJson,
   isAnthropicKeyShaped,

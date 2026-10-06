@@ -20,6 +20,8 @@ import {
   imageValues,
   inverseOps,
   linkPreviewOps,
+  notesFeaturesOf,
+  notesSuggestionOps,
   removeFeatureOps,
   resetImageOps,
   setCaptionOps,
@@ -1200,6 +1202,59 @@ describe("the Features editor", () => {
       "create",
       "link",
     ])
+  })
+})
+
+describe("notes suggested by the model", () => {
+  it("describes the board's features with everything they already say, links included", () => {
+    expect(notesFeaturesOf(boardOf(), "b")).toEqual([
+      {
+        label: "Location",
+        type: "place",
+        multi: false,
+        values: ["Mauritius", "Lisbon"],
+        notes: DEFAULT_FEATURES[0].spec.notes,
+      },
+      { label: "Object", type: "text", multi: true, values: [], notes: OBJECT_SPEC.notes },
+    ])
+  })
+
+  it("writes only the notes that are empty, by label, as one batch that undoes whole", () => {
+    let snapshot = boardOf()
+    snapshot = applyOps(snapshot, updateFeatureOps(snapshot, "b", OBJECT, { notes: "" }), NOW)
+    snapshot = applyOps(snapshot, addFeatureOps(snapshot, "b", "blk_colour0000"), NOW)
+    snapshot = applyOps(snapshot, [{ op: "setText", id: "blk_colour0000", text: "Colour" }], NOW)
+    const ops = notesSuggestionOps(
+      snapshot,
+      "b",
+      {
+        notes: [
+          { label: "location", notes: "rewritten" },
+          { label: "OBJECT", notes: " the thing the picture is of " },
+          { label: "Object", notes: "again" },
+          { label: "Colour", notes: "  " },
+          { label: "Nothing", notes: "x" },
+        ],
+      },
+      NOW,
+    )
+    expect(kinds(ops)).toEqual(["setProps"])
+    const next = applyOps(snapshot, ops, NOW)
+    expect(boardFeatures(next, "b").map((s) => s.feature.notes)).toEqual([
+      DEFAULT_FEATURES[0].spec.notes,
+      "the thing the picture is of",
+      "",
+    ])
+    const undone = applyOps(next, inverseOps(ops, snapshot) as Op[], NOW)
+    expect(boardFeatures(undone, "b").map((s) => s.feature.notes)).toEqual([
+      DEFAULT_FEATURES[0].spec.notes,
+      "",
+      "",
+    ])
+    expect(notesSuggestionOps(snapshot, "b", { notes: [] }, NOW)).toEqual([])
+    expect(
+      notesSuggestionOps(snapshot, "nope", { notes: [{ label: "Object", notes: "x" }] }, NOW),
+    ).toEqual([])
   })
 })
 

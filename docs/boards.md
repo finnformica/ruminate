@@ -156,6 +156,24 @@ its block in the outline. On a phone the table is a sheet from the foot
 of the screen (`Sheet`, the phone's drawers), the notes beneath each name
 and **Add feature** pinned full-width at the bottom.
 
+**Suggest writes the notes a board lacks.** The Features editor's title
+bar carries **Suggest** — the sparkles, as the picture window's — there,
+like the Notes column, only while a model can be asked. It sends the
+board's name and its features as they stand — each label, type, whether it
+takes several values, the values in use (the surest sign of what a feature
+means) and the notes already written, so the style matches; link features
+included, as they have a note of their own now, and no picture
+(`notesFeaturesOf`, `requestNotesSuggestion`,
+src/data/suggest-notes.ts) — to `POST /api/boards/notes`, and the model
+writes one line for every feature that lacks a note: what the feature
+means and how to answer it, under 120 characters, no full stop. It does
+not add, rename or remove features. The answer is matched to the features
+by label (`readNotesSuggestion`, src/data/auto-notes.ts) and written only
+where the notes are empty (`notesSuggestionOps`) — a note a person wrote
+is never overwritten — as one batch with one toast, **Notes updated**,
+whose **Undo** takes them all back. Nothing to write is **Nothing to
+add.**; a refusal is the failure toast with its **Copy**.
+
 **Removing a feature deletes nothing.** The remove takes the `feature` key
 off the block's props and keeps the rest (a block named as a feature of
 old — Location, Object, Material, Link — is given `feature: false`
@@ -349,17 +367,23 @@ off the picture), and answers with
 a caption and, per feature, the values that fit — an existing value
 spelled as given, or a short new one. Nothing is tagged unasked.
 
-**Two providers, one path.** The request (`TagRequest`) says nothing about
-who is asked; the Worker's handler resolves that itself and the providers
-differ only in how the picture and the features go out and how the raw
-answer comes back (`TagProvider`, worker/handlers/board-tag.ts: a picture
-and the features in, the model's text out). Everything else is shared —
-the day's count, the refusal codes, one step that reads the text leniently
-(`extractJson`: a code fence or words around the object are stripped) into
-a `TagSuggestion` through the same `readTagSuggestion` (trimmed,
-de-duplicated, capped, one value for a single-value feature; an answer
-that is not a suggestion is a 422) — and on the client one `suggestionOps`
-batch through `suggestTags`.
+**Two providers, one path, two callers.** The request (`TagRequest`) says
+nothing about who is asked; the Worker resolves that itself, in one module
+every route that asks a model goes through (worker/ai.ts): the router over
+the Worker's own truth, the two providers behind one `ask` — a system
+prompt, a user prompt, the schema the answer is held to and, when the
+caller has one, a picture, the model's text out — the gateway and its log
+id, and the refusals and their bodies. The tag route (`board-tag.ts`) and
+the notes route (`board-notes.ts`, above under "Features") are thin
+callers of it, each reading its own request and its own answer — one step
+that reads the text leniently (`extractJson`: a code fence or words around
+the object are stripped) into a `TagSuggestion` through `readTagSuggestion`
+(trimmed, de-duplicated, capped, one value for a single-value feature; an
+answer that is not a suggestion is a 422) or a `NotesSuggestion` through
+`readNotesSuggestion` — and on the client one batch each, `suggestionOps`
+through `suggestTags` and `notesSuggestionOps` through `suggestNotes`. The
+day's count is one fuse for both: a note suggested is a call spent, as a
+picture tagged is.
 
 - **Anthropic** — the Messages API with the user's own key, open to every
   signed-in user who keeps one under Settings → AI, with a JSON schema the
@@ -429,11 +453,13 @@ the answer is held to (structured output) to the Messages API, as
 rather than the Worker reading them from D1, on purpose: the browser's
 graph is the one that knows the board now (a value picked a moment ago may
 not have reached the replica yet), and the Worker trusts the form as
-prompt text only and writes nothing to the graph. Refusals are codes the
-client puts into words (src/data/suggest-tags.ts): not a form with a
-picture and features (400), nothing set up (412), a key Anthropic refuses
-(422), the day's calls spent (429 — a fuse of 300 a day per account
-whoever answers, counted in `ai_usage`, migrations/0019; the `calls_*`
+prompt text only and writes nothing to the graph. Refusals are codes
+named once, each with the status it answers at (`SUGGEST_CODES`,
+src/data/ai-codes.ts), that the client puts into words
+(src/data/suggest-tags.ts): not a form with a picture and features (400),
+nothing set up (412), a key Anthropic refuses (422), the day's calls spent
+(429 — a fuse of `AUTO_TAG_DAILY_LIMIT` a day per account whoever answers,
+counted in `ai_usage`, migrations/0019; the `calls_*`
 columns 0018 gave the key's row are no longer written), a picture too
 large or in a format the API does not read (413, 415), Cloudflare chosen
 with no binding (501), the provider failing (502), and an answer that is
@@ -482,8 +508,10 @@ src/data/auto-tag.ts). The caption's first letter is upper-cased. A value
 that matches one in use — trimmed, whatever its case — comes back spelled
 exactly as the value in use, so `setValueOps` links the board's own value
 rather than making a near-duplicate. A new value is cut to 30 characters
-(`MAX_SUGGESTED_VALUE_LENGTH`: it becomes a menu option; a value in use is
-never shortened) and takes the style of the feature's values in use: when
+(`MAX_SUGGESTED_VALUE_LENGTH`, with every other cap the AI requests and
+answers are held to, in src/data/ai-limits.ts: it becomes a menu option; a
+value in use is never shortened) and takes the style of the feature's
+values in use: when
 every one starts upper-case its first letter is upper-cased, when every one
 starts lower-case it is lower-cased, and mixed or none in use means
 upper-cased. The prompt asks the model for the same style — the same case,
