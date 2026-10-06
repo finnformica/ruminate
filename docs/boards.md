@@ -453,11 +453,13 @@ the answer is held to (structured output) to the Messages API, as
 rather than the Worker reading them from D1, on purpose: the browser's
 graph is the one that knows the board now (a value picked a moment ago may
 not have reached the replica yet), and the Worker trusts the form as
-prompt text only and writes nothing to the graph. Refusals are codes the
-client puts into words (src/data/suggest-tags.ts): not a form with a
-picture and features (400), nothing set up (412), a key Anthropic refuses
-(422), the day's calls spent (429 — a fuse of 300 a day per account
-whoever answers, counted in `ai_usage`, migrations/0019; the `calls_*`
+prompt text only and writes nothing to the graph. Refusals are codes
+named once, each with the status it answers at (`SUGGEST_CODES`,
+src/data/ai-codes.ts), that the client puts into words
+(src/data/suggest-tags.ts): not a form with a picture and features (400),
+nothing set up (412), a key Anthropic refuses (422), the day's calls spent
+(429 — a fuse of `AUTO_TAG_DAILY_LIMIT` a day per account whoever answers,
+counted in `ai_usage`, migrations/0019; the `calls_*`
 columns 0018 gave the key's row are no longer written), a picture too
 large or in a format the API does not read (413, 415), Cloudflare chosen
 with no binding (501), the provider failing (502), and an answer that is
@@ -506,8 +508,10 @@ src/data/auto-tag.ts). The caption's first letter is upper-cased. A value
 that matches one in use — trimmed, whatever its case — comes back spelled
 exactly as the value in use, so `setValueOps` links the board's own value
 rather than making a near-duplicate. A new value is cut to 30 characters
-(`MAX_SUGGESTED_VALUE_LENGTH`: it becomes a menu option; a value in use is
-never shortened) and takes the style of the feature's values in use: when
+(`MAX_SUGGESTED_VALUE_LENGTH`, with every other cap the AI requests and
+answers are held to, in src/data/ai-limits.ts: it becomes a menu option; a
+value in use is never shortened) and takes the style of the feature's
+values in use: when
 every one starts upper-case its first letter is upper-cased, when every one
 starts lower-case it is lower-cased, and mixed or none in use means
 upper-cased. The prompt asks the model for the same style — the same case,

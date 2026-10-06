@@ -1,5 +1,10 @@
 import React from "react"
-import { isLinkType, type BoardFeatureState, type FeatureType } from "../../data/boards"
+import {
+  FEATURE_TYPES,
+  isLinkType,
+  type BoardFeatureState,
+  type FeatureType,
+} from "../../data/boards"
 import { useAiAvailable } from "../../hooks/ai"
 import type { BoardWrites } from "../../hooks/board"
 import { useCoarsePointer } from "../../hooks/coarse-pointer"
@@ -25,7 +30,6 @@ import {
 /** The types a feature can be, as the menu names them, and the glyph each
  * wears: lines of text for a name, a globe for a place, a link. */
 const TYPE_LABELS: Record<FeatureType, string> = { text: "Text", link: "Link", place: "Place" }
-const TYPES: readonly FeatureType[] = ["text", "place", "link"]
 const TYPE_ICONS: Record<FeatureType, React.ReactNode> = {
   text: <AlignLeftIcon16 />,
   place: <GlobeIcon16 />,
@@ -232,7 +236,7 @@ function useFeatureCells({ state, focus, writes }: RowProps) {
         }
       />
       <DropdownMenu.Content align="start" width={160}>
-        {TYPES.map((type) => (
+        {FEATURE_TYPES.map((type) => (
           <DropdownMenu.Item
             key={type}
             icon={TYPE_ICONS[type]}

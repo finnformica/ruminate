@@ -68,7 +68,8 @@ import { applyOps, type Op } from "./ops"
  * (`link`), kept as a link block and drawn as its card, which the model is
  * never asked about.
  */
-export type FeatureType = "text" | "link" | "place"
+export const FEATURE_TYPES = ["text", "place", "link"] as const
+export type FeatureType = (typeof FEATURE_TYPES)[number]
 
 /** What the `feature` prop on a block carries. */
 export interface FeatureSpec {
@@ -95,6 +96,12 @@ export interface BoardFeature extends FeatureSpec {
  * board** (`defaultFeatureOps`), and the names a board from before
  * features were blocks is read by. The one place the defaults live.
  */
+/** What the Object feature's notes say — the one example of a note the
+ * model is shown when it writes notes (`AUTO_NOTES_SYSTEM_PROMPT`), so the
+ * example is always a note a board actually carries. */
+export const OBJECT_NOTES =
+  "the thing the picture is of, such as furniture, lighting, cutlery, plants or decoration"
+
 export const DEFAULT_FEATURES: readonly { label: string; spec: FeatureSpec }[] = [
   {
     label: "Location",
@@ -106,12 +113,7 @@ export const DEFAULT_FEATURES: readonly { label: string; spec: FeatureSpec }[] =
   },
   {
     label: "Object",
-    spec: {
-      type: "text",
-      multi: true,
-      notes:
-        "the thing the picture is of, such as furniture, lighting, cutlery, plants or decoration",
-    },
+    spec: { type: "text", multi: true, notes: OBJECT_NOTES },
   },
   { label: "Material", spec: { type: "text", multi: true, notes: "what that thing is made of" } },
   { label: "Link", spec: { type: "link", multi: true } },
@@ -140,8 +142,15 @@ const normalise = (text: string) => text.trim().toLocaleLowerCase()
  * model's answer is matched to the features it was asked about. */
 const sameLabel = (a: string, b: string) => normalise(a) === normalise(b)
 
+/** Whether a value names one of the feature types. */
+export const isFeatureType = (value: unknown): value is FeatureType =>
+  (FEATURE_TYPES as readonly unknown[]).includes(value)
+
 /** Whether a feature's values are link blocks. */
 export const isLinkType = (type: FeatureType): boolean => type === "link"
+
+/** Whether a feature is the one a picture's location is offered to. */
+const isPlaceType = (type: FeatureType): boolean => type === "place"
 
 /** Whether the note is a board: a note whose page carries `board: true`
  * (`BOARD_PROP`). The board page refuses any other note, and the writes
@@ -165,7 +174,7 @@ export function featureSpecOf(props: BlockProps | null): FeatureSpec | null {
   const raw = props?.[FEATURE_PROP]
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null
   const { type, multi, notes, meaning } = raw as Record<string, unknown>
-  const kind: FeatureType = type === "link" || type === "place" ? type : "text"
+  const kind: FeatureType = isFeatureType(type) ? type : "text"
   const written = typeof notes === "string" ? notes : typeof meaning === "string" ? meaning : ""
   const said = written.trim()
   return { type: kind, multi: multi === true, ...(said !== "" ? { notes: said } : {}) }
@@ -705,7 +714,7 @@ export function tagFeaturesOf(snapshot: GraphSnapshot, boardId: NoteId): TagFeat
         multi: feature.multi,
         ...(feature.notes !== "" ? { notes: feature.notes } : {}),
         values: state.values.map((value) => value.text.trim()).filter((text) => text !== ""),
-        ...(feature.type === "place" ? { place: true } : {}),
+        ...(isPlaceType(feature.type) ? { place: true } : {}),
       },
     ]
   })

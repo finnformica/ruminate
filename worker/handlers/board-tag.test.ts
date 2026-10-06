@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import {
-  AUTO_TAG_MAX_IMAGE_BYTES,
-  AUTO_TAG_MODEL,
-  CLOUDFLARE_AI_MODEL,
-  type TagFeature,
-} from "../../src/data/auto-tag"
+import { AUTO_TAG_MAX_IMAGE_BYTES } from "../../src/data/ai-limits"
+import { AUTO_TAG_MODEL, CLOUDFLARE_AI_MODEL, type TagFeature } from "../../src/data/auto-tag"
 import { spendAiCall } from "../ai-usage"
 import { setFeatureAudience } from "../features"
 import { createMcpTestEnv, type McpTestEnv } from "../mcp/test-support"

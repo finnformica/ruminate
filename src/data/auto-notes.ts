@@ -16,8 +16,9 @@
  * and the client never overwrites a note that has text.
  */
 
+import { MAX_BOARD_LENGTH, MAX_FEATURES, cut, readLabel, readNotes, readValues } from "./ai-limits"
 import type { AiProvider } from "./auto-tag"
-import type { FeatureType } from "./boards"
+import { OBJECT_NOTES, isFeatureType, type FeatureType } from "./boards"
 
 /** A feature as the client describes it: all text already on the board. */
 export interface NotesFeature {
@@ -48,17 +49,7 @@ export interface NotesResponse extends NotesSuggestion {
   log?: string
 }
 
-// Limits on what is sent and what is read back, as the tag request's.
-const MAX_BOARD_LENGTH = 120
-const MAX_FEATURES = 12
-const MAX_VALUES_PER_FEATURE = 200
-const MAX_LABEL_LENGTH = 60
-const MAX_VALUE_LENGTH = 60
-const MAX_NOTES_LENGTH = 500
-
 const normalise = (text: string) => text.trim().toLocaleLowerCase()
-
-const FEATURE_TYPES: readonly FeatureType[] = ["text", "place", "link"]
 
 /**
  * The request a value states, or null when it is not one: a board's name
@@ -75,33 +66,27 @@ export function readNotesRequest(raw: unknown): NotesRequest | null {
   for (const entry of record.features) {
     if (typeof entry !== "object" || entry === null) return null
     const feature = entry as Record<string, unknown>
-    if (typeof feature.label !== "string" || typeof feature.multi !== "boolean") return null
-    if (!FEATURE_TYPES.includes(feature.type as FeatureType)) return null
-    if (!Array.isArray(feature.values) || feature.values.length > MAX_VALUES_PER_FEATURE) {
-      return null
-    }
-    const label = feature.label.trim().slice(0, MAX_LABEL_LENGTH)
-    if (label === "") return null
-    const values: string[] = []
-    for (const value of feature.values) {
-      if (typeof value !== "string") return null
-      const text = value.trim().slice(0, MAX_VALUE_LENGTH)
-      if (text !== "") values.push(text)
-    }
-    const notes =
-      typeof feature.notes === "string" ? feature.notes.trim().slice(0, MAX_NOTES_LENGTH) : ""
-    features.push({ label, type: feature.type as FeatureType, multi: feature.multi, values, notes })
+    if (typeof feature.multi !== "boolean" || !isFeatureType(feature.type)) return null
+    const label = readLabel(feature.label)
+    const values = readValues(feature.values)
+    if (label === null || values === null) return null
+    features.push({
+      label,
+      type: feature.type,
+      multi: feature.multi,
+      values,
+      notes: readNotes(feature.notes),
+    })
   }
-  return { board: record.board.trim().slice(0, MAX_BOARD_LENGTH), features }
+  return { board: cut(record.board, MAX_BOARD_LENGTH), features }
 }
 
 /** What the model is, and how it is to answer. Fixed text, so it caches. */
 export const AUTO_NOTES_SYSTEM_PROMPT = [
   "You help set up a mood board — inspiration kept for a home, a garden, a project — whose",
   "pictures are tagged by a vision model. The board has features, each with a short note",
-  'telling the vision model what the feature means and how to answer it, such as "the thing',
-  'the picture is of, such as furniture, lighting, cutlery, plants or decoration". You are',
-  "given the board's name, which says what the board is about, and its features: each one's",
+  `telling the vision model what the feature means and how to answer it, such as "${OBJECT_NOTES}".`,
+  "You are given the board's name, which says what the board is about, and its features: each one's",
   "label, type, whether it takes one value or several, the values in use — the surest sign of",
   "what a feature means — and the note already written, if any. Write a note for every feature",
   "that lacks one: one line, under 120 characters, no full stop, in the style of the notes",
@@ -194,7 +179,7 @@ export function readNotesSuggestion(raw: unknown, request: NotesRequest): NotesS
       entries.push(null)
       continue
     }
-    entries.push({ label: item.label, notes: item.notes.trim().slice(0, MAX_NOTES_LENGTH) })
+    entries.push({ label: item.label, notes: readNotes(item.notes) })
   }
   // Only when the answer is the missing features, in order, under other names.
   const byPosition =

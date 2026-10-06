@@ -180,6 +180,9 @@ function failedToast(message: string, detail: string): void {
   toast.error(message, { duration: 10000, action: copyControl(detail) })
 }
 
+/** What a suggestion with nothing to write is answered with. */
+const NOTHING_TO_ADD = "Nothing to add."
+
 /** A toast control that puts `detail` on the clipboard. */
 const copyControl = (detail: string) => ({
   label: "Copy",
@@ -430,7 +433,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
           Date.now(),
         )
         if (ops.length === 0) {
-          toast("Nothing to add.")
+          toast(NOTHING_TO_ADD)
           return
         }
         undoable(ops, "Picture updated")
@@ -459,7 +462,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       const suggestion = await requestNotesSuggestion(title, notesFeaturesOf(snapshot, boardId))
       const ops = notesSuggestionOps(store.get(graphSnapshotAtom), boardId, suggestion, Date.now())
       if (ops.length === 0) {
-        toast("Nothing to add.")
+        toast(NOTHING_TO_ADD)
         return
       }
       undoable(ops, "Notes updated")

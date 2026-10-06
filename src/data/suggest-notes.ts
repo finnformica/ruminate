@@ -1,5 +1,6 @@
 import type { NotesFeature, NotesSuggestion } from "./auto-notes"
 import { sessionFetch } from "./session-fetch"
+import { SUGGEST_CODES } from "./ai-codes"
 import { readSuggestResponse, SuggestError } from "./suggest-tags"
 
 /**
@@ -21,7 +22,7 @@ export async function requestNotesSuggestion(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ board, features }),
     },
-    () => new SuggestError("signed_out", "Sign in to suggest notes."),
+    () => new SuggestError(SUGGEST_CODES.signedOut, "Sign in to suggest notes."),
   )
   return readSuggestResponse(
     response,

@@ -30,8 +30,16 @@ import {
   readNotesSuggestion,
   type NotesResponse,
 } from "../../src/data/auto-notes"
+import { SUGGEST_CODES } from "../../src/data/ai-codes"
 import { extractJson } from "../../src/data/auto-tag"
-import { badAnswerResponse, dailyLimitResponse, failureResponse, json, resolveAsker } from "../ai"
+import {
+  badAnswerResponse,
+  dailyLimitResponse,
+  failureResponse,
+  json,
+  refusal,
+  resolveAsker,
+} from "../ai"
 import { spendAiCall } from "../ai-usage"
 import { controlPlaneDriver } from "../tenancy-db"
 import type { Env } from "../types"
@@ -45,12 +53,12 @@ export async function boardNotes(
   fetchImpl: typeof fetch = fetch,
   options: { clock?: () => number; dailyLimit?: number } = {},
 ): Promise<Response> {
-  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405)
+  if (request.method !== "POST") return refusal(SUGGEST_CODES.methodNotAllowed)
   const session = await requireSession(request, env, fetchImpl)
   if (session instanceof Response) return session
 
   const body = readNotesRequest(await request.json().catch(() => null))
-  if (body === null) return json({ error: "invalid_body" }, 400)
+  if (body === null) return refusal(SUGGEST_CODES.invalidBody)
 
   // Who answers, before a call is counted.
   const asker = await resolveAsker(env, session, fetchImpl)

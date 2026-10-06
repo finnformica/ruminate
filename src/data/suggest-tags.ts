@@ -1,3 +1,4 @@
+import { SUGGEST_CODES, type ServerSuggestCode, type SuggestCode } from "./ai-codes"
 import type { NotesResponse } from "./auto-notes"
 import type { TagFeature, TagLocation, TagResponse, TagSuggestion } from "./auto-tag"
 import { sessionFetch } from "./session-fetch"
@@ -16,7 +17,7 @@ import { sessionFetch } from "./session-fetch"
  * notes for the features — as the toast shows it. */
 export class SuggestError extends Error {
   constructor(
-    public readonly code: string,
+    public readonly code: SuggestCode,
     message: string,
     /** Plain lines for the clipboard: the message, then what the call can
      * be found by and what the provider said. */
@@ -27,19 +28,27 @@ export class SuggestError extends Error {
   }
 }
 
-/** The words for each refusal — what the person can do about it. */
-const MESSAGES: Record<string, string> = {
-  no_provider: "Set up AI under Settings → AI to suggest.",
-  invalid_api_key: "Anthropic refused your API key — check it under Settings → AI.",
-  ai_disabled: "Cloudflare AI isn’t set up on this Ruminate.",
-  provider_error: "The model couldn’t answer — try again in a moment.",
-  bad_answer: "The model’s answer made no sense — try again.",
-  daily_limit: "Suggesting has made its calls for today.",
-  rate_limited: "Anthropic asked to slow down — try again in a minute.",
-  image_too_large: "That picture is too large to tag.",
-  unsupported_image: "That picture is in a format the model can’t read.",
-  refused: "The model declined to tag that picture.",
+/** The words for each refusal the Worker answers with — what the person
+ * can do about it. Keyed by the codes themselves, so a code without words
+ * is a type error. */
+const MESSAGES: Record<ServerSuggestCode, string> = {
+  [SUGGEST_CODES.invalidBody]: "That request made no sense — try again.",
+  [SUGGEST_CODES.methodNotAllowed]: "That request made no sense — try again.",
+  [SUGGEST_CODES.noProvider]: "Set up AI under Settings → AI to suggest.",
+  [SUGGEST_CODES.invalidApiKey]: "Anthropic refused your API key — check it under Settings → AI.",
+  [SUGGEST_CODES.aiDisabled]: "Cloudflare AI isn’t set up on this Ruminate.",
+  [SUGGEST_CODES.providerError]: "The model couldn’t answer — try again in a moment.",
+  [SUGGEST_CODES.badAnswer]: "The model’s answer made no sense — try again.",
+  [SUGGEST_CODES.dailyLimit]: "Suggesting has made its calls for today.",
+  [SUGGEST_CODES.rateLimited]: "Anthropic asked to slow down — try again in a minute.",
+  [SUGGEST_CODES.imageTooLarge]: "That picture is too large to tag.",
+  [SUGGEST_CODES.unsupportedImage]: "That picture is in a format the model can’t read.",
+  [SUGGEST_CODES.refused]: "The model declined to tag that picture.",
 }
+
+/** Whether a code is one the Worker answers with. */
+const isServerCode = (code: unknown): code is ServerSuggestCode =>
+  typeof code === "string" && code in MESSAGES
 
 /** What a route answers with, when it is JSON: an answer or a refusal. */
 export type ParsedBody = Partial<TagResponse> & Partial<NotesResponse> & RefusalBody
@@ -115,8 +124,10 @@ export async function readSuggestResponse<T>(
   }
   const cfRay = response.headers.get("cf-ray")
   if (!response.ok) {
-    const code = typeof body?.error === "string" ? body.error : "failed"
-    const message = MESSAGES[code] ?? `Couldn’t suggest ${what} (${response.status}).`
+    const code = isServerCode(body?.error) ? body.error : SUGGEST_CODES.failed
+    const message = isServerCode(code)
+      ? MESSAGES[code]
+      : `Couldn’t suggest ${what} (${response.status}).`
     throw new SuggestError(
       code,
       message,
@@ -125,11 +136,12 @@ export async function readSuggestResponse<T>(
   }
   const picked = body ? pick(body) : undefined
   if (picked === undefined) {
+    const code = SUGGEST_CODES.failed
     const message = `Couldn’t suggest ${what}.`
     throw new SuggestError(
-      "failed",
+      code,
       message,
-      suggestDetail({ message, code: "failed", status: response.status, body, rawBody, cfRay }),
+      suggestDetail({ message, code, status: response.status, body, rawBody, cfRay }),
     )
   }
   return picked
@@ -149,7 +161,7 @@ export async function requestTagSuggestion(
   const response = await sessionFetch(
     "/api/boards/tag",
     { method: "POST", body: form },
-    () => new SuggestError("signed_out", "Sign in to suggest tags."),
+    () => new SuggestError(SUGGEST_CODES.signedOut, "Sign in to suggest tags."),
   )
   return readSuggestResponse(response, (body) => body.suggestion, "tags")
 }

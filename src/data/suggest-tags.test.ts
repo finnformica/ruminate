@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { SUGGEST_CODES } from "./ai-codes"
 import { SuggestError, suggestDetail } from "./suggest-tags"
 
 describe("suggestDetail", () => {
@@ -56,7 +57,9 @@ describe("suggestDetail", () => {
   })
 
   it("is what the error carries, the message alone by default", () => {
-    expect(new SuggestError("x", "Nope").detail).toBe("Nope")
-    expect(new SuggestError("x", "Nope", "Nope\ncode: x").detail).toBe("Nope\ncode: x")
+    expect(new SuggestError(SUGGEST_CODES.failed, "Nope").detail).toBe("Nope")
+    expect(new SuggestError(SUGGEST_CODES.failed, "Nope", "Nope\ncode: failed").detail).toBe(
+      "Nope\ncode: failed",
+    )
   })
 })

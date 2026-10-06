@@ -26,6 +26,13 @@
 // the API's answers, which never carry it.
 
 import Anthropic from "@anthropic-ai/sdk"
+import {
+  DAILY_LIMIT_RETRY_AFTER,
+  SUGGEST_CODES,
+  SUGGEST_STATUS,
+  type ServerSuggestCode,
+} from "../src/data/ai-codes"
+import { MAX_DETAIL_LENGTH } from "../src/data/ai-limits"
 import { resolveAiProvider } from "../src/data/ai-router"
 import { AUTO_TAG_MODEL, CLOUDFLARE_AI_MODEL, type AiProvider } from "../src/data/auto-tag"
 import { featureAllows } from "./features"
@@ -39,6 +46,14 @@ export const json = (body: unknown, status = 200, headers: Record<string, string
     status,
     headers: { "Content-Type": "application/json", ...headers },
   })
+
+/** A refusal, at the status its code pairs with (`SUGGEST_STATUS`), with
+ * whatever else the body carries. */
+export const refusal = (
+  code: ServerSuggestCode,
+  body: Record<string, unknown> = {},
+  headers: Record<string, string> = {},
+): Response => json({ error: code, ...body }, SUGGEST_STATUS[code], headers)
 
 /** Bytes to base64, in chunks a call stack can take. */
 function toBase64(bytes: ArrayBuffer): string {
@@ -77,8 +92,7 @@ interface Provider {
 
 class ProviderRefusal extends Error {
   constructor(
-    public readonly status: number,
-    public readonly code: string,
+    public readonly code: ServerSuggestCode,
     public readonly detail?: string,
     public readonly headers: Record<string, string> = {},
   ) {
@@ -128,23 +142,21 @@ function anthropicProvider(apiKey: string, fetchImpl: typeof fetch): Provider {
           error instanceof Anthropic.PermissionDeniedError
         ) {
           throw new ProviderRefusal(
-            422,
-            "invalid_api_key",
+            SUGGEST_CODES.invalidApiKey,
             "Anthropic refused the API key kept for you.",
           )
         }
         if (error instanceof Anthropic.RateLimitError) {
           const retryAfter = error.headers?.get("retry-after")
           throw new ProviderRefusal(
-            429,
-            "rate_limited",
+            SUGGEST_CODES.rateLimited,
             "Anthropic asked to slow down.",
             retryAfter ? { "Retry-After": retryAfter } : {},
           )
         }
         throw error
       }
-      if (answer.stop_reason === "refusal") throw new ProviderRefusal(422, "refused")
+      if (answer.stop_reason === "refusal") throw new ProviderRefusal(SUGGEST_CODES.refused)
       return answer.content.find((block) => block.type === "text")?.text ?? ""
     },
   }
@@ -320,12 +332,11 @@ export async function resolveAsker(
 ): Promise<Asker | Response> {
   const chosen = await chooseProvider(env, session)
   if (chosen === null) {
-    return json(
-      { error: "no_provider", detail: "Add your Anthropic API key under Settings → AI." },
-      412,
-    )
+    return refusal(SUGGEST_CODES.noProvider, {
+      detail: "Add your Anthropic API key under Settings → AI.",
+    })
   }
-  if (chosen === "cloudflare" && !env.AI) return json({ error: "ai_disabled" }, 501)
+  if (chosen === "cloudflare" && !env.AI) return refusal(SUGGEST_CODES.aiDisabled)
   const provider: Provider =
     chosen === "anthropic"
       ? anthropicProvider((await readKey(controlPlaneDriver(env), session.id)) ?? "", fetchImpl)
@@ -350,27 +361,30 @@ export async function resolveAsker(
  */
 export function failureResponse(error: unknown, found: Found): Response {
   if (error instanceof ProviderRefusal) {
-    return json(
-      { error: error.code, ...(error.detail ? { detail: error.detail } : {}), ...found },
-      error.status,
+    return refusal(
+      error.code,
+      { ...(error.detail ? { detail: error.detail } : {}), ...found },
       error.headers,
     )
   }
   const status = error instanceof Anthropic.APIError ? (error.status ?? null) : null
-  const message = String((error as { message?: unknown })?.message ?? error).slice(0, 2000)
-  return json({ error: "provider_error", status, message, ...found }, 502)
+  const message = String((error as { message?: unknown })?.message ?? error).slice(
+    0,
+    MAX_DETAIL_LENGTH,
+  )
+  return refusal(SUGGEST_CODES.providerError, { status, message, ...found })
 }
 
 /** The response for an answer that is not what was asked for: the answer
  * as it came, so the person can see what the model said. */
 export function badAnswerResponse(text: string, found: Found): Response {
-  return json(
-    { error: "bad_answer", detail: { ...found, answer: text.slice(0, 2000) }, ...found },
-    422,
-  )
+  return refusal(SUGGEST_CODES.badAnswer, {
+    detail: { ...found, answer: text.slice(0, MAX_DETAIL_LENGTH) },
+    ...found,
+  })
 }
 
 /** The response for a day whose calls are spent. */
 export function dailyLimitResponse(detail: string): Response {
-  return json({ error: "daily_limit", detail }, 429, { "Retry-After": "3600" })
+  return refusal(SUGGEST_CODES.dailyLimit, { detail }, { "Retry-After": DAILY_LIMIT_RETRY_AFTER })
 }

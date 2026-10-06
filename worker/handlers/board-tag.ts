@@ -36,9 +36,10 @@
 // two above, what the provider actually said, so the person can copy it
 // from the toast.
 
+import { SUGGEST_CODES } from "../../src/data/ai-codes"
+import { AUTO_TAG_MAX_IMAGE_BYTES } from "../../src/data/ai-limits"
 import {
   AUTO_TAG_IMAGE_TYPES,
-  AUTO_TAG_MAX_IMAGE_BYTES,
   AUTO_TAG_SYSTEM_PROMPT,
   cloudflareTagPrompt,
   extractJson,
@@ -57,6 +58,7 @@ import {
   dailyLimitResponse,
   failureResponse,
   json,
+  refusal,
   resolveAsker,
   type ImageMediaType,
 } from "../ai"
@@ -97,12 +99,12 @@ export async function boardTag(
   fetchImpl: typeof fetch = fetch,
   options: { clock?: () => number; dailyLimit?: number } = {},
 ): Promise<Response> {
-  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405)
+  if (request.method !== "POST") return refusal(SUGGEST_CODES.methodNotAllowed)
   const session = await requireSession(request, env, fetchImpl)
   if (session instanceof Response) return session
 
   const form = await readForm(request)
-  if (form === null) return json({ error: "invalid_body" }, 400)
+  if (form === null) return refusal(SUGGEST_CODES.invalidBody)
 
   // Who answers, before a byte is read or a call counted.
   const asker = await resolveAsker(env, session, fetchImpl)
@@ -111,11 +113,11 @@ export async function boardTag(
   // The picture, before the call is counted: one the models cannot read
   // costs the day nothing.
   const mediaType = (form.image.type ?? "").split(";")[0].trim().toLowerCase()
-  if (!AUTO_TAG_IMAGE_TYPES.includes(mediaType)) return json({ error: "unsupported_image" }, 415)
-  if (form.image.size > AUTO_TAG_MAX_IMAGE_BYTES) return json({ error: "image_too_large" }, 413)
+  if (!AUTO_TAG_IMAGE_TYPES.includes(mediaType)) return refusal(SUGGEST_CODES.unsupportedImage)
+  if (form.image.size > AUTO_TAG_MAX_IMAGE_BYTES) return refusal(SUGGEST_CODES.imageTooLarge)
   const bytes = await form.image.arrayBuffer()
-  if (bytes.byteLength === 0) return json({ error: "invalid_body" }, 400)
-  if (bytes.byteLength > AUTO_TAG_MAX_IMAGE_BYTES) return json({ error: "image_too_large" }, 413)
+  if (bytes.byteLength === 0) return refusal(SUGGEST_CODES.invalidBody)
+  if (bytes.byteLength > AUTO_TAG_MAX_IMAGE_BYTES) return refusal(SUGGEST_CODES.imageTooLarge)
 
   const now = options.clock?.() ?? Date.now()
   const spend = await spendAiCall(controlPlaneDriver(env), session.id, now, options.dailyLimit)

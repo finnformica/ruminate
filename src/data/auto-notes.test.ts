@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest"
 import {
+  MAX_BOARD_LENGTH,
+  MAX_FEATURES,
+  MAX_LABEL_LENGTH,
+  MAX_NOTES_LENGTH,
+  MAX_VALUES_PER_FEATURE,
+  MAX_VALUE_LENGTH,
+} from "./ai-limits"
+import {
   AUTO_NOTES_SYSTEM_PROMPT,
   cloudflareNotesPrompt,
   notesOutputSchema,
@@ -25,24 +33,24 @@ const REQUEST: NotesRequest = {
 }
 
 describe("readNotesRequest", () => {
-  it("reads a request, trimming and cutting every string, and dropping empty values", () => {
+  it("reads a request, trimming and cutting every string to its cap, and dropping empty values", () => {
     const read = readNotesRequest({
-      board: `  ${"b".repeat(200)}`,
+      board: `  ${"b".repeat(MAX_BOARD_LENGTH * 2)}`,
       features: [
         {
-          label: " Object ",
+          label: ` ${"l".repeat(MAX_LABEL_LENGTH * 2)} `,
           type: "text",
           multi: true,
-          values: [" Lamp", "", "x".repeat(80)],
-          notes: " n".repeat(300),
+          values: [" Lamp", "", "x".repeat(MAX_VALUE_LENGTH * 2)],
+          notes: " n".repeat(MAX_NOTES_LENGTH),
         },
         { label: "Link", type: "link", multi: true, values: [] },
       ],
     })
-    expect(read?.board).toHaveLength(120)
-    expect(read?.features[0].label).toBe("Object")
-    expect(read?.features[0].values).toEqual(["Lamp", "x".repeat(60)])
-    expect(read?.features[0].notes).toHaveLength(500)
+    expect(read?.board).toHaveLength(MAX_BOARD_LENGTH)
+    expect(read?.features[0].label).toBe("l".repeat(MAX_LABEL_LENGTH))
+    expect(read?.features[0].values).toEqual(["Lamp", "x".repeat(MAX_VALUE_LENGTH)])
+    expect(read?.features[0].notes).toHaveLength(MAX_NOTES_LENGTH)
     expect(read?.features[1]).toEqual({
       label: "Link",
       type: "link",
@@ -80,7 +88,20 @@ describe("readNotesRequest", () => {
     expect(
       readNotesRequest({
         board: "b",
-        features: Array.from({ length: 13 }, () => ({
+        features: [
+          {
+            label: "L",
+            type: "text",
+            multi: true,
+            values: Array.from({ length: MAX_VALUES_PER_FEATURE + 1 }, () => "v"),
+          },
+        ],
+      }),
+    ).toBeNull()
+    expect(
+      readNotesRequest({
+        board: "b",
+        features: Array.from({ length: MAX_FEATURES + 1 }, () => ({
           label: "L",
           type: "text",
           multi: true,
