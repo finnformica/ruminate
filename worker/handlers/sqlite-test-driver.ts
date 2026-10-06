@@ -16,6 +16,7 @@ import migration0006 from "../../migrations/0006_notes_id.sql?raw"
 import migration0015 from "../../migrations/0015_views.sql?raw"
 import migration0016 from "../../migrations/0016_retire_view_props.sql?raw"
 import migration0020 from "../../migrations/0020_board_type.sql?raw"
+import migration0021 from "../../migrations/0021_note_views.sql?raw"
 import migration0003 from "../../migrations/0003_control_plane.sql?raw"
 import migration0010 from "../../migrations/0010_user_email.sql?raw"
 import migration0011 from "../../migrations/0011_user_email_required.sql?raw"
@@ -97,6 +98,7 @@ export async function createTenantTestDriver(): Promise<SqlDriver> {
       views: migration0015,
       retireViewProps: migration0016,
       boardType: migration0020,
+      noteViews: migration0021,
     },
     "columns",
   )

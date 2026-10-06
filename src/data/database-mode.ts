@@ -21,7 +21,16 @@ import type { CorpusRows } from "./deleted-notes"
 import type { NoteStore } from "./note-store"
 import { isBrowserOffline } from "../utils/network"
 import { sampleViews } from "./sample-graph"
-import { applyViewRows, deletedIdsOf, orphanedViews, viewMapOf, viewsAtom } from "./views"
+import {
+  applyViewRows,
+  deletedIdsOf,
+  orphanedViews,
+  patchedViews,
+  viewByRootAtom,
+  viewMapOf,
+  viewsAtom,
+  type ViewWrite,
+} from "./views"
 import {
   OFF_STORAGE_DIAGNOSTICS,
   storageDiagnosticsAtom,
@@ -114,6 +123,14 @@ const OWNER_KEY = "store_owner"
  * boot before the first pull lands would show the old shape, which the new
  * code still reads (`isLegacyBoard`), until the pull replaced it.
  *
+ * Generation `8` is the note view rows (migrations/0021): every note and
+ * board is given a pinned view row, and the Views list is the pinned rows
+ * (`src/data/views.ts`). The rows take fresh `seq` values, so the since-pull
+ * carries them; the wipe is the belt to those braces, as for `5` and `7` —
+ * a cache served at boot before the first pull lands holds no row for any
+ * note, which the new code reads as an empty Views list until the pull
+ * fills it.
+ *
  * This is why the constant is bumped rather than merely re-documented: every
  * device that already booted on generation `2` has `"2"` stamped in its meta,
  * so folding a new change into the old number is a wipe that never fires.
@@ -124,7 +141,7 @@ const OWNER_KEY = "store_owner"
  * when the tab hides, so the window is small — but it is real, and it is why
  * this is bumped deliberately rather than routinely.
  */
-export const CACHE_GENERATION = "7"
+export const CACHE_GENERATION = "8"
 /**
  * The database the local copy was last pulled from — `"production"`, or a
  * preview clone's id — as the replica reports it (`replica_id` on every pull,
@@ -464,11 +481,17 @@ export function stopDatabaseMode() {
  * The graph atom takes the ops synchronously (the screen never waits); the
  * store write coalesces for `OPS_FLUSH_MS` and then lands the same rows and
  * hands the row diff to the replica queue. Nothing here parses or
- * reconciles: the ops are the rows.
+ * reconciles: the ops are the rows. The view writes a batch carries
+ * (`ViewWrite`: the row a new note is listed by) land with it, through
+ * `databaseApplyViews`, after the tombstones its deletes leave.
  */
-export function databaseApplyOps(ops: readonly Op[]) {
+export function databaseApplyOps(ops: readonly Op[], views: readonly ViewWrite[] = []) {
   const activation = runtime
-  if (!activation || ops.length === 0) return
+  if (!activation) return
+  if (ops.length === 0) {
+    databaseApplyViews(patchedViews(jotai().get(viewByRootAtom), views, Date.now()))
+    return
+  }
 
   const store = jotai()
   const before = store.get(databaseGraphAtom)
@@ -480,8 +503,12 @@ export function databaseApplyOps(ops: readonly Op[]) {
   activation.pendingOps.push(...ops)
   patchStatus({ emptyOffline: false })
   // A deleted node takes its view with it: the one place the graph reaches
-  // into the views table (`src/data/views.ts`).
-  databaseApplyViews(orphanedViews(store.get(viewsAtom), deletedIdsOf(ops), Date.now()))
+  // into the views table (`src/data/views.ts`). Then the batch's own rows.
+  const now = Date.now()
+  databaseApplyViews([
+    ...orphanedViews(store.get(viewsAtom), deletedIdsOf(ops), now),
+    ...patchedViews(store.get(viewByRootAtom), views, now),
+  ])
 
   if (activation.opsFlushTimer !== null) clearTimeout(activation.opsFlushTimer)
   activation.opsFlushTimer = setTimeout(() => {

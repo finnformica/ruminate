@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { databaseAllRows } from "../data/database-mode"
 import { deletedNotesOf, restoreNoteOps, type CorpusRows } from "../data/deleted-notes"
 import { useApplyOps } from "../data/store"
+import { LISTED_VIEW } from "../data/views"
 import { AsyncButton } from "./ui/async-button"
 import { Skeleton } from "./ui/skeleton"
 import { SettingsSection } from "./settings-section"
@@ -41,7 +42,11 @@ export function DeletedNotesSection() {
 
   const restore = async (id: string, title: string) => {
     if (!rows) return
-    apply(restoreNoteOps(id, rows))
+    const ops = restoreNoteOps(id, rows)
+    if (ops.length === 0) return
+    // The delete tombstoned the note's view row with it (`orphanedViews`),
+    // so the restore writes the row back, listed, as creating the note did.
+    apply(ops, { views: [{ rootId: id, patch: LISTED_VIEW }] })
     // The note comes back in the sidebar, not here: the toast says so, and
     // opens it.
     toast.success(`Restored “${title}”.`, {

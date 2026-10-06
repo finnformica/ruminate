@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { viewMapOf, viewsAtom } from "../data/views"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { Provider, createStore } from "jotai"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -239,19 +240,44 @@ describe("ResultsEditor (a browsed row's menu)", () => {
     )
 
   it("a note's row opens the note's menu — what its sidebar row's ⋯ holds", async () => {
-    await renderResults(NOTE_ROOTS)
+    const { store } = await renderResults(NOTE_ROOTS)
+    // The row every note is created with, listing it (src/data/views.ts).
+    store.set(
+      viewsAtom,
+      viewMapOf([
+        {
+          id: "journal",
+          root_id: "journal",
+          filter: null,
+          sort: null,
+          pinned: true,
+          sort_key: null,
+          updated_at: 1,
+        },
+      ]),
+    )
     const menu = await menuOn("journal")
     expect(labels(menu)).toEqual([
       "Copy markdown",
       "Copy ID",
       "Share…",
       "Rename",
+      "Remove from Views",
       "Print",
       "Delete",
     ])
     // Nothing of the note editor's block menu: a note's row is not a block.
     expect(menu.textContent).not.toContain("Duplicate")
-    expect(menu.textContent).not.toContain("Add to Views")
+    // Remove from Views clears the note's listing and nothing else: the
+    // row stays, and the menu then offers the way back.
+    await act(async () => {
+      fireEvent.click(screen.getByText("Remove from Views"))
+    })
+    // The note had saved nothing, so its row held nothing but the listing
+    // and goes whole, as a block's does (`patchedView`); a note that saved a
+    // filter keeps its row, unlisted (nav-items.test.tsx).
+    expect(store.get(viewsAtom).has("journal")).toBe(false)
+    expect(labels(await menuOn("journal"))).toContain("Add to Views")
   })
 
   it("a block's row opens the block's menu away from its note, with Add to Views for a block that is none", async () => {

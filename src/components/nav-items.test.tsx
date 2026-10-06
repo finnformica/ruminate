@@ -292,6 +292,40 @@ describe("the sidebar's Views list", () => {
     expect(store.get(viewsAtom).has("blk_x")).toBe(false)
   })
 
+  it("a note's ⋯ offers Remove from Views while its row lists it, and Add to Views after", async () => {
+    const store = renderSidebar({ notes: [THREE[0]], blocks: [] })
+    // The row the note was created with, carrying a saved filter too.
+    store.set(
+      viewsAtom,
+      viewMapOf([
+        {
+          id: "a",
+          root_id: "a",
+          filter: "type:todo",
+          sort: null,
+          pinned: true,
+          sort_key: "a0",
+          updated_at: 1,
+        },
+      ]),
+    )
+    fireEvent.click(within(viewRows()[0]).getByRole("button", { name: "Note actions" }))
+    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove from Views" }))
+    // Only the listing goes: the note still opens with its filter, and its
+    // place is kept for when it is added back.
+    expect(store.get(viewsAtom).get("a")).toMatchObject({
+      pinned: false,
+      filter: "type:todo",
+      sort_key: "a0",
+    })
+    fireEvent.click(within(viewRows()[0]).getByRole("button", { name: "Note actions" }))
+    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
+    expect(screen.queryByRole("menuitem", { name: "Remove from Views" })).toBeNull()
+    fireEvent.click(screen.getByRole("menuitem", { name: "Add to Views" }))
+    expect(store.get(viewsAtom).get("a")?.pinned).toBe(true)
+  })
+
   it("a block view's ⋯ is the block's menu — the list's moves, then Copy, Copy link, Share, Remove from Views", async () => {
     renderSidebar({ notes: [THREE[0]], blocks: [BLOCK] })
     fireEvent.click(within(viewRows()[1]).getByRole("button", { name: "Block view actions" }))
