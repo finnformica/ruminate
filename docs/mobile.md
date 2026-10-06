@@ -152,8 +152,8 @@ keyboard that appears and disappears. The block editor
   autocorrect off with it. (If a fresh block still opens unshifted on iOS, that
   is WebKit not re-reading the attribute when focus is moved by script while
   the keyboard is already up — a known quirk with no page-side fix.)
-- **Chrome is sized for a finger.** The collapse chevron always shows (nothing
-  to hover with) at a 12px glyph on a 36×32px target; the focus dot's hit area
+- **Chrome is sized for a finger.** The collapse chevron, always shown in its
+  column on every screen, is drawn at 14px on a 24×32px target; the focus dot's hit area
   is 26px; the todo checkbox is drawn at 17px and grows its hit area through a
   pseudo-element, up and down and a little left but never right, and the
   marker gap widens from 8px to 12px; the type scale steps body text up (16px,

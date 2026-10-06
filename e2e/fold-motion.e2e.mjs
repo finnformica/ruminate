@@ -44,12 +44,9 @@ const row = (text) =>
     })
     .first()
 
-/** Hover a parent's marker (so its chevron shows) and click the chevron. */
+/** Click a parent's chevron (always shown, in its column before the key). */
 async function clickToggle(text) {
-  const r = row(text)
-  await r.locator(".block-toggle-slot, .block-toggle-beside").first().hover({ force: true })
-  await page.waitForTimeout(120)
-  await r.locator(".block-toggle").click({ force: true })
+  await row(text).locator(".block-toggle").click({ force: true })
 }
 
 /**
@@ -60,9 +57,6 @@ async function clickToggle(text) {
  * alike.
  */
 async function record(text, texts, ms = 480) {
-  const r = row(text)
-  await r.locator(".block-toggle-slot, .block-toggle-beside").first().hover({ force: true })
-  await page.waitForTimeout(120)
   return page.evaluate(
     async ({ text, texts, ms }) => {
       const bodies = () => Array.from(document.querySelectorAll('[data-testid="block-body"]'))
@@ -385,7 +379,7 @@ await story("blockeditor--deep-headings")
   )
 }
 
-// ── A to-do parent's beside-chevron survives a fold and unfold ──────────────
+// ── A to-do parent's chevron survives a fold and unfold ─────────────────────
 await story("blockeditor--nested-todo")
 {
   await clickToggle("Parent todo")
@@ -393,13 +387,13 @@ await story("blockeditor--nested-todo")
   await clickToggle("Parent todo")
   await page.waitForTimeout(500)
   const ok = await page.evaluate(() => {
-    const el = document.querySelector(".block-toggle-beside .block-toggle")
+    const el = document.querySelector('[data-testid="chevron-column"] .block-toggle')
     if (!el) return false
     const r = el.getBoundingClientRect()
     const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
     return !!at && (el === at || el.contains(at))
   })
-  check("to-do parent: the beside-chevron is hittable after a fold and unfold", ok)
+  check("to-do parent: the chevron is hittable after a fold and unfold", ok)
 }
 
 await browser.close()
