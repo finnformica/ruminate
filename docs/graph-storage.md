@@ -298,9 +298,11 @@ text are plain text.)
 ### `views` (id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at)
 
 The entrypoints into the graph (docs/metadata.md, "Views"; `migrations/0015`):
-a node to start at, what of its subgraph to keep, how to lay it out, and where
-it sits in the Views list (`sort_key`; `pinned` now only says a block's row is
-to be kept when it saves nothing else). Not part of the graph and not derivable from it — a
+a node to start at, what of its subgraph to keep, how to lay it out, whether
+it is in the Views list (`pinned` — the list IS the rows that say so, for a
+note, a board and a block alike; every note and board is created with one,
+`migrations/0021` gave the existing ones theirs) and where it sits in it
+(`sort_key`). Not part of the graph and not derivable from it — a
 view may name a node another tenant owns (a share), which no prop on that
 node could record — so a table of its own, replicated exactly as the other
 two are: per-row last-writer-wins on `updated_at`, a delete as a row carrying
