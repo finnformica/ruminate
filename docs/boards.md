@@ -412,7 +412,8 @@ work on the sample graph, like the rest of the editor.
 
 **The row is the board's own node**, and in an outline it is drawn as a
 card (`board-card.tsx`, the `board` kind in `block-kinds.tsx`): the
-board's icon, its name — the node's text, rendered and never a textarea: a
+board's favicon in the row's key slot, as every row's key is, then the card —
+its name — the node's text, rendered and never a textarea: a
 board is named on its own page, and asking to edit the row (a double-click,
 a tap, the arrows walking into it) selects it instead (`uneditable`) — and
 beneath it what the board holds, read live off the graph (`boardCardLine`:
