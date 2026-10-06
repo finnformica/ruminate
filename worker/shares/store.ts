@@ -79,7 +79,8 @@ export async function createShare(
   return shareFromRow(row)
 }
 
-const SHARE_COLUMNS = "id, owner_id, grantee_email, view_id, permissions, created_at, revoked_at"
+const SHARE_COLUMNS =
+  "id, owner_id, grantee_email, view_id, permissions, created_at, revoked_at, revoked_by"
 
 const asRow = (row: Record<string, unknown>): ShareRow => ({
   id: String(row.id),
@@ -90,6 +91,8 @@ const asRow = (row: Record<string, unknown>): ShareRow => ({
   created_at: Number(row.created_at),
   revoked_at:
     row.revoked_at === null || row.revoked_at === undefined ? null : Number(row.revoked_at),
+  revoked_by:
+    row.revoked_by === null || row.revoked_by === undefined ? null : String(row.revoked_by),
 })
 
 /** The shares a user has GIVEN, newest first. Revoked ones are included —
@@ -127,7 +130,7 @@ export async function listReceivedShares(
 ): Promise<ReceivedShare[]> {
   const rows = await driver.exec(
     `SELECT s.id, s.owner_id, s.grantee_email, s.view_id, s.permissions, s.created_at, ` +
-      `s.revoked_at, u.login AS owner_login, u.name AS owner_name ` +
+      `s.revoked_at, s.revoked_by, u.login AS owner_login, u.name AS owner_name ` +
       `FROM shares s ` +
       `JOIN users g ON g.github_id = ?1 AND g.email = s.grantee_email ` +
       `JOIN users u ON u.github_id = s.owner_id AND u.status = 'active' ` +
@@ -162,9 +165,9 @@ export async function findReceivedShare(
 }
 
 /**
- * Revoke one share. Scoped to `ownerId` in the statement itself, so naming
- * someone else's share revokes nothing rather than revoking theirs. Returns
- * whether a live row was actually retired.
+ * Revoke one share — the owner's side of ending it. Scoped to `ownerId` in
+ * the statement itself, so naming someone else's share revokes nothing rather
+ * than revoking theirs. Returns whether a live row was actually retired.
  */
 export async function revokeShare(
   driver: SqlDriver,
@@ -178,8 +181,39 @@ export async function revokeShare(
   ])
   if (rows.length === 0 || rows[0].revoked_at !== null) return false
   await driver.exec(
-    "UPDATE shares SET revoked_at = ?3 WHERE id = ?1 AND owner_id = ?2 AND revoked_at IS NULL",
+    "UPDATE shares SET revoked_at = ?3, revoked_by = 'owner' " +
+      "WHERE id = ?1 AND owner_id = ?2 AND revoked_at IS NULL",
     [id, ownerId, now],
+  )
+  return true
+}
+
+/**
+ * Leave one share — the grantee's side of ending it: the same row retired,
+ * with `revoked_by` saying so, so the owner's list can tell the two apart.
+ * Scoped through the ledger in the statement itself, like every grantee
+ * lookup (verified id → recorded address → the row naming it), so a caller
+ * can end only a share addressed to them, and naming anyone else's ends
+ * nothing. Returns whether a live row was actually retired.
+ */
+export async function leaveShare(
+  driver: SqlDriver,
+  granteeId: number,
+  id: string,
+  now: number = Date.now(),
+): Promise<boolean> {
+  const rows = await driver.exec(
+    "SELECT s.revoked_at FROM shares s " +
+      "JOIN users g ON g.github_id = ?2 AND g.email = s.grantee_email " +
+      "WHERE s.id = ?1",
+    [id, granteeId],
+  )
+  if (rows.length === 0 || rows[0].revoked_at !== null) return false
+  await driver.exec(
+    "UPDATE shares SET revoked_at = ?3, revoked_by = 'grantee' " +
+      "WHERE id = ?1 AND revoked_at IS NULL " +
+      "AND grantee_email = (SELECT email FROM users WHERE github_id = ?2)",
+    [id, granteeId, now],
   )
   return true
 }

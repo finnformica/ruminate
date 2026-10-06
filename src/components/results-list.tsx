@@ -136,9 +136,10 @@ export function ResultsList({
           {count}
         </div>
       ) : null}
-      {/* Set in by the rows' own reach (a root's surface extends 4.5px past
-          its box), so the surfaces sit flush with what is above. */}
-      <div className="px-[4.5px] empty:hidden">
+      {/* Set in by the rows' own reach (a surface extends 2px past its
+          box), so the surfaces sit flush with what is above. A root here
+          is the row it is in its note — no wider surface of its own. */}
+      <div className="px-0.5 empty:hidden">
         <ResultsEditor
           roots={roots}
           resetKey={`${mode}:${query}`}
