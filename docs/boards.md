@@ -373,6 +373,76 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
   (`new-value-dialog.tsx`); the same dialog asks a link feature's **Add
   link** for an address (required, a web address) and a title (optional).
 
+## A board in a note
+
+A board can live inside a note (`/board`, `/link board`): the board's own
+node linked under a block, drawn as a card where the row is. Nothing is
+new in the data — the graph has always allowed a note root under a block,
+and the walker has always drawn one as a `note` or `board` row
+(docs/graph-schema-v2.md) — so this section is the way to do it and what
+the row looks like.
+
+**Two slash entries**, under **Insert** in the slash menu
+(`src/blocks/slash-menu.ts`), offered only in a note of your own — a note
+someone shared with you has neither:
+
+- **Board** (`/board`, `/new board`) opens the New board dialog
+  (`new-board-dialog.tsx`, the header's own, told where the board goes)
+  and on **Create** writes, in one batch, the board's node with its default
+  features (`newBoardOps`) and the one `link` that puts it where the row is
+  (`linkBoardOps`, `src/data/boards.ts`): in place of the row when the row
+  was blank — as the image entry takes a blank line over — else after it.
+  Nothing navigates: the card appears in place, selected. **No view row is
+  written**: a board made inside a note is not in the Views list, since
+  the note is its place (docs/metadata.md, "Views"); **Add to Views** in
+  the card's menu lists it from there, as any node.
+- **Link board** (`/link board`, `/existing board`, `/add board`) opens a
+  picker (`link-board-dialog.tsx`): a search field over your boards, by
+  name, <kbd>Enter</kbd> or a click picks, and the one `link` is written. The
+  picker never offers the note being edited (a board linked into its own
+  outline would be a loop for nothing) nor a board already under that
+  parent, and `linkBoardOps` refuses both again.
+
+Either way the editor records a structural step of its own once the graph
+holds the board (`BoardRequest.place`, `block-editor.tsx`): the row goes
+into the doc as the walk would build it (`boardRow`), so the save that
+follows finds nothing to write, and one <kbd>⌘</kbd> <kbd>Z</kbd> takes the
+row out again — which only unlinks the board (below). Signed out the two
+work on the sample graph, like the rest of the editor.
+
+**The row is the board's own node**, and in an outline it is drawn as a
+card (`board-card.tsx`, the `board` kind in `block-kinds.tsx`): the
+board's icon, its name — the node's text, rendered and never a textarea: a
+board is named on its own page, and asking to edit the row (a double-click,
+a tap, the arrows walking into it) selects it instead (`uneditable`) — and
+beneath it what the board holds, read live off the graph (`boardCardLine`:
+"12 pictures · Location, Object, Material", "No pictures yet" while it is
+empty, four features named and the rest counted). **Open board** in the
+card's corner opens the board's page; click anywhere else and the row is
+selected, as any row. The card is a figure in a link card's frame
+(`figure-frame.tsx`, `isFigureType`): it keeps to a side and takes a
+width, from the handles or the row's menu, and those two props sit on the
+board's own node beside its metadata — one card, however many notes it is
+linked in. The row starts folded, whatever the depth setting says
+(`foldRule`, `src/data/view-state.ts`): the card stands for the board's
+outline, which is a chevron away. Listed — a search result, the Views
+page, the palette — a board is still the note row with the board's favicon,
+not the card.
+
+**Removing the row never deletes the board.** <kbd>⌫</kbd> on the row, Cut,
+and **Unlink** in its menu only unlink it: a note is a root of its own, and
+an outline edit can only let go of it (`partsToOps`, `src/data/ops.ts` — a
+dropped note is never deleted, not even blank or named to discard). The
+board is then where it was: listed if it was listed, open from search,
+**Recent** or its address, and **Link board** puts it back. **Delete** in
+the row's menu is the board's own delete: the dialog the sidebar's Delete
+opens (`delete-note-dialog.tsx`), naming the board, with a red **Delete**
+that runs `deleteNoteOps` — the board with everything only it held.
+
+Not yet: a note linked into a note takes the same path with a `note` card,
+switched on later; the board page says nothing of the notes it is linked
+in.
+
 ## Tagging with Claude
 
 **A proof of concept**, open to every signed-in user with a provider set
