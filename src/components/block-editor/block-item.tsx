@@ -302,12 +302,6 @@ export function BlockItem({
   const looped = !!occurrence.looped
   const hasToggle = hasChildren || looped
   const rowContext: RowContext = { block, occurrence, api, depth, editing }
-  // A ROOT of a results view (`api.fixedRoots`): its surface is set in by
-  // 8.5px at the sides, so every root's surface — a note's, a matched
-  // block's — shares one left edge, the one the page's search box sits on
-  // (the view pads by the reach). The margin still nets the text to the
-  // shared 4px column.
-  const wide = !!api.fixedRoots && depth === 0
   // Kept as context by a filter, not found by it (`BlockEditorApi.context`).
   const dimmed = api.context?.has(block.id) ?? false
 
@@ -1137,9 +1131,7 @@ export function BlockItem({
             // for the start of the line lands on the line, not the marker
             // (a todo's checkbox above all).
             "relative flex items-start gap-2 rounded coarse:gap-3",
-            wide
-              ? "-ml-[4.5px] -mr-[4.5px] pl-[8.5px] pr-[8.5px]"
-              : "-ml-0.5 -mr-0.5 pl-1.5 pr-1.5",
+            "-ml-0.5 -mr-0.5 pl-1.5 pr-1.5",
             // Per-side vertical pairs. Mid-run sides also square their
             // corners and drop that edge of the selection ring
             // (`.block-run-*`, block-editor.css) so the run reads as ONE

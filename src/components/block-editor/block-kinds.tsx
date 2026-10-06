@@ -3,8 +3,10 @@ import type { ReactNode } from "react"
 import { figureAlignOf, type FigureAlign } from "../../blocks/figure"
 import { BLOCK_TYPE_DEFS } from "../../blocks/registry"
 import type { Block, BlockType } from "../../blocks/types"
+import type { NoteType } from "../../schema"
 import type { Occurrence } from "../../blocks/view"
 import { cx } from "../../utils/cx"
+import { BOARD_PROP } from "../../utils/board-prop"
 import { noteTypeOf } from "../../utils/note-type"
 import { NoteFavicon } from "../note-favicon"
 import type { BlockEditorApi } from "./block-item"
@@ -172,7 +174,7 @@ const note: BlockKind = {
   // heading's `#`; a note with blocks in it folds from the chevron column
   // beside it, as every parent does.
   glyphNode: (block) => (
-    <NoteFavicon note={{ id: block.id, type: noteTypeOf(block.id) }} className="size-[15px]" />
+    <NoteFavicon note={{ id: block.id, type: noteKindOf(block) }} className="size-[15px]" />
   ),
   // A note's title is a NAME, not content: it is set in the interface font
   // the sidebar and the note header use for it, not the content font the
@@ -181,6 +183,15 @@ const note: BlockKind = {
   // so a note row and a heading row read as the same row with a different
   // key.
   typography: (_depth, _block, listed) => cx(BODY, "font-sans", listed && "font-bold"),
+}
+
+/** Which kind of note a note block is, for its favicon: what its id says
+ * (a day, a week, a note) — except that a board is a plain note whose PAGE
+ * carries the board property (docs/boards.md), which only its props can
+ * say. The same reading as the metadata layer's (`src/data/note-meta.ts`). */
+function noteKindOf(block: Block): NoteType {
+  const byId = noteTypeOf(block.id)
+  return byId === "note" && block.props?.[BOARD_PROP] === true ? "board" : byId
 }
 
 export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {

@@ -1667,6 +1667,22 @@ describe("collapse toggle", () => {
     expect(toggleOf(c2, "blk_p")).toBeNull()
   })
 
+  it("a note row's key is its favicon: a board's where the page says board", () => {
+    // A board is a plain note whose page carries the board property
+    // (docs/boards.md) — nothing in its id says so, so the row reads the
+    // props, as the metadata layer does.
+    const note = (id: string, props: Record<string, unknown> | null) => ({
+      props: null,
+      rootBlockIds: [id],
+      blocks: { [id]: { id, type: "note" as const, text: "Trips", props, children: [] } },
+    })
+    const { container } = render(<Harness initialDoc={note("blk_board", { board: true })} />)
+    expect(container.querySelector('[data-testid="favicon-board"]')).not.toBeNull()
+    const { container: plain } = render(<Harness initialDoc={note("blk_note", null)} />)
+    expect(plain.querySelector('[data-testid="favicon-board"]')).toBeNull()
+    expect(plain.querySelector('[data-testid="favicon-default"]')).not.toBeNull()
+  })
+
   it("clicking the toggle collapses and expands; the chevron turns, the key stays", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
     const open = toggleOf(container, "blk_bp")!

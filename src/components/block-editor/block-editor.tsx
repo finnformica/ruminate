@@ -2700,9 +2700,10 @@ export function BlockEditor({
           aria-label="Focus path"
           data-testid="focus-breadcrumb"
           // `note-header` hangs the trail into the page gutter with the
-          // title (block-editor.css): the first crumb's text keeps starting
-          // where the marker slot does, now the focus title's hanging #.
-          className="note-header mb-3 flex min-w-0 items-center gap-0.5 font-content text-sm text-text-secondary"
+          // title (block-editor.css), and the 25px sets it in past the
+          // chevron column and its gap, as the title is: the first crumb's
+          // text keeps starting where the key slot does, the focus title's #.
+          className="note-header mb-3 flex min-w-0 items-center gap-0.5 pl-[25px] font-content text-sm text-text-secondary"
         >
           <button type="button" className={crumbClass} onClick={() => navigateFocus(null)}>
             {noteTitle?.trim() || "Note"}

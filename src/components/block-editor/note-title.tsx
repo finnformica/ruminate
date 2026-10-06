@@ -114,18 +114,21 @@ export function NoteTitle({
   }
 
   return (
-    // pl-[27px] puts the title at the block TEXT column: the marker slot
-    // starts 4px into the content column (the highlight surface's net reach)
-    // and is 15px wide, then an 8px gap. The # sits in that slot exactly as a
-    // heading's does — right-aligned, overflowing left when the 3xl glyph
-    // outgrows 15px. (27px is arbitrary-valued — the spacing scale has no
-    // 6.75 step.) `note-header` then hangs the whole h1 into the page gutter
-    // by as much as the page allows (`--note-header-pull`, block-editor.css):
-    // on a wide page that is the full 27px, so the title's text sits at the
-    // column's edge and the outline reads as indented beneath it.
+    // pl-[52px] puts the title at the block TEXT column, laid out as a row
+    // is (block-item.tsx): the 17px chevron column starts 4px into the
+    // content column (the highlight surface's net reach), then the 8px gap,
+    // the 15px key slot, and the gap again. The # sits in that slot exactly
+    // as a heading's does — right-aligned, overflowing left into the gap
+    // when the 3xl glyph outgrows 15px — so a selected title's ring stands
+    // as far from its # as a heading row's does. `note-header` then hangs
+    // the whole h1 into the page gutter by as much as the page allows
+    // (`--note-header-pull`, block-editor.css): on a wide page that is 27px,
+    // the key slot and its gap, so the outline reads as set in beneath the
+    // title by exactly that, and the title's # stands over the rows'
+    // chevron column.
     <h1 className="note-header relative font-content text-3xl font-bold leading-tight tracking-[-0.02em] [overflow-wrap:anywhere]">
       {/* The hanging # inherits the h1's full typography — same size as the title. */}
-      <Hash className="pointer-events-none absolute left-1 top-0 flex w-[15px] justify-end" />
+      <Hash className="pointer-events-none absolute left-[29px] top-0 flex w-[15px] justify-end" />
       {editing ? (
         <input
           ref={inputRef}
@@ -167,7 +170,7 @@ export function NoteTitle({
           spellCheck={false}
           aria-label={label}
           placeholder="Untitled"
-          className="w-full border-none bg-transparent py-0 pl-[27px] pr-0 text-text outline-none placeholder:text-text-tertiary"
+          className="w-full border-none bg-transparent py-0 pl-[52px] pr-0 text-text outline-none placeholder:text-text-tertiary"
         />
       ) : (
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
@@ -198,10 +201,10 @@ export function NoteTitle({
             }
           }}
           className={cx(
-            // -mx-0.5 + pl-[29px]/pr-0.5 keep the text at the block text column
-            // (pl-[27px]) while the highlight surface gains the same 2px reach
+            // -mx-0.5 + pl-[54px]/pr-0.5 keep the text at the block text column
+            // (pl-[52px]) while the highlight surface gains the same 2px reach
             // as a selected block line.
-            "-mx-0.5 rounded py-0 pl-[29px] pr-0.5 outline-none transition-colors duration-100",
+            "-mx-0.5 rounded py-0 pl-[54px] pr-0.5 outline-none transition-colors duration-100",
             readOnly ? "cursor-default" : "cursor-text",
             // Same selection treatment as a block (see .block-highlight).
             selected && "bg-bg-secondary block-highlight",

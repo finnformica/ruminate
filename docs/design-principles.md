@@ -167,14 +167,13 @@ asks for it.
    (`--color-text-selected-chrome`, via `.block-glyph` / `.block-glyph-fill`):
    the selection's text tint never reaches an element with explicit ink.
    Controls (checkbox, chevron) keep their own. The note title's
-   hash sits in the same slot, so the title is set exactly as the outline's
-   top heading — but the title is not a row. On a wide page the whole header
-   (title, focus breadcrumb, focus title) hangs into the page gutter by the
-   marker-slot offset (`.note-header` + `--note-header-pull`,
-   block-editor.css; the page sets it with its padding), so the header's
-   text sits at the content column's edge, the hash in the gutter beside it,
-   and the outline reads as indented beneath the title rather than the title
-   as one more row. The pull is the page's to grant: it needs the 40px
+   hash sits in the same slot, after the same chevron column's room, so the
+   title is set exactly as the outline's top heading — but the title is not
+   a row. On a wide page the whole header (title, focus breadcrumb, focus
+   title) hangs into the page gutter by the key slot and its gap
+   (`.note-header` + `--note-header-pull`, block-editor.css; the page sets
+   it with its padding), so the outline reads as indented beneath the title
+   rather than the title as one more row. The pull is the page's to grant: it needs the 40px
    gutter, so a narrow page (16–20px) leaves the header at the text column.
    The rows never take it — the text column does not move. The hash is NOT a
    focus target, and neither is the bullet or the number — the markers read
@@ -253,11 +252,15 @@ where you are, and everything below the leading row reads as it does outside foc
   adds any. The text column is sacred; surfaces flex around it.
 - **Header pull:** the note title, the focus breadcrumb and the focus title
   hang into the page gutter by `--note-header-pull` (`.note-header`,
-  block-editor.css): 27px — the marker-slot offset — once the page's gutter
-  is 40px (`@[640px]`), else 0. A plain negative margin on the header alone,
-  so the header's text moves to the column's edge and nothing in the rows
-  does. The breadcrumb hangs by the same amount, so its first crumb's text
-  keeps starting where the marker slot does — the focus title's `#`.
+  block-editor.css): 27px — the key slot and its gap — once the page's
+  gutter is 40px (`@[640px]`), else 0. A plain negative margin on the
+  header alone, so the outline reads as set in beneath the title's text by
+  that much and nothing in the rows moves. The title is laid out as a row
+  is, with the chevron column's room (25px) before its `#`, so a selected
+  title's ring stands as far from its hash as a heading row's does, and
+  pulled, the hash stands over the rows' chevron column. The breadcrumb
+  hangs and is set in by the same amounts, so its first crumb's text keeps
+  starting where the key slot does — the focus title's `#`.
 - **Vertical extension is conditional, per side.** The inter-row gap is 4px
   between nested rows and 6px between roots, so surfaces may only grow as far
   as their neighbour's paint allows. By default each side extends 2px
