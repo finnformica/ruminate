@@ -201,15 +201,20 @@ export interface BlockDebugOptions {
  * body scale and keep the ordinary surface. */
 const HEADING_SCALE_NAMES: Record<number, "2xl" | "xl" | "lg"> = { 0: "2xl", 1: "xl", 2: "lg" }
 
-/** Row geometry, in px. Each level indents by `INDENT`: the guide line hangs
- * from the parent's CHEVRON COLUMN — a 1px rule under the centre of the 14px
- * column, which starts 4px into the content column (the highlight surface's
- * -2px reach + 6px inner padding) — so the rule sits at `GUIDE_X`, and the
- * child's content starts `INDENT` in (rule + 12px of padding), its own
- * chevron centred 12px right of the rule. The 15px key slot follows the
- * column after the row's 8px gap, so text starts 49px into the column. */
+/** Row geometry, in px. A row is the 17px CHEVRON COLUMN, the row's gap, the
+ * 15px key slot, the gap again, then the text; the column starts 4px into
+ * the content column (the highlight surface's -2px reach + 6px inner
+ * padding), so its centre is 12.5px in and the key's centre 24px further on
+ * with the 8px gap (4 + 17 + 8 + 7.5 = 36.5). Each level indents by exactly
+ * that, so a parent's key stands directly over its children's chevrons: the
+ * indent is the column's centre-to-centre distance to the key, which is
+ * `INDENT` at the 8px gap and `COARSE_INDENT` at the coarse pointer's 12px
+ * (`coarse:gap-3`). The guide line hangs from the parent's chevron: a 1px
+ * rule at `GUIDE_X`, covering 12–13px, centred on the column's 12.5. Text
+ * starts 52px into the column (56px on a coarse pointer). */
 const INDENT = 24
-const GUIDE_X = 11
+const COARSE_INDENT = 28
+const GUIDE_X = 12
 /** Root rows sit 2px further apart than nested ones (which meet at their
  * 2px + 2px vertical padding). */
 const ROOT_GAP = 2
@@ -286,6 +291,9 @@ export function BlockItem({
   // the body's scale and its breathing room.
   const listed = !!api.fixedRoots
   const scaleDepth = listed ? LISTED_HEADING_DEPTH : depth
+  // The level's indent: the chevron-to-key distance, which the coarse
+  // pointer's wider marker gap stretches (see the geometry above).
+  const indent = api.coarsePointer ? COARSE_INDENT : INDENT
   const typo = kind.typography(depth, block, listed)
   // Whether this block owns a collapse toggle at all: parents only. The
   // row that closes a loop keeps its chevron too — the block has children,
@@ -672,15 +680,15 @@ export function BlockItem({
   //
   // It floats out of the flow, centred on the column by its own midpoint
   // (left/top 50% + a half-size translate, NOT `inset-0 m-auto`: the 20px
-  // square is wider than the 14px column, and an over-constrained absolute
+  // square is wider than the 17px column, and an over-constrained absolute
   // box drops its left margin to zero instead of going negative). Press
   // feedback lives on the control (IconButton supplies the hover surface);
   // the content itself never animates on collapse.
   //
-  // The square is 20px: the column's centre sits 13px in from the surface's
-  // left edge (2px reach + 6px padding + half of 14px) and the surface is
-  // 27px tall (a 23px line + 2px each side), so the square is 3px inside the
-  // left edge and 3.5px inside the top and bottom.
+  // The square is 20px: the column's centre sits 14.5px in from the
+  // surface's left edge (2px reach + 6px padding + half of 17px) and the
+  // surface is 27px tall (a 23px line + 2px each side), so the square is
+  // 4.5px inside the left edge and 3.5px inside the top and bottom.
   const toggle = hasToggle ? (
     <IconButton
       aria-label={looped ? "Loop detected" : isCollapsed ? "Expand" : "Collapse"}
@@ -711,7 +719,7 @@ export function BlockItem({
         // 40px-tall padded bar (which would overlap neighbouring rows and
         // squeeze the glyph); it reaches a hair past the surface into the
         // gap on either side, where no other control lives. 24px wide: it
-        // overhangs the column by 5px a side, and the row's wider marker
+        // overhangs the column by 3.5px a side, and the row's wider marker
         // gap on a coarse pointer (12px) keeps it clear of the key — a
         // to-do's checkbox above all.
         "h-5 w-5 coarse:h-8 coarse:w-6 coarse:px-0",
@@ -744,17 +752,19 @@ export function BlockItem({
       </svg>
     </IconButton>
   ) : null
-  // The chevron column: 14px, on EVERY row — a leaf's is empty — so the key
+  // The chevron column: 17px, on EVERY row — a leaf's is empty — so the key
   // slot and the text stay in one column whether or not a row can fold. Its
-  // centre is where the indent guide hangs (`GUIDE_X`): the thread of a
-  // subtree drops straight out of the control that folds it. `h-[1lh]` at
-  // the row's first-line scale centres the chevron on that line — a
-  // heading's scale on a heading, the body's otherwise.
+  // width is what puts a parent's key exactly over its children's chevrons
+  // (the geometry above), and its centre is where the indent guide hangs
+  // (`GUIDE_X`): the thread of a subtree drops straight out of the control
+  // that folds it. `h-[1lh]` at the row's first-line scale centres the
+  // chevron on that line — a heading's scale on a heading, the body's
+  // otherwise.
   const chevronColumn = (
     <span
       data-testid="chevron-column"
       className={cx(
-        "relative flex h-[1lh] w-[14px] shrink-0 items-center justify-center",
+        "relative flex h-[1lh] w-[17px] shrink-0 items-center justify-center",
         kind.slot === "hash" && headingScale(scaleDepth),
       )}
     >
@@ -1081,7 +1091,7 @@ export function BlockItem({
       data-block-row={block.id}
       data-occurrence={occurrence.key}
       className="relative"
-      style={{ paddingLeft: depth * INDENT, marginTop }}
+      style={{ paddingLeft: depth * indent, marginTop }}
       {...rowTap}
     >
       {occurrence.guideKeys.map((guideKey, level) => (
@@ -1090,7 +1100,7 @@ export function BlockItem({
           aria-hidden
           data-guide={guideKey}
           className="block-guide pointer-events-none absolute bottom-0 w-px bg-border-secondary transition-colors duration-200"
-          style={{ left: GUIDE_X + level * INDENT, top: -marginTop }}
+          style={{ left: GUIDE_X + level * indent, top: -marginTop }}
         />
       ))}
       <div className="relative min-w-0 py-0.5 font-content leading-relaxed">

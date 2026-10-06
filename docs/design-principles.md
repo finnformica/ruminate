@@ -120,25 +120,26 @@ asks for it.
 5. **Generous reading rhythm.** Body line-height is 1.65 (`leading-relaxed` —
    defined for real in `tailwind.config.cjs`; it was previously a silent no-op).
    Headings tighten as they grow (1.25 at the top of the scale).
-6. **The chevron has a column; the guide hangs from it.** Every row begins
-   with a 14px chevron column, then the 15px key slot, then the text. A
-   parent's chevron lives in the column, always shown; a leaf's column is
-   empty, so the key and the text stay in one column whether or not a row
-   can fold. The chevron is one glyph in both states — an open chevron,
-   turned a quarter: down while open, right while closed — so nothing fades,
-   swaps or changes shape, and every key (a bullet dot, a heading `#`, a
-   number, a quote `>`, a paragraph `¶`, a to-do's checkbox) keeps its slot
-   and its own click. The indent guide is a 1px rule under the column's
-   centre — the column starts 4px into the content column (the surface's
-   reach), so its centre is 11px in and the rule sits there — with children
-   starting 24px in (`ml-[11px]` + rule + `pl-3`), so the thread of a subtree
-   drops straight out of the control that folds it, and a child's own
-   chevron sits 12px right of its parent's line. The chevron's hover square
-   is 20px with the small (4px) radius: inside the 27px-tall surface that
-   is ~3px inside the left edge and 3.5px inside the top and bottom, because
-   the column's centre sits 13px in from the surface's edge. Affordances
-   float out of the flow (absolute/negative margin) so hover never moves
-   text.
+6. **The chevron has a column; the key stands over the children's.** Every
+   row begins with a 17px chevron column, then the 15px key slot, then the
+   text. A parent's chevron lives in the column, always shown; a leaf's
+   column is empty, so the key and the text stay in one column whether or
+   not a row can fold. The chevron is one glyph in both states — an open
+   chevron, turned a quarter: down while open, right while closed — so
+   nothing fades, swaps or changes shape, and every key (a bullet dot, a
+   heading `#`, a number, a quote `>`, a paragraph `¶`, a to-do's checkbox)
+   keeps its slot and its own click. The level's indent is exactly the
+   distance from the column's centre to the key's (17/2 + the 8px gap +
+   15/2 = 24px; 28px on a coarse pointer, whose gap is 12px), so a parent's
+   key sits directly over its children's chevrons, and the indent guide —
+   a 1px rule under the parent's chevron, at 12px (the column starts 4px
+   into the content column, the surface's reach, so its centre is 12.5px
+   in) — hangs one indent to the left of them: the thread of a subtree
+   drops straight out of the control that folds it. The chevron's hover
+   square is 20px with the small (4px) radius: inside the 27px-tall surface
+   that is 4.5px inside the left edge and 3.5px inside the top and bottom.
+   Affordances float out of the flow (absolute/negative margin) so hover
+   never moves text.
 7. **One marker slot, and a key for every text block.** Every block marker
    — bullet dot, checkbox, ordered number, heading `#`, quote `>`, paragraph
    `¶` — occupies the same 15px slot (the checkbox's width): dots and the
@@ -236,18 +237,18 @@ where you are, and everything below the leading row reads as it does outside foc
 - **Headings breathe above:** top margin scales with the heading — 20 / 16 / 10 /
   6px by depth. Space belongs _above_ a heading (it opens a section), never
   below.
-- **Indent unit:** 24px per level (`ml-[11px]` + 1px rule + `pl-3`), guide
-  line under the chevron column at 11px — every row has one. The key slot
-  follows the column after the 8px marker gap, so text starts 49px in.
+- **Indent unit:** 24px per level (28px on a coarse pointer): the chevron
+  column's centre to the key's, so a parent's key stands over its
+  children's chevrons. The guide line sits under the chevron column at
+  12px — every row has one. Text starts 52px in (56px coarse).
 - **Highlight inset:** highlighted line surfaces give the text 6px of
   horizontal breathing room (symmetric — 6px inner padding each side, the
   surface extending 2px past the text column on both, via `-mx-0.5 px-1.5`;
   the note title's `-mx-0.5 pl-[29px] pr-0.5` extends the same 2px left) so
   the **text never moves** — only the background extends outward, into the
-  indent and the inter-row space. The 2px reach is what puts the chevron
-  column's centre 13px in from the surface's edge, within half a pixel of
-  its vertical centre line, so the collapse chevron's square sits evenly
-  inside. Block
+  indent and the inter-row space. The 2px reach puts the chevron column's
+  centre 14.5px in from the surface's edge, a pixel off its vertical centre
+  line, so the collapse chevron's square sits near evenly inside. Block
   rhythm is untouched: the surface borrows the space between rows, it never
   adds any. The text column is sacred; surfaces flex around it.
 - **Header pull:** the note title, the focus breadcrumb and the focus title

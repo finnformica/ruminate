@@ -1602,7 +1602,7 @@ describe("collapse toggle", () => {
     const toggle = toggleOf(container, "blk_bp")!
     const column = toggle.parentElement!
     expect(column.getAttribute("data-testid")).toBe("chevron-column")
-    expect(column.className).toContain("w-[14px]")
+    expect(column.className).toContain("w-[17px]")
     expect(column.className).toContain("relative")
     // The dot keeps its own slot after the column; it is no focus button.
     const slot = column.nextElementSibling!
@@ -1737,14 +1737,15 @@ describe("collapse toggle", () => {
     }
   })
 
-  it("hangs the guide line from the key of every block type", () => {
+  it("hangs the guide line from the chevron column of every parent", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
-    // Under the 15px slot's centre — every block type has a key there — and
-    // the children start one indent in.
+    // Under the 17px column's centre, whatever the parent's type — and the
+    // children start one indent in: the column's centre-to-centre distance
+    // to the key, so a parent's key stands over its children's chevrons.
     for (const id of ["blk_bp", "blk_hp", "blk_tp", "blk_pp"]) {
       const guide = guideOf(container, id)
       expect(guide, id).not.toBeNull()
-      expect(guide!.style.left, id).toBe("11px")
+      expect(guide!.style.left, id).toBe("12px")
       const child = guide!.closest<HTMLElement>("[data-block-row]")!
       expect(child.style.paddingLeft).toBe("24px")
     }

@@ -126,8 +126,8 @@
  * A heading's line is taller than a paragraph's, so the collapse chevron's
  * 20px square, centred on the chevron column, sits well inside the surface's
  * top and bottom edges at the larger scales (~11px at the top scale) but only
- * ~3px inside its left edge (the column starts 4px in and the square,
- * centred on it, outgrows it by 3px a side). The surface reaches further
+ * 4.5px inside its left edge (the column starts 4px in and the square,
+ * centred on it, outgrows it by 1.5px a side). The surface reaches further
  * left on such a heading — by exactly that difference — so the chevron, and
  * the `#` beside it, sit the same distance from every edge. A negative margin paired with
  * padding, as every other reach of the surface: the text column never
@@ -212,7 +212,7 @@
 /* Coarse pointers: the box is drawn a size up (it overhangs the 15px slot
  * evenly) and its hit area grows through a pseudo-element — up and down
  * only, and a little to the LEFT, short of the chevron column's wider
- * finger target (block-item.tsx), which ends 5px past its column. Never
+ * finger target (block-item.tsx), which ends 3.5px past its column. Never
  * to the RIGHT: a tap past the box is a tap at the start
  * of the line, and one the phone snaps onto the box anyway is handed back
  * to the text (`tapMissedBox`, block-item.tsx). */
