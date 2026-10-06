@@ -121,6 +121,11 @@
     },
   ],
   "workers_dev": true,
+  // Preview versions land on this same Worker (a branch alias URL each), but
+  // NOT on this database: the Workers Builds preview command is
+  // `npm run preview:deploy`, which clones production per pull request,
+  // migrates the clone, and uploads the version through a generated copy of
+  // this file with only the binding swapped (docs/preview-databases.md).
   "preview_urls": true,
   "observability": { "enabled": true },
   // Worker Previews (Workers Builds runs `npx wrangler preview` on every
