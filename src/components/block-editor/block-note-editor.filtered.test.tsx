@@ -59,7 +59,7 @@ function FilteredNote({ filter }: { filter: string }) {
       onChange={setDoc}
       context={context}
       onEditingChange={setEditing}
-      trailingBlank={filter === ""}
+      starter={filter === ""}
     />
   )
 }

@@ -63,8 +63,9 @@ export interface FrameState {
  * a link block's card (`link-card.tsx`): the layout the figure types share
  * (`src/blocks/figure.ts`), drawn once.
  *
- * No chrome of its own: the row's padding is the figure's spacing. The
- * block's `align` keeps the figure to one side of the row, and its `size`
+ * No chrome of its own: the block frame's inset (`block-frame.tsx`) is the
+ * figure's spacing. The block's `align` keeps the figure to one side of the
+ * row, and its `size`
  * makes it a fraction of the row's width; absent, the figure is the width
  * it gave the frame (`naturalWidth` — a picture's own pixels no wider than
  * the row, a card the row's full width) or, giving none, shrinks to fit.
@@ -139,7 +140,15 @@ export function FigureFrame({
     const frame = frameRef.current
     const row = frame?.parentElement
     if (!frame || !row) return
-    const rowWidth = row.getBoundingClientRect().width
+    // The row's width is the frame's room: the block frame's content box
+    // (`block-frame.tsx`), without the padding that sets it in from the
+    // row's surface — a `size` is a fraction of that room, as a `100%`
+    // width is.
+    const rowStyle = getComputedStyle(row)
+    const rowWidth =
+      row.getBoundingClientRect().width -
+      (parseFloat(rowStyle.paddingLeft) || 0) -
+      (parseFloat(rowStyle.paddingRight) || 0)
     const startWidth = frame.getBoundingClientRect().width
     if (rowWidth <= 0) return
     const startX = event.clientX

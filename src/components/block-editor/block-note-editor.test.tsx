@@ -30,16 +30,27 @@ import { BlockNoteEditor } from "./block-note-editor"
 afterEach(cleanup)
 
 /** A controlled host, like the real note page: it owns the doc and echoes
- * editor changes back down as the `doc` prop. */
+ * editor changes back down as the `doc` prop, and its foot (a click
+ * beneath the note) asks for a block at the end. */
 function Host({ initial, startEditing }: { initial: string; startEditing?: boolean }) {
   const [doc, setDoc] = useState(() => parse(initial))
+  const [appendRootSignal, setAppendRootSignal] = useState(0)
   return (
     <>
-      <BlockNoteEditor doc={doc} onChange={setDoc} startEditing={startEditing} />
+      <BlockNoteEditor
+        doc={doc}
+        onChange={setDoc}
+        startEditing={startEditing}
+        appendRootSignal={appendRootSignal}
+      />
       <button data-testid="external-update" onClick={() => setDoc(parse("- pulled from remote"))}>
         external
       </button>
+      <button data-testid="foot" onClick={() => setAppendRootSignal((n) => n + 1)}>
+        foot
+      </button>
       <pre data-testid="value">{serialize(doc)}</pre>
+      <pre data-testid="roots">{doc.rootBlockIds.length}</pre>
     </>
   )
 }
@@ -134,19 +145,71 @@ describe("BlockNoteEditor onToggleCollapse", () => {
   })
 })
 
-describe("the last row of a doc without a trailing blank (the basket)", () => {
-  /** The basket's shape: no trailing blank, and a removal is the delete. */
+const editorRoot = (container: HTMLElement) =>
+  container.querySelector<HTMLElement>('[tabindex="-1"]')!
+
+// A note ends where its last block does: no empty paragraph is kept at the
+// bottom (one used to be, minted on every edit and written to the note).
+// The room beneath the note is the place to click for a block at its end.
+describe("the end of a note", () => {
+  it("keeps no blank block after the last one, and writes none", () => {
+    const { container, getByTestId } = render(<Host initial="- only line" />)
+    expect(getByTestId("roots").textContent).toBe("1")
+    expect(container.querySelectorAll("[data-occurrence]")).toHaveLength(1)
+    // An edit: the doc round-trips through the host with nothing added.
+    fireEvent.click(container.querySelector('[data-testid="block-body"]')!)
+    fireEvent.keyDown(editorRoot(container), { key: "Enter" })
+    fireEvent.change(container.querySelector("textarea")!, { target: { value: "only line." } })
+    expect(getByTestId("roots").textContent).toBe("1")
+    expect(getByTestId("value").textContent).toContain("only line.")
+    expect(getByTestId("value").textContent).not.toMatch(/\n-\s*\n/)
+  })
+
+  it("a click in the room beneath the note adds a block at the end and edits it", () => {
+    const { container, getByTestId } = render(<Host initial={"- first\n- last"} />)
+    fireEvent.click(getByTestId("foot"))
+    expect(getByTestId("roots").textContent).toBe("3")
+    const rows = container.querySelectorAll("[data-occurrence]")
+    expect(rows).toHaveLength(3)
+    // The new, empty block is the last row, open for typing.
+    const textarea = container.querySelector("textarea")!
+    expect(textarea).not.toBeNull()
+    expect(textarea.value).toBe("")
+    expect(rows[2].contains(textarea)).toBe(true)
+  })
+
+  it("a click beneath a note that already ends in an empty block edits that one", () => {
+    const { container, getByTestId } = render(<Host initial={"- first\n- "} />)
+    expect(getByTestId("roots").textContent).toBe("2")
+    fireEvent.click(getByTestId("foot"))
+    expect(getByTestId("roots").textContent).toBe("2")
+    const textarea = container.querySelector("textarea")!
+    expect(textarea.value).toBe("")
+    expect(container.querySelectorAll("[data-occurrence]")[1].contains(textarea)).toBe(true)
+  })
+
+  it("mounting under a bumped counter adds nothing: the click was for the note before", () => {
+    const onChange = vi.fn()
+    const { container } = render(
+      <BlockNoteEditor doc={parse("- a line")} onChange={onChange} appendRootSignal={3} />,
+    )
+    expect(onChange).not.toHaveBeenCalled()
+    expect(container.querySelectorAll("[data-occurrence]")).toHaveLength(1)
+    expect(container.querySelector("textarea")).toBeNull()
+  })
+})
+
+describe("the last row of a doc without a starter (the basket)", () => {
+  /** The basket's shape: no starter, and a removal is the delete. */
   function Basket({ initial }: { initial: string }) {
     const [doc, setDoc] = useState(() => parse(initial))
     return (
       <>
-        <BlockNoteEditor doc={doc} onChange={setDoc} trailingBlank={false} rowRemoval="delete" />
+        <BlockNoteEditor doc={doc} onChange={setDoc} starter={false} rowRemoval="delete" />
         <pre data-testid="roots">{doc.rootBlockIds.length}</pre>
       </>
     )
   }
-  const editorRoot = (container: HTMLElement) =>
-    container.querySelector<HTMLElement>('[tabindex="-1"]')!
 
   it("can be removed: the basket empties", () => {
     const { container, getByTestId } = render(<Basket initial="- the last unassigned block" />)
@@ -156,7 +219,7 @@ describe("the last row of a doc without a trailing blank (the basket)", () => {
     expect(container.querySelector("[data-occurrence]")).toBeNull()
   })
 
-  it("is kept in the outline, where the trailing blank is the block to type in", () => {
+  it("is kept in the outline, where the starter is the block to type in", () => {
     const { container } = render(<Host initial="" />)
     expect(container.querySelectorAll("[data-occurrence]")).toHaveLength(1)
     fireEvent.keyDown(editorRoot(container), { key: "Backspace" })
@@ -179,7 +242,7 @@ describe("focused", () => {
     },
   })
 
-  it("seeds no trailing blank beside the focused root, and adds a first child only to a leaf heading", () => {
+  it("seeds no root beside the focused one, and adds a first child only to a leaf heading", () => {
     const rooted = rootedDoc("h1")
     const onChange = vi.fn()
     const { container } = render(

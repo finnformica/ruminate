@@ -251,6 +251,15 @@ where you are, and everything below the leading row reads as it does outside foc
   line, so the collapse chevron's square sits near evenly inside. Block
   rhythm is untouched: the surface borrows the space between rows, it never
   adds any. The text column is sacred; surfaces flex around it.
+- **Framed blocks:** a picture, a link card and a code panel are things set
+  in the text rather than lines of it, and share one frame
+  (`block-frame.tsx`) that stands them off the row's surface on every side:
+  10px above and below, and as far from the surface's right edge as from
+  its left. The left is the text column's 54px (the surface's 6px, the
+  chevron column, the key slot and their gaps); the right pays the same,
+  so the frame is centred in the surface, with its room at the sides the
+  column's and its room above and below a line's. A code block's panel
+  used to be drawn over the row's surface itself, flush to its edges.
 - **Header pull:** the note title, the focus breadcrumb and the focus title
   hang into the page gutter by `--note-header-pull` (`.note-header`,
   block-editor.css): 27px — the key slot and its gap — once the page's
@@ -290,11 +299,11 @@ where you are, and everything below the leading row reads as it does outside foc
 
 One token family, sized by surface, never per-element drift:
 
-| Token                  | Value | Used for                                                               |
-| ---------------------- | ----- | ---------------------------------------------------------------------- |
-| `--border-radius-sm`   | 4px   | inline chips: inline code, transclusions, keys                         |
-| `--border-radius-base` | 8px   | line surfaces (block/title highlight, a code block's panel) & controls |
-| `--border-radius-lg`   | 12px  | block panels: cards                                                    |
+| Token                  | Value | Used for                                                             |
+| ---------------------- | ----- | -------------------------------------------------------------------- |
+| `--border-radius-sm`   | 4px   | inline chips: inline code, transclusions, keys                       |
+| `--border-radius-base` | 8px   | line surfaces (block/title highlight) & controls                     |
+| `--border-radius-lg`   | 12px  | block panels: cards, and the framed blocks (a picture, a code panel) |
 
 The rule: the bigger the surface, the bigger the radius. All values derive from
 `--border-radius-base`, so a theme that changes the base changes the whole

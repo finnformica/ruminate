@@ -13,7 +13,9 @@ import type { BlockEditorApi } from "./block-item"
  * only, it is just the label.
  */
 
-const LABEL = "absolute right-[5px] top-1 font-mono text-[11px] leading-4"
+// In the panel's padding corner (block-kinds.tsx): 12px in from its right
+// edge, where the text is, and on the first line's upper half.
+const LABEL = "absolute right-3 top-2 font-mono text-[11px] leading-4"
 
 const stop = (event: MouseEvent) => event.stopPropagation()
 

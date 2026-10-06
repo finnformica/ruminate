@@ -154,6 +154,9 @@ function NotePage() {
   // clicked here never lands on the note's own.
   const { expanded, setFold } = useFoldRule(noteId, { filter, sort })
   const narrowed = filter !== "" || sort !== ""
+  // Whether a click beneath the note may add a block to its end (the page's
+  // foot, below): an editable note, shown whole.
+  const canAppend = useBlockEditor && !readOnlyShare && !narrowed
   const directions = useAtomValue(linkDirectionsAtom)
   // The block being edited, which a filter keeps whatever it says of it:
   // a row is judged when the editing leaves it, not on every keystroke
@@ -259,6 +262,7 @@ function NotePage() {
   const [focusFirstMode, setFocusFirstMode] = useState<"edit" | "select">("select")
   const [titleFocusSignal, setTitleFocusSignal] = useState(0)
   const [newRootSignal, setNewRootSignal] = useState(0)
+  const [appendRootSignal, setAppendRootSignal] = useState(0)
   const [refocusSignal, setRefocusSignal] = useState(0)
 
   // Actions
@@ -454,7 +458,7 @@ function NotePage() {
         <div className="p-4 @[480px]:p-5 @[640px]:p-10 @[640px]:[--note-header-pull:27px]">
           <div
             className={cx(
-              "flex flex-col gap-8 pb-[50vh]",
+              "flex flex-col gap-8",
               resolvedWidth === "fixed" && "mx-auto max-w-[700px]",
             )}
           >
@@ -519,6 +523,7 @@ function NotePage() {
                   focusFirstSignal={focusFirstSignal}
                   focusFirstMode={focusFirstMode}
                   newRootSignal={newRootSignal}
+                  appendRootSignal={appendRootSignal}
                   refocusSignal={refocusSignal}
                   focusBlockId={focusBlockId ?? null}
                   onFocusNavigate={(id) => {
@@ -529,12 +534,11 @@ function NotePage() {
                   noteTitle={note?.displayName ?? ""}
                   context={context}
                   onEditingChange={setEditingBlockId}
-                  // Narrowed, there is no blank row to type into. A new
+                  // Narrowed, there is no starter row to type into. A new
                   // row lands in the note as it does anywhere (Enter on a
                   // row, `useNoteDoc`), but a blank one is a plain text row
-                  // the filter hides the moment it is typed into, and one
-                  // minted on every edit would litter the note with empties.
-                  trailingBlank={!narrowed}
+                  // the filter hides the moment it is typed into.
+                  starter={!narrowed}
                 />
                 {noteId && noteExists && share === null ? (
                   <UnassignedBasket noteId={noteId} />
@@ -551,6 +555,24 @@ function NotePage() {
                 <DaysOfWeek week={noteId ?? ""} />
               </Details>
             ) : null}
+            {/* The page's foot: half a screen of room beneath the note, so
+                its last block is never pinned to the bottom edge — and, where
+                the note can be written, the place to click for a block at its
+                end, as the foot of a Notion page is: the last block if it is
+                already an empty one, else a new one after it
+                (`appendRootSignal`). A note no longer keeps an empty paragraph
+                at its end for this. Not while narrowed (a blank row is one
+                the filter would hide). It starts where the last thing on the
+                page ends (the negative margin eats the column's gap), so the
+                room is the target, whole. The keyboard has its own ways to
+                the end of a note (↓ to the last row, Enter), so the click
+                needs no key. */}
+            {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
+            <div
+              data-testid="page-foot"
+              className={cx("-mt-8 h-[50vh]", canAppend && "cursor-text")}
+              onClick={canAppend ? () => setAppendRootSignal((n) => n + 1) : undefined}
+            />
           </div>
         </div>
       </div>
