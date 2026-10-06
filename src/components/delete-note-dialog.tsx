@@ -37,6 +37,9 @@ export function DeleteNoteDialog() {
   const deleteNote = useDeleteNote()
 
   const note = request === null ? undefined : notes.get(request.noteId)
+  // The dialog names what it asks about: a board's row in a note is deleted
+  // from here too (docs/boards.md, "A board in a note").
+  const noun = note?.type === "board" ? "board" : "note"
   const text = note?.displayName ?? ""
   const label = text.length > LABEL_LENGTH ? `${text.slice(0, LABEL_LENGTH - 1)}…` : text
 
@@ -55,12 +58,12 @@ export function DeleteNoteDialog() {
     >
       {share === null ? (
         <>
-          The note and everything only it holds will be deleted. You can restore it from{" "}
+          The {noun} and everything only it holds will be deleted. You can restore it from{" "}
           <span className="text-text">Recently deleted</span> in Settings.
         </>
       ) : (
         <>
-          This note was shared with you: deleting it deletes it from its owner’s notes too, along
+          This {noun} was shared with you: deleting it deletes it from its owner’s notes too, along
           with everything only it holds.
         </>
       )}

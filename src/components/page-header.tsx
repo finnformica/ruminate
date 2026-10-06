@@ -33,7 +33,7 @@ export function PageHeader({ title, icon, className, actions }: PageHeaderProps)
   )
 
   useHotkeys(APP_SHORTCUTS.newNote, createNewNote, GLOBAL_HOTKEY_OPTIONS)
-  useHotkeys(APP_SHORTCUTS.newBoard, () => openNewBoard(true), GLOBAL_HOTKEY_OPTIONS)
+  useHotkeys(APP_SHORTCUTS.newBoard, () => openNewBoard({}), GLOBAL_HOTKEY_OPTIONS)
 
   return (
     <div className={cx("@container/header", className)}>

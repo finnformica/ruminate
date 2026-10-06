@@ -8,6 +8,7 @@ import { cx } from "../../utils/cx"
 import { noteTypeOf } from "../../utils/note-type"
 import { NoteFavicon } from "../note-favicon"
 import type { BlockEditorApi } from "./block-item"
+import { BoardCard } from "./board-card"
 import { LinkCard } from "./link-card"
 import { CodeHighlight } from "./code-highlight"
 import { CodeLanguage } from "./code-language"
@@ -38,15 +39,27 @@ export interface RowContext {
    * type's chrome that reaches the row's edge (a code block's panel) must
    * stop short of the slot when it is there. */
   slotted: boolean
+  /** The row is LISTED — a results view's (`BlockEditorApi.fixedRoots`),
+   * one among many — rather than a row of an outline. */
+  listed: boolean
 }
+
+/** What stands in a row's marker slot (`BlockKind.slot`). */
+type SlotKind = "checkbox" | "dot" | "hash" | "number" | "glyph" | "none"
 
 export interface BlockKind {
   /** The key in the marker slot: a to-do's checkbox, a bullet's dot, a
    * heading's `#`, a numbered item's number, or a static glyph (none for a
    * paragraph — the slot keeps its width so text stays in one column).
    * `none` drops the slot altogether (an image, which has no text column to
-   * keep); a parent still gets the slot back to host its chevron. */
-  readonly slot: "checkbox" | "dot" | "hash" | "number" | "glyph" | "none"
+   * keep); a parent still gets the slot back to host its chevron. A
+   * function, for a type whose slot depends on whether the row is listed
+   * (a board: a favicon among the results, no slot before its card). */
+  readonly slot: SlotKind | ((listed: boolean) => SlotKind)
+  /** The row's text is never edited in place: no textarea opens on it,
+   * and asking to edit it selects it instead (a board card's title is the
+   * board's name, changed on the board's own page). */
+  readonly uneditable?: boolean
   /** The glyph for a `glyph` slot, or null for an empty slot. */
   readonly glyph?: string | null
   /** A RENDERED key for a `glyph` slot, where the key depends on the block
@@ -194,11 +207,40 @@ const note: BlockKind = {
   typography: (_depth, _block, listed) => cx(BODY, "font-sans", listed && "font-bold"),
 }
 
+/**
+ * A board is a note root of the other kind. LISTED — a search result, the
+ * Views page, the palette — it is the note row with the board's own
+ * favicon. As a row of an outline it is a board linked under the block
+ * (docs/boards.md, "A board in a note"), drawn as its card (`BoardCard`):
+ * the row's content line is the board's name, rendered inside the card and
+ * never a textarea — a board is named on its own page, and asking to edit
+ * the row selects it (`uneditable`). The card is a figure, in a link card's
+ * frame: no marker slot before it, and the layout the figures share.
+ */
+const board: BlockKind = {
+  ...note,
+  slot: (listed) => (listed ? "glyph" : "none"),
+  uneditable: true,
+  typography: (_depth, _block, listed) =>
+    cx(BODY, "font-sans", listed ? "font-bold" : "font-medium"),
+  wrap: (content, context) =>
+    context.listed
+      ? content
+      : figureWrap("board-block", (title, { block, occurrence, api }) => (
+          <BoardCard
+            block={block}
+            occurrence={occurrence}
+            api={api}
+            title={lineOf(title)}
+            pointer={rowPointer(context)}
+          />
+        ))(content, context),
+}
+
 export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
   text,
   note,
-  // A board is a note root of the other kind: the same row, its own favicon.
-  board: note,
+  board,
   ul: { slot: "dot", typography: () => BODY },
   ol: { slot: "number", typography: () => BODY },
   todo,
@@ -371,7 +413,7 @@ function rowPointer({ occurrence, api }: RowContext): Pointer {
 function figureWrap(
   testId: string,
   figure: (content: ReactNode, context: RowContext) => ReactNode,
-): BlockKind["wrap"] {
+): NonNullable<BlockKind["wrap"]> {
   return (content, context) => {
     const pointer = rowPointer(context)
     const own =

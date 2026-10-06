@@ -47,7 +47,7 @@ export function collapsedKeysOf(doc: BlockDoc, expanded: ExpandedRule, startLeve
       const block = doc.blocks[id]
       if (!block || path.has(id) || block.children.length === 0) continue
       const key = keyOf(parentKey, id)
-      if (!expanded(key, level)) {
+      if (!expanded(key, level, block.type)) {
         collapsed.push(key)
         continue
       }

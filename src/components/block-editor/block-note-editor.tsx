@@ -1,10 +1,12 @@
-import { useAtomValue, useStore } from "jotai"
+import { useAtomValue, useSetAtom, useStore } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { emptyBlock } from "../../blocks/ops"
 import type { BlockDoc, ChangeHint } from "../../blocks/types"
 import { imagesEnabled, uploadImage } from "../../data/images"
 import { fetchLinkPreview } from "../../data/link-previews"
+import { isNoteType } from "../../data/graph"
 import { deleteBlockOps, deleteSubtreeOps, parentCount } from "../../data/ops"
+import { sharedOriginAtom } from "../../data/shared-mode"
 import { useApplyOps } from "../../data/store"
 import { useFoldRule } from "../../data/view-state"
 import { collapsedKeysOf } from "../../blocks/default-collapsed"
@@ -12,7 +14,10 @@ import { titlesFocus } from "../../blocks/markers"
 import { graphSnapshotAtom, isDatabaseModeAtom } from "../../global-state"
 import { upstreamIndexAtom, useDeveloperDebug } from "../../hooks/is-developer"
 import { resolveBlockSubtrees } from "../../utils/resolve-blocks"
-import { BlockEditor, type BlockDebugOptions } from "./block-editor"
+import { deleteNoteDialogAtom } from "../delete-note-dialog"
+import { linkBoardDialogAtom } from "../link-board-dialog"
+import { newBoardDialogAtom } from "../new-board-dialog"
+import { BlockEditor, type BlockDebugOptions, type BoardRequest } from "./block-editor"
 
 /** Ensure a parsed doc always has at least one block to edit. Not for a view
  * that may legitimately be empty — see `seedDoc`. */
@@ -95,6 +100,7 @@ export function BlockNoteEditor({
   rowRemoval = "unlink",
   context,
   onEditingChange,
+  onOpenBoard,
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc, hint?: ChangeHint) => void
@@ -162,6 +168,9 @@ export function BlockNoteEditor({
   context?: ReadonlySet<string>
   /** Told which block is being edited as it changes (`BlockEditor`). */
   onEditingChange?: (id: string | null) => void
+  /** Open a board's page (a board card's "Open board", docs/boards.md).
+   * The page's to give: navigation is its business. */
+  onOpenBoard?: (id: string) => void
 }) {
   // Read-only history views are shown verbatim; only editable notes get the
   // always-present trailing blank — and not while focused, where the doc's
@@ -240,9 +249,21 @@ export function BlockNoteEditor({
     (id: string) => parentCount(jotaiStore.get(graphSnapshotAtom), id),
     [jotaiStore],
   )
+  // A board's row (docs/boards.md, "A board in a note") is the board's own
+  // node, which `deleteBlockOps` leaves alone: its Delete is the board's
+  // own — asked first, in the dialog the sidebar's Delete opens, then
+  // `deleteNoteOps`, the board with everything only it held. Blocks in the
+  // same selection go as they always have.
+  const requestDeleteNote = useSetAtom(deleteNoteDialogAtom)
   const deleteEverywhere = useCallback(
-    (ids: string[]) => applyOps(deleteBlockOps(ids, jotaiStore.get(graphSnapshotAtom))),
-    [applyOps, jotaiStore],
+    (ids: string[]) => {
+      const snapshot = jotaiStore.get(graphSnapshotAtom)
+      const notes = ids.filter((id) => isNoteType(snapshot.nodes.get(id)?.type ?? ""))
+      const blocks = ids.filter((id) => !notes.includes(id))
+      if (blocks.length > 0) applyOps(deleteBlockOps(blocks, snapshot))
+      if (notes.length > 0) requestDeleteNote({ noteId: notes[0] })
+    },
+    [applyOps, jotaiStore, requestDeleteNote],
   )
   const deleteSubtree = useCallback(
     (ids: string[]) => applyOps(deleteSubtreeOps(ids, jotaiStore.get(graphSnapshotAtom))),
@@ -253,6 +274,24 @@ export function BlockNoteEditor({
   const knownBlock = useCallback(
     (id: string) => jotaiStore.get(graphSnapshotAtom).nodes.has(id),
     [jotaiStore],
+  )
+
+  // A board at a row (docs/boards.md, "A board in a note"): the slash
+  // menu's Board and Link board open the app's dialogs, each told where the
+  // board goes and how to put its row in the doc. Only in a note of the
+  // reader's own: a note someone shared is theirs, and its slash menu
+  // offers neither.
+  const sharedOrigin = useAtomValue(sharedOriginAtom)
+  const openNewBoard = useSetAtom(newBoardDialogAtom)
+  const openLinkBoard = useSetAtom(linkBoardDialogAtom)
+  const ownNote = noteId !== undefined && !readOnly && !sharedOrigin.has(noteId)
+  const onRequestBoard = useCallback(
+    ({ kind, ...into }: BoardRequest) => {
+      if (noteId === undefined) return
+      if (kind === "new") openNewBoard({ into })
+      else openLinkBoard({ noteId, into })
+    },
+    [noteId, openNewBoard, openLinkBoard],
   )
 
   // Images (docs/images.md): pasted pictures upload to the Worker — only where
@@ -321,6 +360,8 @@ export function BlockNoteEditor({
       knownBlock={noteId ? knownBlock : undefined}
       onImageUpload={onImageUpload}
       onLinkPreview={onLinkPreview}
+      onRequestBoard={ownNote ? onRequestBoard : undefined}
+      onOpenBoard={onOpenBoard}
       // The trailing blank is what keeps a block to type in; without it (the
       // basket) the last row may go, and the basket goes with it.
       emptyable={!trailingBlank}

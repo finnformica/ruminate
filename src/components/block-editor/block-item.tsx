@@ -135,6 +135,15 @@ export interface BlockEditorApi {
   requestImage?: (key: string) => void
   /** Expand an image block's picture (the lightbox). */
   openImage?: (id: string) => void
+  /** Put a board at this row (the slash menu's "Board" and "Link board",
+   * docs/boards.md): a new one, or one that exists — with the row's text
+   * as the pick leaves it (the `/phrase` gone), written first as its own
+   * undo step. Absent where the editor has no note of the reader's own
+   * behind it. */
+  requestBoard?: (key: string, kind: "new" | "existing", text?: string) => void
+  /** Open a board's page (a board card's "Open board"). Absent where there
+   * is nowhere to go (a standalone editor). */
+  openBoard?: (id: string) => void
   /** Make a link block of a link in this row's text (docs/links.md): the
    * row itself when its text is nothing but the link, else a new row
    * beneath it. Absent in read-only views. */
@@ -233,8 +242,13 @@ export function BlockItem({
 }) {
   const { depth, olNumber, hasChildren, collapsed: isCollapsed } = occurrence
   const readOnly = api.readOnly ?? false
+  // How this type looks (`block-kinds.tsx`): its marker, typography, any
+  // panel, and the chrome around the content line.
+  const kind = kindOf(block.type)
   // Selection and edit focus are per row: this occurrence, not the block.
-  const editing = !readOnly && api.focus?.key === occurrence.key
+  // A row whose text is never edited in place (a board's card) is never
+  // editing, whatever focus says — the editor selects it instead.
+  const editing = !readOnly && !kind.uneditable && api.focus?.key === occurrence.key
   const selected = api.selectedSet.has(occurrence.key) && !editing
   // Which sides of this row sit MID-RUN in a multi-select (the adjacent
   // visible row is also selected and the surfaces touch) — those sides keep
@@ -268,8 +282,11 @@ export function BlockItem({
     () =>
       slashQuery === undefined
         ? []
-        : slashMenuItems(slashQuery, new Date(), { images: api.requestImage !== undefined }),
-    [slashQuery, api.requestImage],
+        : slashMenuItems(slashQuery, new Date(), {
+            images: api.requestImage !== undefined,
+            boards: api.requestBoard !== undefined,
+          }),
+    [slashQuery, api.requestImage, api.requestBoard],
   )
 
   const type = block.type
@@ -277,12 +294,11 @@ export function BlockItem({
   // real bullet/checkbox/heading style in the marker slot, never as text. This
   // keeps the view and the editor pixel-identical — nothing shifts on click.
   const body = block.text
-  // How this type looks (`block-kinds.tsx`): its marker, typography, any
-  // panel, and the chrome around the content line.
-  const kind = kindOf(type)
   // A results view's row (`fixedRoots`): one among many, so a heading keeps
   // the body's scale and its breathing room.
   const listed = !!api.fixedRoots
+  // The marker slot this row draws, for a type whose slot depends on that.
+  const slot = typeof kind.slot === "function" ? kind.slot(listed) : kind.slot
   const scaleDepth = listed ? LISTED_HEADING_DEPTH : depth
   const typo = kind.typography(depth, block, listed)
   // Whether this block owns a collapse toggle at all: parents only. The
@@ -292,8 +308,8 @@ export function BlockItem({
   const looped = !!occurrence.looped
   const hasToggle = hasChildren || looped
   // A marker slot is drawn unless the type has none AND nothing needs one.
-  const slotted = kind.slot !== "none" || hasToggle
-  const rowContext: RowContext = { block, occurrence, api, depth, editing, slotted }
+  const slotted = slot !== "none" || hasToggle
+  const rowContext: RowContext = { block, occurrence, api, depth, editing, slotted, listed }
   // A ROOT of a results view (`api.fixedRoots`): its surface is set in by
   // 8.5px at the sides, so every root's surface — a note's, a matched
   // block's — shares one left edge, the one the page's search box sits on
@@ -477,6 +493,18 @@ export function BlockItem({
     pendingCaret.current = result.caret
     dismissedSlash.current = null
     setSlash(null)
+    if (result.action !== undefined) {
+      // An action (a board made or linked here, docs/boards.md): the
+      // `/phrase` goes — the editor writes that with the request, so it
+      // can judge the row as the pick leaves it — and the dialog the editor
+      // opens decides what (if anything) is added at the row.
+      api.requestBoard?.(
+        occurrence.key,
+        result.action === "board" ? "new" : "existing",
+        result.text,
+      )
+      return
+    }
     if (result.type !== undefined && !defOf(result.type).turnInto) {
       // A row that is not a type change (an image asks for a file): the
       // `/phrase` goes, and the picker decides what (if anything) is added.
@@ -663,7 +691,7 @@ export function BlockItem({
   // the chevron to swap with: left to the hover reveal, an open paragraph
   // parent showed an empty slot and no sign of its fold. Its chevron is
   // pinned visible instead, open or closed, as the key would be.
-  const keyless = kind.slot === "glyph" && !kind.glyph && !kind.glyphNode
+  const keyless = slot === "glyph" && !kind.glyph && !kind.glyphNode
   const pinned = isCollapsed || looped || (hasToggle && keyless)
   // Every block type but an image owns the 15px marker slot. Most carry a KEY there — a
   // bullet dot, heading `#`, number, quote `>` — and the key is pure chrome,
@@ -820,9 +848,11 @@ export function BlockItem({
         slotClass,
       )}
     >
-      {kind.glyphNode ? (
+      {slot === "glyph" && kind.glyphNode ? (
         // A rendered key (a note's favicon). Not `aria-hidden`: unlike the
-        // typographic keys it can carry meaning of its own.
+        // typographic keys it can carry meaning of its own. Only in a glyph
+        // slot: the empty slot a slotless parent gets back for its chevron
+        // (a board's card, whose icon is in the card) draws no key.
         <span className={cx("block-glyph flex items-center", keyClass)}>
           {kind.glyphNode(block)}
         </span>
@@ -856,7 +886,7 @@ export function BlockItem({
   // its edge. A parent still needs somewhere to put its chevron, so it falls
   // through to the empty glyph slot.
   const marker =
-    kind.slot === "none" && !hasToggle ? null : kind.slot === "checkbox" ? (
+    slot === "none" && !hasToggle ? null : slot === "checkbox" ? (
       // The checkbox IS the todo's marker — a control in the key slot, which
       // is why a parent todo's chevron sits beside it (see `toggleBeside`).
       // Hovering the box also reveals that chevron (`.block-toggle-hint`,
@@ -900,9 +930,9 @@ export function BlockItem({
           className={cx("block-checkbox", readOnly ? "cursor-default" : "cursor-pointer")}
         />
       </span>
-    ) : kind.slot === "dot" ? (
+    ) : slot === "dot" ? (
       dotSlot
-    ) : kind.slot === "hash" ? (
+    ) : slot === "hash" ? (
       // Headings hang the same grey `#` as the note / focus titles — the shared
       // `Hash`, at the heading's own scale: the slot carries the heading's
       // size + weight (headingScale + bold, no underline — that lives in
@@ -926,7 +956,7 @@ export function BlockItem({
         <Hash className={keyClass} />
         {toggle}
       </span>
-    ) : kind.slot === "number" ? (
+    ) : slot === "number" ? (
       // Numbers are read (they carry order), so they sit one step up the ramp
       // from the dot — muted, not faint — and right-align to the slot edge.
       <span
@@ -940,6 +970,9 @@ export function BlockItem({
         </span>
         {toggle}
       </span>
+    ) : slot === "none" ? (
+      // A slotless parent's slot, for its chevron alone.
+      glyphSlot(null, "paragraph-slot")
     ) : (
       glyphSlot(kind.glyph ?? null, kind.slotTestId ?? "paragraph-slot")
     )
@@ -1147,7 +1180,7 @@ export function BlockItem({
           // A heading's surface reaches further left at the larger scales
           // (`[data-heading-scale]` in block-editor.css), so its chevron and
           // `#` sit as far from the left edge as from the top and bottom.
-          data-heading-scale={kind.slot === "hash" ? HEADING_SCALE_NAMES[scaleDepth] : undefined}
+          data-heading-scale={slot === "hash" ? HEADING_SCALE_NAMES[scaleDepth] : undefined}
           className={cx(
             // Negative margin + padding pairs grow the highlight surface
             // while the text (and every marker) stays exactly where it was —

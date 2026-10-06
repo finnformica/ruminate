@@ -2,6 +2,7 @@ import { useAtomValue } from "jotai"
 import React from "react"
 import { expandedByDepth } from "../blocks/default-collapsed"
 import { idOfKey, type ExpandedRule } from "../blocks/view"
+import { BOARD_TYPE } from "./graph"
 import { expandedLevelsAtom } from "../global-state"
 
 /**
@@ -180,10 +181,12 @@ export function writeFolds(viewKey: string, folds: Folds) {
  * The rule a view descends by: the reader's explicit folds over the depth
  * rule. A key's own entry wins; failing that an entry naming its block id
  * (a fold from before occurrence keys) applies to every occurrence; failing
- * both, the depth rule decides.
+ * both, a board's row is closed — its card stands for what is beneath it
+ * (docs/boards.md, "A board in a note"), and its outline is a chevron away
+ * — and the depth rule decides the rest.
  */
 export function foldRule(folds: Folds, byDepth: ExpandedRule): ExpandedRule {
-  return (key, level) => {
+  return (key, level, type) => {
     if (folds.closed.has(key)) return false
     if (folds.open.has(key)) return true
     const id = idOfKey(key)
@@ -191,7 +194,8 @@ export function foldRule(folds: Folds, byDepth: ExpandedRule): ExpandedRule {
       if (folds.closed.has(id)) return false
       if (folds.open.has(id)) return true
     }
-    return byDepth(key, level)
+    if (type === BOARD_TYPE) return false
+    return byDepth(key, level, type)
   }
 }
 

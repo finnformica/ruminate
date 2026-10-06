@@ -58,10 +58,21 @@ export interface FrameState {
   boxed: boolean
 }
 
+/** What each figure is called in its controls' labels. */
+const NOUN_LABELS: Record<FigureNoun, string> = {
+  image: "Image",
+  link: "Link",
+  board: "Board",
+}
+
+/** The figures the frame knows by name: for the controls' labels and test
+ * ids (`image-resize-left`, `link-toolbar`, `board-figure`). */
+export type FigureNoun = "image" | "link" | "board"
+
 /**
  * The frame every figure block sits in — a picture (`image-figure.tsx`),
- * a link block's card (`link-card.tsx`): the layout the figure types share
- * (`src/blocks/figure.ts`), drawn once.
+ * a link block's card (`link-card.tsx`), a board's card (`board-card.tsx`):
+ * the layout the figure types share (`src/blocks/figure.ts`), drawn once.
  *
  * No chrome of its own: the row's padding is the figure's spacing. The
  * block's `align` keeps the figure to one side of the row, and its `size`
@@ -98,7 +109,7 @@ export function FigureFrame({
   api: BlockEditorApi
   /** What the figure is, for the controls' labels and test ids
    * (`image-resize-left`, `link-toolbar`). */
-  noun: "image" | "link"
+  noun: FigureNoun
   /** The frame's width when the block sets no size: a CSS width, or
    * undefined to shrink to the figure. */
   naturalWidth?: string
@@ -230,7 +241,7 @@ export function FigureFrame({
             ))}
             <div
               role="toolbar"
-              aria-label={`${noun === "image" ? "Image" : "Link"} layout`}
+              aria-label={`${NOUN_LABELS[noun]} layout`}
               data-testid={`${noun}-toolbar`}
               className={cx(
                 "absolute right-2 top-2 flex gap-0.5 p-0.5",

@@ -3,7 +3,8 @@ import type { Block, BlockProps, BlockType } from "./types"
 /**
  * **Figures**: the block types whose row is a thing set in the text rather
  * than a line of it — a picture (`image`, docs/images.md), a link block's card
- * (`link`, docs/links.md). What they share is their LAYOUT, which
+ * (`link`, docs/links.md), a board's card (`board`, docs/boards.md, "A
+ * board in a note"). What they share is their LAYOUT, which
  * this module holds: two props on the block say how the figure sits in its
  * row, chosen in the editor (the frame's handles and toolbar,
  * `figure-frame.tsx`, or the row's context menu).
@@ -19,8 +20,10 @@ export type FigureAlign = "left" | "center" | "right"
 
 export const FIGURE_ALIGNS: readonly FigureAlign[] = ["left", "center", "right"]
 
-/** The block types laid out as figures. */
-const FIGURE_TYPES: readonly BlockType[] = ["image", "link"]
+/** The block types laid out as figures. A board's layout props sit on
+ * the board's own node, beside its metadata: the one card, however many
+ * notes it is linked in. */
+const FIGURE_TYPES: readonly BlockType[] = ["image", "link", "board"]
 
 export function isFigureType(type: BlockType): boolean {
   return FIGURE_TYPES.includes(type)
