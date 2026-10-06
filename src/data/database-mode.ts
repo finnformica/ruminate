@@ -13,7 +13,7 @@ import {
   planPullApplication,
   type D1NoteSource,
 } from "./d1-note-source"
-import { NOTE_TYPE, buildGraphSnapshot, type GraphSnapshot } from "./graph"
+import { buildGraphSnapshot, isNoteType, type GraphSnapshot } from "./graph"
 import { applyOps, notesTouchedBy, type Op } from "./ops"
 import { resetReplicaAccess } from "./replica-access"
 import type { ReplicaSyncHandle } from "./replica-sync"
@@ -107,6 +107,13 @@ const OWNER_KEY = "store_owner"
  * rather than the loading state a cleared store shows. Discarding once also
  * settles a device whose cursor is somehow ahead of the rewrite.
  *
+ * Generation `7` is the board type (migrations/0020): every board's root is
+ * retyped from `note` with a `board` prop to `board`, with its `updated_at`
+ * moved so the since-pull carries the row as 0016 did; the wipe is the belt
+ * to those braces for the same reason as generation `5` — a cache served at
+ * boot before the first pull lands would show the old shape, which the new
+ * code still reads (`isLegacyBoard`), until the pull replaced it.
+ *
  * This is why the constant is bumped rather than merely re-documented: every
  * device that already booted on generation `2` has `"2"` stamped in its meta,
  * so folding a new change into the old number is a wipe that never fires.
@@ -117,7 +124,7 @@ const OWNER_KEY = "store_owner"
  * when the tab hides, so the window is small — but it is real, and it is why
  * this is bumped deliberately rather than routinely.
  */
-export const CACHE_GENERATION = "6"
+export const CACHE_GENERATION = "7"
 const CACHE_GENERATION_KEY = "cache_generation"
 const PULL_RETRY_MS = 60_000
 /** How long a run of ops coalesces before it is written: a typed word is one
@@ -274,7 +281,7 @@ async function defaultOpenReplicaSync(
 /** How many notes the graph holds (the diagnostics' note count). */
 function noteCount(graph: GraphSnapshot): number {
   let count = 0
-  for (const node of graph.nodes.values()) if (node.type === NOTE_TYPE) count += 1
+  for (const node of graph.nodes.values()) if (isNoteType(node.type)) count += 1
   return count
 }
 
