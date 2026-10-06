@@ -4,11 +4,13 @@ import React from "react"
 import { toast } from "sonner"
 import { blockId } from "../blocks/id"
 import {
+  addFeatureOps,
   addImageOps,
   boardFeatures,
   boardImageIds,
   boardLinkUrl,
   clearValueOps,
+  defaultFeatureOps,
   imageLocationOf,
   imageLocationOps,
   imageUploadedOps,
@@ -17,15 +19,17 @@ import {
   isBoard,
   linkPreviewOps,
   outlineImageIds,
+  removeFeatureOps,
   resetImageOps,
   setCaptionOps,
   suggestionOps,
   tagFeaturesOf,
   unassignedImageIds,
+  updateFeatureOps,
   setValueOps,
-  type BoardFeature,
   type BoardFeatureState,
   type BoardValue,
+  type FeaturePatch,
   type ValueRef,
 } from "../data/boards"
 import { requestDatabaseFlush } from "../data/database-mode"
@@ -41,15 +45,51 @@ import {
   releasePendingImage,
   uploadImage,
 } from "../data/images"
-import { parseProps } from "../data/graph"
+import { NOTE_TYPE, parseProps, propsJson } from "../data/graph"
 import { fetchLinkPreview } from "../data/link-previews"
-import { deleteBlockOps, type Op } from "../data/ops"
+import { notePropsOps } from "../data/note-meta"
+import { applyOps, deleteBlockOps, type Op } from "../data/ops"
 import { useApplyOps } from "../data/store"
 import { requestTagSuggestion, SuggestTagsError } from "../data/suggest-tags"
 import { blockIndexAtom, graphSnapshotAtom, isDatabaseModeAtom } from "../global-state"
 import type { NoteId } from "../schema"
+import { BOARD_PROP } from "../utils/board-prop"
 import { viewNarrowing } from "../utils/view-narrowing"
 import { useAiAvailable } from "./ai"
+
+/**
+ * Making a board (docs/boards.md): the one property set on the note's
+ * page, and the default features written onto it as blocks — Location,
+ * Object, Material — in one batch. **New board** makes the note first
+ * (`create`, with its title); **Make this a board** marks the note that is
+ * there. A default the note already has by label is left as it is, so a
+ * note with a `Location` block written by hand keeps it.
+ */
+export function useMakeBoard(): (noteId: NoteId, create?: { title: string }) => void {
+  const store = useStore()
+  const apply = useApplyOps()
+  return React.useCallback(
+    (noteId, create) => {
+      const snapshot = store.get(graphSnapshotAtom)
+      const ops: Op[] = []
+      if (snapshot.nodes.has(noteId)) {
+        ops.push(...notePropsOps(noteId, { [BOARD_PROP]: true }, snapshot))
+      } else if (create) {
+        ops.push({
+          op: "create",
+          id: noteId,
+          type: NOTE_TYPE,
+          text: create.title.trim() || noteId,
+          props: propsJson({ [BOARD_PROP]: true, updated_at: new Date().toISOString() }),
+        })
+      } else return
+      // The defaults, against the board as the batch so far leaves it.
+      ops.push(...defaultFeatureOps(applyOps(snapshot, ops, Date.now()), noteId))
+      apply(ops)
+    },
+    [store, apply],
+  )
+}
 
 /**
  * A board (docs/boards.md) as the page draws it: whether the note is there,
@@ -161,10 +201,18 @@ export interface BoardWrites {
    * their location comes from: the camera's from the device, a library's
    * from the picture's own metadata. Neither is required. */
   addImages: (files: File[], source?: "camera" | "photos") => string[]
-  /** Give a picture a value, or take one off: the picker shows the result,
-   * and nothing else is said. */
-  setValue: (feature: BoardFeature, imageId: string, ref: ValueRef) => void
+  /** Give a picture a value of a feature (by its block), or take one off:
+   * the picker shows the result, and nothing else is said. */
+  setValue: (featureId: string, imageId: string, ref: ValueRef) => void
   clearValue: (value: BoardValue, imageId: string) => void
+  /** The Features editor's writes (docs/boards.md, "Features"): a new text
+   * feature, handed back by its block's id so the editor can focus it; a
+   * feature's label, type, several-values and notes; and a feature
+   * removed — its block left in the note as content, with a toast that
+   * can undo it. */
+  addFeature: () => string | null
+  updateFeature: (featureId: string, patch: FeaturePatch) => void
+  removeFeature: (featureId: string) => void
   /** Take the caption and every value off a picture, all features at once,
    * as one batch with a toast that can undo it. */
   resetImage: (imageId: string) => void
@@ -256,9 +304,9 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   )
 
   const setValue = React.useCallback(
-    (feature: BoardFeature, imageId: string, ref: ValueRef) => {
+    (featureId: string, imageId: string, ref: ValueRef) => {
       const snapshot = store.get(graphSnapshotAtom)
-      const ops = setValueOps(snapshot, boardId, feature, imageId, ref)
+      const ops = setValueOps(snapshot, boardId, featureId, imageId, ref)
       write(ops)
       // A card made for a new address is asked for its preview.
       const url = "url" in ref ? boardLinkUrl(ref.url) : null
@@ -275,6 +323,34 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       write(clearValueOps(store.get(graphSnapshotAtom), value.id, imageId))
     },
     [store, write],
+  )
+
+  // The Features editor's writes: each applied at once, the row showing
+  // the result. A removal takes the prop off the block and deletes nothing,
+  // and is answered with a toast whose Undo puts the prop back.
+  const addFeature = React.useCallback((): string | null => {
+    const id = blockId()
+    const ops = addFeatureOps(store.get(graphSnapshotAtom), boardId, id)
+    if (ops.length === 0) return null
+    write(ops)
+    return id
+  }, [store, boardId, write])
+
+  const updateFeature = React.useCallback(
+    (featureId: string, patch: FeaturePatch) => {
+      write(updateFeatureOps(store.get(graphSnapshotAtom), boardId, featureId, patch))
+    },
+    [store, boardId, write],
+  )
+
+  const removeFeature = React.useCallback(
+    (featureId: string) => {
+      undoable(
+        removeFeatureOps(store.get(graphSnapshotAtom), boardId, featureId),
+        "Feature removed",
+      )
+    },
+    [store, boardId, undoable],
   )
 
   const resetImage = React.useCallback(
@@ -329,10 +405,14 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
         return
       }
       try {
+        // Where the picture was taken goes only where the board has a
+        // place feature to offer it to.
+        const features = tagFeaturesOf(snapshot, boardId)
+        const placed = features.some((feature) => feature.place === true)
         const suggestion = await requestTagSuggestion(
           picture,
-          tagFeaturesOf(snapshot, boardId),
-          imageLocationOf(snapshot, imageId),
+          features,
+          placed ? imageLocationOf(snapshot, imageId) : null,
         )
         const ops = suggestionOps(
           store.get(graphSnapshotAtom),
@@ -433,6 +513,9 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       addImages,
       setValue,
       clearValue,
+      addFeature,
+      updateFeature,
+      removeFeature,
       resetImage,
       setCaption,
       deleteImage,
@@ -444,6 +527,9 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       addImages,
       setValue,
       clearValue,
+      addFeature,
+      updateFeature,
+      removeFeature,
       resetImage,
       setCaption,
       deleteImage,

@@ -1,6 +1,11 @@
 import { useAtomValue } from "jotai"
 import React from "react"
-import { imageValues, type BoardFeature, type BoardFeatureState } from "../../data/boards"
+import {
+  imageValues,
+  isLinkType,
+  type BoardFeature,
+  type BoardFeatureState,
+} from "../../data/boards"
 import { graphSnapshotAtom } from "../../global-state"
 import type { BoardWrites } from "../../hooks/board"
 import { usePending } from "../../hooks/pending"
@@ -118,9 +123,11 @@ export function BoardInspector({
               />
             </FormControl>
             {features.map((state) => (
-              <div key={state.feature.label} className="flex flex-col gap-2">
-                <span className="text-sm/4 text-text-secondary">{state.feature.label}</span>
-                {state.feature.kind === "link" ? (
+              <div key={state.feature.id} className="flex flex-col gap-2">
+                <span className="text-sm/4 text-text-secondary">
+                  {state.feature.label.trim() || "Untitled"}
+                </span>
+                {isLinkType(state.feature.type) ? (
                   <LinkValues
                     values={imageValues(snapshot, state, image.id)}
                     onRemove={(value) => writes.clearValue(value, image.id)}
@@ -130,7 +137,9 @@ export function BoardInspector({
                   <ValuePicker
                     state={state}
                     selected={imageValues(snapshot, state, image.id)}
-                    onPick={(value) => writes.setValue(state.feature, image.id, { id: value.id })}
+                    onPick={(value) =>
+                      writes.setValue(state.feature.id, image.id, { id: value.id })
+                    }
                     onClear={(value) => writes.clearValue(value, image.id)}
                     onNew={() => setNaming(state.feature)}
                   />
@@ -139,7 +148,7 @@ export function BoardInspector({
             ))}
             <NewValueDialog
               feature={naming}
-              onAdd={(feature, ref) => writes.setValue(feature, image.id, ref)}
+              onAdd={(feature, ref) => writes.setValue(feature.id, image.id, ref)}
               onClose={() => setNaming(null)}
             />
             <div className="mt-auto flex flex-wrap items-center gap-2">

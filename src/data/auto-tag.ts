@@ -56,14 +56,18 @@ export const AUTO_TAG_IMAGE_TYPES: readonly string[] = [
 ]
 
 /** A feature as the client describes it to the Worker: its label, whether
- * a picture may carry several of its values, what it means, and the
- * values in use. */
+ * a picture may carry several of its values, its notes, the values in
+ * use, and whether it is a place — the feature the location hint is for,
+ * when the picture carries where it was taken. */
 export interface TagFeature {
   label: string
   multi: boolean
   values: string[]
-  /** What the feature is, for the prompt — "what that thing is made of". */
-  meaning?: string
+  /** Notes on what the feature is, for the prompt — "what that thing is
+   * made of". */
+  notes?: string
+  /** A place feature: where the picture was taken is offered to it. */
+  place?: boolean
 }
 
 /** Where a picture was taken: WGS84, as its block's `lat`/`lon` props. */
@@ -113,7 +117,7 @@ export interface TagResponse {
 const MAX_FEATURES = 12
 const MAX_VALUES_PER_FEATURE = 200
 const MAX_LABEL_LENGTH = 60
-const MAX_MEANING_LENGTH = 200
+const MAX_NOTES_LENGTH = 500
 const MAX_VALUE_LENGTH = 60
 const MAX_CAPTION_LENGTH = 120
 /** How many values the model may give one feature at once. */
@@ -141,15 +145,21 @@ export function readTagRequest(raw: unknown): TagRequest | null {
     }
     const label = feature.label.trim().slice(0, MAX_LABEL_LENGTH)
     if (label === "") return null
-    const meaning =
-      typeof feature.meaning === "string" ? feature.meaning.trim().slice(0, MAX_MEANING_LENGTH) : ""
+    const notes =
+      typeof feature.notes === "string" ? feature.notes.trim().slice(0, MAX_NOTES_LENGTH) : ""
     const values: string[] = []
     for (const value of feature.values) {
       if (typeof value !== "string") return null
       const text = value.trim().slice(0, MAX_VALUE_LENGTH)
       if (text !== "") values.push(text)
     }
-    features.push({ label, multi: feature.multi, values, ...(meaning ? { meaning } : {}) })
+    features.push({
+      label,
+      multi: feature.multi,
+      values,
+      ...(notes ? { notes } : {}),
+      ...(feature.place === true ? { place: true } : {}),
+    })
   }
   const location = readTagLocation(record.location)
   return location ? { features, location } : { features }
@@ -162,12 +172,20 @@ export interface LocationHint {
   place: string | null
 }
 
-/** The line the prompt carries for a location. */
-function locationLine(hint: LocationHint): string {
+/** The labels of the features a location is for: the board's place
+ * features. None, and the prompt says nothing of where the picture was
+ * taken, whatever the request carried. */
+export const placeLabels = (features: readonly TagFeature[]): string[] =>
+  features.filter((feature) => feature.place === true).map((feature) => feature.label)
+
+/** The line the prompt carries for a location, naming the place feature
+ * (or features) it is for. */
+function locationLine(hint: LocationHint, labels: readonly string[]): string {
+  const named = labels.join(" and ")
   if (hint.place) {
-    return `The picture was taken at: ${hint.place} (most specific first). For Location, use a value in use that covers the place; otherwise name it as a person would in conversation — the country by default, or the everyday short name of a notable specific place such as an airport, a landmark or a city.`
+    return `The picture was taken at: ${hint.place} (most specific first). For ${named}, use a value in use that covers the place; otherwise name it as a person would in conversation — the country by default, or the everyday short name of a notable specific place such as an airport, a landmark or a city.`
   }
-  return `The picture was taken at latitude ${hint.location.lat}, longitude ${hint.location.lon}: name the town or area for Location.`
+  return `The picture was taken at latitude ${hint.location.lat}, longitude ${hint.location.lon}: name the town or area for ${named}.`
 }
 
 /** What the model is, and how it is to answer. Fixed text, so it caches. */
@@ -183,17 +201,19 @@ export const AUTO_TAG_SYSTEM_PROMPT = [
 ].join(" ")
 
 /** The text beside the picture: the features and their values, one a
- * line, and where the picture was taken, when that is known. */
+ * line, and where the picture was taken, when that is known and the board
+ * has a place feature to offer it to. */
 export function tagPrompt(features: readonly TagFeature[], hint?: LocationHint): string {
-  const where = hint ? [locationLine(hint)] : []
+  const labels = placeLabels(features)
+  const where = hint && labels.length > 0 ? [locationLine(hint, labels)] : []
   if (features.length === 0) {
     return ["There are no features on this board: answer with a caption.", ...where].join("\n")
   }
   const lines = features.map((feature) => {
     const kind = feature.multi ? "several values" : "one value"
     const values = feature.values.length ? feature.values.join(", ") : "none yet"
-    const meaning = feature.meaning ? `${feature.meaning}. ` : ""
-    return `- ${feature.label} (${kind}): ${meaning}Values in use: ${values}`
+    const notes = feature.notes ? `${feature.notes}. ` : ""
+    return `- ${feature.label} (${kind}): ${notes}Values in use: ${values}`
   })
   return ["Features:", ...lines, ...where].join("\n")
 }

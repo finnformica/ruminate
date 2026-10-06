@@ -1,9 +1,8 @@
 import { useNavigate } from "@tanstack/react-router"
 import { atom, useAtom } from "jotai"
 import React from "react"
-import { useCreateNote } from "../hooks/note"
+import { useMakeBoard } from "../hooks/board"
 import { generateNoteId } from "../utils/note-id"
-import { BOARD_PROP } from "../utils/board-prop"
 import { Button } from "./ui/button"
 import { Dialog } from "./ui/dialog"
 import { TextInput } from "./ui/text-input"
@@ -15,13 +14,14 @@ export const newBoardDialogAtom = atom(false)
 /**
  * **New board** (docs/boards.md): a name, then a board. A board is a note
  * whose page carries the `board` property, so making one is making a note
- * with that property and opening it on its board page rather than its
+ * with that property — and the default features written onto its page
+ * (`useMakeBoard`) — and opening it on its board page rather than its
  * outline. The name is the note's title and can be blank, as a note's can.
  */
 export function NewBoardDialog() {
   const [open, setOpen] = useAtom(newBoardDialogAtom)
   const [name, setName] = React.useState("")
-  const createNote = useCreateNote()
+  const makeBoard = useMakeBoard()
   const navigate = useNavigate()
   React.useEffect(() => {
     if (open) setName("")
@@ -29,7 +29,7 @@ export function NewBoardDialog() {
   const close = () => setOpen(false)
   const submit = () => {
     const id = generateNoteId()
-    createNote(id, { title: name.trim(), props: { [BOARD_PROP]: true } })
+    makeBoard(id, { title: name })
     close()
     void navigate({ to: "/boards/$", params: { _splat: id } })
   }

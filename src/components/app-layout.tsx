@@ -6,7 +6,7 @@ import {
   Panel,
   Separator,
   useDefaultLayout,
-  usePanelRef,
+  usePanelCallbackRef,
   type Layout,
   type LayoutChangedMeta,
 } from "react-resizable-panels"
@@ -16,6 +16,7 @@ import { useApplyUpdateShortcut, useRegisterAppUpdate } from "../hooks/app-updat
 import { usePresence } from "../hooks/presence"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
+import { AppUpdateNotice } from "./app-update-notice"
 import { HelpDrawer, HelpSidebar } from "./help-panel"
 import { NavBar } from "./nav-bar"
 import { Sidebar } from "./sidebar"
@@ -43,7 +44,16 @@ export function AppLayout({ className, children }: AppLayoutProps) {
   // motion"), so its edge travels with its contents instead of jumping to
   // where they are going. The separator is kept until the contents have
   // gone (src/hooks/presence.ts).
-  const helpPanel = usePanelRef()
+  //
+  // The panel's handle is held as state rather than in a ref, because the
+  // panel comes and goes with the viewport (below), and the group only
+  // learns of a panel that has just mounted on the render after it mounts.
+  // A ref is filled in the mounting commit itself, and a resize or collapse
+  // through it then asks the group about a panel it has not yet registered
+  // — "Panel constraints not found for Panel help" the moment a narrow
+  // window is widened. State is set on that same commit but read on the
+  // next render, by which point the group has the panel.
+  const [helpPanel, helpPanelRef] = usePanelCallbackRef()
   const helpPresent = usePresence(showHelpSidebar)
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "app-layout",
@@ -67,11 +77,10 @@ export function AppLayout({ className, children }: AppLayoutProps) {
     [onLayoutChanged],
   )
   useEffect(() => {
-    const panel = helpPanel.current
-    if (!panel) return
-    if (showHelpSidebar) panel.resize(`${helpWidth}%`)
-    else panel.collapse()
-  }, [showHelpSidebar, isWideViewport, helpWidth, helpPanel])
+    if (!helpPanel) return
+    if (showHelpSidebar) helpPanel.resize(`${helpWidth}%`)
+    else helpPanel.collapse()
+  }, [showHelpSidebar, helpWidth, helpPanel])
   // Nor must that first layout play as motion: the transition is switched on
   // a frame later.
   const [panelMotion, setPanelMotion] = useState(false)
@@ -105,6 +114,10 @@ export function AppLayout({ className, children }: AppLayoutProps) {
 
   return (
     <div className={cx("flex grow flex-col overflow-hidden print:overflow-visible", className)}>
+      {/* A waiting update, said above the page on a phone, where the
+          sidebar's row is in a drawer (src/components/app-update-notice.tsx).
+          From `sm` the sidebar and its row are on screen. */}
+      <AppUpdateNotice className="sm:hidden" />
       <div className="flex grow overflow-hidden">
         {sidebar === "expanded" ? (
           <div className="hidden w-56 shrink-0 sm:grid print:hidden">
@@ -147,7 +160,7 @@ export function AppLayout({ className, children }: AppLayoutProps) {
               <Panel
                 id="help"
                 className="print:hidden"
-                panelRef={helpPanel}
+                panelRef={helpPanelRef}
                 collapsible
                 defaultSize="30%"
                 minSize="25%"

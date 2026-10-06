@@ -1,26 +1,33 @@
 import { describe, expect, it } from "vitest"
+import { moveBlocks, updateText } from "../blocks/ops"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
+import { keyOf } from "../blocks/view"
 import {
-  BOARD_FEATURES,
+  DEFAULT_FEATURES,
+  addFeatureOps,
   addImageOps,
+  boardFeature,
   boardFeatures,
   boardImageIds,
   boardLinkUrl,
   clearValueOps,
-  featureBlockId,
+  defaultFeatureOps,
+  featureSpecOf,
   imageLocationOf,
   imageLocationOps,
   imageUploadedOps,
   imageValues,
   inverseOps,
   linkPreviewOps,
+  removeFeatureOps,
   resetImageOps,
   setCaptionOps,
   setValueOps,
   suggestionOps,
   tagFeaturesOf,
   unassignedImageIds,
+  updateFeatureOps,
 } from "./boards"
 import {
   buildGraphSnapshot,
@@ -28,15 +35,21 @@ import {
   docToGraph,
   noteDoc,
   parentIdsOf,
+  parseProps,
   type GraphSnapshot,
 } from "./graph"
-import { applyOps, type Op } from "./ops"
+import { applyOps, docToOps, type Op } from "./ops"
 import { unassignedIds } from "./basket"
 
 const NOW = 1000
 
-const LOCATION = BOARD_FEATURES[0]
-const FIXTURE = BOARD_FEATURES[1]
+/** The fixture's features, by their blocks: Location is read by its name
+ * alone, as a board from before features were blocks has it; Object
+ * carries the prop. */
+const LOCATION = "blk_location00"
+const OBJECT = "blk_object0000"
+
+const OBJECT_SPEC = { type: "text", multi: true, notes: "the thing the picture is of" }
 
 /** A graph holding these notes, from canonical markdown. */
 function graphOf(notes: Record<string, string>): GraphSnapshot {
@@ -60,9 +73,14 @@ const kinds = (ops: Op[]) => ops.map((op) => op.op)
 
 const img = (n: number) => `![](/api/images/img_${String(n).padStart(12, "0")})`
 
-/** A board with two pictures and one feature already on it. The first
+/** The feature prop as a block's props string. */
+const featureProps = (spec: Record<string, unknown>) => JSON.stringify({ feature: spec })
+
+/** A board with two pictures and two features on it: Location, with two
+ * values, read by its name; Object, empty, with the prop. The first
  * picture is in Mauritius: linked under that value as well as the page
- * (`boardOf` adds the second parent — markdown cannot say it twice). */
+ * (`boardOf` adds the second parent — markdown cannot say it twice, nor
+ * write a prop). */
 const BOARD = [
   "Location",
   "  id:: blk_location00",
@@ -70,6 +88,8 @@ const BOARD = [
   "    id:: blk_mauritius0",
   "  - Lisbon",
   "    id:: blk_lisbon0000",
+  "- Object",
+  "  id:: blk_object0000",
   img(1),
   "  id:: blk_pic1000000",
   img(2),
@@ -80,49 +100,146 @@ const BOARD = [
 const boardOf = (extra = "") =>
   applyOps(
     graphOf({ b: extra + BOARD }),
-    [{ op: "link", source: "blk_mauritius0", destination: "blk_pic1000000", sortKey: "a0" }],
+    [
+      { op: "link", source: "blk_mauritius0", destination: "blk_pic1000000", sortKey: "a0" },
+      { op: "setProps", id: OBJECT, props: featureProps(OBJECT_SPEC) },
+    ],
     1,
   )
 
-describe("featureBlockId", () => {
-  it("matches a direct child by its text, trimmed and whatever its case", () => {
-    const snapshot = graphOf({ b: "- location \n  id:: blk_loc0000000\n" })
-    expect(featureBlockId(snapshot, "b", LOCATION)).toBe("blk_loc0000000")
-    expect(featureBlockId(snapshot, "b", FIXTURE)).toBeNull()
+/** The feature's state, by its block, asserted to be there. */
+const stateOf = (snapshot: GraphSnapshot, featureId: string) => {
+  const state = boardFeature(snapshot, "b", featureId)
+  if (!state) throw new Error(`no feature ${featureId}`)
+  return state
+}
+
+describe("featureSpecOf", () => {
+  it("reads the prop leniently: a type it does not know is text, multi only when true", () => {
+    expect(featureSpecOf({ feature: { type: "place", multi: false, notes: " where " } })).toEqual({
+      type: "place",
+      multi: false,
+      notes: "where",
+    })
+    expect(featureSpecOf({ feature: {} })).toEqual({ type: "text", multi: false })
+    expect(featureSpecOf({ feature: { type: "colour", multi: "yes", notes: "" } })).toEqual({
+      type: "text",
+      multi: false,
+    })
+    // The key the notes were first written under is still read.
+    expect(featureSpecOf({ feature: { type: "text", multi: true, meaning: "old" } })).toEqual({
+      type: "text",
+      multi: true,
+      notes: "old",
+    })
+    expect(featureSpecOf({ feature: true })).toBeNull()
+    expect(featureSpecOf({ feature: false })).toBeNull()
+    expect(featureSpecOf({ feature: [] })).toBeNull()
+    expect(featureSpecOf({ align: "left" })).toBeNull()
+    expect(featureSpecOf(null)).toBeNull()
+  })
+})
+
+describe("boardFeatures", () => {
+  it("lists the feature blocks in page order, the legacy ones by name, with their values", () => {
+    const snapshot = boardOf()
+    const state = boardFeatures(snapshot, "b")
+    expect(state).toEqual([
+      {
+        feature: {
+          id: LOCATION,
+          label: "Location",
+          type: "place",
+          multi: false,
+          notes: DEFAULT_FEATURES[0].spec.notes,
+        },
+        values: [
+          { id: "blk_mauritius0", text: "Mauritius" },
+          { id: "blk_lisbon0000", text: "Lisbon" },
+        ],
+      },
+      {
+        feature: { id: OBJECT, label: "Object", ...OBJECT_SPEC },
+        values: [],
+      },
+    ])
   })
 
-  it("takes the first of two and ignores a deeper one", () => {
+  it("reads a block with the prop whatever its name, and a child without one as content", () => {
+    const snapshot = applyOps(
+      graphOf({
+        b: [
+          "- Notes",
+          "  id:: blk_notes00000",
+          "  - Location",
+          "    id:: blk_deep000000",
+          "- Colour",
+          "  id:: blk_colour0000",
+          "  - Teal",
+          "    id:: blk_teal000000",
+          "- Shopping list",
+          "  id:: blk_list000000",
+          "",
+        ].join("\n"),
+      }),
+      [
+        {
+          op: "setProps",
+          id: "blk_colour0000",
+          props: featureProps({ type: "text", multi: true }),
+        },
+      ],
+      1,
+    )
+    const state = boardFeatures(snapshot, "b")
+    expect(state.map((s) => s.feature.id)).toEqual(["blk_colour0000"])
+    expect(state[0].feature).toEqual({
+      id: "blk_colour0000",
+      label: "Colour",
+      type: "text",
+      multi: true,
+      notes: "",
+    })
+    expect(state[0].values.map((v) => v.text)).toEqual(["Teal"])
+  })
+
+  it("reads a legacy name trimmed and whatever its case, the first only, never a deeper one", () => {
     const snapshot = graphOf({
       b: [
         "- Notes",
         "  id:: blk_notes00000",
         "  - Location",
         "    id:: blk_deep000000",
-        "- Location",
+        "- location ",
         "  id:: blk_first00000",
         "- Location",
         "  id:: blk_second0000",
+        "- Link",
+        "  id:: blk_link000000",
         "",
       ].join("\n"),
     })
-    expect(featureBlockId(snapshot, "b", LOCATION)).toBe("blk_first00000")
-  })
-})
-
-describe("boardFeatures", () => {
-  it("lists every feature, with the values of the ones on the page", () => {
-    const snapshot = boardOf()
     const state = boardFeatures(snapshot, "b")
-    expect(state.map((s) => s.feature.label)).toEqual(BOARD_FEATURES.map((f) => f.label))
-    expect(state[0]).toEqual({
-      feature: LOCATION,
-      blockId: "blk_location00",
-      values: [
-        { id: "blk_mauritius0", text: "Mauritius" },
-        { id: "blk_lisbon0000", text: "Lisbon" },
-      ],
-    })
-    expect(state[1]).toEqual({ feature: FIXTURE, blockId: null, values: [] })
+    expect(state.map((s) => [s.feature.id, s.feature.type, s.feature.multi])).toEqual([
+      ["blk_first00000", "place", false],
+      ["blk_link000000", "link", true],
+    ])
+    expect(state[1].feature.notes).toBe("")
+  })
+
+  it("follows the blocks' order on the page, and a rename keeps the feature", () => {
+    const snapshot = boardOf()
+    const renamed = applyOps(snapshot, [{ op: "setText", id: OBJECT, text: "Thing" }], NOW)
+    expect(boardFeatures(renamed, "b").map((s) => [s.feature.id, s.feature.label])).toEqual([
+      [LOCATION, "Location"],
+      [OBJECT, "Thing"],
+    ])
+    const swapped = applyOps(
+      renamed,
+      [{ op: "link", source: "b", destination: OBJECT, sortKey: "0" }],
+      NOW,
+    )
+    expect(boardFeatures(swapped, "b").map((s) => s.feature.id)).toEqual([OBJECT, LOCATION])
   })
 
   it("does not read a picture under a feature as a value", () => {
@@ -130,6 +247,12 @@ describe("boardFeatures", () => {
       b: `Location\n  id:: blk_location00\n  ${img(9)}\n    id:: blk_stray00000\n`,
     })
     expect(boardFeatures(snapshot, "b")[0].values).toEqual([])
+  })
+
+  it("is empty for a note with no features, and finds one feature by its block", () => {
+    expect(boardFeatures(graphOf({ b: `${img(1)}\n` }), "b")).toEqual([])
+    expect(boardFeature(boardOf(), "b", OBJECT)?.feature.label).toBe("Object")
+    expect(boardFeature(boardOf(), "b", "blk_pic1000000")).toBeNull()
   })
 })
 
@@ -211,23 +334,18 @@ describe("setCaptionOps", () => {
 })
 
 describe("setValueOps", () => {
-  it("creates the feature and the value the first time, at the top of the page", () => {
+  it("creates the value under the feature the first time, and links the picture beneath it", () => {
     const snapshot = boardOf()
-    const ops = setValueOps(snapshot, "b", FIXTURE, "blk_pic2000000", { text: " Lamp " })
-    expect(kinds(ops)).toEqual(["create", "link", "create", "link", "link"])
+    const ops = setValueOps(snapshot, "b", OBJECT, "blk_pic2000000", { text: " Lamp " })
+    expect(kinds(ops)).toEqual(["create", "link", "link"])
     const next = applyOps(snapshot, ops, NOW)
-    const [fixture] = boardFeatures(next, "b").filter((s) => s.feature === FIXTURE)
-    expect(fixture.blockId).not.toBeNull()
-    expect(fixture.values.map((v) => v.text)).toEqual(["Lamp"])
-    expect(imageValues(next, fixture, "blk_pic2000000")).toEqual(fixture.values)
-    // Features together at the top, the pictures where they were.
-    expect(childIdsOf(next, "b")).toEqual([
-      "blk_location00",
-      fixture.blockId,
-      "blk_pic1000000",
-      "blk_pic2000000",
-    ])
-    expect(next.nodes.get(fixture.blockId as string)?.notes_id).toBe("b")
+    const object = stateOf(next, OBJECT)
+    expect(object.values.map((v) => v.text)).toEqual(["Lamp"])
+    expect(imageValues(next, object, "blk_pic2000000")).toEqual(object.values)
+    expect(next.nodes.get(object.values[0].id)?.notes_id).toBe("b")
+    expect(next.nodes.get(object.values[0].id)?.type).toBe("ul")
+    // The page is as it was: no feature is made here.
+    expect(childIdsOf(next, "b")).toEqual(childIdsOf(snapshot, "b"))
   })
 
   it("reuses an existing value by text, whatever its case", () => {
@@ -263,23 +381,23 @@ describe("setValueOps", () => {
     let snapshot = boardOf()
     snapshot = applyOps(
       snapshot,
-      setValueOps(snapshot, "b", FIXTURE, "blk_pic1000000", { text: "Lamp" }),
+      setValueOps(snapshot, "b", OBJECT, "blk_pic1000000", { text: "Lamp" }),
       NOW,
     )
     snapshot = applyOps(
       snapshot,
-      setValueOps(snapshot, "b", FIXTURE, "blk_pic1000000", { text: "Decking" }),
+      setValueOps(snapshot, "b", OBJECT, "blk_pic1000000", { text: "Decking" }),
       NOW,
     )
-    const [fixture] = boardFeatures(snapshot, "b").filter((s) => s.feature === FIXTURE)
-    expect(fixture.values.map((v) => v.text)).toEqual(["Lamp", "Decking"])
-    expect(imageValues(snapshot, fixture, "blk_pic1000000").map((v) => v.text)).toEqual([
+    const object = stateOf(snapshot, OBJECT)
+    expect(object.values.map((v) => v.text)).toEqual(["Lamp", "Decking"])
+    expect(imageValues(snapshot, object, "blk_pic1000000").map((v) => v.text)).toEqual([
       "Lamp",
       "Decking",
     ])
   })
 
-  it("is nothing when the picture already carries the value, or the ref names nothing", () => {
+  it("is nothing when the picture already carries the value, or the ref or feature names nothing", () => {
     const snapshot = boardOf()
     expect(
       setValueOps(snapshot, "b", LOCATION, "blk_pic1000000", { id: "blk_mauritius0" }),
@@ -289,6 +407,13 @@ describe("setValueOps", () => {
       setValueOps(snapshot, "b", LOCATION, "blk_pic1000000", { id: "blk_nope000000" }),
     ).toEqual([])
     expect(setValueOps(snapshot, "nope", LOCATION, "blk_pic1000000", { text: "x" })).toEqual([])
+    // A feature is its block: a block that is not one takes no value.
+    expect(setValueOps(snapshot, "b", "blk_nope000000", "blk_pic1000000", { text: "x" })).toEqual(
+      [],
+    )
+    expect(setValueOps(snapshot, "b", "blk_pic1000000", "blk_pic2000000", { text: "x" })).toEqual(
+      [],
+    )
     // A note without the property is not a board, whatever it holds.
     const plain = applyOps(
       snapshot,
@@ -304,7 +429,7 @@ describe("setValueOps", () => {
     const snapshot = graphOf({
       b: [
         "object",
-        "  id:: blk_fixture000",
+        "  id:: blk_byhand0000",
         "  - Lamp",
         "    id:: blk_lamp000000",
         img(5),
@@ -312,7 +437,8 @@ describe("setValueOps", () => {
         "",
       ].join("\n"),
     })
-    const ops = setValueOps(snapshot, "b", FIXTURE, "blk_pic5000000", { text: "Lamp" })
+    expect(boardFeatures(snapshot, "b")[0].feature.id).toBe("blk_byhand0000")
+    const ops = setValueOps(snapshot, "b", "blk_byhand0000", "blk_pic5000000", { text: "Lamp" })
     expect(ops).toEqual([
       expect.objectContaining({
         op: "link",
@@ -378,9 +504,9 @@ describe("inverseOps", () => {
     return applyOps(after, inverse as Op[], NOW + 1)
   }
 
-  it("puts back a first value set: the feature, the value and the link go", () => {
+  it("puts back a first value set: the value and the link go", () => {
     const snapshot = boardOf()
-    const ops = setValueOps(snapshot, "b", FIXTURE, "blk_pic2000000", { text: "Lamp" })
+    const ops = setValueOps(snapshot, "b", OBJECT, "blk_pic2000000", { text: "Lamp" })
     const back = roundTrip(snapshot, ops)
     expect(walk(back, "b")).toBe(walk(snapshot, "b"))
     expect(back.nodes.size).toBe(snapshot.nodes.size)
@@ -406,22 +532,46 @@ describe("inverseOps", () => {
 })
 
 describe("tagFeaturesOf", () => {
-  it("names every name feature, with the values in use", () => {
-    const meaningOf = (label: string) => {
-      const feature = BOARD_FEATURES.find((each) => each.label === label)
-      return feature?.kind === "text" ? feature.meaning : undefined
-    }
+  it("names every text and place feature, with its notes and the values in use", () => {
     expect(tagFeaturesOf(boardOf(), "b")).toEqual([
       {
         label: "Location",
         multi: false,
-        meaning: meaningOf("Location"),
+        notes: DEFAULT_FEATURES[0].spec.notes,
         values: ["Mauritius", "Lisbon"],
+        place: true,
       },
-      { label: "Object", multi: true, meaning: meaningOf("Object"), values: [] },
-      { label: "Material", multi: true, meaning: meaningOf("Material"), values: [] },
+      { label: "Object", multi: true, notes: "the thing the picture is of", values: [] },
     ])
-    expect(meaningOf("Object")).toContain("the thing the picture is of")
+    expect(DEFAULT_FEATURES[1].spec.notes).toContain("the thing the picture is of")
+  })
+
+  it("leaves out a link feature, and the notes of a feature with none", () => {
+    let snapshot = boardOf()
+    snapshot = applyOps(snapshot, addFeatureOps(snapshot, "b", "blk_added00000"), NOW)
+    snapshot = applyOps(
+      snapshot,
+      [
+        { op: "setText", id: "blk_added00000", text: "Source" },
+        {
+          op: "setProps",
+          id: "blk_added00000",
+          props: featureProps({ type: "link", multi: true }),
+        },
+      ],
+      NOW,
+    )
+    snapshot = applyOps(snapshot, addFeatureOps(snapshot, "b", "blk_colour0000"), NOW)
+    expect(tagFeaturesOf(snapshot, "b").map((feature) => feature.label)).toEqual([
+      "Location",
+      "Object",
+      "New feature",
+    ])
+    expect(tagFeaturesOf(snapshot, "b")[2]).toEqual({
+      label: "New feature",
+      multi: true,
+      values: [],
+    })
   })
 })
 
@@ -435,7 +585,7 @@ describe("suggestionOps", () => {
     ],
   }
 
-  it("captions and tags an untagged picture in one batch, creating what is missing", () => {
+  it("captions and tags an untagged picture in one batch, creating the values it lacks", () => {
     const snapshot = boardOf()
     const ops = suggestionOps(snapshot, "b", "blk_pic2000000", suggestion, NOW)
     const next = applyOps(snapshot, ops, NOW)
@@ -450,10 +600,8 @@ describe("suggestionOps", () => {
       "Lamp",
       "Pendant",
     ])
-    // One Object block, not one per value.
-    expect(
-      childIdsOf(next, "b").filter((id) => next.nodes.get(id)?.text === "Object"),
-    ).toHaveLength(1)
+    // Material names no feature on this board, so nothing is made for it.
+    expect(childIdsOf(next, "b")).toEqual(childIdsOf(snapshot, "b"))
     // And undone as one.
     const undone = applyOps(next, inverseOps(ops, snapshot) as Op[], NOW)
     expect(walk(undone, "b")).toBe(walk(snapshot, "b"))
@@ -464,7 +612,7 @@ describe("suggestionOps", () => {
     snapshot = applyOps(snapshot, setCaptionOps(snapshot, "blk_pic1000000", "Mine"), NOW)
     snapshot = applyOps(
       snapshot,
-      setValueOps(snapshot, "b", FIXTURE, "blk_pic1000000", { text: "Lamp" }),
+      setValueOps(snapshot, "b", OBJECT, "blk_pic1000000", { text: "Lamp" }),
       NOW,
     )
     // The picture has a caption, is in Mauritius, and carries Lamp.
@@ -487,6 +635,15 @@ describe("suggestionOps", () => {
     expect(suggestionOps(snapshot, "b", "blk_pic2000000", empty, NOW)).toEqual([])
     expect(suggestionOps(snapshot, "b", "blk_missing000", suggestion, NOW)).toEqual([])
     expect(suggestionOps(snapshot, "nope", "blk_pic2000000", suggestion, NOW)).toEqual([])
+  })
+
+  it("reads the answer by the feature's label, as the board names it now", () => {
+    const snapshot = applyOps(boardOf(), [{ op: "setText", id: OBJECT, text: "Thing" }], NOW)
+    const answer = { caption: "", features: [{ label: "thing", values: ["Lamp"] }] }
+    const ops = suggestionOps(snapshot, "b", "blk_pic2000000", answer, NOW)
+    expect(kinds(ops)).toEqual(["create", "link", "link"])
+    const asked = { caption: "", features: [{ label: "Object", values: ["Lamp"] }] }
+    expect(suggestionOps(snapshot, "b", "blk_pic2000000", asked, NOW)).toEqual([])
   })
 
   it("links the board's own value when the text matches one in use, whatever its case", () => {
@@ -516,7 +673,7 @@ describe("resetImageOps", () => {
     snapshot = applyOps(snapshot, setCaptionOps(snapshot, "blk_pic1000000", "Mine"), NOW)
     snapshot = applyOps(
       snapshot,
-      setValueOps(snapshot, "b", FIXTURE, "blk_pic1000000", { text: "Lamp" }),
+      setValueOps(snapshot, "b", OBJECT, "blk_pic1000000", { text: "Lamp" }),
       NOW,
     )
     // In Mauritius, with a lamp.
@@ -614,23 +771,36 @@ describe("where a picture was taken", () => {
 })
 
 describe("a link feature", () => {
-  const LINK = BOARD_FEATURES[3]
+  const LINK = "blk_source0000"
   const url = "https://www.made.com/lamp"
+  /** The fixture with a link feature, Source, after the others. */
+  const withLink = () =>
+    applyOps(
+      boardOf(),
+      [
+        {
+          op: "create",
+          id: LINK,
+          type: "ul",
+          text: "Source",
+          props: featureProps({ type: "link", multi: true }),
+          notesId: "b",
+        },
+        { op: "link", source: "b", destination: LINK, sortKey: "a5" },
+      ],
+      1,
+    )
   /** A board whose first picture has been given the address: the card made,
    * and its id. */
   const withCard = () => {
-    const snapshot = boardOf()
+    const snapshot = withLink()
     const next = applyOps(
       snapshot,
       setValueOps(snapshot, "b", LINK, "blk_pic1000000", { url }),
       NOW,
     )
-    return { snapshot: next, card: boardFeatures(next, "b")[3].values[0].id }
+    return { snapshot: next, card: stateOf(next, LINK).values[0].id }
   }
-
-  it("is the last of the preset, takes several values, and its values are addresses", () => {
-    expect(LINK).toEqual({ label: "Link", multi: true, kind: "link" })
-  })
 
   it("takes an address with or without its scheme, and nothing that is not one", () => {
     expect(boardLinkUrl(" made.com/lamp ")).toBe("https://made.com/lamp")
@@ -639,21 +809,37 @@ describe("a link feature", () => {
     expect(boardLinkUrl("")).toBeNull()
   })
 
-  it("makes the Link block and a card titled by the host, and links the picture under it", () => {
-    const snapshot = boardOf()
+  it("makes a card titled by the host, and links the picture under it", () => {
+    const snapshot = withLink()
     const ops = setValueOps(snapshot, "b", LINK, "blk_pic2000000", { url: "www.made.com/lamp" })
-    expect(kinds(ops)).toEqual(["create", "link", "create", "link", "link"])
+    expect(kinds(ops)).toEqual(["create", "link", "link"])
     const next = applyOps(snapshot, ops, NOW)
-    const link = boardFeatures(next, "b")[3]
+    const link = stateOf(next, LINK)
     expect(link.values).toEqual([{ id: expect.any(String), text: "made.com", link: { url } }])
     const card = link.values[0].id
     expect(next.nodes.get(card)?.type).toBe("link")
     expect(imageValues(next, link, "blk_pic2000000")).toEqual(link.values)
     expect(parentIdsOf(next, "blk_pic2000000")).toContain(card)
-    // In the outline: the card beneath the Link block, the picture beneath
-    // the card, as markdown writes a link block.
+    // In the outline: the card beneath the feature block, the picture
+    // beneath the card, as markdown writes a link block.
     expect(walk(next, "b")).toContain("[made.com](https://www.made.com/lamp)")
     expect(childIdsOf(next, card)).toEqual(["blk_pic2000000"])
+  })
+
+  it("names the card by the title given, and shows a card with no title by its host", () => {
+    const snapshot = withLink()
+    const ops = setValueOps(snapshot, "b", LINK, "blk_pic2000000", {
+      url,
+      title: " Oak lamp ",
+    })
+    const next = applyOps(snapshot, ops, NOW)
+    expect(stateOf(next, LINK).values.map((v) => v.text)).toEqual(["Oak lamp"])
+    const untitled = applyOps(
+      next,
+      [{ op: "setText", id: stateOf(next, LINK).values[0].id, text: "" }],
+      NOW,
+    )
+    expect(stateOf(untitled, LINK).values.map((v) => v.text)).toEqual(["made.com"])
   })
 
   it("reuses the board's card for the same address, a trailing slash aside", () => {
@@ -665,13 +851,13 @@ describe("a link feature", () => {
   })
 
   it("makes nothing of a name, of an address that is not one, or of an address to a name feature", () => {
-    const snapshot = boardOf()
+    const snapshot = withLink()
     expect(setValueOps(snapshot, "b", LINK, "blk_pic2000000", { text: "made.com" })).toEqual([])
     expect(setValueOps(snapshot, "b", LINK, "blk_pic2000000", { url: "a lamp" })).toEqual([])
     expect(setValueOps(snapshot, "b", LOCATION, "blk_pic2000000", { url })).toEqual([])
   })
 
-  it("reads only the link blocks under a Link block written by hand as values", () => {
+  it("reads only the link blocks under a legacy Link block written by hand as values", () => {
     const snapshot = applyOps(
       graphOf({
         b: [
@@ -697,11 +883,11 @@ describe("a link feature", () => {
       ],
       1,
     )
-    const link = boardFeatures(snapshot, "b")[3]
-    expect(link.blockId).toBe("blk_link000000")
-    expect(link.values).toEqual([{ id: "blk_card000000", text: "", link: { url } }])
+    const link = stateOf(snapshot, "blk_link000000")
+    expect(link.feature.type).toBe("link")
+    expect(link.values).toEqual([{ id: "blk_card000000", text: "made.com", link: { url } }])
     // A picture given that address goes under the card that is there.
-    expect(setValueOps(snapshot, "b", LINK, "blk_pic1000000", { url })).toEqual([
+    expect(setValueOps(snapshot, "b", "blk_link000000", "blk_pic1000000", { url })).toEqual([
       expect.objectContaining({
         op: "link",
         source: "blk_card000000",
@@ -718,7 +904,7 @@ describe("a link feature", () => {
       { op: "unlink", source: "blk_mauritius0", destination: "blk_pic1000000" },
       { op: "unlink", source: card, destination: "blk_pic1000000" },
     ])
-    const before = boardOf()
+    const before = withLink()
     const ops = setValueOps(before, "b", LINK, "blk_pic2000000", { url })
     const after = applyOps(before, ops, NOW)
     const back = applyOps(after, inverseOps(ops, before) as Op[], NOW + 1)
@@ -740,7 +926,7 @@ describe("a link feature", () => {
       const ops = linkPreviewOps(snapshot, card, url, preview)
       expect(kinds(ops)).toEqual(["setProps", "setText"])
       const next = applyOps(snapshot, ops, NOW)
-      expect(boardFeatures(next, "b")[3].values).toEqual([
+      expect(stateOf(next, LINK).values).toEqual([
         {
           id: card,
           text: "Oak pendant lamp",
@@ -767,13 +953,273 @@ describe("a link feature", () => {
   })
 
   it("is not told to the model, and nothing the model says of one is applied", () => {
-    const snapshot = boardOf()
+    const snapshot = withLink()
     expect(tagFeaturesOf(snapshot, "b").map((feature) => feature.label)).toEqual([
       "Location",
       "Object",
-      "Material",
     ])
-    const suggestion = { caption: "", features: [{ label: "Link", values: ["https://made.com"] }] }
+    const suggestion = {
+      caption: "",
+      features: [{ label: "Source", values: ["https://made.com"] }],
+    }
     expect(suggestionOps(snapshot, "b", "blk_pic2000000", suggestion, NOW)).toEqual([])
+  })
+})
+
+describe("the defaults", () => {
+  it("are written onto a new board as blocks with the prop, in order, after any feature there", () => {
+    const empty = graphOf({ b: `${img(1)}\n  id:: blk_pic1000000\n` })
+    const ops = defaultFeatureOps(empty, "b")
+    expect(kinds(ops)).toEqual([
+      "create",
+      "link",
+      "create",
+      "link",
+      "create",
+      "link",
+      "create",
+      "link",
+    ])
+    const next = applyOps(empty, ops, NOW)
+    const features = boardFeatures(next, "b")
+    expect(features.map((s) => [s.feature.label, s.feature.type, s.feature.multi])).toEqual([
+      ["Location", "place", false],
+      ["Object", "text", true],
+      ["Material", "text", true],
+      ["Link", "link", true],
+    ])
+    expect(features.map((s) => s.feature.notes)).toEqual(
+      DEFAULT_FEATURES.map((entry) => entry.spec.notes ?? ""),
+    )
+    // Each a bullet carrying the prop, before the picture.
+    for (const { feature } of features) {
+      const node = next.nodes.get(feature.id)
+      expect(node?.type).toBe("ul")
+      expect(node?.notes_id).toBe("b")
+      expect(featureSpecOf(parseProps(node?.props ?? null))).toEqual(
+        DEFAULT_FEATURES.find((entry) => entry.label === feature.label)?.spec,
+      )
+    }
+    expect(childIdsOf(next, "b").map((id) => next.nodes.get(id)?.text)).toEqual([
+      "Location",
+      "Object",
+      "Material",
+      "Link",
+      "",
+    ])
+    expect(childIdsOf(next, "b").at(-1)).toBe("blk_pic1000000")
+  })
+
+  it("leave a default the board already has by label, and are nothing for a plain note", () => {
+    const snapshot = boardOf()
+    const ops = defaultFeatureOps(snapshot, "b")
+    expect(kinds(ops)).toEqual(["create", "link", "create", "link"])
+    const next = applyOps(snapshot, ops, NOW)
+    expect(boardFeatures(next, "b").map((s) => s.feature.label)).toEqual([
+      "Location",
+      "Object",
+      "Material",
+      "Link",
+    ])
+    // Together at the top, the pictures where they were.
+    expect(childIdsOf(next, "b").slice(-2)).toEqual(["blk_pic1000000", "blk_pic2000000"])
+    const plain = graphOf({ b: "" })
+    const unmade = applyOps(plain, [{ op: "setProps", id: "b", props: null }], NOW)
+    expect(defaultFeatureOps(unmade, "b")).toEqual([])
+  })
+})
+
+describe("the Features editor", () => {
+  it("adds a text feature named New feature after the others, with the prop", () => {
+    const snapshot = boardOf()
+    const ops = addFeatureOps(snapshot, "b", "blk_added00000")
+    expect(kinds(ops)).toEqual(["create", "link"])
+    const next = applyOps(snapshot, ops, NOW)
+    expect(boardFeatures(next, "b").map((s) => s.feature.id)).toEqual([
+      LOCATION,
+      OBJECT,
+      "blk_added00000",
+    ])
+    expect(stateOf(next, "blk_added00000").feature).toEqual({
+      id: "blk_added00000",
+      label: "New feature",
+      type: "text",
+      multi: true,
+      notes: "",
+    })
+    expect(childIdsOf(next, "b")).toEqual([
+      LOCATION,
+      OBJECT,
+      "blk_added00000",
+      "blk_pic1000000",
+      "blk_pic2000000",
+    ])
+    expect(addFeatureOps(next, "b", "blk_added00000")).toEqual([])
+    expect(addFeatureOps(snapshot, "nope", "blk_other00000")).toEqual([])
+  })
+
+  it("renames by the block's text, and the rest by the prop, stamping a legacy feature", () => {
+    const snapshot = boardOf()
+    const ops = updateFeatureOps(snapshot, "b", LOCATION, { label: " Place ", multi: true })
+    expect(ops).toEqual([
+      { op: "setText", id: LOCATION, text: "Place" },
+      {
+        op: "setProps",
+        id: LOCATION,
+        props: featureProps({
+          type: "place",
+          multi: true,
+          notes: DEFAULT_FEATURES[0].spec.notes,
+        }),
+      },
+    ])
+    const next = applyOps(snapshot, ops, NOW)
+    // The same feature, its values still its own.
+    const place = stateOf(next, LOCATION)
+    expect(place.feature.label).toBe("Place")
+    expect(place.values.map((v) => v.text)).toEqual(["Mauritius", "Lisbon"])
+    expect(imageValues(next, place, "blk_pic1000000").map((v) => v.text)).toEqual(["Mauritius"])
+    // A notes cleared is left out of the prop; nothing to change is nothing.
+    const cleared = updateFeatureOps(next, "b", LOCATION, { notes: "  " })
+    expect(cleared).toEqual([
+      { op: "setProps", id: LOCATION, props: featureProps({ type: "place", multi: true }) },
+    ])
+    expect(updateFeatureOps(next, "b", LOCATION, { label: "Place" })).toEqual([])
+    expect(updateFeatureOps(next, "b", LOCATION, { label: "" })).toEqual([])
+    expect(updateFeatureOps(next, "b", "blk_pic1000000", { label: "x" })).toEqual([])
+  })
+
+  it("keeps the other props of the block, and changes a type between names freely", () => {
+    const snapshot = applyOps(
+      boardOf(),
+      [
+        {
+          op: "setProps",
+          id: OBJECT,
+          props: JSON.stringify({ align: "left", feature: OBJECT_SPEC }),
+        },
+      ],
+      NOW,
+    )
+    const next = applyOps(snapshot, updateFeatureOps(snapshot, "b", OBJECT, { type: "place" }), NOW)
+    expect(parseProps(next.nodes.get(OBJECT)?.props ?? null)).toEqual({
+      align: "left",
+      feature: { ...OBJECT_SPEC, type: "place" },
+    })
+  })
+
+  it("refuses a change between a name and a link while the feature has values", () => {
+    const snapshot = boardOf()
+    // Location has values: it stays a place, the rest of the patch goes through.
+    expect(updateFeatureOps(snapshot, "b", LOCATION, { type: "link", multi: true })).toEqual([
+      {
+        op: "setProps",
+        id: LOCATION,
+        props: featureProps({
+          type: "place",
+          multi: true,
+          notes: DEFAULT_FEATURES[0].spec.notes,
+        }),
+      },
+    ])
+    // Object has none: it may become a link.
+    const linked = applyOps(
+      snapshot,
+      updateFeatureOps(snapshot, "b", OBJECT, { type: "link" }),
+      NOW,
+    )
+    expect(stateOf(linked, OBJECT).feature.type).toBe("link")
+    const withCard = applyOps(
+      linked,
+      setValueOps(linked, "b", OBJECT, "blk_pic2000000", { url: "https://made.com" }),
+      NOW,
+    )
+    expect(updateFeatureOps(withCard, "b", OBJECT, { type: "text" })).toEqual([])
+  })
+
+  it("removes a feature by taking the prop off its block, deleting nothing, and Undo puts it back", () => {
+    const snapshot = boardOf()
+    // Object, renamed Thing, carries the prop and another prop beside it.
+    const kept = applyOps(
+      snapshot,
+      [
+        { op: "setText", id: OBJECT, text: "Thing" },
+        {
+          op: "setProps",
+          id: OBJECT,
+          props: JSON.stringify({ align: "left", feature: OBJECT_SPEC }),
+        },
+      ],
+      NOW,
+    )
+    const withValue = applyOps(
+      kept,
+      setValueOps(kept, "b", OBJECT, "blk_pic2000000", { text: "Lamp" }),
+      NOW,
+    )
+    const lamp = stateOf(withValue, OBJECT).values[0].id
+    const ops = removeFeatureOps(withValue, "b", OBJECT)
+    expect(ops).toEqual([{ op: "setProps", id: OBJECT, props: JSON.stringify({ align: "left" }) }])
+    const next = applyOps(withValue, ops, NOW)
+    // No longer a feature; the block, its value and the picture's link stay.
+    expect(boardFeatures(next, "b").map((s) => s.feature.id)).toEqual([LOCATION])
+    expect(childIdsOf(next, "b")).toEqual(childIdsOf(withValue, "b"))
+    expect(childIdsOf(next, OBJECT)).toEqual([lamp])
+    expect(parentIdsOf(next, "blk_pic2000000")).toContain(lamp)
+    expect(next.nodes.get(OBJECT)?.text).toBe("Thing")
+    // And back, whole.
+    const inverse = inverseOps(ops, withValue)
+    expect(inverse).toEqual([
+      { op: "setProps", id: OBJECT, props: withValue.nodes.get(OBJECT)?.props },
+    ])
+    const undone = applyOps(next, inverse as Op[], NOW)
+    expect(stateOf(undone, OBJECT).feature).toEqual({ id: OBJECT, label: "Thing", ...OBJECT_SPEC })
+    expect(stateOf(undone, OBJECT).values.map((v) => v.id)).toEqual([lamp])
+    expect(removeFeatureOps(snapshot, "b", "blk_pic1000000")).toEqual([])
+  })
+
+  it("marks a removed feature named as one of old, so its name does not make it one again", () => {
+    const snapshot = boardOf()
+    const ops = removeFeatureOps(snapshot, "b", LOCATION)
+    expect(ops).toEqual([
+      { op: "setProps", id: LOCATION, props: JSON.stringify({ feature: false }) },
+    ])
+    const next = applyOps(snapshot, ops, NOW)
+    expect(boardFeatures(next, "b").map((s) => s.feature.id)).toEqual([OBJECT])
+    expect(next.nodes.has("blk_mauritius0")).toBe(true)
+    expect(parentIdsOf(next, "blk_pic1000000")).toContain("blk_mauritius0")
+    // Undo takes the prop off again, and the name reads as the feature it was.
+    const undone = applyOps(next, inverseOps(ops, snapshot) as Op[], NOW)
+    expect(boardFeatures(undone, "b").map((s) => s.feature.id)).toEqual([LOCATION, OBJECT])
+    // The defaults would write Location afresh: the marked block is content now.
+    expect(defaultFeatureOps(next, "b").map((op) => op.op)).toEqual([
+      "create",
+      "link",
+      "create",
+      "link",
+      "create",
+      "link",
+    ])
+  })
+})
+
+describe("a feature block in the outline", () => {
+  it("keeps its prop through a text edit and a move made in the editor", () => {
+    const snapshot = boardOf()
+    const doc = noteDoc("b", snapshot)
+    if (!doc) throw new Error("no doc")
+    // Retitle the Object block as the editor does, and move it to the top.
+    const retitled = updateText(doc, OBJECT, "Thing")
+    const moved = moveBlocks(retitled, [keyOf(null, OBJECT)], "up")
+    const ops = docToOps("b", moved, snapshot)
+    expect(kinds(ops).sort()).toEqual(["link", "setText"])
+    const next = applyOps(snapshot, ops, NOW)
+    expect(next.nodes.get(OBJECT)?.props).toBe(featureProps(OBJECT_SPEC))
+    expect(boardFeatures(next, "b").map((s) => [s.feature.id, s.feature.label])).toEqual([
+      [OBJECT, "Thing"],
+      [LOCATION, "Location"],
+    ])
+    // And the walk back carries it, so the next edit starts from it.
+    expect(noteDoc("b", next)?.blocks[OBJECT].props).toEqual(JSON.parse(featureProps(OBJECT_SPEC)))
   })
 })

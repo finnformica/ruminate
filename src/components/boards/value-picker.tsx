@@ -55,7 +55,7 @@ export function ValuePicker({
         ))}
         {values.length > 0 ? <DropdownMenu.Separator /> : null}
         <DropdownMenu.Item icon={<PlusIcon16 />} onClick={onNew}>
-          New {feature.label.toLowerCase()}…
+          New {feature.label.trim().toLowerCase() || "value"}…
         </DropdownMenu.Item>
       </DropdownMenu.Content>
     </DropdownMenu>

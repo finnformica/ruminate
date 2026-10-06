@@ -55,7 +55,7 @@ export function sortDirections(key: string): QualifierOption[] {
  * theirs.** The language reads a comma list as _either_ (`parent:a,b`) and a
  * repeated key as _both_ (`parent:a parent:b`) — the engine ANDs the
  * qualifiers and ORs within one (`searchBlocks`). A board's Filter leans on
- * that: each feature branch (Location, Fixture — `FilterBranch`,
+ * that: each feature branch (Location, Object — `FilterBranch`,
  * src/components/view-controls.tsx) writes a `parent:` qualifier of its own,
  * so Mauritius or Lisbon, and a lamp, is `parent:<mauritius>,<lisbon>
  * parent:<lamp>`. A branch addresses its qualifier by the values it offers

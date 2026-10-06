@@ -8,6 +8,7 @@ import { receivedSharesAtom, sharePermissions, sharedOriginAtom } from "../data/
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { developerDebugPreferenceAtom, useIsDeveloper } from "../hooks/is-developer"
 import { useNoteShare } from "../hooks/share"
+import { useMakeBoard } from "../hooks/board"
 import { useRenameNote, useSetNoteProps } from "../hooks/note"
 import { deleteNoteDialogAtom } from "./delete-note-dialog"
 import { shareDialogAtom } from "./share-note-dialog"
@@ -23,6 +24,7 @@ import {
   BoardIcon16,
   CopyIcon16,
   EditIcon16,
+  ListIcon16,
   MoreIcon16,
   NoteIcon16,
   PrinterIcon16,
@@ -99,12 +101,14 @@ interface EditorActions {
  * Sharing is the owner's alone: an own note, signed in.
  *
  * A note's default surface is one property on its page (docs/boards.md):
- * **Make this a board** sets it and opens the board, **Make this a note**
- * clears it, and a board's outline offers **Open board** to get back. Own
- * notes only (signed out, the sample graph in memory, as **New board**
- * does), and only where the caller can open the board (`openBoard`); a
- * daily or weekly note is what its id says it is, so neither is offered
- * one.
+ * **Make this a board** sets it — writing the default features onto the
+ * page as **New board** does (`useMakeBoard`) — and opens the board,
+ * **Make this a note** clears it, and a board's outline offers **Open
+ * board** to get back. Own notes only (signed out, the sample graph in
+ * memory, as **New board** does), and only where the caller can open the
+ * board (`openBoard`); a daily or weekly note is what its id says it is,
+ * so neither is offered one. The board page itself adds **Features**,
+ * which opens its Features editor (`openFeatures`).
  */
 export function useNoteMenuEntries() {
   const isSignedOut = useAtomValue(isSignedOutAtom)
@@ -114,6 +118,7 @@ export function useNoteMenuEntries() {
   const requestDelete = useSetAtom(deleteNoteDialogAtom)
   const openShare = useSetAtom(shareDialogAtom)
   const setNoteProps = useSetNoteProps()
+  const makeBoard = useMakeBoard()
   return React.useCallback(
     (
       noteId: string,
@@ -125,6 +130,8 @@ export function useNoteMenuEntries() {
         /** Opens the note's outline: what the board page passes instead,
          * being the board already. */
         openOutline?: () => void
+        /** Opens the board's Features editor: the board page's own. */
+        openFeatures?: () => void
       } = {},
     ) => {
       const shareId = jotaiStore.get(sharedOriginAtom).get(noteId)
@@ -169,6 +176,16 @@ export function useNoteMenuEntries() {
         ? []
         : kind === "board"
           ? [
+              ...(options.openFeatures
+                ? [
+                    {
+                      kind: "item" as const,
+                      label: "Features",
+                      icon: <ListIcon16 />,
+                      onSelect: () => options.openFeatures?.(),
+                    },
+                  ]
+                : []),
               options.openOutline
                 ? {
                     kind: "item",
@@ -199,7 +216,7 @@ export function useNoteMenuEntries() {
                   label: "Make this a board",
                   icon: <BoardIcon16 />,
                   onSelect: () => {
-                    setNoteProps(noteId, { [BOARD_PROP]: true })
+                    makeBoard(noteId)
                     options.openBoard?.()
                   },
                 },
@@ -237,7 +254,7 @@ export function useNoteMenuEntries() {
         },
       ] satisfies MenuEntry[]
     },
-    [jotaiStore, isSignedOut, renameNote, requestDelete, openShare, setNoteProps],
+    [jotaiStore, isSignedOut, renameNote, requestDelete, openShare, setNoteProps, makeBoard],
   )
 }
 
@@ -254,6 +271,7 @@ export function NoteActionsMenu({
   editor,
   reorder,
   surface = "outline",
+  onFeatures,
 }: {
   noteId: string
   className?: string
@@ -263,6 +281,8 @@ export function NoteActionsMenu({
   /** Where the menu is drawn: the board page says so, and gets the way to
    * the outline where every other surface gets the way to the board. */
   surface?: "outline" | "board"
+  /** Opens the board's Features editor: the board page passes it. */
+  onFeatures?: () => void
 }) {
   const entriesFor = useNoteMenuEntries()
   const navigate = useNavigate()
@@ -339,6 +359,7 @@ export function NoteActionsMenu({
                         params: { _splat: noteId },
                         search: { query: undefined },
                       }),
+                    openFeatures: onFeatures,
                   }
                 : { openBoard: () => navigate({ to: "/boards/$", params: { _splat: noteId } }) }),
             }),
