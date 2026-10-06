@@ -19,6 +19,8 @@ import { useDragReorder } from "../hooks/drag-reorder"
 import { shareOwnerName } from "../data/shares"
 import type { Note } from "../schema"
 import { typeGlyph } from "../blocks/registry"
+import { BlockKey, hasBlockKey } from "./block-editor/block-key"
+import { kindOf } from "./block-editor/block-kinds"
 import type { BlockType } from "../blocks/types"
 import { APP_SHORTCUTS, formatCombo } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
@@ -545,22 +547,41 @@ function ViewRows({
 }
 
 /**
- * The glyph a block view's row leads with: the block's own markdown marker
- * (`typeGlyph`: a bullet's `-`, a to-do's `[ ]`, a heading's `#`), in the
- * slot a note's favicon takes, so the row says what kind of block it opens
- * on the way the row in the note does. Mono and quiet, as the qualifier
- * picker draws the same glyphs; centred in the icon's square, and a
- * three-character glyph is let run a little past it rather than shrunk.
+ * The glyph a block view's row leads with: the block's KEY — the very glyph
+ * the block editor sets in the block's key slot (`BlockKey`: a bullet's
+ * dot, a to-do's box, a heading's `#`, a paragraph's `¶`) — in the slot a
+ * note's favicon takes, so the row says what kind of block it opens on the
+ * way the row in the note does, and the sidebar and the Views page never
+ * draw a type two ways. The key takes the icon's ink (`[&_.block-glyph]`
+ * below hands the glyphs `currentColor`, where in a row they carry their
+ * own), so it leans with the label when the row is current, as a favicon
+ * does. A figure has no key, its frame being its mark; in a list it has no
+ * frame either, so its row falls back to the markdown that stands for it
+ * (`typeGlyph`: a code fence, `![]`, `[]()`), mono and quiet.
  */
 function BlockGlyph({ type }: { type: BlockType }) {
-  const glyph = typeGlyph(type)
+  if (!hasBlockKey(type)) {
+    const glyph = typeGlyph(type)
+    return (
+      <span
+        aria-hidden
+        data-key={type}
+        className="grid size-icon place-items-center overflow-visible whitespace-nowrap font-mono text-xs leading-none tracking-tight"
+      >
+        {glyph}
+      </span>
+    )
+  }
   return (
     <span
       aria-hidden
-      data-glyph={glyph}
-      className="grid size-icon place-items-center overflow-visible whitespace-nowrap font-mono text-xs leading-none tracking-tight"
+      data-key={type}
+      className={cx(
+        "grid size-icon place-items-center font-content text-base leading-none [&_.block-glyph]:text-current [&_.block-glyph-fill]:bg-current",
+        kindOf(type).slot === "hash" && "font-bold",
+      )}
     >
-      {glyph}
+      <BlockKey type={type} />
     </span>
   )
 }

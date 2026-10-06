@@ -11,16 +11,13 @@ asks for it.
    that is _about_ the content — markers, guides, breadcrumbs, affordances — sits
    two or three steps down the gray ramp (`secondary` → `tertiary` → `border`).
    Never promote chrome to ink.
-2. **Quiet chrome, hover affordances.** Structural controls (collapse chevron,
-   hover surfaces) are invisible until their own area is hovered or they hold
-   focus, and they appear **without any layout shift** — always reserving their
-   space, only fading opacity. The collapse chevron reveals _in the block's own
-   key_: hovering the key slot (never the whole row) fades the bullet dot, `#`
-   or number out and the chevron in, in the same slot, together with its hover
-   square (see 6 for the checkbox and keyless blocks). Exception: a
-   _collapsed_ block keeps its chevron visible (the key stays hidden for the
-   duration), so hidden content is never a secret. Without a hovering pointer
-   (touch) the chevron simply stands in for a parent's key.
+2. **Quiet chrome, hover affordances.** Hover surfaces are invisible until
+   their own area is hovered or they hold focus, and they appear **without
+   any layout shift** — always reserving their space, only fading opacity.
+   The collapse chevron is the exception that proves it: a parent's chevron
+   is _always_ shown, in a column of its own before the key (6), so hidden
+   content is never a secret and no key ever fades or swaps for a control.
+   It stays quiet by ink (tertiary, like the keys) rather than by hiding.
 3. **Selection has its own color, and is drawn as a ring.** Hover is a neutral
    **fill**; selection is an accent **ring**. The two differ in _kind_, not in
    weight, and the difference says something true: a ring draws a boundary,
@@ -123,43 +120,45 @@ asks for it.
 5. **Generous reading rhythm.** Body line-height is 1.65 (`leading-relaxed` —
    defined for real in `tailwind.config.cjs`; it was previously a silent no-op).
    Headings tighten as they grow (1.25 at the top of the scale).
-6. **The key is the toggle; the guide hangs from it.** There is no collapse
-   gutter. Every block type owns the 15px marker slot, and a parent's chevron
-   lives in that slot: it swaps in for the key on hover (2) — a bullet dot, a
-   heading `#`, a number, a quote `>` — or simply appears in a paragraph's
-   empty slot. The indent guide is a 1px rule under the slot's centre — the
-   slot starts 4px into the content column (the surface's reach), so its
-   centre is 11.5px in and the rule sits at 11px — with children starting
-   24px in (`ml-[11px]` + rule + `pl-3`), so a guide never hangs from
-   anything but a slot and the markers never sit off the lines. A checkbox is
-   a control in its own right (a swap would leave a parent todo un-tickable),
-   so a parent todo's chevron sits _beside_ the slot, hugging the highlight
-   surface's left edge from outside (its ink ~3px off the edge, clear of the
-   parent's guide line 11px out when nested) — same reveal (hover its own
-   square, or the checkbox), same pin while collapsed — and that square is a
-   hit area only,
-   with no hover surface, so it never clashes with the box or the highlight
-   it straddles. The chevron's hover square is 20px,
-   with the small (4px) radius: inside the 27px-tall surface that is an even
-   ~3.5px inset on every side, because the slot's centre sits 13.5px in from
-   the surface's edge — the same as the surface's vertical centre. The
-   chevron itself is a filled triangle with softened corners. Affordances
-   float out of the flow (absolute/negative margin) so hover never moves
-   text.
-7. **One marker slot.** Every block marker — bullet dot, checkbox, ordered
-   number, heading `#`, quote `>` — occupies the same 15px slot (the
-   checkbox's width): dots centre in it; text glyphs right-align to its edge;
-   a paragraph leaves it empty. Body text therefore starts at one column
-   across all block types (dots, the checkbox and the quote's `>` centre in
-   the slot; `#` and numbers right-align). A quote's bar stands at the text
+6. **The chevron has a column; the key stands over the children's.** Every
+   row begins with a 17px chevron column, then the 15px key slot, then the
+   text. A parent's chevron lives in the column, always shown; a leaf's
+   column is empty, so the key and the text stay in one column whether or
+   not a row can fold. The chevron is one glyph in both states — an open
+   chevron, turned a quarter: down while open, right while closed — so
+   nothing fades, swaps or changes shape, and every key (a bullet dot, a
+   heading `#`, a number, a quote `>`, a paragraph `¶`, a to-do's checkbox)
+   keeps its slot and its own click. The level's indent is exactly the
+   distance from the column's centre to the key's (17/2 + the 8px gap +
+   15/2 = 24px; 28px on a coarse pointer, whose gap is 12px), so a parent's
+   key sits directly over its children's chevrons, and the indent guide —
+   a 1px rule under the parent's chevron, at 12px (the column starts 4px
+   into the content column, the surface's reach, so its centre is 12.5px
+   in) — hangs one indent to the left of them: the thread of a subtree
+   drops straight out of the control that folds it. The chevron's hover
+   square is 20px with the small (4px) radius: inside the 27px-tall surface
+   that is 4.5px inside the left edge and 3.5px inside the top and bottom.
+   Affordances float out of the flow (absolute/negative margin) so hover
+   never moves text.
+7. **One marker slot, and a key for every text block.** Every block marker
+   — bullet dot, checkbox, ordered number, heading `#`, quote `>`, paragraph
+   `¶` — occupies the same 15px slot (the checkbox's width): dots, the `#`
+   and the narrow glyphs centre in it; numbers right-align to its edge, so
+   a two-digit number grows into the gutter. Every
+   block with a text line of its own has a key; markdown has no mark for a
+   paragraph, so its pilcrow is a label where the dot is a marker, in the
+   same slot and the same faint ink. A figure — a picture, a link card, a
+   code block — has a frame of its own for a mark, so its slot stays empty,
+   and keeps its width. Body text therefore starts at one column across all
+   block types, and so does every figure. A quote's bar stands at the text
    column, in the glyph ink with rounded ends, and pushes the quote's text
    10px in — the one block whose text is set in from the column.
    The grey `#` is one component (`Hash`) everywhere it appears — note title,
    focus title, section headings — with no typography of its own: it inherits
    its parent's scale (the titles' 3xl, each heading's depth size and bold),
    so the hash is always the same size as the text beside it, only recolored
-   to tertiary. A large heading's hash outgrows the slot and overflows left,
-   past the surface's edge — the text column never moves. At the three
+   to tertiary. A large heading's hash outgrows the slot by a pixel or two
+   a side, into the gaps — the text column never moves. At the three
    larger heading scales the surface itself reaches further left
    (`[data-heading-scale]`, block-editor.css), by exactly the amount that
    makes the chevron's square as far from the left edge as from the top and
@@ -169,19 +168,18 @@ asks for it.
    (`--color-text-selected-chrome`, via `.block-glyph` / `.block-glyph-fill`):
    the selection's text tint never reaches an element with explicit ink.
    Controls (checkbox, chevron) keep their own. The note title's
-   hash sits in the same slot, so the title is set exactly as the outline's
-   top heading — but the title is not a row. On a wide page the whole header
-   (title, focus breadcrumb, focus title) hangs into the page gutter by the
-   marker-slot offset (`.note-header` + `--note-header-pull`,
-   block-editor.css; the page sets it with its padding), so the header's
-   text sits at the content column's edge, the hash in the gutter beside it,
-   and the outline reads as indented beneath the title rather than the title
-   as one more row. The pull is the page's to grant: it needs the 40px
+   hash sits in the same slot, after the same chevron column's room, so the
+   title is set exactly as the outline's top heading — but the title is not
+   a row. On a wide page the whole header (title, focus breadcrumb, focus
+   title) hangs into the page gutter by the key slot and its gap
+   (`.note-header` + `--note-header-pull`, block-editor.css; the page sets
+   it with its padding), so the outline reads as indented beneath the title
+   rather than the title as one more row. The pull is the page's to grant: it needs the 40px
    gutter, so a narrow page (16–20px) leaves the header at the text column.
    The rows never take it — the text column does not move. The hash is NOT a
    focus target, and neither is the bullet or the number — the markers read
    as typography, and focus stays on F / Cmd+., the block menu and the
-   phone's edit bar (a parent's key is its collapse toggle).
+   phone's edit bar (a parent folds from its chevron column).
 
 ## Type scale
 
@@ -239,25 +237,31 @@ where you are, and everything below the leading row reads as it does outside foc
 - **Headings breathe above:** top margin scales with the heading — 20 / 16 / 10 /
   6px by depth. Space belongs _above_ a heading (it opens a section), never
   below.
-- **Indent unit:** 24px per level (`ml-[11px]` + 1px rule + `pl-3`), guide
-  line under the key at 11px — every block type has one.
+- **Indent unit:** 24px per level (28px on a coarse pointer): the chevron
+  column's centre to the key's, so a parent's key stands over its
+  children's chevrons. The guide line sits under the chevron column at
+  12px — every row has one. Text starts 52px in (56px coarse).
 - **Highlight inset:** highlighted line surfaces give the text 6px of
   horizontal breathing room (symmetric — 6px inner padding each side, the
   surface extending 2px past the text column on both, via `-mx-0.5 px-1.5`;
   the note title's `-mx-0.5 pl-[29px] pr-0.5` extends the same 2px left) so
   the **text never moves** — only the background extends outward, into the
-  indent and the inter-row space. The 2px reach is what puts the key slot's
-  centre on the surface's vertical centre line, so the collapse chevron's
-  square sits evenly inside. Block
+  indent and the inter-row space. The 2px reach puts the chevron column's
+  centre 14.5px in from the surface's edge, a pixel off its vertical centre
+  line, so the collapse chevron's square sits near evenly inside. Block
   rhythm is untouched: the surface borrows the space between rows, it never
   adds any. The text column is sacred; surfaces flex around it.
 - **Header pull:** the note title, the focus breadcrumb and the focus title
   hang into the page gutter by `--note-header-pull` (`.note-header`,
-  block-editor.css): 27px — the marker-slot offset — once the page's gutter
-  is 40px (`@[640px]`), else 0. A plain negative margin on the header alone,
-  so the header's text moves to the column's edge and nothing in the rows
-  does. The breadcrumb hangs by the same amount, so its first crumb's text
-  keeps starting where the marker slot does — the focus title's `#`.
+  block-editor.css): 27px — the key slot and its gap — once the page's
+  gutter is 40px (`@[640px]`), else 0. A plain negative margin on the
+  header alone, so the outline reads as set in beneath the title's text by
+  that much and nothing in the rows moves. The title is laid out as a row
+  is, with the chevron column's room (25px) before its `#`, so a selected
+  title's ring stands as far from its hash as a heading row's does, and
+  pulled, the hash stands over the rows' chevron column. The breadcrumb
+  hangs and is set in by the same amounts, so its first crumb's text keeps
+  starting where the key slot does — the focus title's `#`.
 - **Vertical extension is conditional, per side.** The inter-row gap is 4px
   between nested rows and 6px between roots, so surfaces may only grow as far
   as their neighbour's paint allows. By default each side extends 2px
@@ -586,9 +590,9 @@ watches all of this frame by frame in a real browser. The rows below — and wha
 editor on the page — are in their final places at once and slide up over
 the ghost. Everything is a transform on the compositor, so nothing
 jitters, and it never holds the editor up: the state changes at once, so
-`Space` on repeat is as quick as ever. Nothing clips at rest, so a to-do's
-chevron beside its checkbox and a heading's hash, which reach beyond their
-row, always show. Reduced motion swaps the motion for a short fade.
+`Space` on repeat is as quick as ever. Nothing clips at rest, so a heading's
+hash, which reaches beyond its slot, always shows. Reduced motion swaps the
+motion for a short fade.
 
 **What never animates:**
 

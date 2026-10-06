@@ -416,10 +416,12 @@ export function searchTypeValues(): Record<string, readonly BlockType[]> {
 }
 
 /** The markdown glyph that stands for a type — what the qualifier picker
- * draws beside a `type:` row, and the sidebar beside a block view: the
- * type's marker, or what stands for it where the marker is not a prefix
- * (a numbered item's number, a code fence, an image's `![]`, a link
- * block's `[]()`, a paragraph's pilcrow). */
+ * draws beside a `type:` row, and the sidebar beside a block view of a
+ * type that has no key of its own (a figure): the type's marker, or what
+ * stands for it where the marker is not a prefix (a numbered item's
+ * number, a code fence, an image's `![]`, a link block's `[]()`, a
+ * paragraph's pilcrow). A block's KEY — the glyph its row carries — is
+ * `BlockKey` (`src/components/block-editor/block-key.tsx`). */
 export function typeGlyph(type: BlockType): string {
   return searchGlyph(defOf(type))
 }

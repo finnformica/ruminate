@@ -26,7 +26,7 @@ import { IconButton } from "../ui/icon-button"
 import { BlockContent } from "./block-content"
 import { LISTED_HEADING_DEPTH, headingScale, kindOf, type RowContext } from "./block-kinds"
 import { caretCoordinates, caretLineFlags, caretOffsetAtPoint } from "./caret"
-import { Hash } from "./hash"
+import { BlockKey } from "./block-key"
 import { LinkActionsContext, type LinkActions } from "./link-actions"
 import { SLASH_MENU_WIDTH, SlashMenu } from "./slash-menu"
 
@@ -201,13 +201,20 @@ export interface BlockDebugOptions {
  * body scale and keep the ordinary surface. */
 const HEADING_SCALE_NAMES: Record<number, "2xl" | "xl" | "lg"> = { 0: "2xl", 1: "xl", 2: "lg" }
 
-/** Row geometry, in px. Each level indents by `INDENT`: the guide line hangs
- * from the parent's key — a 1px rule under the centre of the 15px marker
- * slot, which starts 4px into the content column (the highlight surface's
- * -2px reach + 6px inner padding) — so the rule sits at `GUIDE_X`, and the
- * child's content starts `INDENT` in (rule + 12px of padding). */
+/** Row geometry, in px. A row is the 17px CHEVRON COLUMN, the row's gap, the
+ * 15px key slot, the gap again, then the text; the column starts 4px into
+ * the content column (the highlight surface's -2px reach + 6px inner
+ * padding), so its centre is 12.5px in and the key's centre 24px further on
+ * with the 8px gap (4 + 17 + 8 + 7.5 = 36.5). Each level indents by exactly
+ * that, so a parent's key stands directly over its children's chevrons: the
+ * indent is the column's centre-to-centre distance to the key, which is
+ * `INDENT` at the 8px gap and `COARSE_INDENT` at the coarse pointer's 12px
+ * (`coarse:gap-3`). The guide line hangs from the parent's chevron: a 1px
+ * rule at `GUIDE_X`, covering 12–13px, centred on the column's 12.5. Text
+ * starts 52px into the column (56px on a coarse pointer). */
 const INDENT = 24
-const GUIDE_X = 11
+const COARSE_INDENT = 28
+const GUIDE_X = 12
 /** Root rows sit 2px further apart than nested ones (which meet at their
  * 2px + 2px vertical padding). */
 const ROOT_GAP = 2
@@ -284,22 +291,17 @@ export function BlockItem({
   // the body's scale and its breathing room.
   const listed = !!api.fixedRoots
   const scaleDepth = listed ? LISTED_HEADING_DEPTH : depth
+  // The level's indent: the chevron-to-key distance, which the coarse
+  // pointer's wider marker gap stretches (see the geometry above).
+  const indent = api.coarsePointer ? COARSE_INDENT : INDENT
   const typo = kind.typography(depth, block, listed)
   // Whether this block owns a collapse toggle at all: parents only. The
   // row that closes a loop keeps its chevron too — the block has children,
-  // they are simply above it — pinned, greyed and inert, with the reason in
-  // its tooltip (focus on it to go round again).
+  // they are simply above it — greyed and inert, with the reason in its
+  // tooltip (focus on it to go round again).
   const looped = !!occurrence.looped
   const hasToggle = hasChildren || looped
-  // A marker slot is drawn unless the type has none AND nothing needs one.
-  const slotted = kind.slot !== "none" || hasToggle
-  const rowContext: RowContext = { block, occurrence, api, depth, editing, slotted }
-  // A ROOT of a results view (`api.fixedRoots`): its surface is set in by
-  // 8.5px at the sides, so every root's surface — a note's, a matched
-  // block's — shares one left edge, the one the page's search box sits on
-  // (the view pads by the reach). The margin still nets the text to the
-  // shared 4px column.
-  const wide = !!api.fixedRoots && depth === 0
+  const rowContext: RowContext = { block, occurrence, api, depth, editing }
   // Kept as context by a filter, not found by it (`BlockEditorApi.context`).
   const dimmed = api.context?.has(block.id) ?? false
 
@@ -659,44 +661,28 @@ export function BlockItem({
     api.onPaste(occurrence.key, before, pasted, after)
   }
 
-  // A paragraph's slot holds no key, so a parent paragraph has nothing for
-  // the chevron to swap with: left to the hover reveal, an open paragraph
-  // parent showed an empty slot and no sign of its fold. Its chevron is
-  // pinned visible instead, open or closed, as the key would be.
-  const keyless = kind.slot === "glyph" && !kind.glyph && !kind.glyphNode
-  const pinned = isCollapsed || looped || (hasToggle && keyless)
-  // Every block type but an image owns the 15px marker slot. Most carry a KEY there — a
-  // bullet dot, heading `#`, number, quote `>` — and the key is pure chrome,
-  // so on a parent it SWAPS for the chevron: hover the slot and the key fades
-  // out while the chevron fades in, in the same slot — nothing moves. A
-  // paragraph's slot is empty (its text still starts in the shared column).
-  // A todo's slot holds its checkbox — a control, which never swaps out (that
-  // would leave a parent todo un-tickable) — so a parent todo's chevron sits
-  // BESIDE the slot instead, in the gutter just outside the highlight
-  // surface: same reveal (hover its own square), same pin while collapsed.
-  const toggleBeside = hasToggle && !!kind.toggleBeside
-
-  // The chevron. `.block-toggle` (block-editor.css) keeps it invisible until
-  // its own square — the key slot, or the gutter square beside a todo; never
-  // the whole row — is hovered (or, on a device with nothing to hover with,
-  // always) —
-  // except on a COLLAPSED block, which pins it visible so hidden content is
-  // never a secret. It floats out of the flow, centred on whatever slot holds
-  // it, so the reveal never shifts the text. Centred by its own midpoint
-  // (left/top 50% + a half-size translate), NOT by `inset-0 m-auto`: the
-  // 20px square is wider than the 15px slot, and an over-constrained absolute
-  // box drops its left margin to zero instead of going negative — which
-  // left-aligned the square and put the chevron 4.5px right of the guide.
-  // Press feedback lives on the control (IconButton supplies the hover
-  // surface); the content itself never animates on collapse.
+  // The chevron: a parent's fold control. It lives in the CHEVRON COLUMN
+  // every row carries before its key slot (`chevronColumn`, below) — never
+  // in the slot, so no key ever swaps out or fades for it, and a to-do's
+  // checkbox keeps the slot and its click like any other key. Always shown
+  // on a parent (hidden content is never a secret, and the column makes the
+  // control's place plain without a reveal); a leaf's column is empty. One
+  // glyph, turned a quarter: down while open, right while closed — the same
+  // size and shape in both states. The row that closes a loop keeps its
+  // chevron too — the block has children, they are simply above it —
+  // greyed and inert, with the reason in its tooltip.
   //
-  // The square is 20px everywhere so it sits an even ~3.5px inside the
-  // highlight surface on every side it touches: the surface is 27px tall
-  // (a 23px line + 2px each side) and the key slot's centre is 13.5px in
-  // from its left edge (2px reach + 6px padding + half of 15px) — the same
-  // distance as the surface's vertical centre, so the square inset matches
-  // horizontally and vertically. Beside a todo the same square straddles the
-  // surface's left edge, its glyph tucked just outside it.
+  // It floats out of the flow, centred on the column by its own midpoint
+  // (left/top 50% + a half-size translate, NOT `inset-0 m-auto`: the 20px
+  // square is wider than the 17px column, and an over-constrained absolute
+  // box drops its left margin to zero instead of going negative). Press
+  // feedback lives on the control (IconButton supplies the hover surface);
+  // the content itself never animates on collapse.
+  //
+  // The square is 20px: the column's centre sits 14.5px in from the
+  // surface's left edge (2px reach + 6px padding + half of 17px) and the
+  // surface is 27px tall (a 23px line + 2px each side), so the square is
+  // 4.5px inside the left edge and 3.5px inside the top and bottom.
   const toggle = hasToggle ? (
     <IconButton
       aria-label={looped ? "Loop detected" : isCollapsed ? "Expand" : "Collapse"}
@@ -716,7 +702,7 @@ export function BlockItem({
       onMouseDown={keepEditing}
       onClick={looped ? undefined : () => api.toggleCollapse(occurrence.key)}
       className={cx(
-        "block-toggle absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150",
+        "block-toggle absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shrink-0 p-0 text-text-tertiary transition-transform duration-150",
         looped
           ? "cursor-not-allowed enabled:hover:bg-transparent enabled:active:bg-transparent"
           : "active:scale-[0.92] motion-reduce:active:scale-100",
@@ -726,112 +712,96 @@ export function BlockItem({
         // Coarse pointers get a 32px-tall target instead of IconButton's
         // 40px-tall padded bar (which would overlap neighbouring rows and
         // squeeze the glyph); it reaches a hair past the surface into the
-        // gap on either side, where no other control lives. It is 36px
-        // wide: the row's wider marker gap on a coarse pointer leaves the
-        // room, and it still stops short of the text.
-        "h-5 w-5 coarse:h-8 coarse:w-9 coarse:px-0",
-        // Beside a todo the square is a hit area only — no hover surface, so
-        // it never clashes with the checkbox or the highlight it straddles;
-        // the chevron's own fade-in is the whole reveal. It stays 20px wide
-        // on coarse pointers too: wider would reach the checkbox.
-        toggleBeside && "enabled:hover:bg-transparent enabled:active:bg-transparent coarse:w-5",
-        pinned && "block-toggle-pinned",
+        // gap on either side, where no other control lives. 24px wide: it
+        // overhangs the column by 3.5px a side, and the row's wider marker
+        // gap on a coarse pointer (12px) keeps it clear of the key — a
+        // to-do's checkbox above all.
+        "h-5 w-5 coarse:h-8 coarse:w-6 coarse:px-0",
       )}
     >
       <svg
-        width="8"
-        height="8"
-        viewBox="0 0 8 8"
+        width="12"
+        height="12"
+        viewBox="0 0 12 12"
         aria-hidden
         className={cx(
           // A quarter turn, long enough to read as a turn rather than a
           // swap, easing out to rest with no overshoot.
           "transition-transform duration-300 ease-[var(--ease-in-out)] motion-reduce:transition-none",
-          // A finger's chevron is the key itself (it never swaps in), so
-          // it is drawn a size up to be read — and aimed at — as one.
-          "coarse:size-3",
-          isCollapsed || looped ? "rotate-0" : "rotate-90",
+          // A finger's chevron is drawn a size up, to be read — and aimed
+          // at — as the control it is.
+          "coarse:size-[14px]",
+          isCollapsed || looped ? "-rotate-90" : "rotate-0",
         )}
       >
-        {/* A filled triangle with softened corners: the fill plus a round-
-            joined stroke of the same ink, which rounds the three points. */}
+        {/* An open chevron, round-capped: turned, it is the same glyph. */}
         <path
-          d="M2.6 1.6l3.2 2.4-3.2 2.4z"
-          fill="currentColor"
+          d="M3 4.5l3 3 3-3"
+          fill="none"
           stroke="currentColor"
-          strokeWidth="1.2"
+          strokeWidth="1.6"
+          strokeLinecap="round"
           strokeLinejoin="round"
         />
       </svg>
     </IconButton>
   ) : null
-  // The key of a swapping parent: fades out as the chevron fades in, and is
-  // hidden outright while collapsed (the pinned chevron stands in for it).
-  const keyClass = hasToggle ? cx("block-key", pinned && "block-key-hidden") : undefined
-  // The slot of a swapping parent is the chevron's hover area (see
-  // `.block-toggle-slot` in block-editor.css). Not a todo's: its chevron is
-  // beside, and hovering the checkbox must mean the checkbox.
-  const slotClass = hasToggle && !toggleBeside ? "block-toggle-slot" : undefined
+  // The chevron column: 17px, on EVERY row — a leaf's is empty — so the key
+  // slot and the text stay in one column whether or not a row can fold. Its
+  // width is what puts a parent's key exactly over its children's chevrons
+  // (the geometry above), and its centre is where the indent guide hangs
+  // (`GUIDE_X`): the thread of a subtree drops straight out of the control
+  // that folds it. `h-[1lh]` at the row's first-line scale centres the
+  // chevron on that line — a heading's scale on a heading, the body's
+  // otherwise.
+  const chevronColumn = (
+    <span
+      data-testid="chevron-column"
+      className={cx(
+        "relative flex h-[1lh] w-[17px] shrink-0 items-center justify-center",
+        kind.slot === "hash" && headingScale(scaleDepth),
+      )}
+    >
+      {toggle}
+    </span>
+  )
 
   // No marker is a focus target. A bullet once was (Logseq-style: click the
   // dot to make the block the note), but a finger reaching for a row's text
   // landed on the dot often enough that the note kept swapping for one
   // block, and on a desktop nobody meant the click either. Focus stays on
   // F / Cmd+., the block menu and the phone's edit bar (docs/mobile.md);
-  // a parent's key is its collapse toggle.
+  // a parent's fold is the chevron column's.
   //
   // Every marker occupies the same 15px slot, so body text starts at one
   // column across every block type and the markers read as one chrome
-  // family: dots centre in it; text glyphs (`#`, number, `>`) right-align
-  // to its edge; a paragraph's slot is simply empty. Each slot is `relative`
-  // so a swapped-in chevron centres on it, and carries `slotClass` so
-  // hovering it reveals the chevron.
+  // family: dots, the `#` and the narrow glyphs centre in it; numbers
+  // right-align to its edge; a figure's slot is simply empty.
   //
-  // The bullet's dot: faint, like the chevron — pure chrome; content leads.
-  // On a parent it is the key that swaps for the chevron.
+  // The key itself is drawn by `BlockKey` (block-key.tsx) — the one glyph
+  // a type has wherever it is listed, the sidebar included; the slots here
+  // only place it. The bullet's dot: faint, like the chevron — pure chrome;
+  // content leads.
   const dotSlot = (
-    <span
-      className={cx(
-        "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
-        slotClass,
-      )}
-    >
-      <span
-        aria-hidden
-        className={cx("block-glyph-fill size-1.5 rounded-full bg-text-tertiary", keyClass)}
-      />
-      {toggle}
+    <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
+      <BlockKey type={type} />
     </span>
   )
-  // A static text glyph key (the quote's `>`) or none at all (a paragraph):
-  // faint, like the dot and the `#` — chrome, not content. CENTRED in the
-  // slot, like the dot and the checkbox, not right-aligned like `#` and the
-  // numbers: `>` is a narrow glyph, and right-aligned its ink sat 3px right
-  // of the dot's centre (and of the guide line that hangs from it). Never a
-  // focus button (no marker is; focus stays on F / Cmd+. and the edit bar);
-  // on a parent it swaps for the collapse chevron. The empty paragraph slot keeps
-  // its width so the text stays in the shared column, and still hosts a
-  // parent's chevron.
-  const glyphSlot = (glyph: string | null, testId: string) => (
+  // A static glyph key (the quote's `>`, the paragraph's `¶`, a note's
+  // favicon) or none at all (a figure — a picture, a link card, a code
+  // block — whose frame or panel is its own mark): faint, like the dot and
+  // the `#` — chrome, not content. CENTRED in the slot, like the dot, the
+  // `#` and the checkbox, not right-aligned like the numbers: `>` is a
+  // narrow glyph, and right-aligned its ink sat 3px right of the dot's
+  // centre. Never a focus button (no marker is; focus stays on F / Cmd+.
+  // and the edit bar). An empty slot keeps its width so the text stays in
+  // the shared column.
+  const glyphSlot = (testId: string) => (
     <span
       data-testid={testId}
-      className={cx(
-        "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
-        slotClass,
-      )}
+      className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center"
     >
-      {kind.glyphNode ? (
-        // A rendered key (a note's favicon). Not `aria-hidden`: unlike the
-        // typographic keys it can carry meaning of its own.
-        <span className={cx("block-glyph flex items-center", keyClass)}>
-          {kind.glyphNode(block)}
-        </span>
-      ) : glyph ? (
-        <span aria-hidden className={cx("block-glyph select-none text-text-tertiary", keyClass)}>
-          {glyph}
-        </span>
-      ) : null}
-      {toggle}
+      <BlockKey type={type} block={block} />
     </span>
   )
   // Whether a finger's tap on the checkbox came down to the right of the
@@ -852,23 +822,16 @@ export function BlockItem({
     else api.edit(occurrence.key, true)
   }
 
-  // An image (`slot: "none"`) has no slot at all: the row's content starts at
-  // its edge. A parent still needs somewhere to put its chevron, so it falls
-  // through to the empty glyph slot.
+  // The key slot, by kind. A figure (`slot: "none"`) has no key but keeps
+  // the slot, empty, so its frame starts at the text column like every other
+  // row's content.
   const marker =
-    kind.slot === "none" && !hasToggle ? null : kind.slot === "checkbox" ? (
+    kind.slot === "checkbox" ? (
       // The checkbox IS the todo's marker — a control in the key slot, which
-      // is why a parent todo's chevron sits beside it (see `toggleBeside`).
-      // Hovering the box also reveals that chevron (`.block-toggle-hint`,
-      // block-editor.css) — the marker is where people look for the fold
-      // control — without the box ever giving up its own click. On coarse
-      // pointers the box grows its own tap area (`.block-checkbox::before`).
-      <span
-        className={cx(
-          "flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
-          toggleBeside && "block-toggle-hint",
-        )}
-      >
+      // keeps its own click (the fold is the chevron column's, beside it).
+      // On coarse pointers the box grows its own tap area
+      // (`.block-checkbox::before`).
+      <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
         <input
           type="checkbox"
           checked={type === "done"}
@@ -908,40 +871,34 @@ export function BlockItem({
       // size + weight (headingScale + bold, no underline — that lives in
       // `typo`) and the glyph inherits it, so the hash always matches the text
       // beside it, at every depth. The slot stays the shared 15px column
-      // (heading text aligns with every other marked block); the hash
-      // right-aligns in it and, when a large scale outgrows the slot,
-      // overflows LEFT, past the surface's edge — the text column never
-      // moves. The slot's `h-[1lh]` (resolved at the heading's scale) centres
-      // the glyph on the heading's first line. A static glyph, like the note
-      // title's — never a focus button (no marker is; focus stays on F /
-      // Cmd+. and the edit bar); on a parent it swaps for the collapse chevron.
+      // (heading text aligns with every other marked block) and the hash is
+      // CENTRED in it, as the dot and a note's favicon are, so a small hash
+      // (a listed heading's, a deep one's) stands on the same centre line
+      // as every other key rather than in the slot's right half; a large
+      // scale outgrows the slot by a pixel or two a side, into the gaps —
+      // the text column never moves. The slot's `h-[1lh]` (resolved at the
+      // heading's scale) centres the glyph on the heading's first line. A
+      // static glyph, like the note title's — never a focus button (no
+      // marker is; focus stays on F / Cmd+. and the edit bar).
       <span
         data-testid="heading-hash"
         className={cx(
-          "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-end font-bold",
+          "flex h-[1lh] w-[15px] shrink-0 items-center justify-center font-bold",
           headingScale(scaleDepth),
-          slotClass,
         )}
       >
-        <Hash className={keyClass} />
-        {toggle}
+        <BlockKey type={type} />
       </span>
     ) : kind.slot === "number" ? (
       // Numbers are read (they carry order), so they sit one step up the ramp
       // from the dot — muted, not faint — and right-align to the slot edge.
-      <span
-        className={cx(
-          "block-glyph relative flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary",
-          slotClass,
-        )}
-      >
-        <span aria-hidden className={keyClass}>
-          {olNumber}.
-        </span>
-        {toggle}
+      <span className="flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end">
+        <BlockKey type={type} olNumber={olNumber} />
       </span>
+    ) : kind.slot === "none" ? (
+      glyphSlot("figure-slot")
     ) : (
-      glyphSlot(kind.glyph ?? null, kind.slotTestId ?? "paragraph-slot")
+      glyphSlot(kind.slotTestId ?? "paragraph-slot")
     )
 
   // The wrapper: indented by depth, carrying the guide lines of every row it
@@ -1041,8 +998,8 @@ export function BlockItem({
     </>
   ) : (
     // Keyboard for select mode is handled by the editor container (it
-    // holds focus); this element only needs the pointer interactions.
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+    // holds focus), and the pointer is the row's (`linePointer`, below):
+    // this element only draws the text.
     <div
       data-testid="block-body"
       data-block-id={block.id}
@@ -1060,20 +1017,6 @@ export function BlockItem({
         typo,
         kind.bodyClass,
       )}
-      {...(readOnly
-        ? api.activate
-          ? { onClick: () => api.activate?.(occurrence.key) }
-          : api.navigable
-            ? { onClick: () => api.select(occurrence.key) }
-            : {}
-        : api.coarsePointer
-          ? // A finger's tap is handled by the row (`handleRowTap`): the
-            // whole row is the target, not just the text.
-            {}
-          : {
-              onClick: (event: React.MouseEvent) => api.select(occurrence.key, event.shiftKey),
-              onDoubleClick: () => api.edit(occurrence.key),
-            })}
     >
       <LinkActionsContext.Provider value={linkActions}>
         {kind.body ? kind.body(block) : <BlockContent content={body} />}
@@ -1120,13 +1063,57 @@ export function BlockItem({
         }
       : {}
 
+  // The mouse on the row's SURFACE — anywhere on the highlight surface that
+  // is not a control: the chevron column (and its empty space on a leaf),
+  // the key slot (a dot, a `#`, a `¶`), the row's padding, a figure's frame
+  // and the text itself. A click selects the row (Shift+click extends the
+  // selection); a double-click edits it, with the caret at the start of the
+  // line when the click fell left of the text, in the gutter, and at the
+  // end otherwise. Read-only, a click opens the row (a result) or selects
+  // it (a browsed list). Controls keep their own clicks — the chevron, the
+  // checkbox, a link, a card's tools, the textarea being edited — so a
+  // click on one never doubles as a selection. (The handlers once sat on
+  // the text alone, so a click on the dot or beside the chevron did
+  // nothing, which read as a row that would not select.) A finger's tap is
+  // the row wrapper's (`handleRowTap`, above).
+  const isControl = (target: EventTarget | null) =>
+    target instanceof Element &&
+    target.closest("button, input, a, textarea, [role='menu']") !== null
+  const linePointer: Pick<React.HTMLAttributes<HTMLElement>, "onClick" | "onDoubleClick"> = readOnly
+    ? api.activate
+      ? {
+          onClick: (event) => {
+            if (!isControl(event.target)) api.activate?.(occurrence.key)
+          },
+        }
+      : api.navigable
+        ? {
+            onClick: (event) => {
+              if (!isControl(event.target)) api.select(occurrence.key)
+            },
+          }
+        : {}
+    : api.coarsePointer
+      ? {}
+      : {
+          onClick: (event) => {
+            if (!isControl(event.target)) api.select(occurrence.key, event.shiftKey)
+          },
+          onDoubleClick: (event) => {
+            if (isControl(event.target)) return
+            const bodyEl = event.currentTarget.querySelector<HTMLElement>("[data-block-id]")
+            const left = bodyEl?.getBoundingClientRect().left
+            api.edit(occurrence.key, left !== undefined && event.clientX < left)
+          },
+        }
+
   return (
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
     <div
       data-block-row={block.id}
       data-occurrence={occurrence.key}
       className="relative"
-      style={{ paddingLeft: depth * INDENT, marginTop }}
+      style={{ paddingLeft: depth * indent, marginTop }}
       {...rowTap}
     >
       {occurrence.guideKeys.map((guideKey, level) => (
@@ -1135,7 +1122,7 @@ export function BlockItem({
           aria-hidden
           data-guide={guideKey}
           className="block-guide pointer-events-none absolute bottom-0 w-px bg-border-secondary transition-colors duration-200"
-          style={{ left: GUIDE_X + level * INDENT, top: -marginTop }}
+          style={{ left: GUIDE_X + level * indent, top: -marginTop }}
         />
       ))}
       <div className="relative min-w-0 py-0.5 font-content leading-relaxed">
@@ -1148,6 +1135,7 @@ export function BlockItem({
           // (`[data-heading-scale]` in block-editor.css), so its chevron and
           // `#` sit as far from the left edge as from the top and bottom.
           data-heading-scale={kind.slot === "hash" ? HEADING_SCALE_NAMES[scaleDepth] : undefined}
+          {...linePointer}
           className={cx(
             // Negative margin + padding pairs grow the highlight surface
             // while the text (and every marker) stays exactly where it was —
@@ -1172,9 +1160,7 @@ export function BlockItem({
             // for the start of the line lands on the line, not the marker
             // (a todo's checkbox above all).
             "relative flex items-start gap-2 rounded coarse:gap-3",
-            wide
-              ? "-ml-[4.5px] -mr-[4.5px] pl-[8.5px] pr-[8.5px]"
-              : "-ml-0.5 -mr-0.5 pl-1.5 pr-1.5",
+            "-ml-0.5 -mr-0.5 pl-1.5 pr-1.5",
             // Per-side vertical pairs. Mid-run sides also square their
             // corners and drop that edge of the selection ring
             // (`.block-run-*`, block-editor.css) so the run reads as ONE
@@ -1209,29 +1195,8 @@ export function BlockItem({
             dimmed && !editing && !selected && "opacity-55",
           )}
         >
+          {chevronColumn}
           {marker}
-          {toggleBeside ? (
-            // The beside toggle: a 20px slot (the chevron's square) centred
-            // 5px OUTSIDE the surface's left edge, on the block's first line,
-            // so the glyph hugs the block: its ink sits ~3px off the edge and
-            // stops short of the checkbox (the slot ends 1px before it).
-            // Nested, that keeps it clear of the parent's guide line, which
-            // runs 11px outside the edge — the glyph's ink ends ≥2.5px right
-            // of it, so the two never touch. `typo` + h-[1lh] size the slot
-            // to that line whatever the scale; the top offset mirrors the
-            // line's own vertical padding. It FOLLOWS the marker in the DOM
-            // (position is absolute, so order is invisible) so the checkbox
-            // slot's hover can reach it with a sibling selector.
-            <span
-              className={cx(
-                "block-toggle-beside absolute -left-[15px] h-[1lh] w-5",
-                runEdges?.top ? "top-1" : "top-0.5",
-                typo,
-              )}
-            >
-              {toggle}
-            </span>
-          ) : null}
           {kind.before?.(rowContext)}
           {kind.wrap ? kind.wrap(content, rowContext) : content}
           {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}
