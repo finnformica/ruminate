@@ -1,6 +1,6 @@
 import { isTombstoned, type LinkRow, type NodeRow } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
-import { CHILD_KIND, NOTE_TYPE } from "./graph"
+import { CHILD_KIND, isNoteType } from "./graph"
 import { emittedNoteTitle } from "./note-identity"
 import type { Op } from "./ops"
 
@@ -45,7 +45,7 @@ export interface DeletedNote {
 export function deletedNotesOf(rows: CorpusRows): DeletedNote[] {
   const notes: DeletedNote[] = []
   for (const node of rows.nodes) {
-    if (node.type !== NOTE_TYPE || !isTombstoned(node)) continue
+    if (!isNoteType(node.type) || !isTombstoned(node)) continue
     notes.push({
       id: node.id,
       title: emittedNoteTitle(node.id, node.text) ?? node.id,
@@ -68,7 +68,7 @@ export function deletedNotesOf(rows: CorpusRows): DeletedNote[] {
  */
 export function restoreNoteOps(noteId: NoteId, rows: CorpusRows): Op[] {
   const note = rows.nodes.find((node) => node.id === noteId)
-  if (!note || note.type !== NOTE_TYPE || !isTombstoned(note)) return []
+  if (!note || !isNoteType(note.type) || !isTombstoned(note)) return []
   const nodes = new Map(rows.nodes.map((node) => [node.id, node]))
   const revived = revivedIdsOf(note, rows)
   const alive = (id: string) => {
@@ -118,7 +118,7 @@ function revivedIdsOf(note: NodeRow, rows: CorpusRows): Set<string> {
   const revived = new Set<string>([note.id])
   const stack: string[] = [note.id]
   for (const node of rows.nodes) {
-    if (node.notes_id !== note.id || node.deleted_at !== stamp || node.type === NOTE_TYPE) continue
+    if (node.notes_id !== note.id || node.deleted_at !== stamp || isNoteType(node.type)) continue
     if (revived.has(node.id)) continue
     revived.add(node.id)
     stack.push(node.id)
@@ -128,7 +128,7 @@ function revivedIdsOf(note: NodeRow, rows: CorpusRows): Set<string> {
     for (const child of children.get(id) ?? []) {
       if (revived.has(child)) continue
       const node = nodes.get(child)
-      if (!node || node.type === NOTE_TYPE || node.deleted_at !== stamp) continue
+      if (!node || isNoteType(node.type) || node.deleted_at !== stamp) continue
       revived.add(child)
       stack.push(child)
     }

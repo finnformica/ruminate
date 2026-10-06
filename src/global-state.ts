@@ -12,7 +12,7 @@ import {
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { DEFAULT_EXPANDED_LEVELS, clampExpandedLevels } from "./blocks/default-collapsed"
 import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
-import { NOTE_TYPE, type GraphSnapshot, type LinkDirections } from "./data/graph"
+import { isNoteType, type GraphSnapshot, type LinkDirections } from "./data/graph"
 import { asBlockType, type BlockType } from "./blocks/types"
 import { orderedNoteIds } from "./data/note-order"
 import {
@@ -523,7 +523,7 @@ export const blockViewsAtom = atom((get) => {
   const viewIds = new Set<string>()
   for (const id of get(viewRootIdsAtom)) {
     const node = graph.nodes.get(id)
-    if (node && node.type !== NOTE_TYPE) viewIds.add(id)
+    if (node && !isNoteType(node.type)) viewIds.add(id)
   }
   if (viewIds.size === 0) return NO_BLOCK_VIEWS
 

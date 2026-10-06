@@ -8,12 +8,11 @@ import { receivedSharesAtom, sharePermissions, sharedOriginAtom } from "../data/
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { developerDebugPreferenceAtom, useIsDeveloper } from "../hooks/is-developer"
 import { useNoteShare } from "../hooks/share"
-import { useMakeBoard } from "../hooks/board"
-import { useRenameNote, useSetNoteProps } from "../hooks/note"
+import { useMakeBoard, useMakeNote } from "../hooks/board"
+import { useRenameNote } from "../hooks/note"
 import { deleteNoteDialogAtom } from "./delete-note-dialog"
 import { shareDialogAtom } from "./share-note-dialog"
 import type { Width } from "../schema"
-import { BOARD_PROP } from "../utils/board-prop"
 import { cx } from "../utils/cx"
 import { MenuItems, type MenuEntry } from "./block-editor/block-context-menu"
 import { DropdownMenu } from "./ui/dropdown-menu"
@@ -117,8 +116,8 @@ export function useNoteMenuEntries() {
   // Delete asks first (`delete-note-dialog.tsx`); the menu only opens it.
   const requestDelete = useSetAtom(deleteNoteDialogAtom)
   const openShare = useSetAtom(shareDialogAtom)
-  const setNoteProps = useSetNoteProps()
   const makeBoard = useMakeBoard()
+  const makeNote = useMakeNote()
   return React.useCallback(
     (
       noteId: string,
@@ -204,7 +203,7 @@ export function useNoteMenuEntries() {
                 label: "Make this a note",
                 icon: <NoteIcon16 />,
                 onSelect: () => {
-                  setNoteProps(noteId, { [BOARD_PROP]: null })
+                  makeNote(noteId)
                   options.openOutline?.()
                 },
               },
@@ -254,7 +253,7 @@ export function useNoteMenuEntries() {
         },
       ] satisfies MenuEntry[]
     },
-    [jotaiStore, isSignedOut, renameNote, requestDelete, openShare, setNoteProps, makeBoard],
+    [jotaiStore, isSignedOut, renameNote, requestDelete, openShare, makeBoard, makeNote],
   )
 }
 

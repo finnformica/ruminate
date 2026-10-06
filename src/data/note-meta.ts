@@ -3,8 +3,15 @@ import { isHeading } from "../blocks/markers"
 import type { Block, BlockDoc } from "../blocks/types"
 import { formatDate, formatWeek, toDateStringUtc } from "../utils/date"
 import { noteTypeOf } from "../utils/note-type"
-import { BOARD_PROP } from "../utils/board-prop"
-import { NOTE_TYPE, noteDoc, parseProps, propsJson, type GraphSnapshot } from "./graph"
+import {
+  BOARD_TYPE,
+  isLegacyBoard,
+  isNoteType,
+  noteDoc,
+  parseProps,
+  propsJson,
+  type GraphSnapshot,
+} from "./graph"
 import type { Op } from "./ops"
 import { emittedNoteTitle, isMintedNoteId } from "./note-identity"
 
@@ -41,7 +48,7 @@ export function notePropsOps(
   snapshot: GraphSnapshot,
 ): Op[] {
   const note = snapshot.nodes.get(noteId)
-  if (!note || note.type !== NOTE_TYPE) return []
+  if (!note || !isNoteType(note.type)) return []
   const entries = notePropsEntries(note.props)
   for (const [key, value] of Object.entries(patch)) {
     if (value === null || value === undefined) delete entries[key]
@@ -88,7 +95,7 @@ const PREVIEW_WORDS = 8
  */
 export function noteFromNode(id: NoteId, snapshot: GraphSnapshot): Note | null {
   const note = snapshot.nodes.get(id)
-  if (!note || note.type !== NOTE_TYPE) return null
+  if (!note || !isNoteType(note.type)) return null
   const doc = noteDoc(id, snapshot) as BlockDoc
   const blocks = blocksInOrder(doc)
   const props = notePropsEntries(note.props)
@@ -122,10 +129,13 @@ export function noteFromNode(id: NoteId, snapshot: GraphSnapshot): Note | null {
     const date = dateOf(value)
     if (date) dates.add(date)
   }
-  // A board is a plain note whose page carries the `board` property
-  // (docs/boards.md); a daily or weekly note is what its id says it is.
+  // A board is a note root of its own type (docs/boards.md) — or, until
+  // migrations/0020 has run, a note whose page still carries the old
+  // property; a daily or weekly note is what its id says it is.
   const type: NoteType =
-    noteTypeOf(id) === "note" && props[BOARD_PROP] === true ? "board" : noteTypeOf(id)
+    noteTypeOf(id) === "note" && (note.type === BOARD_TYPE || isLegacyBoard(note))
+      ? "board"
+      : noteTypeOf(id)
   if (type === "daily") dates.add(id)
 
   const text = texts.join("\n")
@@ -213,7 +223,7 @@ export function createNotesBuilder() {
   return function buildNotes(snapshot: GraphSnapshot): Map<NoteId, Note> {
     const notes = new Map<NoteId, Note>()
     for (const node of snapshot.nodes.values()) {
-      if (node.type !== NOTE_TYPE) continue
+      if (!isNoteType(node.type)) continue
       const rows = noteFingerprint(node.id, snapshot)
       const cached = cache.get(node.id)
       if (cached && sameRows(cached.rows, rows)) {

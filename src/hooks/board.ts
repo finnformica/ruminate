@@ -47,7 +47,7 @@ import {
   releasePendingImage,
   uploadImage,
 } from "../data/images"
-import { NOTE_TYPE, parseProps, propsJson } from "../data/graph"
+import { BOARD_TYPE, LEGACY_BOARD_PROP, NOTE_TYPE, parseProps, propsJson } from "../data/graph"
 import { fetchLinkPreview } from "../data/link-previews"
 import { notePropsOps } from "../data/note-meta"
 import { applyOps, deleteBlockOps, type Op } from "../data/ops"
@@ -57,17 +57,17 @@ import { requestTagSuggestion, SuggestError } from "../data/suggest-tags"
 import { emittedNoteTitle } from "../data/note-identity"
 import { blockIndexAtom, graphSnapshotAtom, isDatabaseModeAtom } from "../global-state"
 import type { NoteId } from "../schema"
-import { BOARD_PROP } from "../utils/board-prop"
 import { viewNarrowing } from "../utils/view-narrowing"
 import { useAiAvailable } from "./ai"
 
 /**
- * Making a board (docs/boards.md): the one property set on the note's
- * page, and the default features written onto it as blocks — Location,
- * Object, Material — in one batch. **New board** makes the note first
- * (`create`, with its title); **Make this a board** marks the note that is
- * there. A default the note already has by label is left as it is, so a
- * note with a `Location` block written by hand keeps it.
+ * Making a board (docs/boards.md): the note's root given the `board` type,
+ * and the default features written onto it as blocks — Location, Object,
+ * Material, Link — in one batch. **New board** makes the node first
+ * (`create`, with its title); **Make this a board** retypes the note that
+ * is there. Nothing beneath the root changes. A default the note already
+ * has by label is left as it is, so a note with a `Location` block written
+ * by hand keeps it.
  */
 export function useMakeBoard(): (noteId: NoteId, create?: { title: string }) => void {
   const store = useStore()
@@ -77,19 +77,44 @@ export function useMakeBoard(): (noteId: NoteId, create?: { title: string }) => 
       const snapshot = store.get(graphSnapshotAtom)
       const ops: Op[] = []
       if (snapshot.nodes.has(noteId)) {
-        ops.push(...notePropsOps(noteId, { [BOARD_PROP]: true }, snapshot))
+        ops.push({ op: "setType", id: noteId, type: BOARD_TYPE })
+        // The note is edited: its `updated_at` moves with it.
+        ops.push(...notePropsOps(noteId, {}, snapshot))
       } else if (create) {
         ops.push({
           op: "create",
           id: noteId,
-          type: NOTE_TYPE,
+          type: BOARD_TYPE,
           text: create.title.trim() || noteId,
-          props: propsJson({ [BOARD_PROP]: true, updated_at: new Date().toISOString() }),
+          props: propsJson({ updated_at: new Date().toISOString() }),
         })
       } else return
       // The defaults, against the board as the batch so far leaves it.
       ops.push(...defaultFeatureOps(applyOps(snapshot, ops, Date.now()), noteId))
       apply(ops)
+    },
+    [store, apply],
+  )
+}
+
+/**
+ * **Make this a note** (docs/boards.md): the board's root given the `note`
+ * type back, and nothing else — the same rows, the same outline. The old
+ * `board` property is cleared with it, so a board from before
+ * migrations/0020 stops being one too (`isLegacyBoard`; the key goes with
+ * that helper).
+ */
+export function useMakeNote(): (noteId: NoteId) => void {
+  const store = useStore()
+  const apply = useApplyOps()
+  return React.useCallback(
+    (noteId) => {
+      const snapshot = store.get(graphSnapshotAtom)
+      if (!snapshot.nodes.has(noteId)) return
+      apply([
+        { op: "setType", id: noteId, type: NOTE_TYPE },
+        ...notePropsOps(noteId, { [LEGACY_BOARD_PROP]: null }, snapshot),
+      ])
     },
     [store, apply],
   )

@@ -7,7 +7,13 @@ import {
   type GraphDiff,
   type NodeRow,
 } from "../../worker/handlers/replica-payload"
-import { NOTE_TYPE, buildGraphSnapshot, indexParents, type GraphSnapshot } from "./graph"
+import {
+  NOTE_TYPE,
+  buildGraphSnapshot,
+  indexParents,
+  isNoteType,
+  type GraphSnapshot,
+} from "./graph"
 import { applyOps, type Op } from "./ops"
 import { opsToRows } from "./ops-rows"
 import {
@@ -233,11 +239,12 @@ export function mergeDiffs(pending: GraphDiff, next: GraphDiff): GraphDiff {
   }
 }
 
-/** The slice's rows with every root that is a block presented as a note. */
+/** The slice's rows with every root that is a block presented as a note. A
+ * root that is a note already — a note or a board — is left as it is. */
 export function asNotes(nodes: NodeRow[], rootIds: readonly string[]): NodeRow[] {
   const roots = new Set(rootIds)
   return nodes.map((node) =>
-    roots.has(node.id) && node.type !== NOTE_TYPE ? { ...node, type: NOTE_TYPE } : node,
+    roots.has(node.id) && !isNoteType(node.type) ? { ...node, type: NOTE_TYPE } : node,
   )
 }
 
@@ -246,7 +253,7 @@ function rootTypesOf(nodes: NodeRow[], rootIds: readonly string[]): Map<string, 
   const roots = new Set(rootIds)
   const types = new Map<string, string>()
   for (const node of nodes) {
-    if (roots.has(node.id) && node.type !== NOTE_TYPE) types.set(node.id, node.type)
+    if (roots.has(node.id) && !isNoteType(node.type)) types.set(node.id, node.type)
   }
   return types
 }

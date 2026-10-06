@@ -3,10 +3,10 @@ import type { ReactNode } from "react"
 import { figureAlignOf, type FigureAlign } from "../../blocks/figure"
 import { BLOCK_TYPE_DEFS } from "../../blocks/registry"
 import type { Block, BlockType } from "../../blocks/types"
+import { BOARD_TYPE, LEGACY_BOARD_PROP } from "../../data/graph"
 import type { NoteType } from "../../schema"
 import type { Occurrence } from "../../blocks/view"
 import { cx } from "../../utils/cx"
-import { BOARD_PROP } from "../../utils/board-prop"
 import { noteTypeOf } from "../../utils/note-type"
 import { NoteFavicon } from "../note-favicon"
 import type { BlockEditorApi } from "./block-item"
@@ -185,18 +185,22 @@ const note: BlockKind = {
   typography: (_depth, _block, listed) => cx(BODY, "font-sans", listed && "font-bold"),
 }
 
-/** Which kind of note a note block is, for its favicon: what its id says
- * (a day, a week, a note) — except that a board is a plain note whose PAGE
- * carries the board property (docs/boards.md), which only its props can
- * say. The same reading as the metadata layer's (`src/data/note-meta.ts`). */
+/** Which kind of note a note block is, for its favicon: a board by its
+ * type (docs/boards.md), else what its id says (a day, a week, a note). The
+ * same reading as the metadata layer's (`src/data/note-meta.ts`), legacy
+ * shape included — a root still carrying the board property, read until
+ * migration 0020 has run everywhere (`isLegacyBoard`, src/data/graph.ts). */
 function noteKindOf(block: Block): NoteType {
+  if (block.type === BOARD_TYPE) return "board"
   const byId = noteTypeOf(block.id)
-  return byId === "note" && block.props?.[BOARD_PROP] === true ? "board" : byId
+  return byId === "note" && block.props?.[LEGACY_BOARD_PROP] === true ? "board" : byId
 }
 
 export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
   text,
   note,
+  // A board is a note root of the other kind: the same row, its own favicon.
+  board: note,
   ul: { slot: "dot", typography: () => BODY },
   ol: { slot: "number", typography: () => BODY },
   todo,

@@ -10,41 +10,60 @@ the header's **New** menu (or <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>B</kbd>), makes
 opens it at `/boards/<note id>`; its header is the note's own — Sort, Filter
 and the ⋯ menu, where **Open note** opens the note beneath it.
 
-## One property, and nothing else new in the data
+## One type, and nothing else new in the data
 
-A board is a note whose page carries `board: true` among its metadata
-(`BOARD_PROP`, `src/utils/board-prop.ts`), beside its font and width. That
-one property is what makes it a board: the note's kind is `board`
-(`NoteType`, derived in `src/data/note-meta.ts`), which gives it its icon in
-every list, sends its rows to the board page rather than the outline
-(`useOpenNote`, `src/hooks/open-note.ts`), lists it under `type:board` in a
-search, and is what the board page checks before it draws anything — a
-note without it is refused and opened as a note.
+A board is a note whose root node is of type `board` rather than `note`
+(`BOARD_TYPE`, beside `NOTE_TYPE` in `src/data/graph.ts`;
+docs/graph-schema-v2.md). The two are the note types — `NOTE_TYPES`, and
+`isNoteType` is the question — so everywhere a note is listed, counted,
+ordered, deleted, shared or walked, a board is one; the registry knows the
+type (`src/blocks/registry.ts`, the `note` family), so a board linked under
+a block walks as a `board` row, drawn as a note row is with the board's own
+icon in the favicon slot. That one type is what makes it a board: the note's
+kind is `board` (`NoteType`, derived in `src/data/note-meta.ts`), which
+gives it its icon in every list, sends its rows to the board page rather
+than the outline (`useOpenNote`, `src/hooks/open-note.ts`), lists it under
+`type:board` in a search, and is what the board page checks before it draws
+anything (`isBoard`) — a note of any other type is refused and opened as a
+note. Its metadata — font, width, `updated_at` — is its `props`, as a
+note's.
 
-The property is a note's **default surface**, nothing more, and the note's
-menu toggles it: **Make this a board** on any plain note sets it and opens
-the board; **Make this a note** on a board clears it. Nothing else about the
-note changes either way — the same rows, the same outline, the same id and
-URL — and no structure is required first: a note with no pictures makes an
-empty board, and the outline of a board is one click away (**Open note**
-in the board's ⋯ menu, **Open board** in the outline's). A daily or weekly
-note is what its id says it is and cannot be made a board.
+The type is a note's **default surface**, nothing more, and the note's menu
+changes it: **Make this a board** on any plain note sets the root's type to
+`board` (`useMakeBoard`, `src/hooks/board.ts`, one `setType`) and opens the
+board; **Make this a note** on a board sets it back (`useMakeNote`). Nothing
+else about the note changes either way — the same rows, the same outline,
+the same id and URL; nothing beneath the root is touched — and no structure
+is required first: a note with no pictures makes an empty board, and the
+outline of a board is one click away (**Open note** in the board's ⋯ menu,
+**Open board** in the outline's). A daily or weekly note is what its id says
+it is and cannot be made a board. The editor never retypes a root either
+way: a doc carries a note's text and props, never its kind, so an edit to a
+board's outline leaves it a board (`partsToOps`, `src/data/ops.ts`).
 
-Beneath that property, every piece of a board is a block the outline
+Until 2026-W41 a board was a `note` row whose props carried `board: true`;
+migrations/0020 retyped every such row. While that migration has yet to run
+where a build is pointed, the old shape is still read as a board through one
+helper (`isLegacyBoard`, `src/data/graph.ts`), and the replica retypes a
+board a stale client pushes in that shape (`worker/handlers/replica.ts`) so
+it cannot write it back over the migrated row. Both go once 0020 has run in
+production.
+
+Beneath that type, every piece of a board is a block the outline
 already understands, which is what lets the board and the outline be two
 surfaces on one graph with no special-casing between them: a picture pasted
 into the outline is on the board, a picture added from the board is in the
 note, and a board's features and values can be written by hand in the
 outline and the form picks them up.
 
-| on the board       | in the graph                                                                                                                                                                                                                                      |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| the board          | a note whose page props hold `board: true`                                                                                                                                                                                                        |
-| its pictures       | the image blocks written in the note (docs/images.md): the ones the outline reaches, and the ones in its Unassigned basket                                                                                                                        |
-| a feature          | a direct child of the page whose props carry `feature` (`FEATURE_PROP`, `src/utils/board-prop.ts`): its type, whether a picture may carry several of its values, and what it means to the model. Its text is its label; the block is its identity |
-| a feature's values | the feature block's children, in order (`Mauritius`, `Lisbon` under `Location`)                                                                                                                                                                   |
-| a picture's value  | a `child` link from the value block to the picture: the value is a second parent, exactly as copy and select-mode paste make                                                                                                                      |
-| a link value       | a value of a feature of type `link`, whose block is a link block (docs/links.md): the page's card, address and preview in its props, with the same `child` link from it to the picture — so the pictures from one page share one card             |
+| on the board       | in the graph                                                                                                                                                                                                                                 |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the board          | a note whose root node is of type `board`                                                                                                                                                                                                    |
+| its pictures       | the image blocks written in the note (docs/images.md): the ones the outline reaches, and the ones in its Unassigned basket                                                                                                                   |
+| a feature          | a direct child of the page whose props carry `feature` (`FEATURE_PROP`, `src/data/boards.ts`): its type, whether a picture may carry several of its values, and what it means to the model. Its text is its label; the block is its identity |
+| a feature's values | the feature block's children, in order (`Mauritius`, `Lisbon` under `Location`)                                                                                                                                                              |
+| a picture's value  | a `child` link from the value block to the picture: the value is a second parent, exactly as copy and select-mode paste make                                                                                                                 |
+| a link value       | a value of a feature of type `link`, whose block is a link block (docs/links.md): the page's card, address and preview in its props, with the same `child` link from it to the picture — so the pictures from one page share one card        |
 
 So a board's outline reads:
 
@@ -71,7 +90,7 @@ feature as a bullet with its label, the prop out of sight.)
 
 ## Features
 
-**A feature is a block, as a board is a property.** The `feature` prop on a
+**A feature is a block, as a board is a type.** The `feature` prop on a
 direct child of the page is what makes it one (`featureSpecOf`,
 `src/data/boards.ts`, reads it leniently: a `feature` that is an object is
 a feature, a type it does not name is `text`, `multi` holds only when it

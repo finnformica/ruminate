@@ -5,12 +5,17 @@ import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
 import { sampleGraph } from "./sample-graph"
 import {
+  BOARD_TYPE,
+  NOTE_TYPE,
+  NOTE_TYPES,
   blockRollup,
   blockView,
   buildGraphSnapshot,
   docFromGraph,
   docToGraph,
   docToParts,
+  isLegacyBoard,
+  isNoteType,
   noteDoc,
   noteView,
   parentIdsOf,
@@ -710,6 +715,48 @@ describe("docFromGraph (the walk, N roots)", () => {
           .map((l) => l.destination_id),
       )
     }
+  })
+})
+
+describe("the note types", () => {
+  it("isNoteType: a note or a board, and nothing else", () => {
+    expect(NOTE_TYPES).toEqual([NOTE_TYPE, BOARD_TYPE])
+    expect(isNoteType("note")).toBe(true)
+    expect(isNoteType("board")).toBe(true)
+    for (const type of ["text", "ul", "corpus_root", "page", "", "Note"]) {
+      expect(isNoteType(type)).toBe(false)
+    }
+  })
+
+  it("a board is a note to the walk: its doc, its rollup, never a block view", () => {
+    const markdown = canonical("- one\n")
+    const { nodes, links } = docToGraph("b", markdown, 1)
+    const graph = buildGraphSnapshot(
+      nodes.map((n) => (n.id === "b" ? { ...n, type: BOARD_TYPE } : n)),
+      links,
+    )
+    expect(rollup("b", graph)).toBe(markdown)
+    expect(noteView("b", graph)).not.toBeNull()
+    expect(blockView("b", graph)).toBeNull()
+    expect(blockRollup("b", graph)).toBeNull()
+    // Linked under a block, it walks as a `board` row — a type the registry
+    // knows, so a save never reads it as an unknown type turned to text.
+    const rows = buildGraphSnapshot(
+      [row("blk_p", "ul", "holder"), row("b", BOARD_TYPE, "Wall")],
+      [edge("blk_p", "b", "a0")],
+    )
+    expect(docFromGraph(["blk_p"], rows).blocks.b.type).toBe("board")
+  })
+
+  it("isLegacyBoard: the shape a board had before migrations/0020, and only that", () => {
+    expect(isLegacyBoard(row("b", "note", "Wall", '{"board":true}'))).toBe(true)
+    expect(isLegacyBoard(row("b", "note", "Wall", '{"board":true,"width":"wide"}'))).toBe(true)
+    expect(isLegacyBoard(row("b", "note", "Wall", '{"board":"yes"}'))).toBe(false)
+    expect(isLegacyBoard(row("b", "note", "Wall", null))).toBe(false)
+    expect(isLegacyBoard(row("b", "note", "Wall", "{not json"))).toBe(false)
+    // A retyped board carries no prop; a block never counts, whatever it says.
+    expect(isLegacyBoard(row("b", "board", "Wall", null))).toBe(false)
+    expect(isLegacyBoard(row("b", "ul", "x", '{"board":true}'))).toBe(false)
   })
 })
 

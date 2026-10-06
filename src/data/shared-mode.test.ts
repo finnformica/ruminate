@@ -99,6 +99,11 @@ describe("asNotes", () => {
     expect(out.map((row) => row.type)).toEqual(["note", "note", "ul"])
     expect(rows[1].type).toBe("ul")
   })
+
+  it("leaves a board root a board: it is a note already", () => {
+    const rows = [node("blk_board", "Wall", "board"), node("blk_a", "one")]
+    expect(asNotes(rows, ["blk_board"]).map((row) => row.type)).toEqual(["board", "ul"])
+  })
 })
 
 describe("routeOps", () => {

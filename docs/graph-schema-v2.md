@@ -158,19 +158,20 @@ Design notes, and why:
 `type` is stored, not derived from markers. `text` is marker-free; the
 serializer is a pure type→marker map.
 
-| type           | markdown marker    | notes                                                                                                                                  |
-| -------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `note`         | — (file root)      | `text` = title; `props` = metadata entries (stored as `page` until migrations/0008)                                                    |
-| `text`         | `- `               | plain outline bullet                                                                                                                   |
-| `h1` `h2` `h3` | `# ` `## ` `### `  | fold by default like any other block                                                                                                   |
-| `todo`         | `- [ ] `           | checked state is a TYPE, not an attribute                                                                                              |
-| `done`         | `- [x] `           |                                                                                                                                        |
-| `ul`           | `- ` (styled)      |                                                                                                                                        |
-| `ol`           | `1. ` (renumbered) | renderer/serializer renumbers, as today                                                                                                |
-| `quote`        | `> `               |                                                                                                                                        |
-| `code`         | fenced block       | `props.language`                                                                                                                       |
-| `image`        | `![caption](url)`  | `text` = caption; `props.image` (asset id) or `props.src`, `align`/`size` for its layout — docs/images.md                              |
-| `link`         | `[title](url)`     | graph-only: written as the link, read back as text; `text` = title; `props.url` and the page's preview, `align`/`size` — docs/links.md |
+| type           | markdown marker    | notes                                                                                                                                               |
+| -------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `note`         | — (file root)      | `text` = title; `props` = metadata entries (stored as `page` until migrations/0008)                                                                 |
+| `board`        | — (file root)      | a note root of the other kind (docs/boards.md): the same row, opened as a wall of its pictures (a `note` with a `board` prop until migrations/0020) |
+| `text`         | `- `               | plain outline bullet                                                                                                                                |
+| `h1` `h2` `h3` | `# ` `## ` `### `  | fold by default like any other block                                                                                                                |
+| `todo`         | `- [ ] `           | checked state is a TYPE, not an attribute                                                                                                           |
+| `done`         | `- [x] `           |                                                                                                                                                     |
+| `ul`           | `- ` (styled)      |                                                                                                                                                     |
+| `ol`           | `1. ` (renumbered) | renderer/serializer renumbers, as today                                                                                                             |
+| `quote`        | `> `               |                                                                                                                                                     |
+| `code`         | fenced block       | `props.language`                                                                                                                                    |
+| `image`        | `![caption](url)`  | `text` = caption; `props.image` (asset id) or `props.src`, `align`/`size` for its layout — docs/images.md                                           |
+| `link`         | `[title](url)`     | graph-only: written as the link, read back as text; `text` = title; `props.url` and the page's preview, `align`/`size` — docs/links.md              |
 
 Checked-as-type was a deliberate call: type transitions are already the native
 mutation (the marker turn-into keys), so toggling a checkbox is

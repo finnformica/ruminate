@@ -16,7 +16,7 @@ import {
   type ReplicaChangesBody,
   type ReplicaCorpusBody,
 } from "./replica-payload"
-import { replica, requireSession } from "./replica"
+import { replica, requireSession, retypeLegacyBoards } from "./replica"
 import {
   applyControlPlane,
   asFakeD1,
@@ -929,6 +929,46 @@ describe("the control plane is not tenant data", () => {
     expect(response.status).toBe(403)
     expect(await response.json()).toEqual({ error: "sign_in_required" })
     expect(await driver.exec("SELECT github_id FROM users WHERE github_id = 4343")).toEqual([])
+  })
+})
+
+describe("the legacy board guard (migrations/0020; removed with isLegacyBoard)", () => {
+  const legacy: NodeRow = {
+    id: "blk_board00000",
+    type: "note",
+    text: "Wall",
+    props: '{"board":true,"width":"full"}',
+    updated_at: 200,
+  }
+
+  it("retypes a board pushed in its old shape, strips the prop and leaves the rest alone", () => {
+    const bare: NodeRow = { ...legacy, id: "blk_board00001", props: '{"board":true}' }
+    const links = [link]
+    const out = retypeLegacyBoards({ nodes: [legacy, bare, node], links })
+    expect(out.nodes).toEqual([
+      { ...legacy, type: "board", props: '{"width":"full"}' },
+      { ...bare, type: "board", props: null },
+      node,
+    ])
+    expect(out.links).toBe(links)
+    // A payload with nothing to retype is the same object.
+    const plain = { nodes: [node], links: [link] }
+    expect(retypeLegacyBoards(plain)).toBe(plain)
+  })
+
+  it("a stale client's push lands as a board over the migrated row, never as a note again", async () => {
+    const tenant = await openTenant(1)
+    await corpusPut(
+      tenant,
+      { nodes: [{ ...legacy, type: "board", props: null, updated_at: 101 }], links: [] },
+      NOW,
+    )
+    // The route's guard, on a push that is the newer version.
+    await corpusPut(tenant, retypeLegacyBoards({ nodes: [legacy], links: [] }), NOW)
+    const { nodes } = await corpusPullFull(tenant)
+    expect(nodes.map(({ id, type, props }) => ({ id, type, props }))).toEqual([
+      { id: legacy.id, type: "board", props: '{"width":"full"}' },
+    ])
   })
 })
 

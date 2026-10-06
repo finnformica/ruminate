@@ -5,6 +5,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import type React from "react"
 import type { ClipboardEvent, FocusEvent, KeyboardEvent, MouseEvent, TouchEvent } from "react"
 import { isDatabaseModeAtom, newBlockMarkerAtom } from "../../global-state"
+import { isNoteType } from "../../data/graph"
 import { sharedOriginAtom } from "../../data/shared-mode"
 import { shareDialogAtom } from "../share-note-dialog"
 import type { Block, BlockDoc, ChangeHint } from "../../blocks/types"
@@ -1875,7 +1876,7 @@ export function BlockEditor({
     const target = current.blocks[targetId]
     if (!target) return
     const whole = wholeTextLink(target.text)
-    const inPlace = whole !== null && whole.url === href && target.type !== "note"
+    const inPlace = whole !== null && whole.url === href && !isNoteType(target.type)
     const text = (inPlace ? whole.title : title).trim()
     let next: BlockDoc
     let id: string
@@ -1995,7 +1996,7 @@ export function BlockEditor({
     if (previous === null || previous === focus?.key || readOnly) return
     const current = docRef.current
     const block = current.blocks[idOfKey(previous)]
-    if (!block || block.type === "code" || block.type === "note") return
+    if (!block || block.type === "code" || isNoteType(block.type)) return
     const text = linkifyPastedText(block.text)
     if (text === block.text) return
     history.commit(current, updateBlock(current, block.id, { text }), { type: "structural" })

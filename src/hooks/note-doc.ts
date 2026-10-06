@@ -5,7 +5,7 @@ import type { BlockDoc, ChangeHint } from "../blocks/types"
 import type { ExpandedRule } from "../blocks/view"
 import { basketDoc, basketToOps } from "../data/basket"
 import { filteredView, isNarrowed, type FilteredView } from "../data/filter-view"
-import { NOTE_TYPE, blockView, noteView, type LinkDirections } from "../data/graph"
+import { blockView, isNoteType, noteView, type LinkDirections } from "../data/graph"
 import { notePropsOps } from "../data/note-meta"
 import { docToOps } from "../data/ops"
 import { useApplyOps } from "../data/store"
@@ -120,7 +120,7 @@ export function useNoteDoc({
   const rootId = focusBlockId && view?.doc.rootBlockIds[0] === focusBlockId ? focusBlockId : null
   const exists =
     noteId !== undefined &&
-    (rootId ? snapshot.nodes.get(noteId)?.type === NOTE_TYPE : view !== null)
+    (rootId ? isNoteType(snapshot.nodes.get(noteId)?.type ?? "") : view !== null)
   // Once the note has been seen, its absence means "deleted", not "new".
   const seenRef = useRef(exists)
   if (exists) seenRef.current = true
@@ -133,7 +133,7 @@ export function useNoteDoc({
       if (noteId === undefined) return
       // Diff against the graph as it is NOW (edits can outrun renders).
       const current = store.get(graphSnapshotAtom)
-      const note = current.nodes.get(noteId)?.type === NOTE_TYPE ? noteId : null
+      const note = isNoteType(current.nodes.get(noteId)?.type ?? "") ? noteId : null
       if (note === null) {
         if (seenRef.current) return // deleted underneath: let it stay deleted
         if (isEmptyDoc(next)) return // nothing worth creating a note for

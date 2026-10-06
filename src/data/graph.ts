@@ -39,6 +39,30 @@ import { emittedNoteTitle } from "./note-identity"
 
 export const CHILD_KIND = "child"
 export const NOTE_TYPE = "note"
+/** A board's root node (docs/boards.md): a note of the other kind, opened as
+ * a wall of its pictures. The same row as a note's in every other way. */
+export const BOARD_TYPE = "board"
+/** The two stored types a note's root node can have. The one list: nothing
+ * else spells the pair. */
+export const NOTE_TYPES = [NOTE_TYPE, BOARD_TYPE] as const
+/** Is this a note root's type — a note or a board? The one predicate every
+ * pass that lists, counts, orders or stops at a note asks. */
+export function isNoteType(type: string): boolean {
+  return type === NOTE_TYPE || type === BOARD_TYPE
+}
+
+/**
+ * TRANSITION: a board as it was stored before migrations/0020 — a `note` row
+ * whose props carry `board: true`. The branch preview runs against the
+ * production database before the migration has, so what must recognise a
+ * board (`isBoard`, the derived `NoteType`, the replica's guard) accepts
+ * this shape through here. Remove `LEGACY_BOARD_PROP` and `isLegacyBoard`,
+ * and every use of them, once 0020 has run in production.
+ */
+export const LEGACY_BOARD_PROP = "board"
+export function isLegacyBoard(node: { type: string; props: string | null }): boolean {
+  return node.type === NOTE_TYPE && parseProps(node.props)?.[LEGACY_BOARD_PROP] === true
+}
 
 /**
  * The **corpus root**: one node per corpus whose `child` links carry the
@@ -121,7 +145,7 @@ export function docToParts(
     if (id !== noteId && !reservedIds?.has(id)) continue
     // Another note walked into this doc as a row (upstream) IS that note,
     // not a block wearing its id: it keeps it.
-    if (doc.blocks[id].type === NOTE_TYPE && id !== noteId) continue
+    if (isNoteType(doc.blocks[id].type) && id !== noteId) continue
     let fresh = blockId()
     while (doc.blocks[fresh] !== undefined || fresh === noteId || reservedIds?.has(fresh)) {
       fresh = blockId()
@@ -138,6 +162,8 @@ export function docToParts(
   const nodes: NodeRow[] = [
     {
       id: noteId,
+      // The root's kind as a new note is made; an existing note's is not
+      // the doc's to say, and the diff leaves it alone (`partsToOps`).
       type: NOTE_TYPE,
       // No title means an untitled note (or a date note, whose id IS its
       // name) — `text` stays the id, exactly as it was before minting.
@@ -501,7 +527,7 @@ export interface WalkOptions {
  *
  * The note node itself is not part of a note's doc (see `noteDoc`); pass a
  * note id as a root and it walks like any node — a note linked under a block
- * renders as a `note` block.
+ * renders as a `note` block, a board as a `board` one.
  *
  * Walked **upstream** as well (`directions`), every block also carries the
  * complete list of its parents' ids (`upstream`), and beneath an open row
@@ -634,7 +660,7 @@ export function noteView(
   directions: LinkDirections = "downstream",
 ): GraphView | null {
   const note = graph.nodes.get(noteId)
-  if (!note || note.type !== NOTE_TYPE) return null
+  if (!note || !isNoteType(note.type)) return null
   const entries = noteEntries(note.props)
   const title = emittedNoteTitle(note.id, note.text)
   const props = title !== null ? { title, ...(entries ?? {}) } : entries
@@ -662,7 +688,7 @@ export function blockView(
   directions: LinkDirections = "downstream",
 ): GraphView | null {
   const node = graph.nodes.get(blockId)
-  if (!node || node.type === NOTE_TYPE) return null
+  if (!node || isNoteType(node.type)) return null
   return walkGraph([blockId], graph, { expanded, startLevel: 0, directions })
 }
 
@@ -736,6 +762,6 @@ export function rollup(noteId: string, graph: GraphSnapshot): string | null {
  */
 export function blockRollup(blockId: string, graph: GraphSnapshot): string | null {
   const node = graph.nodes.get(blockId)
-  if (!node || node.type === NOTE_TYPE) return null
+  if (!node || isNoteType(node.type)) return null
   return serialize(docFromGraph([blockId], graph))
 }

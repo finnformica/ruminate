@@ -35,7 +35,7 @@
 // column, which makes a repeated node a distinct row, so the bound is what
 // terminates it; `MAX_DEPTH` in `tools.ts` is what keeps that bound small.
 
-import { NOTE_TYPE } from "../../src/data/graph"
+import { NOTE_TYPES } from "../../src/data/graph"
 import type { SqlValue } from "../../src/data/sql-driver"
 import { toLinkRow, toNodeRow, type LinkRow, type NodeRow } from "../handlers/replica-payload"
 import type { TenantDb } from "../tenancy-db"
@@ -146,8 +146,8 @@ export const noteNodes = async (tenant: TenantDb): Promise<NodeRow[]> =>
   asNodes(
     await tenant.exec(
       `SELECT ${NODE_COLUMNS} FROM nodes ` +
-        "WHERE user_id = :tenant AND deleted_at IS NULL AND type = ?1",
-      [NOTE_TYPE],
+        "WHERE user_id = :tenant AND deleted_at IS NULL AND type IN (?1, ?2)",
+      [...NOTE_TYPES],
     ),
   )
 
@@ -299,7 +299,8 @@ export const scopeNodeIds = async (tenant: TenantDb, noteIds: string[]): Promise
       const rows = await tenant.exec(
         `WITH RECURSIVE granted (id) AS ( ` +
           `SELECT n.id FROM nodes n ` +
-          `WHERE n.user_id = :tenant AND n.deleted_at IS NULL AND n.type = ?${batch.length + 1} ` +
+          `WHERE n.user_id = :tenant AND n.deleted_at IS NULL ` +
+          `AND n.type IN (?${batch.length + 1}, ?${batch.length + 2}) ` +
           `AND n.id IN (${holes(batch.length)}) ), ` +
           `seed (id) AS ( ` +
           `SELECT id FROM granted ` +
@@ -315,7 +316,7 @@ export const scopeNodeIds = async (tenant: TenantDb, noteIds: string[]): Promise
           `JOIN nodes c ON c.user_id = :tenant AND c.id = l.destination_id ` +
           `AND c.deleted_at IS NULL ) ` +
           `SELECT id FROM visible`,
-        [...batch, NOTE_TYPE],
+        [...batch, ...NOTE_TYPES],
       )
       return rows.map((row) => String(row.id))
     }),

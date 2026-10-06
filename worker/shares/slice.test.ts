@@ -140,6 +140,10 @@ describe("planSliceWrite", () => {
     expect(
       plan("read,write", [node("blk_new", { type: "note" })], [link("blk_a", "blk_new")]),
     ).toMatchObject({ ok: false, refusal: { error: "permission_denied" } })
+    // A board is a note root too (migrations/0020): a share makes none.
+    expect(
+      plan("read,write", [node("blk_new", { type: "board" })], [link("blk_a", "blk_new")]),
+    ).toMatchObject({ ok: false, refusal: { error: "permission_denied" } })
     expect(plan("read,write", [node("blk_a", { type: "ul" })]).ok).toBe(true)
   })
 

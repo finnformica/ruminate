@@ -1,4 +1,5 @@
 import React from "react"
+import { isNoteType } from "../data/graph"
 import { useResultsDoc, type ResultRoot } from "../hooks/results-doc"
 import type { NoteId } from "../schema"
 import type { BlockMenuTarget, MenuEntry } from "./block-editor/block-context-menu"
@@ -65,7 +66,7 @@ export function ResultsEditor({
   const blockEntries = useBlockViewMenuEntries()
   const menuEntries = React.useCallback(
     (target: BlockMenuTarget): MenuEntry[] => {
-      if (target.type === "note") return noteEntries(target.id)
+      if (isNoteType(target.type)) return noteEntries(target.id)
       const noteId = noteOf.get(target.id)
       return noteId === undefined ? [] : blockEntries(target.id, noteId)
     },

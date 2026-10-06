@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router"
 import { useAtomValue } from "jotai"
 import React from "react"
-import { NOTE_TYPE } from "../data/graph"
+import { isNoteType } from "../data/graph"
 import {
   describeSharePermissions,
   listShares,
@@ -125,7 +125,7 @@ function useRootLabel() {
       if (!node) return id
       const noteName = (noteId: string) =>
         notes.get(noteId)?.displayName || graph.nodes.get(noteId)?.text || ""
-      if (node.type === NOTE_TYPE) return noteName(id) || "Untitled note"
+      if (isNoteType(node.type)) return noteName(id) || "Untitled note"
       const text = node.text.trim() || "Untitled block"
       const clipped = text.length > LABEL_LENGTH ? `${text.slice(0, LABEL_LENGTH - 1)}…` : text
       const home = node.notes_id ? noteName(node.notes_id) : ""

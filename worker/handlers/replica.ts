@@ -41,6 +41,13 @@ import {
   forTenant,
   type TenantDb,
 } from "../tenancy-db"
+import {
+  BOARD_TYPE,
+  LEGACY_BOARD_PROP,
+  isLegacyBoard,
+  parseProps,
+  propsJson,
+} from "../../src/data/graph"
 import type { Env } from "../types"
 import { corpusPullFull, corpusPullSince, corpusPut, corpusStatus } from "./replica-corpus"
 import {
@@ -48,6 +55,7 @@ import {
   REPLICA_PROTOCOL_HEADER,
   parseReplicaPayload,
   parseSinceCursor,
+  type ReplicaPutPayload,
 } from "./replica-payload"
 import { resolveTenancy, type VerifiedIdentity } from "./tenancy"
 
@@ -242,7 +250,26 @@ async function replicaPut(request: Request, tenant: TenantDb): Promise<Response>
   const payload = parseReplicaPayload(body)
   if (!payload) return jsonResponse({ error: "invalid_payload" }, 400)
 
-  return jsonResponse(await corpusPut(tenant, payload))
+  return jsonResponse(await corpusPut(tenant, retypeLegacyBoards(payload)))
+}
+
+/**
+ * TRANSITION (migrations/0020): a board pushed in its old shape — a `note`
+ * row whose props carry `board: true`, from a client still on the build
+ * before the type — lands in the new one, so a stale client cannot write
+ * the old shape back over a migrated row (the upsert is last-writer-wins on
+ * `updated_at`, and an edit made after the migration is the newer one).
+ * Removed with `isLegacyBoard` once 0020 has run in production.
+ */
+export function retypeLegacyBoards(payload: ReplicaPutPayload): ReplicaPutPayload {
+  if (!payload.nodes.some(isLegacyBoard)) return payload
+  const nodes = payload.nodes.map((node) => {
+    if (!isLegacyBoard(node)) return node
+    const props = { ...(parseProps(node.props) ?? {}) }
+    delete props[LEGACY_BOARD_PROP]
+    return { ...node, type: BOARD_TYPE, props: propsJson(props) }
+  })
+  return { ...payload, nodes }
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
