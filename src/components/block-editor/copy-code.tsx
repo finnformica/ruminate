@@ -14,11 +14,15 @@ import { IconButton } from "../ui/icon-button"
 export function CopyCodeButton({
   text,
   icon,
+  ghost,
   className,
 }: {
   text: string
   /** Classes for the icon (a smaller one in an inline chip). */
   icon?: string
+  /** No hover or pressed fill, only the icon (and the tick once copied) —
+   * an inline chip's button, where a fill collided with the chip's border. */
+  ghost?: boolean
   className?: string
 }) {
   const [copyText, copied] = useCopied()
@@ -34,7 +38,12 @@ export function CopyCodeButton({
         event.stopPropagation()
         copyText(text)
       }}
-      className={cx("rounded-sm px-1.5", className)}
+      className={cx(
+        "rounded-sm px-1.5",
+        ghost &&
+          "enabled:hover:bg-transparent enabled:active:bg-transparent data-[popup-open]:bg-transparent",
+        className,
+      )}
     >
       {copied ? <CheckIcon16 className={icon} /> : <CopyIcon16 className={icon} />}
     </IconButton>

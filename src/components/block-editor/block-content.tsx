@@ -1,6 +1,6 @@
 import type { Element, ElementContent } from "hast"
 import type { Root } from "mdast"
-import { Fragment, useContext, useRef, useState } from "react"
+import { Fragment, useContext } from "react"
 import ReactMarkdown from "react-markdown"
 import rehypeKatex from "rehype-katex"
 import remarkGfm from "remark-gfm"
@@ -131,10 +131,6 @@ function Link({
 const CHIP =
   "rounded-sm border border-border-secondary bg-[var(--color-bg-code-block)] box-decoration-clone px-1.5 py-px font-mono text-[0.85em]"
 
-/** The narrowest chip the copy button sits inside: below this, the button
- * and its fade would cover nearly all of the code. */
-const INSIDE_MIN_WIDTH = 64
-
 /**
  * The inline code chip: a bordered, tinted pill in the mono face, a touch
  * smaller than the text around it (the Linear / Notion idiom), at the chip
@@ -143,65 +139,31 @@ const INSIDE_MIN_WIDTH = 64
  * chip never inflates the line box (which would break the pixel-identical
  * view/edit swap).
  *
- * While the pointer is over it, a copy button sits in the chip's right end,
- * on its vertical centre (`copy-code.tsx`), and the code fades out beneath
- * it — a mask on the text, not a fill over it: the chip's tint is
- * translucent, so a painted fade doubled it — so the line never reflows to
- * make room. A chip too short to give the button room (`INSIDE_MIN_WIDTH`,
- * measured as the pointer arrives) would be all button, so there the button
- * stands just past the chip's right edge instead, in a chip of its own —
- * the same border, radius and tint, made opaque — over whatever follows.
- * Its left padding meets the chip's edge, so the pointer crosses to it
- * without the hover dropping.
+ * While the pointer is over it, a copy button (`copy-code.tsx`) stands just
+ * past its right edge, in a chip of its own — the same border, radius,
+ * height and tint, made opaque — over whatever follows: beside the code
+ * rather than on it, so it never hides any of a short chip, and absolutely
+ * placed, so the line never reflows to make room. Its left padding meets
+ * the chip's edge, so the pointer crosses to it without the hover dropping.
  */
 function InlineCode({ children, node }: { children?: React.ReactNode; node?: Element }) {
   const text = textOf(node)
-  const ref = useRef<HTMLElement>(null)
-  const [outside, setOutside] = useState(false)
   if (!text) return <code className={CHIP}>{children}</code>
   return (
-    <code
-      ref={ref}
-      className={cx(CHIP, "group/code relative")}
-      onPointerEnter={() => {
-        const width = ref.current?.getBoundingClientRect().width ?? 0
-        setOutside(width < INSIDE_MIN_WIDTH)
-      }}
-    >
-      <span
-        className={cx(
-          !outside &&
-            "group-hover/code:[mask-image:linear-gradient(to_left,transparent_1rem,#000_1.75rem)]",
-        )}
-      >
-        {children}
-      </span>
-      <span
-        data-placement={outside ? "outside" : "inside"}
-        className={cx(
-          "absolute flex items-center",
-          outside ? "-inset-y-px left-full z-10 pl-1" : "inset-y-0 right-0.5",
-          "invisible opacity-0 transition-opacity duration-150 group-hover/code:visible group-hover/code:opacity-100",
-        )}
-      >
-        {outside ? (
-          // The chip's own border, radius, height and tint, laid over the
-          // page's colour: the tint alone is translucent, and the word under
-          // the button showed through it.
-          <span className="flex h-full rounded-sm border border-border-secondary [background:linear-gradient(var(--color-bg-code-block),var(--color-bg-code-block)),var(--color-bg)]">
-            <CopyCodeButton
-              text={text}
-              icon="size-3"
-              className="h-full rounded-[inherit] px-1 coarse:h-full coarse:px-1"
-            />
-          </span>
-        ) : (
+    <code className={cx(CHIP, "group/code relative")}>
+      {children}
+      <span className="invisible absolute -inset-y-px left-full z-10 flex pl-1 opacity-0 transition-opacity duration-150 group-hover/code:visible group-hover/code:opacity-100">
+        {/* The chip's tint alone is translucent, and the word under the
+            button showed through it: laid over the page's colour, it is
+            opaque. */}
+        <span className="flex h-full rounded-sm border border-border-secondary [background:linear-gradient(var(--color-bg-code-block),var(--color-bg-code-block)),var(--color-bg)]">
           <CopyCodeButton
             text={text}
             icon="size-3"
-            className="h-full max-h-5 px-0.5 coarse:h-full coarse:px-0.5"
+            ghost
+            className="h-full rounded-[inherit] px-1 coarse:h-full coarse:px-1"
           />
-        )}
+        </span>
       </span>
     </code>
   )
