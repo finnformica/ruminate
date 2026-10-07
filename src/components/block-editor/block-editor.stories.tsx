@@ -291,11 +291,8 @@ export const FramedBlocks: Story = {
           id: "blk_fp",
           type: "text",
           text: "Each framed block has rows under it, and sits under a row in turn.",
-          children: ["blk_fp1"],
+          children: [],
         },
-        // A text parent beside the framed ones: every chevron sits on its
-        // row's first line.
-        blk_fp1: { id: "blk_fp1", type: "ul", text: "A bullet under the paragraph", children: [] },
         blk_fi: {
           id: "blk_fi",
           type: "image",

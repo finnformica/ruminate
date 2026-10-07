@@ -108,7 +108,7 @@ for (const name of ["export async function fetchNotes", "Some text with"]) {
 }
 {
   // The panel sits in the block frame (block-frame.tsx), as a picture does:
-  // 6px off the row's surface above and below, and as far from the
+  // 10px off the row's surface above and below, and as far from the
   // surface's right edge as from its left — the text column is 54px in, so
   // the frame is centred in the surface. Its text sits the panel's padding
   // and border in from the text column.
@@ -134,34 +134,18 @@ for (const name of ["export async function fetchNotes", "Some text with"]) {
   )
   check(
     "code panel is inset from the row's surface, the same above and below",
-    Math.abs(geo.top - 6) <= 1 && Math.abs(geo.bottom - geo.top) <= 1,
+    Math.abs(geo.top - 10) <= 1 && Math.abs(geo.bottom - geo.top) <= 1,
     `top=${geo.top} bottom=${geo.bottom}`,
   )
   check(
     "one-line code block is a paragraph plus the frame's and the panel's room",
-    Math.abs(geo.oneLineCode - geo.oneLinePara - 8 - 18) <= 1,
+    Math.abs(geo.oneLineCode - geo.oneLinePara - 16 - 18) <= 1,
     `code=${geo.oneLineCode.toFixed(1)} para=${geo.oneLinePara.toFixed(1)}`,
   )
   check(
     "code text starts the panel's padding and border in from the text column",
     Math.abs(geo.codeText - geo.paraText - 13) <= 1,
     `code=${geo.codeText} para=${geo.paraText}`,
-  )
-  // The chevron sits on the frame's first line, as on a text row's: its
-  // centre is the first line of code's centre (blk_cp has rows under it).
-  const chev = await page.evaluate(() => {
-    const box = (sel) => document.querySelector(sel).getBoundingClientRect()
-    const toggle = box('[data-block-row="blk_cp"] .block-toggle')
-    const line = box('[data-block-id="blk_cp"]')
-    const lineHeight = parseFloat(
-      getComputedStyle(document.querySelector('[data-block-id="blk_cp"]')).lineHeight,
-    )
-    return { toggle: toggle.top + toggle.height / 2, firstLine: line.top + lineHeight / 2 }
-  })
-  check(
-    "a code block's chevron is centred on its first line",
-    Math.abs(chev.toggle - chev.firstLine) <= 1,
-    `toggle=${chev.toggle.toFixed(1)} line=${chev.firstLine.toFixed(1)}`,
   )
   // ``` then Enter: the new, empty code block is one full line tall at once
   // and does not jump when the first character is typed.

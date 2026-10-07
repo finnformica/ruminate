@@ -753,11 +753,7 @@ export function BlockItem({
   // (`GUIDE_X`): the thread of a subtree drops straight out of the control
   // that folds it. `h-[1lh]` at the row's first-line scale centres the
   // chevron on that line — a heading's scale on a heading, the body's
-  // otherwise. A framed block's first line sits further down, past its
-  // frame (and a panel's border and padding), so its column moves down by
-  // that much (`BlockKind.firstLineOffset`): the chevron is on the first
-  // line of code, the card's title, the top of the picture — on the row's
-  // first line, as on every other row.
+  // otherwise.
   const chevronColumn = (
     <span
       data-testid="chevron-column"
@@ -765,7 +761,6 @@ export function BlockItem({
         "relative flex h-[1lh] w-[17px] shrink-0 items-center justify-center",
         kind.slot === "hash" && headingScale(scaleDepth),
       )}
-      style={kind.firstLineOffset ? { marginTop: kind.firstLineOffset } : undefined}
     >
       {toggle}
     </span>
