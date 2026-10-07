@@ -3,7 +3,8 @@ import type { Block, BlockProps, BlockType } from "./types"
 /**
  * **Figures**: the block types whose row is a thing set in the text rather
  * than a line of it — a picture (`image`, docs/images.md), a link block's card
- * (`link`, docs/links.md). What they share is their LAYOUT, which
+ * (`link`, docs/links.md), a code block's panel (`code`). What they share is
+ * their LAYOUT, which
  * this module holds: two props on the block say how the figure sits in its
  * row, chosen in the editor (the frame's handles and toolbar,
  * `figure-frame.tsx`, or the row's context menu).
@@ -11,7 +12,8 @@ import type { Block, BlockProps, BlockType } from "./types"
  * `align` is the side of the row the figure keeps to (centred when absent),
  * and `size` its width as a percentage of the row's — a figure dragged
  * narrower or wider. Absent, a figure is its natural width: a picture its
- * own pixels no wider than the row, a card the row's full width. Both are
+ * own pixels no wider than the row, a card or a code panel the row's full
+ * width. Both are
  * the row's layout only: the figure's content, and its markdown line, are
  * the same whatever they say.
  */
@@ -20,7 +22,7 @@ export type FigureAlign = "left" | "center" | "right"
 export const FIGURE_ALIGNS: readonly FigureAlign[] = ["left", "center", "right"]
 
 /** The block types laid out as figures. */
-const FIGURE_TYPES: readonly BlockType[] = ["image", "link"]
+const FIGURE_TYPES: readonly BlockType[] = ["image", "link", "code"]
 
 export function isFigureType(type: BlockType): boolean {
   return FIGURE_TYPES.includes(type)

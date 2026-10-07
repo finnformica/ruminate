@@ -8,6 +8,7 @@ import {
   insertBlocksAfter,
   insertBlocksAsFirstChildren,
   insertFirstChild,
+  insertLastChild,
   moveBlocks,
   outdentBlock,
   remintCollidingIds,
@@ -292,6 +293,22 @@ describe("insertFirstChild", () => {
   it("is a no-op for an unknown parent", () => {
     const doc = fixture()
     expect(insertFirstChild(doc, "nope", emptyBlock("text", "x"))).toBe(doc)
+  })
+})
+
+describe("insertLastChild", () => {
+  it("inserts the block at the tail of the parent's children", () => {
+    const doc = fixture()
+    const fresh = emptyBlock("text", "new")
+    const next = insertLastChild(doc, "b", fresh)
+    expect(next.blocks["b"].children).toEqual(["b1", fresh.id])
+    expect(next.blocks[fresh.id].text).toBe("new")
+    expect(doc.blocks["b"].children).toEqual(["b1"])
+  })
+
+  it("is a no-op for an unknown parent", () => {
+    const doc = fixture()
+    expect(insertLastChild(doc, "nope", emptyBlock("text", "x"))).toBe(doc)
   })
 })
 

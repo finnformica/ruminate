@@ -14,8 +14,21 @@ import { upstreamIndexAtom, useDeveloperDebug } from "../../hooks/is-developer"
 import { resolveBlockSubtrees } from "../../utils/resolve-blocks"
 import { BlockEditor, type BlockDebugOptions } from "./block-editor"
 
-/** Ensure a parsed doc always has at least one block to edit. Not for a view
- * that may legitimately be empty — see `seedDoc`. */
+/**
+ * Ensure a parsed doc always has at least one block to edit. The starter is
+ * the editor's alone until it is typed into: it is seeded into the editor's
+ * doc, never written to the note. Not for a view that may legitimately be
+ * empty — see `seedDoc`.
+ *
+ * There is no blank kept at the bottom beyond this. A note used to end in
+ * an empty paragraph whatever it held, minted on every edit so there was
+ * always a row to click into — and written to the note, so every note
+ * carried an empty block it never asked for. Now the note ends where its
+ * last block does, as a Notion page does, and the room beneath it is the
+ * place to click: the page's foot (`_appRoot.views_.$.tsx`) asks the editor
+ * for a block at the end (`appendRootSignal`), which edits the last block
+ * if it is already an empty one and makes a new one otherwise.
+ */
 function withStarterBlock(doc: BlockDoc): BlockDoc {
   if (doc.rootBlockIds.length > 0) return doc
   const block = emptyBlock()
@@ -23,28 +36,12 @@ function withStarterBlock(doc: BlockDoc): BlockDoc {
 }
 
 /**
- * Keep an empty block at the very bottom, so there's always somewhere to click
- * and start typing (like Notion). No-op if the last root block is already an
- * empty, childless block.
- */
-function ensureTrailingBlank(doc: BlockDoc): BlockDoc {
-  const lastId = doc.rootBlockIds[doc.rootBlockIds.length - 1]
-  const last = lastId ? doc.blocks[lastId] : undefined
-  if (last && last.type === "text" && last.text === "" && last.children.length === 0) return doc
-  const block = emptyBlock()
-  return {
-    ...doc,
-    rootBlockIds: [...doc.rootBlockIds, block.id],
-    blocks: { ...doc.blocks, [block.id]: block },
-  }
-}
-
-/**
- * The focused-view stand-in for `ensureTrailingBlank`: while focused we don't
- * append root-level blanks (they'd be invisible below the focused subtree);
- * instead we only make sure the focus root has at least one child to edit when
- * the focus *starts* (e.g. focusing on a leaf). Deleting the last child later
- * is allowed — the title alone is a valid view (Enter on it creates a child).
+ * The focused-view stand-in for the starter: while focused there is no root
+ * to seed (a blank beside the focused block would be a root the note never
+ * holds); instead we only make sure the focus root has at least one child to
+ * edit when the focus *starts* (e.g. focusing on a leaf). Deleting the last
+ * child later is allowed — the title alone is a valid view (Enter on it
+ * creates a child).
  *
  * Only where the block is drawn as the view's title (`titlesFocus`): a block
  * that leads the view as its own first row is already something to edit, and
@@ -82,6 +79,7 @@ export function BlockNoteEditor({
   focusFirstSignal,
   focusFirstMode,
   newRootSignal,
+  appendRootSignal,
   refocusSignal,
   readOnly = false,
   browse = false,
@@ -91,7 +89,7 @@ export function BlockNoteEditor({
   collapseKey,
   folds,
   onToggleCollapse,
-  trailingBlank = true,
+  starter = true,
   rowRemoval = "unlink",
   context,
   onEditingChange,
@@ -133,6 +131,10 @@ export function BlockNoteEditor({
   focusFirstMode?: "edit" | "select"
   /** Bump to add a new root block (e.g. Cmd+Enter from the title). */
   newRootSignal?: number
+  /** Bump to edit a block at the END of the note (a click in the room
+   * beneath it): the last block if it is already an empty one, else a new
+   * one after it. */
+  appendRootSignal?: number
   refocusSignal?: number
   /** Display-only: render the note as read-only blocks (e.g. past-day history). */
   readOnly?: boolean
@@ -148,9 +150,12 @@ export function BlockNoteEditor({
   /** Where this editor's folds are kept, when not under the note's own id —
    * a second editor on the page (the Unassigned basket) keeps its own. */
   collapseKey?: string
-  /** Whether an editable doc always ends with a blank block to type into. Off
-   * for the basket: a blank there would be a new unassigned block. */
-  trailingBlank?: boolean
+  /** Whether an editable doc always keeps a block to type into: an empty
+   * one is seeded when it holds none, and the only root cannot be removed.
+   * Off for the basket (a blank there would be a new unassigned block, and
+   * removing the last block empties the basket) and for a narrowed view (a
+   * blank row is one the filter would hide). */
+  starter?: boolean
   /** What removing a row (⌫, Cut, the menu) does to the block. `"unlink"` —
    * the outline: the block stays, in the note's Unassigned basket if nothing
    * else holds it, and the menu offers Delete beside Unlink. `"delete"` —
@@ -163,20 +168,13 @@ export function BlockNoteEditor({
   /** Told which block is being edited as it changes (`BlockEditor`). */
   onEditingChange?: (id: string | null) => void
 }) {
-  // Read-only history views are shown verbatim; only editable notes get the
-  // always-present trailing blank — and not while focused, where the doc's
-  // one root is the focused block: a blank beside it would be a root the
-  // note never holds (`ensureFocusChild` is the focus rule).
-  //
-  // A view that may legitimately hold nothing gets no starter either: a
-  // filter that matched nothing, and the basket, would otherwise show one
-  // empty row that reads as "this note is empty" when it is not, and that
-  // the filter would hide again as soon as it was typed into.
-  const seedDoc = (incoming: BlockDoc) => {
-    if (!trailingBlank) return incoming
-    const seeded = withStarterBlock(incoming)
-    return readOnly || focusBlockId ? seeded : ensureTrailingBlank(seeded)
-  }
+  // A view that may legitimately hold nothing gets no starter: a filter that
+  // matched nothing, and the basket, would otherwise show one empty row that
+  // reads as "this note is empty" when it is not, and that the filter would
+  // hide again as soon as it was typed into. (While focused the doc's one
+  // root is the focused block, so the starter never applies there either —
+  // `ensureFocusChild` is the focus rule.)
+  const seedDoc = (incoming: BlockDoc) => (starter ? withStarterBlock(incoming) : incoming)
 
   const [doc, setDoc] = useState<BlockDoc>(() => seedDoc(incoming))
   // The last doc this editor produced (or was seeded from). When the incoming
@@ -210,13 +208,9 @@ export function BlockNoteEditor({
   }
 
   const handleChange = (next: BlockDoc, hint?: ChangeHint) => {
-    // While focused, the trailing-blank rule is suspended (a root-level blank
-    // would be invisible below the focused subtree) — see `ensureFocusChild`.
-    const withBlank =
-      readOnly || !trailingBlank ? next : focusBlockId ? next : ensureTrailingBlank(next)
-    setDoc(withBlank)
-    setLastDoc(withBlank)
-    onChange(withBlank, hint)
+    setDoc(next)
+    setLastDoc(next)
+    onChange(next, hint)
   }
 
   // "Paste as link": resolve pasted block ids to their live subtree markdown
@@ -306,6 +300,7 @@ export function BlockNoteEditor({
       focusFirstSignal={focusFirstSignal}
       focusFirstMode={focusFirstMode}
       newRootSignal={newRootSignal}
+      appendRootSignal={appendRootSignal}
       refocusSignal={refocusSignal}
       readOnly={readOnly}
       browse={browse}
@@ -321,9 +316,9 @@ export function BlockNoteEditor({
       knownBlock={noteId ? knownBlock : undefined}
       onImageUpload={onImageUpload}
       onLinkPreview={onLinkPreview}
-      // The trailing blank is what keeps a block to type in; without it (the
+      // The starter is what keeps a block to type in; without it (the
       // basket) the last row may go, and the basket goes with it.
-      emptyable={!trailingBlank}
+      emptyable={!starter}
       context={context}
       onEditingChange={onEditingChange}
     />

@@ -51,8 +51,9 @@ match.
 
 A picture is a **figure** — a block whose row is a thing set in the text
 rather than a line of it — and its layout is the one every figure shares
-(`src/blocks/figure.ts`; a link block's card, docs/links.md, is laid out the
-same way by the same frame, `figure-frame.tsx`).
+(`src/blocks/figure.ts`; a link block's card, docs/links.md, and a code
+block's panel are laid out the same way by the same frame,
+`figure-frame.tsx`).
 
 A picture is, left to itself, its natural size: as wide as the row when it is
 wide enough, centred when it is not, and never taller than a screenful. When
@@ -75,8 +76,11 @@ markdown line are the same whatever they say, so an aligned or resized
 picture copies and exports as `![caption](url)` and comes back at its
 natural size, centred. Copying blocks within the app carries the props.
 
-In the editor, hovering a picture (or selecting its row) reveals a slim
-handle at its side and a small toolbar in its corner. Dragging the handle
+In the editor, hovering a picture's row reveals a slim handle at its side
+and a small toolbar in its corner, and nothing else does: a selected row
+shows none, so the controls never stand on the picture while the note is
+read or moved through by keyboard (a touch screen has no hover, so there
+the selected row reveals them). Dragging the handle
 resizes the picture live, as a fraction of the row so it holds on a narrower
 screen: a centred picture has a handle at each side and grows from both at
 once; one kept to the left or right has a handle at its free side only and

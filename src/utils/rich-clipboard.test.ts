@@ -311,12 +311,15 @@ describe("code blocks on the clipboard", () => {
     const { plain, html } = richClipboardFormats(CODE)
     expect(plain.trimEnd()).toBe("```ts\nconst a = 1\n  const b = 2\n```")
     const blocks = extractClipboardBlocks(html)!
+    // The language rides the fence for an older reader, and the props — the
+    // language and, a code block being a figure, its layout — travel whole.
     expect(blocks).toEqual([
       {
         id: "blk_code",
         type: "code",
         text: "const a = 1\n  const b = 2",
         language: "ts",
+        props: { language: "ts" },
         children: [],
       },
     ])

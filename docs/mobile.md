@@ -178,7 +178,7 @@ keyboard that appears and disappears. The block editor
   `Button`, `DropdownMenu`, `TextInput`, the search boxes); shortcut keycaps
   are hidden where there is nothing to press (`Keys`, `coarse:hidden`).
 - Hover-only affordances show outright on touch: the note card's buttons, the
-  code block's language. The image figure's toolbar is the exception by
+  code block's language. A figure's toolbar is the exception by
   design — hidden until the row is selected (a long press), so a stray tap
   never lands on it.
 - The block menu may take most of the screen on a phone (`coarse:max-h-[80svh]`)

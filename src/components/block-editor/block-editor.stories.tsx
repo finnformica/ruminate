@@ -273,6 +273,102 @@ export const Links: Story = {
   },
 }
 
+/**
+ * The three framed blocks (`block-frame.tsx`) — a picture, a link card, a
+ * code panel — each with rows under it, and each again nested under a row:
+ * the frame's inset holds at every depth, and a framed block's chevron
+ * stands in its column as any parent's does. The visual-regression story
+ * for the frame.
+ */
+export const FramedBlocks: Story = {
+  args: {
+    initial: "",
+    initialDoc: {
+      props: null,
+      rootBlockIds: ["blk_fp", "blk_fi", "blk_fl", "blk_fc", "blk_fq"],
+      blocks: {
+        blk_fp: {
+          id: "blk_fp",
+          type: "text",
+          text: "Each framed block has rows under it, and sits under a row in turn.",
+          children: [],
+        },
+        blk_fi: {
+          id: "blk_fi",
+          type: "image",
+          text: "A picture with rows under it",
+          props: { src: PICTURE("#5b8def", 1200, 400) },
+          children: ["blk_fi1", "blk_fi2"],
+        },
+        blk_fi1: { id: "blk_fi1", type: "ul", text: "A bullet under the picture", children: [] },
+        blk_fi2: {
+          id: "blk_fi2",
+          type: "ul",
+          text: "A bullet with a picture of its own under it",
+          children: ["blk_fi3"],
+        },
+        blk_fi3: {
+          id: "blk_fi3",
+          type: "image",
+          text: "Nested two deep, kept to the left at half the row",
+          props: { src: PICTURE("#e0a458", 800, 500), align: "left", size: 50 },
+          children: [],
+        },
+        blk_fl: {
+          id: "blk_fl",
+          type: "link",
+          text: "How to make a good cup of tea",
+          props: {
+            url: "https://www.example.org/essays/tea",
+            description:
+              "Eleven rules, every one of them controversial, on the making of tea — the drink, the pot, the milk, and the order they go in.",
+            image: PICTURE("#8a6d3b", 800, 600),
+            favicon: PICTURE("#333", 32, 32),
+            site: "Example Essays",
+          },
+          children: ["blk_fl1"],
+        },
+        blk_fl1: {
+          id: "blk_fl1",
+          type: "ul",
+          text: "A bullet under the card, with a card of its own",
+          children: ["blk_fl2"],
+        },
+        blk_fl2: {
+          id: "blk_fl2",
+          type: "link",
+          text: "",
+          props: { url: "https://www.example.com/a/page/with/no/preview" },
+          children: [],
+        },
+        blk_fc: {
+          id: "blk_fc",
+          type: "code",
+          text: "export function frame(block: Block): Frame {\n\treturn insetOf(block)\n}",
+          props: { language: "ts" },
+          children: ["blk_fc1"],
+        },
+        blk_fc1: {
+          id: "blk_fc1",
+          type: "ul",
+          text: "A bullet under the code, with a code block of its own",
+          children: ["blk_fc2", "blk_fc3"],
+        },
+        // Dragged narrower and kept to the left, as a picture can be.
+        blk_fc2: {
+          id: "blk_fc2",
+          type: "code",
+          text: "nested, and no language",
+          props: { align: "left", size: 60 },
+          children: [],
+        },
+        blk_fc3: { id: "blk_fc3", type: "code", text: "", props: { language: "sh" }, children: [] },
+        blk_fq: { id: "blk_fq", type: "text", text: "A closing paragraph.", children: [] },
+      },
+    },
+  },
+}
+
 /** A todo that also has children — both shortcut hints stack when selected. */
 /** A long note with a large nest, for the fold's end-to-end tests
  * (e2e/fold-motion.e2e.mjs): rows above and below it, a nested bullet

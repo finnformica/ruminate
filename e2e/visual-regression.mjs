@@ -46,6 +46,9 @@ const STORIES = [
   { id: "blockeditor--empty", waitFor: '[data-testid="block-body"]' },
   // Waits for the tokens: the grammar is fetched after the story mounts.
   { id: "blockeditor--code", waitFor: '[data-testid="code-panel"] .token' },
+  // The three framed blocks, each with rows under it and each nested in
+  // turn: the frame's inset at every depth. Waits for the tokens too.
+  { id: "blockeditor--framed-blocks", waitFor: '[data-testid="code-panel"] .token' },
   { id: "notetitle--default", waitFor: "text=Meeting notes" },
   // Every primitive in src/components/ui/, and the molecules built straight on
   // them: a change to an atom shows here before it shows in the app. Popups

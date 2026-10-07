@@ -9,10 +9,11 @@ import type { Occurrence } from "../../blocks/view"
 import { cx } from "../../utils/cx"
 import { noteTypeOf } from "../../utils/note-type"
 import { NoteFavicon } from "../note-favicon"
+import { BlockFrame } from "./block-frame"
 import type { BlockEditorApi } from "./block-item"
 import { LinkCard } from "./link-card"
 import { CodeHighlight } from "./code-highlight"
-import { CodeLanguage } from "./code-language"
+import { CodePanel } from "./code-panel"
 import { ImageFigure } from "./image-figure"
 
 /**
@@ -75,8 +76,9 @@ export interface BlockKind {
   /** Chrome before the content line (a quote's bar). */
   readonly before?: (context: RowContext) => ReactNode
   /** Wrap the content line (an image's picture above its caption, a code
-   * block's panel). The line itself stays chrome-free: the row sizes its
-   * textarea by its text alone, so a panel's padding and border belong
+   * block's panel) — for a framed block, in the frame they share
+   * (`block-frame.tsx`). The line itself stays chrome-free: the row sizes
+   * its textarea by its text alone, so a panel's padding and border belong
    * here, around the line, never on it. */
   readonly wrap?: (content: ReactNode, context: RowContext) => ReactNode
 }
@@ -242,38 +244,23 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     body: (block) => (
       <CodeHighlight text={block.text} language={String(block.props?.language ?? "")} />
     ),
-    // The panel — a tinted, bordered surface at the row's own radius —
-    // WRAPS the line rather than being classes on it. The row sizes its
-    // textarea by its text alone (`1lh` empty, else its scroll height) and
-    // draws the view with the same `min-h-[1lh]`; padding and a border on
-    // the line itself broke both: an empty block's one-line box was eaten
-    // by its own padding (the caret clipped, then a jump to size on the
-    // first keystroke), and the border went uncounted, so every edit was
-    // 2px shorter than its view. Around the line, the chrome adds the same
-    // to both states and the text never moves.
+    // The panel — a tinted, bordered surface — WRAPS the line rather than
+    // being classes on it. The row sizes its textarea by its text alone
+    // (`1lh` empty, else its scroll height) and draws the view with the
+    // same `min-h-[1lh]`; padding and a border on the line itself broke
+    // both: an empty block's one-line box was eaten by its own padding
+    // (the caret clipped, then a jump to size on the first keystroke), and
+    // the border went uncounted, so every edit was 2px shorter than its
+    // view. Around the line, the chrome adds the same to both states and
+    // the text never moves.
     //
-    // Its box is the row's highlight surface, to the right: it pulls over
-    // the line's padding (2px above and below, 6px at the right) with
-    // negative margins that its border and 1px of padding pay back, so a
-    // one-line block is the 27px every other row is and its right edge is
-    // every other row's. It starts at the text column, after the empty key
-    // slot, and the text sits 4px in — turning a paragraph into code moves
-    // the text by that much and no more. Selected, its border takes the
-    // selection ring's colour (`.block-code-panel`, block-editor.css),
-    // since it sits where the ring would. The language sits in its
-    // top-right corner — chrome, not content, and a control: click it to
-    // change it (`code-language.tsx`).
-    wrap: (content, { block, api }) => {
-      return (
-        <div
-          data-testid="code-panel"
-          className="group block-code-panel prism relative -my-0.5 -mr-1.5 flex min-w-0 flex-1 rounded border border-border-secondary bg-[var(--color-bg-code-block)] py-px pl-1 pr-[5px]"
-        >
-          {content}
-          <CodeLanguage block={block} api={api} />
-        </div>
-      )
-    },
+    // It is a FIGURE like a picture or a card (`src/blocks/figure.ts`): the
+    // panel (`CodePanel`) sits in the frame every framed block has
+    // (`block-frame.tsx`), inset from the row's surface as they are, and in
+    // the figure frame, so it has their handles and toolbar too.
+    wrap: figureWrap("code-block", (content, { block, occurrence, api }) => (
+      <CodePanel block={block} occurrence={occurrence} api={api} line={content} />
+    )),
   },
   image: {
     // No key: a figure. The slot stays, empty, so the picture starts at the
@@ -336,26 +323,15 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
 const lineOf = (content: ReactNode) => <div className="flex min-w-0">{content}</div>
 
 /**
- * A figure's wrap (a picture, a link block's card): the figure in place of the
- * content line, with the line handed to it to place as its caption or
- * title. The wrap is the block's own padding: the row's surface gives text
- * 6px at the sides and 2px above and below, and the wrap tops that up so
- * the figure sits 10px in from the surface's edge all round. Its empty
- * space (beside a narrow figure, around a caption) is the block, so a click
- * there selects the row and a double click edits the text, as clicking
- * anywhere on the row does (the row's surface takes the pointer,
- * block-item.tsx) — the figure itself keeps its own clicks (a picture's
- * lightbox, a card's links) and stops them there.
+ * A figure's wrap (a picture, a link block's card): the figure in the frame
+ * every framed block has (`block-frame.tsx`), in place of the content
+ * line, with the line handed to it to place as its caption or title.
  */
 function figureWrap(
   testId: string,
   figure: (content: ReactNode, context: RowContext) => ReactNode,
 ): BlockKind["wrap"] {
-  return (content, context) => (
-    <div data-testid={testId} className="flex min-w-0 flex-1 flex-col px-1 py-2">
-      {figure(content, context)}
-    </div>
-  )
+  return (content, context) => <BlockFrame testId={testId}>{figure(content, context)}</BlockFrame>
 }
 
 /** The caption's text alignment, by the picture's. */
