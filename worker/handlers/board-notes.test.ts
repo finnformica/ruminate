@@ -375,3 +375,40 @@ describe("the Cloudflare provider", () => {
     expect(ai.calls).toHaveLength(2)
   })
 })
+
+describe("the history", () => {
+  const history = () =>
+    harness.control.exec(
+      "SELECT kind, provider, image_type, image_bytes, answer, result, outcome FROM ai_history ORDER BY id",
+    )
+
+  it("keeps a notes call as `board-notes`, with no picture", async () => {
+    await keepKey()
+    expect((await send(notesRequest())).status).toBe(200)
+    const rows = await history()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      kind: "board-notes",
+      provider: "anthropic",
+      image_type: null,
+      image_bytes: null,
+      answer: JSON.stringify(GOOD),
+      outcome: "ok",
+    })
+    expect(JSON.parse(String(rows[0].result))).toEqual({ notes: READ })
+  })
+
+  it("keeps a call the reader made nothing of as `bad_answer`", async () => {
+    await keepKey()
+    anthropic.reply = () => messageWith("not an object")
+    expect((await send(notesRequest())).status).toBe(422)
+    expect(await history()).toMatchObject([
+      {
+        kind: "board-notes",
+        answer: JSON.stringify("not an object"),
+        result: null,
+        outcome: "bad_answer",
+      },
+    ])
+  })
+})
