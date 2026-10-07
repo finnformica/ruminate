@@ -78,7 +78,11 @@ export interface FrameState {
  * wherever the figure goes.
  *
  * In an editable editor the frame carries the figure's controls, revealed
- * on hover or while the row is selected, and never in the way of reading:
+ * while the pointer is over the row (the figure or the room around it) and
+ * never otherwise — a selected row shows none, so they never stand on the
+ * content while it is read or moved through; a touch screen, which has no
+ * hover, shows them while the row is selected — and never in the way of
+ * reading:
  * a handle at the figure's side drags it wider or narrower — one at each
  * side of a centred figure, which grows from both sides at once; only at
  * the free side of a figure kept to the left or right, which grows away
@@ -178,12 +182,20 @@ export function FigureFrame({
   }
 
   // The controls: hidden — not just faded, so a stray tap never lands on
-  // them — until the frame is hovered or its row is selected.
+  // them — until the pointer is over the ROW (`group/row`, block-item.tsx:
+  // the figure, its caption, the room beside a narrow one), and through a
+  // drag. Selection alone never shows them on a fine pointer: handles
+  // standing on a selected picture while the keyboard moves down the note
+  // were in the way of the picture. A coarse pointer has no hover, so there
+  // the selected row (a long press) is what reveals them (docs/mobile.md).
   const reveal = cx(
     "transition-opacity duration-150",
-    selected || dragSize !== null
+    dragSize !== null
       ? "visible opacity-100"
-      : "invisible opacity-0 group-hover/figure:visible group-hover/figure:opacity-100",
+      : cx(
+          "invisible opacity-0 group-hover/row:visible group-hover/row:opacity-100",
+          selected && "coarse:visible coarse:opacity-100",
+        ),
   )
 
   return (
@@ -193,7 +205,7 @@ export function FigureFrame({
       data-align={align}
       data-size={shownSize}
       className={cx(
-        "group/figure relative flex max-w-full flex-col gap-1.5",
+        "relative flex max-w-full flex-col gap-1.5",
         ALIGN_SELF[align],
         dragSize !== null && "select-none",
       )}

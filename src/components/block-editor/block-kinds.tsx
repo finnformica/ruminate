@@ -13,8 +13,7 @@ import { BlockFrame } from "./block-frame"
 import type { BlockEditorApi } from "./block-item"
 import { LinkCard } from "./link-card"
 import { CodeHighlight } from "./code-highlight"
-import { CodeLanguage } from "./code-language"
-import { FigureFrame } from "./figure-frame"
+import { CodePanel } from "./code-panel"
 import { ImageFigure } from "./image-figure"
 
 /**
@@ -255,37 +254,12 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     // view. Around the line, the chrome adds the same to both states and
     // the text never moves.
     //
-    // It is a FIGURE like a picture or a card (`src/blocks/figure.ts`): it
-    // sits in the frame every framed block has (`block-frame.tsx`), inset
-    // from the row's surface as they are, at their radius, with the row's
-    // selection ring and hover wash showing around it — and in the figure
-    // frame (`FigureFrame`), so it has their handles and toolbar too: drag
-    // it narrower, keep it to a side, as a picture. The row's full width
-    // until dragged. (It used to be drawn over the row's surface itself,
-    // flush to its edges, with its border taking the ring's colour: the one
-    // framed block set differently from the other two.) The language sits
-    // in its BOTTOM-right corner — chrome, not content, and a control: click
-    // it to change it (`code-language.tsx`) — out from under the toolbar,
-    // which takes the top-right on hover.
+    // It is a FIGURE like a picture or a card (`src/blocks/figure.ts`): the
+    // panel (`CodePanel`) sits in the frame every framed block has
+    // (`block-frame.tsx`), inset from the row's surface as they are, and in
+    // the figure frame, so it has their handles and toolbar too.
     wrap: figureWrap("code-block", (content, { block, occurrence, api }) => (
-      <FigureFrame
-        block={block}
-        occurrence={occurrence}
-        api={api}
-        noun="code"
-        naturalWidth="100%"
-        controls={!api.readOnly}
-      >
-        {() => (
-          <div
-            data-testid="code-panel"
-            className="group prism relative flex w-full min-w-0 rounded-lg border border-border-secondary bg-[var(--color-bg-code-block)] px-3 py-2"
-          >
-            {content}
-            <CodeLanguage block={block} api={api} />
-          </div>
-        )}
-      </FigureFrame>
+      <CodePanel block={block} occurrence={occurrence} api={api} line={content} />
     )),
   },
   image: {
