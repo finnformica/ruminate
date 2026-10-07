@@ -354,7 +354,14 @@ export const FramedBlocks: Story = {
           text: "A bullet under the code, with a code block of its own",
           children: ["blk_fc2", "blk_fc3"],
         },
-        blk_fc2: { id: "blk_fc2", type: "code", text: "nested, and no language", children: [] },
+        // Dragged narrower and kept to the left, as a picture can be.
+        blk_fc2: {
+          id: "blk_fc2",
+          type: "code",
+          text: "nested, and no language",
+          props: { align: "left", size: 60 },
+          children: [],
+        },
         blk_fc3: { id: "blk_fc3", type: "code", text: "", props: { language: "sh" }, children: [] },
         blk_fq: { id: "blk_fq", type: "text", text: "A closing paragraph.", children: [] },
       },

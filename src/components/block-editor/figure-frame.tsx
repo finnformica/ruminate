@@ -25,6 +25,9 @@ const ALIGN_SELF: Record<FigureAlign, string> = {
   right: "self-end",
 }
 
+/** The toolbar's name, by what the figure is. */
+const NOUN_LABELS = { image: "Image", link: "Link", code: "Code block" } as const
+
 const ALIGN_LABELS: Record<FigureAlign, string> = {
   left: "Align left",
   center: "Align centre",
@@ -60,7 +63,8 @@ export interface FrameState {
 
 /**
  * The frame every figure block sits in — a picture (`image-figure.tsx`),
- * a link block's card (`link-card.tsx`): the layout the figure types share
+ * a link block's card (`link-card.tsx`), a code block's panel
+ * (`block-kinds.tsx`): the layout the figure types share
  * (`src/blocks/figure.ts`), drawn once.
  *
  * No chrome of its own: the block frame's inset (`block-frame.tsx`) is the
@@ -68,7 +72,8 @@ export interface FrameState {
  * row, and its `size`
  * makes it a fraction of the row's width; absent, the figure is the width
  * it gave the frame (`naturalWidth` — a picture's own pixels no wider than
- * the row, a card the row's full width) or, giving none, shrinks to fit.
+ * the row, a card or a code panel the row's full width) or, giving none,
+ * shrinks to fit.
  * The caption, when there is one, is the frame's width exactly and goes
  * wherever the figure goes.
  *
@@ -98,8 +103,8 @@ export function FigureFrame({
   occurrence: Occurrence
   api: BlockEditorApi
   /** What the figure is, for the controls' labels and test ids
-   * (`image-resize-left`, `link-toolbar`). */
-  noun: "image" | "link"
+   * (`image-resize-left`, `link-toolbar`, `code-figure`). */
+  noun: "image" | "link" | "code"
   /** The frame's width when the block sets no size: a CSS width, or
    * undefined to shrink to the figure. */
   naturalWidth?: string
@@ -239,7 +244,7 @@ export function FigureFrame({
             ))}
             <div
               role="toolbar"
-              aria-label={`${noun === "image" ? "Image" : "Link"} layout`}
+              aria-label={`${NOUN_LABELS[noun]} layout`}
               data-testid={`${noun}-toolbar`}
               className={cx(
                 "absolute right-2 top-2 flex gap-0.5 p-0.5",

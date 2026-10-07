@@ -51,8 +51,9 @@ match.
 
 A picture is a **figure** — a block whose row is a thing set in the text
 rather than a line of it — and its layout is the one every figure shares
-(`src/blocks/figure.ts`; a link block's card, docs/links.md, is laid out the
-same way by the same frame, `figure-frame.tsx`).
+(`src/blocks/figure.ts`; a link block's card, docs/links.md, and a code
+block's panel are laid out the same way by the same frame,
+`figure-frame.tsx`).
 
 A picture is, left to itself, its natural size: as wide as the row when it is
 wide enough, centred when it is not, and never taller than a screenful. When
