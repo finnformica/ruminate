@@ -44,8 +44,12 @@ export function boardCardLine(snapshot: GraphSnapshot, boardId: string): string 
  * block's page. Click anywhere else and the row is selected, and a
  * double-click selects it too: the row's surface takes the pointer
  * (`block-item.tsx`), and the editor turns an edit of this row into a
- * selection. The frame (`figure-frame.tsx`) holds the layout, so the card
- * keeps to a side and takes a width as a link card does. Listed — a search
+ * selection. The card sits in the block frame every framed block shares
+ * (`block-frame.tsx`: the inset is the card's spacing, the card has none
+ * of its own) and the figure frame holds the layout (`figure-frame.tsx`),
+ * so the card keeps to a side and takes a width as a link card does; its
+ * surface is the link card's, class for class (`link-card.tsx`), as the
+ * code panel's is its sibling (`code-panel.tsx`). Listed — a search
  * result, the Views page — a board is a note row with the board's favicon,
  * not this card (`block-kinds.tsx`).
  */
@@ -63,7 +67,6 @@ export function BoardCard({
 }) {
   const snapshot = useAtomValue(graphSnapshotAtom)
   const line = useMemo(() => boardCardLine(snapshot, block.id), [snapshot, block.id])
-  const editable = !api.readOnly
 
   return (
     <FigureFrame
@@ -72,7 +75,7 @@ export function BoardCard({
       api={api}
       noun="board"
       naturalWidth="100%"
-      controls={editable}
+      controls={!api.readOnly}
       tools={
         api.openBoard ? (
           <FigureTool label="Open board" onClick={() => api.openBoard?.(block.id)}>
@@ -82,14 +85,16 @@ export function BoardCard({
       }
     >
       {() => (
+        // The link card's surface, to the class: the same card, holding a
+        // board rather than a page.
         <div
           data-testid="board-card"
           className={cx(
-            "flex w-full items-center gap-3 overflow-hidden rounded-lg border border-border-secondary bg-bg-card px-4 py-3",
+            "flex w-full overflow-hidden rounded-lg border border-border-secondary bg-bg-card",
             "transition-colors duration-150 hover:bg-bg-hover",
           )}
         >
-          <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-w-0 flex-1 flex-col gap-1 px-4 py-3">
             <div data-block-body className="flex min-w-0">
               {title}
             </div>
