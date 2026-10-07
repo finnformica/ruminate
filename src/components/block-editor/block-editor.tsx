@@ -62,7 +62,8 @@ import {
   type Mode,
 } from "../../blocks/commands"
 import { resolveKey, type KeyLike } from "../../blocks/keymap"
-import { parse } from "../../blocks/parse"
+import { parse, parseWithLevels } from "../../blocks/parse"
+import { lastBlockPath, sectionUnderHeadings } from "../../blocks/sections"
 import { blockLines } from "../../blocks/serialize"
 import {
   ancestorKeys,
@@ -2208,7 +2209,7 @@ export function BlockEditor({
         op === "structural" ? { type: "structural" } : { type: "text", blockId: id },
       )
     },
-    onPaste: (key, before, pasted, after) => {
+    onPaste: (key, before, pasted, after, exact) => {
       // Re-form the block's text with the pasted text spliced in at the caret,
       // then parse (import) the whole thing so markdown markers and blank
       // lines become the right blocks. The current block keeps its type —
@@ -2221,20 +2222,38 @@ export function BlockEditor({
         pasted.includes("\n") ? pasted.indexOf("\n") : undefined,
       )
       const pasteDefinesType = before === "" && leadingMarker(pastedFirstLine) !== null
-      // Reminting keeps a pasted `id::` from clobbering an existing block.
-      let sub = remintCollidingIds(parse(before + pasted + after), doc)
+      const parsed = parseWithLevels(before + pasted + after)
+      let sub = parsed.doc
       const currentType = doc.blocks[idOfKey(key)]?.type
       if (!pasteDefinesType && currentType !== undefined && sub.rootBlockIds.length > 0) {
         sub = updateType(sub, sub.rootBlockIds[0], currentType)
       }
+      // Foreign content is sectioned under its headings; Ruminate's own copy
+      // keeps its tree. The row's own text (anything before the caret) is the
+      // reader's, never a heading that gathers the paste.
+      if (!exact) {
+        const closed = new Set(before !== "" ? sub.rootBlockIds.slice(0, 1) : [])
+        sub = sectionUnderHeadings(sub, parsed.headingLevels, closed)
+      }
+      // Reminting keeps a pasted `id::` from clobbering an existing block.
+      sub = remintCollidingIds(sub, doc)
+      // The text after the caret ends the paste's last block in reading order
+      // — under a heading, once sectioned, rather than a root.
+      const lastRoot = sub.rootBlockIds[sub.rootBlockIds.length - 1]
+      const lastPath = lastRoot === undefined ? [] : lastBlockPath(sub, lastRoot)
       const result = spliceBlocks(doc, key, sub)
       if (!result) return
       history.commit(doc, result.doc, { type: "structural" })
+      // The pasted blocks took the row's place among its siblings. Every row
+      // above the caret's is opened, so the caret is on screen.
+      let lastKey = keyOf(parentKeyOf(key), result.lastId)
+      for (const id of lastPath.slice(1)) {
+        setCollapsedState(lastKey, false)
+        lastKey = keyOf(lastKey, id)
+      }
       // Place the caret at the paste boundary — just before the trailing text.
-      const last = result.doc.blocks[result.lastId]
+      const last = result.doc.blocks[idOfKey(lastKey)]
       const caret = Math.max(0, last.text.length - after.length)
-      // The pasted blocks took the row's place among its siblings.
-      const lastKey = keyOf(parentKeyOf(key), result.lastId)
       setSelected(lastKey)
       setFocus({ key: lastKey, caret })
     },
@@ -2541,7 +2560,7 @@ export function BlockEditor({
     // first (exact rebuild, no markdown parsing), then converted foreign html
     // — and fall back to text/plain parsed as markdown, exactly as before.
     const html = event.clipboardData?.getData("text/html") ?? ""
-    let pasted: BlockDoc | null = null
+    let pasted: ReturnType<typeof parseWithLevels> | null = null
     if (html.trim() !== "") {
       const embedded = extractClipboardBlocks(html)
       if (embedded && embedded.length > 0) {
@@ -2572,15 +2591,16 @@ export function BlockEditor({
         return
       }
       const converted = htmlToMarkdown(html)
-      if (converted.trim() !== "") pasted = parse(converted)
+      if (converted.trim() !== "") pasted = parseWithLevels(converted)
     }
     if (!pasted) {
       if (normalized.trim() === "") return
-      pasted = parse(normalized)
+      pasted = parseWithLevels(normalized)
     }
-    // Remint any pasted ids that already exist here (e.g. content copied with
-    // its `id::` lines) so the paste never clobbers an existing block.
-    const sub = remintCollidingIds(pasted, doc)
+    // Foreign content is sectioned under its headings, then any pasted ids
+    // that already exist here (content copied with its `id::` lines) are
+    // reminted so the paste never clobbers an existing block.
+    const sub = remintCollidingIds(sectionUnderHeadings(pasted.doc, pasted.headingLevels), doc)
     const result = insertBlocksAsFirstChildren(doc, targetId, sub)
     if (!result) return
     settleAfterPaste(sub.rootBlockIds, result.doc)

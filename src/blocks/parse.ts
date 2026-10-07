@@ -1,5 +1,6 @@
 import { blockId } from "./id"
 import { classifyLine } from "./markers"
+import { defOf } from "./registry"
 import type { Block, BlockDoc, BlockProps, BlockType } from "./types"
 
 /**
@@ -58,6 +59,20 @@ const ID_RE = /^\s*id::\s+(.+)$/
 const BULLET_WRAPPED_MARKER_RE = /^[-*+]\s+(?=(?:\[[ xX]?\]\s|#{1,6}\s|>\s|```))/
 
 export function parse(markdown: string): BlockDoc {
+  return parseWithLevels(markdown).doc
+}
+
+/**
+ * `parse`, also reporting the level each heading was written at (`#` is 1,
+ * `###` is 3, up to 6). The block keeps no level — a heading's size comes
+ * from its outline depth — so this is the one place it can be read: paste
+ * uses it to section content under its headings (`sectionUnderHeadings`).
+ */
+export function parseWithLevels(markdown: string): {
+  doc: BlockDoc
+  headingLevels: Map<string, number>
+} {
+  const headingLevels = new Map<string, number>()
   // Normalize line endings so Windows/GitHub CRLF never leaks into content/ids.
   const body = stripFrontmatter(markdown.replace(/\r\n/g, "\n"))
   const lines = body.split("\n")
@@ -174,6 +189,8 @@ export function parse(markdown: string): BlockDoc {
         const { type, text, props } = classifyLine(node.line, olRun + 1, false)
         olRun = type === "ol" ? olRun + 1 : 0
         block = { id, type, text, ...(props ? { props } : {}), children: [] }
+        if (defOf(type).family === "heading")
+          headingLevels.set(id, /^#{1,6}/.exec(node.line)?.[0].length ?? 1)
       }
       blocks[id] = block
       block.children = flatten(node.children)
@@ -183,7 +200,7 @@ export function parse(markdown: string): BlockDoc {
   }
   const rootBlockIds = flatten(roots)
 
-  return { props: null, rootBlockIds, blocks }
+  return { doc: { props: null, rootBlockIds, blocks }, headingLevels }
 }
 
 /** A typed block from one line of markdown, outside any document — what the
