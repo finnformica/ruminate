@@ -766,14 +766,14 @@ describe("write", () => {
     expect((await push(id, { nodes: "no" })).status).toBe(400)
   })
 
-  it("keeps a row's type and the owner's props, and never makes a note", async () => {
+  it("lets write change a row's type, and keeps the owner's props", async () => {
     const id = await share(["read", "write", "delete"])
-    const retyped = await push(id, { nodes: [{ ...edit(A1, "one"), type: "note" }], links: [] })
-    expect(retyped.status).toBe(403)
-    expect((await ownerNode(A1))?.type).toBe("ul")
+    const retyped = await push(id, { nodes: [{ ...edit(A1, "one"), type: "board" }], links: [] })
+    expect(retyped.status).toBe(200)
+    expect((await ownerNode(A1))?.type).toBe("board")
 
     const widened = await push(id, {
-      nodes: [{ ...edit(A1, "one"), props: '{"width":"wide"}' }],
+      nodes: [{ ...edit(A1, "one"), type: "board", props: '{"width":"wide"}' }],
       links: [],
     })
     expect(widened.status).toBe(403)
@@ -784,8 +784,8 @@ describe("write", () => {
       nodes: [{ ...node("blk_page", "a note of theirs", "note"), updated_at: T0 + 10 }],
       links: [{ ...link(A1, "blk_page", "a9"), updated_at: T0 + 10 }],
     })
-    expect(madeNote.status).toBe(403)
-    expect(await ownerNode("blk_page")).toBeUndefined()
+    expect(madeNote.status).toBe(200)
+    expect((await ownerNode("blk_page"))?.type).toBe("note")
   })
 
   it("keeps a row's home note, and its clocks never run ahead of the server", async () => {
