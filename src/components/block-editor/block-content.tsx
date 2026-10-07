@@ -7,6 +7,8 @@ import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import type { Processor } from "unified"
 import { isWebUrl } from "../../blocks/link"
+import { cx } from "../../utils/cx"
+import { CopyCodeButton } from "./copy-code"
 import { LinkActionsContext } from "./link-actions"
 import { LinkHoverCard } from "./link-hover-card"
 
@@ -126,20 +128,51 @@ function Link({
   )
 }
 
+const CHIP =
+  "rounded-sm border border-border-secondary bg-[var(--color-bg-code-block)] box-decoration-clone px-1.5 py-px font-mono text-[0.85em]"
+
+/**
+ * The inline code chip: a bordered, tinted pill in the mono face, a touch
+ * smaller than the text around it (the Linear / Notion idiom), at the chip
+ * radius (`rounded-sm`, --border-radius-sm) — on a chip one line tall it
+ * reads as the row surface's radius does on a row. py is a hairline so the
+ * chip never inflates the line box (which would break the pixel-identical
+ * view/edit swap).
+ *
+ * While the pointer is over it, a copy button (`copy-code.tsx`) stands just
+ * past its right edge, in a chip of its own — the same border, radius,
+ * height and tint, made opaque — over whatever follows: beside the code
+ * rather than on it, so it never hides any of a short chip, and absolutely
+ * placed, so the line never reflows to make room. Its left padding meets
+ * the chip's edge, so the pointer crosses to it without the hover dropping.
+ */
+function InlineCode({ children, node }: { children?: React.ReactNode; node?: Element }) {
+  const text = textOf(node)
+  if (!text) return <code className={CHIP}>{children}</code>
+  return (
+    <code className={cx(CHIP, "group/code relative")}>
+      {children}
+      <span className="invisible absolute -inset-y-px left-full z-10 flex pl-1 opacity-0 transition-opacity duration-150 group-hover/code:visible group-hover/code:opacity-100">
+        {/* The chip's tint alone is translucent, and the word under the
+            button showed through it: laid over the page's colour, it is
+            opaque. */}
+        <span className="flex h-full rounded-sm border border-border-secondary [background:linear-gradient(var(--color-bg-code-block),var(--color-bg-code-block)),var(--color-bg)]">
+          <CopyCodeButton
+            text={text}
+            icon="size-3"
+            ghost
+            className="h-full rounded-[inherit] px-1 coarse:h-full coarse:px-1"
+          />
+        </span>
+      </span>
+    </code>
+  )
+}
+
 const components = {
   p: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
   a: Link,
-  code: ({ children }: { children?: React.ReactNode }) => (
-    // The inline code chip: a bordered, tinted pill in the mono face, a touch
-    // smaller than the text around it (the Linear / Notion idiom), at the
-    // chip radius (`rounded-sm`, --border-radius-sm) — on a chip one line
-    // tall it reads as the row surface's radius does on a row. py is a
-    // hairline so the chip never inflates the line box (which would break
-    // the pixel-identical view/edit swap).
-    <code className="rounded-sm border border-border-secondary bg-[var(--color-bg-code-block)] box-decoration-clone px-1.5 py-px font-mono text-[0.85em]">
-      {children}
-    </code>
-  ),
+  code: InlineCode,
 }
 
 const EDGE_WHITESPACE = /^([ \t]*)(.*?)([ \t]*)$/s

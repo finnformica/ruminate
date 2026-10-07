@@ -1,8 +1,10 @@
 import type { ReactNode } from "react"
 import type { Block } from "../../blocks/types"
 import type { Occurrence } from "../../blocks/view"
+import { cx } from "../../utils/cx"
 import type { BlockEditorApi } from "./block-item"
 import { CodeLanguage } from "./code-language"
+import { CopyCodeButton } from "./copy-code"
 import { FigureFrame } from "./figure-frame"
 
 /**
@@ -26,6 +28,11 @@ import { FigureFrame } from "./figure-frame"
  * corner — chrome, not content, and a control: click it to change it
  * (`code-language.tsx`) — out from under the toolbar, which takes the
  * top-right on hover.
+ *
+ * The code is copied from the panel's TOP-right corner, while the pointer is
+ * over it: in an editable editor as the toolbar's first tool, ahead of the
+ * alignment buttons; read only, where there is no toolbar, as a button of
+ * its own in the same place, on the same surface.
  */
 export function CodePanel({
   block,
@@ -47,6 +54,7 @@ export function CodePanel({
       noun="code"
       naturalWidth="100%"
       controls={!api.readOnly}
+      tools={block.text ? <CopyCodeButton text={block.text} /> : null}
     >
       {() => (
         <div
@@ -55,6 +63,17 @@ export function CodePanel({
         >
           {line}
           <CodeLanguage block={block} api={api} />
+          {api.readOnly && block.text ? (
+            <div
+              className={cx(
+                "absolute right-2 top-2 flex p-0.5",
+                "rounded-[6px] bg-bg-overlay-backdrop shadow-lg ring-1 ring-[var(--neutral-a3)] backdrop-blur-lg dark:ring-inset",
+                "invisible opacity-0 transition-opacity duration-150 group-hover:visible group-hover:opacity-100",
+              )}
+            >
+              <CopyCodeButton text={block.text} />
+            </div>
+          ) : null}
         </div>
       )}
     </FigureFrame>
