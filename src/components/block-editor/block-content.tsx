@@ -1,6 +1,6 @@
 import type { Element, ElementContent } from "hast"
 import type { Root } from "mdast"
-import { Fragment, useContext } from "react"
+import { Fragment, useContext, useRef, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import rehypeKatex from "rehype-katex"
 import remarkGfm from "remark-gfm"
@@ -128,6 +128,13 @@ function Link({
   )
 }
 
+const CHIP =
+  "rounded-sm border border-border-secondary bg-[var(--color-bg-code-block)] box-decoration-clone px-1.5 py-px font-mono text-[0.85em]"
+
+/** The narrowest chip the copy button sits inside: below this, the button
+ * and its fade would cover nearly all of the code. */
+const INSIDE_MIN_WIDTH = 64
+
 /**
  * The inline code chip: a bordered, tinted pill in the mono face, a touch
  * smaller than the text around it (the Linear / Notion idiom), at the chip
@@ -140,33 +147,53 @@ function Link({
  * on its vertical centre (`copy-code.tsx`), and the code fades out beneath
  * it — a mask on the text, not a fill over it: the chip's tint is
  * translucent, so a painted fade doubled it — so the line never reflows to
- * make room, and the button never stands on the next word.
+ * make room. A chip too short to give the button room (`INSIDE_MIN_WIDTH`,
+ * measured as the pointer arrives) would be all button, so there the button
+ * stands just past the chip's right edge instead, on a surface of its own
+ * over whatever follows. Its left padding meets the chip's edge, so the
+ * pointer crosses to it without the hover dropping.
  */
 function InlineCode({ children, node }: { children?: React.ReactNode; node?: Element }) {
   const text = textOf(node)
+  const ref = useRef<HTMLElement>(null)
+  const [outside, setOutside] = useState(false)
+  if (!text) return <code className={CHIP}>{children}</code>
   return (
-    <code className="group/code relative rounded-sm border border-border-secondary bg-[var(--color-bg-code-block)] box-decoration-clone px-1.5 py-px font-mono text-[0.85em]">
-      {text ? (
-        <span className="group-hover/code:[mask-image:linear-gradient(to_left,transparent_1rem,#000_1.75rem)]">
-          {children}
-        </span>
-      ) : (
-        children
-      )}
-      {text ? (
-        <span
+    <code
+      ref={ref}
+      className={cx(CHIP, "group/code relative")}
+      onPointerEnter={() => {
+        const width = ref.current?.getBoundingClientRect().width ?? 0
+        setOutside(width < INSIDE_MIN_WIDTH)
+      }}
+    >
+      <span
+        className={cx(
+          !outside &&
+            "group-hover/code:[mask-image:linear-gradient(to_left,transparent_1rem,#000_1.75rem)]",
+        )}
+      >
+        {children}
+      </span>
+      <span
+        data-placement={outside ? "outside" : "inside"}
+        className={cx(
+          "absolute flex items-center",
+          outside ? "left-full top-1/2 z-10 -translate-y-1/2 pl-1" : "inset-y-0 right-0.5",
+          "invisible opacity-0 transition-opacity duration-150 group-hover/code:visible group-hover/code:opacity-100",
+        )}
+      >
+        <CopyCodeButton
+          text={text}
+          icon="size-3"
           className={cx(
-            "absolute inset-y-0 right-0.5 flex items-center",
-            "invisible opacity-0 transition-opacity duration-150 group-hover/code:visible group-hover/code:opacity-100",
+            "px-0.5 coarse:px-0.5",
+            outside
+              ? "h-5 bg-bg-overlay-backdrop px-1 shadow-sm ring-1 ring-[var(--neutral-a3)] backdrop-blur-lg dark:ring-inset coarse:h-5 coarse:px-1"
+              : "h-full max-h-5 coarse:h-full",
           )}
-        >
-          <CopyCodeButton
-            text={text}
-            icon="size-3"
-            className="h-full max-h-5 px-0.5 coarse:h-full coarse:px-0.5"
-          />
-        </span>
-      ) : null}
+        />
+      </span>
     </code>
   )
 }

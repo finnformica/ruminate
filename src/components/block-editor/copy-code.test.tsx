@@ -27,6 +27,19 @@ describe("copying code", () => {
     expect(button.getAttribute("aria-label")).toBe("Copied")
   })
 
+  it("puts the button inside a chip wide enough to hold it, and outside a short one", () => {
+    const { container } = render(<BlockContent content="Run `npm run test:watch` or `x`" />)
+    const [long, short] = Array.from(container.querySelectorAll("code"))
+    const placement = (chip: Element) =>
+      chip.querySelector("[data-placement]")!.getAttribute("data-placement")
+    vi.spyOn(long, "getBoundingClientRect").mockReturnValue({ width: 160 } as DOMRect)
+    vi.spyOn(short, "getBoundingClientRect").mockReturnValue({ width: 24 } as DOMRect)
+    fireEvent.pointerEnter(long)
+    fireEvent.pointerEnter(short)
+    expect(placement(long)).toBe("inside")
+    expect(placement(short)).toBe("outside")
+  })
+
   it("copies a code block's text from the layout toolbar in an editable editor", () => {
     const { container } = render(<BlockEditor doc={parse(CODE)} onChange={() => {}} />)
     const toolbar = container.querySelector('[data-testid="code-toolbar"]')!
