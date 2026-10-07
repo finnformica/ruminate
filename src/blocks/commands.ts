@@ -1047,7 +1047,10 @@ export const COMMANDS: Record<CommandName, Command> = {
   },
 
   /** Enter at end of line: a fresh continuation block below. Enter from a
-   * heading nests the new block under it, like an outline section. */
+   * heading nests the new block under it, like an outline section — and
+   * reveals the heading, as `indent` does: a heading at or below the depth
+   * rule's last open level would otherwise fold the moment it gains a child
+   * (and one already folded would stay so), hiding the row just made. */
   insertBelow: (input) => {
     const { doc, key } = input
     const id = idOfKey(key)
@@ -1055,8 +1058,19 @@ export const COMMANDS: Record<CommandName, Command> = {
     const fresh = emptyBlock(continuationType(type, input))
     let next = insertAfter(doc, key, fresh)
     let freshKey = siblingKey(key, fresh.id)
-    if (isHeading(type)) ({ doc: next, key: freshKey } = indentBlock(next, freshKey))
-    return { handled: true, doc: next, op: STRUCTURAL, focus: { mode: "edit", key: freshKey } }
+    const reveal: string[] = []
+    if (isHeading(type)) {
+      const nested = indentBlock(next, freshKey)
+      if (nested.doc !== next) reveal.push(key)
+      ;({ doc: next, key: freshKey } = nested)
+    }
+    return {
+      handled: true,
+      doc: next,
+      op: STRUCTURAL,
+      ...(reveal.length > 0 && { reveal }),
+      focus: { mode: "edit", key: freshKey },
+    }
   },
 
   /** New sibling block below, of the *same* type (Cmd/Shift+Enter). Unlike
