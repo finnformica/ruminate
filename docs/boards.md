@@ -548,7 +548,8 @@ is reused and a new one made, the batch built up against the snapshot as
 each write would leave it. It fills in and never overrides what a person set, and
 it is one toast — **Picture updated** — with one **Undo**. Nothing to add
 is a toast that says so. Only a failure's toast offers **Copy**: a call that
-went through can be read in the gateway log.
+went through is in the history, and on the Cloudflare path in the gateway
+log too.
 
 The prompt tells the model what each feature is (`notes` on
 `BoardFeature`, from the block's prop — what the Features editor's
@@ -558,6 +559,31 @@ the picture is of, such as … Values in use: cutlery, potted plant"; a
 feature with no notes is sent without them), and an answer that names the
 features under other labels — "Objects", "Materials" — is still read, by
 position, when it has one entry per feature in order.
+
+**The history** keeps every call made, for good. The one step a route
+takes from the ask to its answer (`askAndRead`, worker/ai.ts) writes one
+row to `ai_history` (migrations/0022, worker/ai-history.ts) however the
+call ends — an answer read, an answer the reader made nothing of
+(`bad_answer`), a refusal the provider passed on, a failure — and nothing
+for a call refused before the model was asked (a bad request, a spent
+day). A row says what the call was for (`kind`, a name each use of a model
+is given once in src/data/ai-kinds.ts: `board-tag`, `board-notes`), who
+answered (the provider, its model, the gateway log id where there is
+one), what was sent (the system prompt and the user prompt as the chosen
+provider had it — the Cloudflare path's own wording on that path — and a
+picture's type and size, never its bytes), what came back (`answer`, the
+model's text as it came, and `result`, what was read from it, as JSON),
+and how it went (`outcome`: `ok` or the refusal's code, with the
+provider's words in `detail` when it failed), with when it was asked and
+how long it took. Each text column is cut to `MAX_HISTORY_TEXT_LENGTH`
+(src/data/ai-limits.ts). It records what was offered, not what was kept:
+the client applies the answer through the board's ordinary writes and may
+undo it, and the row does not know. The row is written after the response
+is in hand, so a write that fails is logged and loses the row, never the
+answer. Nothing reads the table yet: it is the record an interface over
+past suggestions would be built on, and the control plane's, like the
+usage count — D1 only, reached through `controlPlaneDriver`, never
+replicated to a browser.
 
 Deliberately not done: encrypting the key at rest; tagging a picture that
 is not an upload (an external picture's bytes are at its own address);
