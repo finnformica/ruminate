@@ -758,6 +758,32 @@ describe("insertBelow", () => {
     expect(result.doc!.blocks.h.children).toEqual([id])
     expect(result.doc!.blocks[id].type).toBe("ul")
     expect(result.doc!.blocks[id].text).toBe("")
+    // The heading is revealed, so the depth rule can't fold the new row away.
+    expect(result.reveal).toEqual(["h"])
+  })
+
+  it("reveals a nested heading, which the depth rule would otherwise fold", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["p"],
+      blocks: {
+        p: { id: "p", type: "ul", text: "Parent", children: ["h"] },
+        h: { id: "h", type: "h2", text: "Section", children: [] },
+      },
+    }
+    const result = runCommand(
+      "insertBelow",
+      input(doc, "p/h", { mode: "edit", visibleOrder: ["p", "p/h"] }),
+    )
+    const id = newBlockId(doc, result.doc!)
+    expect(result.doc!.blocks.h.children).toEqual([id])
+    expect(result.reveal).toEqual(["p/h"])
+    expect(result.focus).toEqual({ mode: "edit", key: `p/h/${id}` })
+  })
+
+  it("reveals nothing when the new block is a plain sibling", () => {
+    const result = runCommand("insertBelow", input(fixture(), "a", { mode: "edit" }))
+    expect(result.reveal).toBeUndefined()
   })
 
   it("uses the configured new-block type instead of the default", () => {
