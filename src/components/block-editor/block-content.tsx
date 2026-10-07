@@ -149,9 +149,10 @@ const INSIDE_MIN_WIDTH = 64
  * translucent, so a painted fade doubled it — so the line never reflows to
  * make room. A chip too short to give the button room (`INSIDE_MIN_WIDTH`,
  * measured as the pointer arrives) would be all button, so there the button
- * stands just past the chip's right edge instead, on a surface of its own
- * over whatever follows. Its left padding meets the chip's edge, so the
- * pointer crosses to it without the hover dropping.
+ * stands just past the chip's right edge instead, in a chip of its own —
+ * the same border, radius and tint, made opaque — over whatever follows.
+ * Its left padding meets the chip's edge, so the pointer crosses to it
+ * without the hover dropping.
  */
 function InlineCode({ children, node }: { children?: React.ReactNode; node?: Element }) {
   const text = textOf(node)
@@ -179,20 +180,28 @@ function InlineCode({ children, node }: { children?: React.ReactNode; node?: Ele
         data-placement={outside ? "outside" : "inside"}
         className={cx(
           "absolute flex items-center",
-          outside ? "left-full top-1/2 z-10 -translate-y-1/2 pl-1" : "inset-y-0 right-0.5",
+          outside ? "-inset-y-px left-full z-10 pl-1" : "inset-y-0 right-0.5",
           "invisible opacity-0 transition-opacity duration-150 group-hover/code:visible group-hover/code:opacity-100",
         )}
       >
-        <CopyCodeButton
-          text={text}
-          icon="size-3"
-          className={cx(
-            "px-0.5 coarse:px-0.5",
-            outside
-              ? "h-5 bg-bg-overlay-backdrop px-1 shadow-sm ring-1 ring-[var(--neutral-a3)] backdrop-blur-lg dark:ring-inset coarse:h-5 coarse:px-1"
-              : "h-full max-h-5 coarse:h-full",
-          )}
-        />
+        {outside ? (
+          // The chip's own border, radius, height and tint, laid over the
+          // page's colour: the tint alone is translucent, and the word under
+          // the button showed through it.
+          <span className="flex h-full rounded-sm border border-border-secondary [background:linear-gradient(var(--color-bg-code-block),var(--color-bg-code-block)),var(--color-bg)]">
+            <CopyCodeButton
+              text={text}
+              icon="size-3"
+              className="h-full rounded-[inherit] px-1 coarse:h-full coarse:px-1"
+            />
+          </span>
+        ) : (
+          <CopyCodeButton
+            text={text}
+            icon="size-3"
+            className="h-full max-h-5 px-0.5 coarse:h-full coarse:px-0.5"
+          />
+        )}
       </span>
     </code>
   )
