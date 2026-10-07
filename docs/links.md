@@ -163,7 +163,7 @@ feature's block, the pictures from a page beneath its card (docs/boards.md,
 
 ### Layout
 
-Link blocks and pictures are both **figures** (`src/blocks/figure.ts`):
+Link blocks, pictures and code blocks are all **figures** (`src/blocks/figure.ts`):
 blocks whose row is a thing set in the text rather than a line of it, and
 which share one layout — `align`, the side of the row the figure keeps to,
 and `size`, its width as a percentage of the row's — and one frame that

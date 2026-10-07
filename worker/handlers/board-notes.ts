@@ -8,7 +8,8 @@
 // picture (`NotesRequest`, src/data/auto-notes.ts); the answer is read
 // leniently (`extractJson`, `readNotesSuggestion`) and returned, and the
 // client writes it through the board's ordinary writes. This route writes
-// nothing, and reads nothing of the caller's but the session.
+// nothing to the graph — the call goes to the history (worker/ai-history.ts)
+// as `board-notes` — and reads nothing of the caller's but the session.
 //
 // Refusals, each a code the client puts into words:
 //   400 invalid_body         not a board with features
@@ -31,15 +32,9 @@ import {
   type NotesResponse,
 } from "../../src/data/auto-notes"
 import { SUGGEST_CODES } from "../../src/data/ai-codes"
+import { AI_KINDS } from "../../src/data/ai-kinds"
 import { extractJson } from "../../src/data/auto-tag"
-import {
-  badAnswerResponse,
-  dailyLimitResponse,
-  failureResponse,
-  json,
-  refusal,
-  resolveAsker,
-} from "../ai"
+import { askAndRead, dailyLimitResponse, json, refusal, resolveAsker } from "../ai"
 import { spendAiCall } from "../ai-usage"
 import { controlPlaneDriver } from "../tenancy-db"
 import type { Env } from "../types"
@@ -68,21 +63,22 @@ export async function boardNotes(
   const spend = await spendAiCall(controlPlaneDriver(env), session.id, now, options.dailyLimit)
   if (!spend.ok) return dailyLimitResponse("Suggesting has made its calls for today.")
 
-  let text: string
-  try {
-    text = await asker.ask({
+  const answer = await askAndRead(
+    env,
+    session,
+    asker,
+    AI_KINDS.boardNotes,
+    {
       system: AUTO_NOTES_SYSTEM_PROMPT,
       prompt: notesPrompt(body),
       cloudflarePrompt: cloudflareNotesPrompt(body),
       schema: notesOutputSchema(),
       schemaName: "notes_suggestion",
-    })
-  } catch (error) {
-    return failureResponse(error, asker.found())
-  }
-
-  const suggestion = readNotesSuggestion(extractJson(text), body)
-  if (suggestion === null) return badAnswerResponse(text, asker.found())
-  const response: NotesResponse = { ...suggestion, ...asker.found() }
+    },
+    (text) => readNotesSuggestion(extractJson(text), body),
+    options.clock,
+  )
+  if (answer instanceof Response) return answer
+  const response: NotesResponse = { ...answer.result, ...answer.found }
   return json(response)
 }

@@ -135,6 +135,7 @@ import {
   insertBlocksAsFirstChildren,
   insertAfter,
   insertFirstChild,
+  insertLastChild,
   remintCollidingIds,
   removeBlock,
   spliceBlocks,
@@ -384,6 +385,7 @@ export function BlockEditor({
   focusFirstMode = "select",
   initialSelection = "first",
   newRootSignal,
+  appendRootSignal,
   refocusSignal,
   readOnly = false,
   menuEntries,
@@ -491,6 +493,9 @@ export function BlockEditor({
   initialSelection?: "first" | "none"
   /** Bump this (e.g. Cmd+Enter on the note title) to add a new root block. */
   newRootSignal?: number
+  /** Bump this (a click in the room beneath the note) to edit a block at
+   * the end: the last one if it is already empty, else a new one after it. */
+  appendRootSignal?: number
   /** Bump this (the global `i` shortcut) to refocus the editor, restoring the
    * last selected block (or the first). */
   refocusSignal?: number
@@ -1139,36 +1144,38 @@ export function BlockEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refocusSignal])
 
-  // Enter or Cmd+Enter on a title — the note's (`newRootSignal`) or the focus
-  // title's — adds a fresh root block at the top and edits it. The block is of
-  // the type Enter makes (Settings → Editor, "New block markdown"), as one
-  // made at the end of a block would be.
-  const newRootBlock = () => {
+  // A fresh root block at one END of the view, edited: at the top for Enter
+  // or Cmd+Enter on a title — the note's (`newRootSignal`) or the focus
+  // title's — and at the bottom for a click in the room beneath the note
+  // (`appendRootSignal`). The block is of the type Enter makes (Settings →
+  // Editor, "New block markdown"), as one made at the end of a block would
+  // be. While focused, "a root" means a child of the focus root at that end
+  // — the focused subtree is the page.
+  const edgeRootBlock = (end: "top" | "bottom") => {
     if (readOnly) return
     const current = docRef.current
     const type = typeOfMarker(newBlockMarker)
-    // While focused, "a new root" means a new first child of the focus root —
-    // the focused subtree is the page.
     const focused = focusRootId && current.blocks[focusRootId] ? focusRootId : null
-    // An empty block already first (a fresh note's starter, or one just
-    // added) is the new block: edit it, made that type, rather than
-    // stacking another above.
-    const firstId = focused ? current.blocks[focused].children[0] : current.rootBlockIds[0]
-    const first = firstId ? current.blocks[firstId] : undefined
+    const siblings = focused ? current.blocks[focused].children : current.rootBlockIds
+    // An empty block already at that end (a fresh note's starter, or one
+    // just added) is the new block: edit it, made that type, rather than
+    // stacking another beside it.
+    const edgeId = end === "top" ? siblings[0] : siblings[siblings.length - 1]
+    const edge = edgeId ? current.blocks[edgeId] : undefined
     if (
-      first &&
-      (first.type === "text" || first.type === type) &&
-      first.text === "" &&
-      first.children.length === 0
+      edge &&
+      (edge.type === "text" || edge.type === type) &&
+      edge.text === "" &&
+      edge.children.length === 0
     ) {
-      if (first.type !== type) {
+      if (edge.type !== type) {
         const retyped: BlockDoc = {
           ...current,
-          blocks: { ...current.blocks, [first.id]: { ...first, type } },
+          blocks: { ...current.blocks, [edge.id]: { ...edge, type } },
         }
         history.commit(current, retyped, { type: "structural" })
       }
-      const key = focused ? keyOf(focusRootKeyOf(current, focused), first.id) : first.id
+      const key = focused ? keyOf(focusRootKeyOf(current, focused), edge.id) : edge.id
       setAnchorKey(null)
       setSelected(key)
       setFocus({ key })
@@ -1176,10 +1183,15 @@ export function BlockEditor({
     }
     const fresh = emptyBlock(type)
     const next: BlockDoc = focused
-      ? insertFirstChild(current, focused, fresh)
+      ? end === "top"
+        ? insertFirstChild(current, focused, fresh)
+        : insertLastChild(current, focused, fresh)
       : {
           ...current,
-          rootBlockIds: [fresh.id, ...current.rootBlockIds],
+          rootBlockIds:
+            end === "top"
+              ? [fresh.id, ...current.rootBlockIds]
+              : [...current.rootBlockIds, fresh.id],
           blocks: { ...current.blocks, [fresh.id]: fresh },
         }
     const key = focused ? keyOf(focusRootKeyOf(current, focused), fresh.id) : fresh.id
@@ -1188,10 +1200,21 @@ export function BlockEditor({
     setSelected(key)
     setFocus({ key })
   }
+  const newRootBlock = () => edgeRootBlock("top")
   useEffect(() => {
     if (newRootSignal) newRootBlock()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newRootSignal])
+  // The counter's value on mount is not a click: the note page's editor is
+  // keyed by note, and one mounting under a counter bumped for the note
+  // before it must not add a block to the note it opens.
+  const seenAppendRoot = useRef(appendRootSignal)
+  useEffect(() => {
+    if (appendRootSignal === seenAppendRoot.current) return
+    seenAppendRoot.current = appendRootSignal
+    if (appendRootSignal) edgeRootBlock("bottom")
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appendRootSignal])
 
   // The focus title's rename: the focused block's text, one history step.
   const renameFocusRoot = (text: string): boolean => {

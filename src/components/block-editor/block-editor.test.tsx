@@ -129,6 +129,13 @@ function Harness({
             .map((block) => block.props ?? null),
         )}
       </pre>
+      <pre data-testid="code-props">
+        {JSON.stringify(
+          Object.values(doc.blocks)
+            .filter((block) => block.type === "code")
+            .map((block) => block.props ?? null),
+        )}
+      </pre>
     </>
   )
 }
@@ -1871,6 +1878,28 @@ describe("code blocks", () => {
     // starts at the text column as a picture does.
     expect(row.querySelector('[data-testid="paragraph-slot"]')).toBeNull()
     expect(row.querySelector('[data-testid="figure-slot"]')!.textContent).toBe("")
+  })
+
+  it("is a figure: handles at its sides and the layout toolbar, writing align and size beside the language", () => {
+    const { container, getByTestId } = render(<Harness initial={CODE} />)
+    const row = container.querySelector('[data-block-row="blk_code"]')!
+    expect(row.querySelector('[data-testid="code-figure"]')).not.toBeNull()
+    expect(row.querySelector('[data-testid="code-resize-left"]')).not.toBeNull()
+    expect(row.querySelector('[data-testid="code-resize-right"]')).not.toBeNull()
+    const toolbar = getByTestId("code-toolbar")
+    expect(toolbar.getAttribute("aria-label")).toBe("Code block layout")
+    fireEvent.click(toolbar.querySelector('[aria-label="Align left"]')!)
+    // The layout rides the block's props beside the language, which the
+    // markdown still carries on the fence.
+    expect(JSON.parse(getByTestId("code-props").textContent ?? "[]")).toEqual([
+      { language: "ts", align: "left" },
+    ])
+    expect(serializedLines(getByTestId).join("\n")).toContain("```ts")
+    expect(row.querySelector('[data-testid="code-figure"]')!.getAttribute("data-align")).toBe(
+      "left",
+    )
+    // Kept to the left, the handle against that side goes.
+    expect(row.querySelector('[data-testid="code-resize-left"]')).toBeNull()
   })
 
   it("highlights the view for its language once the grammar has loaded", async () => {

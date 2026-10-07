@@ -16,10 +16,16 @@
 //   differ in nothing else.
 // - THE REFUSALS: a provider passes on what it must (a bad key, a rate
 //   limit, a decline) as a `ProviderRefusal`; anything else it throws is a
-//   `provider_error`. `failureResponse` turns either into the body the
+//   `provider_error`. `describeFailure` turns either into the body the
 //   client expects, carrying what the call can be found by (`found`: the
 //   provider, its model, and on the Cloudflare path the AI Gateway log id)
 //   and what the provider said.
+// - THE CALL: `askAndRead` is the one step a route takes from the ask to
+//   its answer — the model asked, the text read by the route's own reader
+//   into its answer, a failure or an answer that is not one turned into
+//   its response — and the one place every call made is written to the
+//   history (worker/ai-history.ts, migrations/0022), under the name the
+//   route gives its use (src/data/ai-kinds.ts), whichever way it ends.
 //
 // The key is in one place — the Anthropic client's constructor — and in no
 // log line, no error detail and no response: the SDK's error messages are
@@ -32,9 +38,11 @@ import {
   SUGGEST_STATUS,
   type ServerSuggestCode,
 } from "../src/data/ai-codes"
+import type { AiKind } from "../src/data/ai-kinds"
 import { MAX_DETAIL_LENGTH } from "../src/data/ai-limits"
 import { resolveAiProvider } from "../src/data/ai-router"
 import { AUTO_TAG_MODEL, CLOUDFLARE_AI_MODEL, type AiProvider } from "../src/data/auto-tag"
+import { recordAiCall, type AiHistoryRow } from "./ai-history"
 import { featureAllows } from "./features"
 import { readKey } from "./handlers/anthropic-key"
 import { storedPreferences } from "./handlers/preferences"
@@ -307,7 +315,7 @@ async function chooseProvider(env: Env, session: AiSession): Promise<AiProvider 
 
 /** What a failing call can be found by: the provider, its model, and — on
  * the Cloudflare path — the AI Gateway log the call was written to. */
-export interface Found {
+interface Found {
   provider: AiProvider
   model: string
   log?: string
@@ -350,34 +358,48 @@ export async function resolveAsker(
   }
 }
 
+/** A failed call, in the words of its response and of its history row. */
+interface Failure {
+  code: ServerSuggestCode
+  body: Record<string, unknown>
+  headers: Record<string, string>
+  /** What the provider said, for the history. */
+  detail: string
+}
+
 /**
- * The response for a call that failed: a refusal the provider passed on,
- * at its own status with its code and detail (and headers — a rate
- * limit's Retry-After); or, for anything else, 502 `provider_error` with
- * the provider's own words, for the person debugging — an SDK error's
- * message is the API's answer and never carries the key, which is in the
- * Anthropic client's constructor alone; the binding's errors are
- * Cloudflare's. Cut to a size a toast can hold.
+ * What a failed call was: a refusal the provider passed on, with its code
+ * and detail (and headers — a rate limit's Retry-After); or, for anything
+ * else, `provider_error` with the provider's own words, for the person
+ * debugging — an SDK error's message is the API's answer and never carries
+ * the key, which is in the Anthropic client's constructor alone; the
+ * binding's errors are Cloudflare's. Cut to a size a toast can hold.
  */
-export function failureResponse(error: unknown, found: Found): Response {
+function describeFailure(error: unknown): Failure {
   if (error instanceof ProviderRefusal) {
-    return refusal(
-      error.code,
-      { ...(error.detail ? { detail: error.detail } : {}), ...found },
-      error.headers,
-    )
+    return {
+      code: error.code,
+      body: error.detail ? { detail: error.detail } : {},
+      headers: error.headers,
+      detail: error.detail ?? error.code,
+    }
   }
   const status = error instanceof Anthropic.APIError ? (error.status ?? null) : null
   const message = String((error as { message?: unknown })?.message ?? error).slice(
     0,
     MAX_DETAIL_LENGTH,
   )
-  return refusal(SUGGEST_CODES.providerError, { status, message, ...found })
+  return {
+    code: SUGGEST_CODES.providerError,
+    body: { status, message },
+    headers: {},
+    detail: message,
+  }
 }
 
 /** The response for an answer that is not what was asked for: the answer
  * as it came, so the person can see what the model said. */
-export function badAnswerResponse(text: string, found: Found): Response {
+function badAnswerResponse(text: string, found: Found): Response {
   return refusal(SUGGEST_CODES.badAnswer, {
     detail: { ...found, answer: text.slice(0, MAX_DETAIL_LENGTH) },
     ...found,
@@ -387,4 +409,65 @@ export function badAnswerResponse(text: string, found: Found): Response {
 /** The response for a day whose calls are spent. */
 export function dailyLimitResponse(detail: string): Response {
   return refusal(SUGGEST_CODES.dailyLimit, { detail }, { "Retry-After": DAILY_LIMIT_RETRY_AFTER })
+}
+
+/** An answer read: what the route's reader made of the text, with what
+ * the call can be found by. */
+export interface Answer<T> {
+  result: T
+  found: Found
+}
+
+/**
+ * One call, from the ask to the answer: the model asked, the text read by
+ * `read` — the route's own reader — into the route's answer, and every
+ * way it can end turned into what the route returns: the answer, a failed
+ * call's refusal (`describeFailure`), or a `bad_answer` for text the
+ * reader made nothing of. Whichever way it ends, the call is written to
+ * the history (worker/ai-history.ts) under `kind` — the prompt as the
+ * chosen provider was sent it, the picture's type and size, the text as
+ * it came, the answer read, the outcome — once the response is in hand,
+ * so a failed write loses the row and nothing else. A call refused before
+ * the model is asked never reaches here, and writes nothing.
+ */
+export async function askAndRead<T>(
+  env: Env,
+  session: AiSession,
+  asker: Asker,
+  kind: AiKind,
+  input: AskInput,
+  read: (text: string) => T | null,
+  clock: () => number = Date.now,
+): Promise<Answer<T> | Response> {
+  const started = clock()
+  const record = (ending: Pick<AiHistoryRow, "answer" | "result" | "outcome" | "detail">) =>
+    recordAiCall(controlPlaneDriver(env), {
+      userId: session.id,
+      createdAt: started,
+      durationMs: Math.max(0, clock() - started),
+      kind,
+      ...asker.found(),
+      system: input.system,
+      prompt: asker.chosen === "cloudflare" ? input.cloudflarePrompt : input.prompt,
+      ...(input.image
+        ? { image: { mimeType: input.image.mimeType, bytes: input.image.bytes.byteLength } }
+        : {}),
+      ...ending,
+    })
+
+  let text: string
+  try {
+    text = await asker.ask(input)
+  } catch (error) {
+    const failure = describeFailure(error)
+    await record({ outcome: failure.code, detail: failure.detail })
+    return refusal(failure.code, { ...failure.body, ...asker.found() }, failure.headers)
+  }
+  const result = read(text)
+  if (result === null) {
+    await record({ answer: text, outcome: SUGGEST_CODES.badAnswer })
+    return badAnswerResponse(text, asker.found())
+  }
+  await record({ answer: text, result, outcome: "ok" })
+  return { result, found: asker.found() }
 }

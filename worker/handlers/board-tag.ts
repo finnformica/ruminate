@@ -11,12 +11,13 @@
 // Worker's own truth. Then the picture is checked (a format the models
 // read, under the API's size limit — a sanity limit, the fitted copy being
 // far below it), the day's call counted (worker/ai-usage.ts, the same count
-// for every route that asks a model), and the model asked; one step after
-// reads the text leniently (`extractJson`) into a `TagSuggestion`
+// for every route that asks a model), and the model asked (`askAndRead`);
+// the text is read leniently (`extractJson`) into a `TagSuggestion`
 // (`readTagSuggestion`: trimmed, de-duplicated, capped, one value for a
-// single-value feature) and returns it. The client applies it through the
-// board's ordinary writes; this route writes nothing, and reads nothing of
-// the caller's but the session.
+// single-value feature) and returned. The client applies it through the
+// board's ordinary writes; this route writes nothing to the graph — the
+// call itself goes to the history (worker/ai-history.ts) as `board-tag` —
+// and reads nothing of the caller's but the session.
 //
 // Refusals, each a code the client puts into words:
 //   400 invalid_body         not a form with a picture and features
@@ -37,6 +38,7 @@
 // from the toast.
 
 import { SUGGEST_CODES } from "../../src/data/ai-codes"
+import { AI_KINDS } from "../../src/data/ai-kinds"
 import { AUTO_TAG_MAX_IMAGE_BYTES } from "../../src/data/ai-limits"
 import {
   AUTO_TAG_IMAGE_TYPES,
@@ -54,9 +56,8 @@ import {
   type TagResponse,
 } from "../../src/data/auto-tag"
 import {
-  badAnswerResponse,
+  askAndRead,
   dailyLimitResponse,
-  failureResponse,
   json,
   refusal,
   resolveAsker,
@@ -123,33 +124,34 @@ export async function boardTag(
   const spend = await spendAiCall(controlPlaneDriver(env), session.id, now, options.dailyLimit)
   if (!spend.ok) return dailyLimitResponse("Tagging has made its calls for today.")
 
-  let text: string
-  try {
-    // Where the picture was taken, as a place name when Nominatim has one
-    // for it — asked once, after the day's call is counted (a refused call
-    // asks nothing), only when the board has a place feature to offer it
-    // to, and inside this try: a failed lookup is a hint without a name,
-    // never a failed tag.
-    const hint: LocationHint | undefined =
-      form.location && placeLabels(form.features).length > 0
-        ? { location: form.location, place: await reverseGeocode(fetchImpl, form.location) }
-        : undefined
-    text = await asker.ask({
+  // Where the picture was taken, as a place name when Nominatim has one
+  // for it — asked once, after the day's call is counted (a refused call
+  // asks nothing), only when the board has a place feature to offer it
+  // to, and never failing: a failed lookup is a hint without a name,
+  // never a failed tag.
+  const hint: LocationHint | undefined =
+    form.location && placeLabels(form.features).length > 0
+      ? { location: form.location, place: await reverseGeocode(fetchImpl, form.location) }
+      : undefined
+  const answer = await askAndRead(
+    env,
+    session,
+    asker,
+    AI_KINDS.boardTag,
+    {
       system: AUTO_TAG_SYSTEM_PROMPT,
       prompt: tagPrompt(form.features, hint),
       cloudflarePrompt: cloudflareTagPrompt(form.features, hint),
       schema: tagOutputSchema(),
       schemaName: "tag_suggestion",
       image: { bytes, mimeType: mediaType as ImageMediaType },
-    })
-  } catch (error) {
-    return failureResponse(error, asker.found())
-  }
-
-  const suggestion = readTagSuggestion(extractJson(text), form.features)
-  if (suggestion === null) return badAnswerResponse(text, asker.found())
+    },
+    (text) => readTagSuggestion(extractJson(text), form.features),
+    options.clock,
+  )
+  if (answer instanceof Response) return answer
   // The answer as it came goes back with what was read from it, so the
   // success toast's Copy shows both.
-  const response: TagResponse = { suggestion, ...asker.found() }
+  const response: TagResponse = { suggestion: answer.result, ...answer.found }
   return json(response)
 }

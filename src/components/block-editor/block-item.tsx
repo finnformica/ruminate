@@ -1185,7 +1185,9 @@ export function BlockItem({
             // The marker gap widens on a coarse pointer, so a finger aiming
             // for the start of the line lands on the line, not the marker
             // (a todo's checkbox above all).
-            "relative flex items-start gap-2 rounded coarse:gap-3",
+            // `group/row`: a figure's handles and toolbar show while the
+            // pointer is over the row (figure-frame.tsx).
+            "group/row relative flex items-start gap-2 rounded coarse:gap-3",
             "-ml-0.5 -mr-0.5 pl-1.5 pr-1.5",
             // Per-side vertical pairs. Mid-run sides also square their
             // corners and drop that edge of the selection ring

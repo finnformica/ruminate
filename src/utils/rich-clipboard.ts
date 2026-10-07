@@ -99,7 +99,8 @@ function docToClipboardBlocks(doc: BlockDoc, declared: Set<string>): ClipboardBl
       text: block.text,
       ...(language ? { language } : {}),
       // A figure's props are the block: where a picture is, a link block's
-      // address and preview (and either's layout) travel with it.
+      // address and preview, a code block's language (and any one's layout)
+      // travel with it.
       ...(isFigureType(block.type) && block.props ? { props: block.props } : {}),
       children,
     }

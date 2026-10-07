@@ -4,7 +4,7 @@ import { cx } from "../../utils/cx"
 import type { BlockEditorApi } from "./block-item"
 
 /**
- * **A code block's language, in the panel's top-right corner** — chrome, not
+ * **A code block's language, in the panel's bottom-right corner** — chrome, not
  * content: the word after the fence, which picks the grammar the view is
  * highlighted with (`code-highlight.tsx`). Clicking it opens a small field
  * in its place; Enter (or leaving it) sets the block's `language` prop, and
@@ -13,7 +13,11 @@ import type { BlockEditorApi } from "./block-item"
  * only, it is just the label.
  */
 
-const LABEL = "absolute right-[5px] top-1 font-mono text-[11px] leading-4"
+// In the panel's padding corner (block-kinds.tsx): 12px in from its right
+// edge, where the text is, and on the last line's lower half. The BOTTOM
+// corner: the figure toolbar (`figure-frame.tsx`) takes the top one on
+// hover, and a control under it could not be clicked.
+const LABEL = "absolute bottom-2 right-3 font-mono text-[11px] leading-4"
 
 const stop = (event: MouseEvent) => event.stopPropagation()
 

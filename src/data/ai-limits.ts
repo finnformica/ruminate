@@ -37,6 +37,11 @@ export const MAX_SUGGESTED_VALUE_LENGTH = 30
  * hold. */
 export const MAX_DETAIL_LENGTH = 2000
 
+/** The most of a prompt, an answer or a result one row of the history
+ * keeps (migrations/0022): a board's worth of values can run to many
+ * kilobytes, and a row is kept for good. */
+export const MAX_HISTORY_TEXT_LENGTH = 20_000
+
 /** A string trimmed and cut to `max`. */
 export const cut = (text: string, max: number): string => text.trim().slice(0, max)
 

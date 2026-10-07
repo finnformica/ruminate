@@ -29,7 +29,7 @@ export function UnassignedBasket({ noteId }: { noteId: NoteId }) {
           doc={doc}
           onChange={setDoc}
           noteTitle="Unassigned"
-          trailingBlank={false}
+          starter={false}
           rowRemoval="delete"
         />
       </Details>

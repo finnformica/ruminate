@@ -194,6 +194,17 @@ export function insertFirstChild(doc: BlockDoc, parentId: string, block: Block):
   return next
 }
 
+/** Insert `block` as the LAST child of `parentId` (the focus view's end:
+ * a click beneath the focused subtree adds to it). */
+export function insertLastChild(doc: BlockDoc, parentId: string, block: Block): BlockDoc {
+  const parent = doc.blocks[parentId]
+  if (!parent) return doc
+  const next = clone(doc)
+  next.blocks[block.id] = block
+  next.blocks[parentId] = { ...parent, children: [...parent.children, block.id] }
+  return next
+}
+
 /** Splice `block` into `refKey`'s sibling list at `refIndex + offset`. */
 function insertRelative(doc: BlockDoc, refKey: string, block: Block, offset: 0 | 1): BlockDoc {
   const at = siblingsOf(doc, refKey)
