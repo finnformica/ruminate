@@ -1,16 +1,7 @@
 import React from "react"
 import { Note } from "../schema"
 import { cx } from "../utils/cx"
-import {
-  BoardFillIcon16,
-  BoardIcon16,
-  CalendarDateFillIcon16,
-  CalendarDateIcon16,
-  CalendarFillIcon16,
-  CalendarIcon16,
-  NoteFillIcon16,
-  NoteIcon16,
-} from "./icons"
+import { BoardFillIcon16, BoardIcon16, NoteFillIcon16, NoteIcon16 } from "./icons"
 
 type NoteFaviconProps = React.ComponentPropsWithoutRef<"span"> & {
   /** Only the identity and the kind: the icon says which sort of note this
@@ -28,8 +19,8 @@ const _defaultFilledFavicon = (
   <NoteFillIcon16 data-testid="favicon-default" className="h-full w-full" />
 )
 
-/** A note's icon: the day for a daily note, a calendar for a weekly one, a
- * board for a board (docs/boards.md), the note icon otherwise. */
+/** A note's icon: a board for a board (docs/boards.md), the note icon
+ * otherwise. */
 export const NoteFavicon = React.memo(
   ({
     note,
@@ -39,16 +30,6 @@ export const NoteFavicon = React.memo(
     ...props
   }: NoteFaviconProps) => {
     let icon = defaultFavicon
-
-    if (note.type === "daily") {
-      const Icon = filled ? CalendarDateFillIcon16 : CalendarDateIcon16
-      icon = <Icon data-testid="favicon-daily" date={new Date(note.id).getUTCDate()} />
-    }
-
-    if (note.type === "weekly") {
-      const Icon = filled ? CalendarFillIcon16 : CalendarIcon16
-      icon = <Icon data-testid="favicon-weekly" />
-    }
 
     if (note.type === "board") {
       const Icon = filled ? BoardFillIcon16 : BoardIcon16

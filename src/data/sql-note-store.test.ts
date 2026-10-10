@@ -318,21 +318,6 @@ describe("openSqlNoteStore", () => {
     )
   })
 
-  it("leaves daily and weekly notes on their date ids (the natural-key carve-out)", async () => {
-    const { driver, store } = await makeStoreWithDriver()
-    await seed(store, "2026-08-31", "today\n  id:: blk_aaaaaaaaaa\n")
-    await seed(store, "2026-W35", "this week\n  id:: blk_bbbbbbbbbb\n")
-
-    const reopened = await openSqlNoteStore(driver)
-    // Byte-identical: a date note's text IS its id, so no title is emitted.
-    expect(await noteOf(reopened, "2026-08-31")).toBe("today\n  id:: blk_aaaaaaaaaa\n")
-    expect(await noteOf(reopened, "2026-W35")).toBe("this week\n  id:: blk_bbbbbbbbbb\n")
-    expect(await driver.exec("SELECT id FROM nodes WHERE type = 'note' ORDER BY id")).toEqual([
-      { id: "2026-08-31" },
-      { id: "2026-W35" },
-    ])
-  })
-
   it("clear wipes every row and the log, and keeps meta", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "old", "- gone\n  id:: blk_aaaaaaaaaa\n")

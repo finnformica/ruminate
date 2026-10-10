@@ -158,8 +158,8 @@ export function useNoteDoc({
         ...next,
         props: { ...(next.props ?? {}), updated_at: new Date().toISOString() },
       }
-      // A first edit to a note that is not in the graph yet — a daily note
-      // typed into, a fresh `/views/<id>` — is what creates it, so the row
+      // A first edit to a note that is not in the graph yet — a fresh
+      // `/views/<id>` typed into — is what creates it, so the row
       // that lists it (`LISTED_VIEW`, src/data/views.ts) is written beside
       // the `create`, as `useCreateNote` writes it.
       apply(

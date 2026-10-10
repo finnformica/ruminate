@@ -64,14 +64,14 @@ import { compareNotes, matchesNoteScope, testNoteFilters } from "./search-notes"
  * | `text`          | plain paragraph                          |
  *
  * A `type:` value outside this table is NOT block vocabulary: on its own the
- * filter stays a note-type filter (`type:daily` — see
+ * filter stays a note-type filter (`type:board` — see
  * search-notes.ts), unchanged from before. Mixed into a block-scoped comma
  * list (`type:todo,zzz`) an unknown value simply matches no blocks.
  */
 const BLOCK_TYPE_VALUES: Record<string, readonly BlockType[]> = searchTypeValues()
 
 /** Is this a `type:` filter carrying at least one block-type value? Such a
- * filter matches blocks; any other filter (including `type:daily`) keeps its
+ * filter matches blocks; any other filter (including `type:board`) keeps its
  * note-level meaning. */
 export function isBlockTypeFilter(filter: Filter): boolean {
   return filter.key === "type" && filter.values.some((value) => value in BLOCK_TYPE_VALUES)

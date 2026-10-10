@@ -119,7 +119,6 @@ describe("shortcut registry entries", () => {
   it("contains the navigation vocabulary and app-level bindings", () => {
     const combos = new Set(SHORTCUTS.flatMap((shortcut) => shortcut.combos))
     for (const expected of [
-      "g d",
       "g v",
       "g s",
       "?",

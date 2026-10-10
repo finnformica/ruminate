@@ -40,7 +40,7 @@ describe("in: scope", () => {
 describe("filtering", () => {
   test("matches by title, type, property, counts, dates, has and no filters", () => {
     const note = makeNote({
-      type: "daily",
+      type: "board",
       title: "Title 1",
       props: { priority: "high" },
       tasks: [
@@ -62,7 +62,7 @@ describe("filtering", () => {
     expect(testNoteFilters([{ key: "title", values: [note.title], exclude: false }], note)).toBe(
       true,
     )
-    expect(testNoteFilters([{ key: "type", values: ["daily"], exclude: false }], note)).toBe(true)
+    expect(testNoteFilters([{ key: "type", values: ["board"], exclude: false }], note)).toBe(true)
     expect(testNoteFilters([{ key: "priority", values: ["high"], exclude: false }], note)).toBe(
       true,
     )

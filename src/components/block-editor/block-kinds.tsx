@@ -6,7 +6,6 @@ import { BOARD_TYPE, LEGACY_BOARD_PROP } from "../../data/graph"
 import type { NoteType } from "../../schema"
 import type { Occurrence } from "../../blocks/view"
 import { cx } from "../../utils/cx"
-import { noteTypeOf } from "../../utils/note-type"
 import { NoteFavicon } from "../note-favicon"
 import { BlockFrame } from "./block-frame"
 import type { BlockEditorApi } from "./block-item"
@@ -181,9 +180,8 @@ const heading: BlockKind = {
  * the title, its `props` the metadata, and its children are its top-level
  * blocks. It draws as a row like any other too — which is what lets a note
  * search result, a note in the Views page and a note linked under a block all
- * be the same row. Its key is its **favicon** (the day for a daily note, a
- * calendar for a weekly one, the note icon otherwise): the one thing about a
- * note that its title does not already say, in the shared 15px marker slot
+ * be the same row. Its key is its **favicon** (a board's, or the note icon):
+ * the one thing about a note that its title does not already say, in the shared 15px marker slot
  * every other type's key sits in. Its text is ordinary body type — the 3xl
  * note-title scale belongs on the note's own page, not on a row among many.
  */
@@ -206,14 +204,12 @@ const note: BlockKind = {
 }
 
 /** Which kind of note a note block is, for its favicon: a board by its
- * type (docs/boards.md), else what its id says (a day, a week, a note). The
- * same reading as the metadata layer's (`src/data/note-meta.ts`), legacy
- * shape included — a root still carrying the board property, read until
- * migration 0020 has run everywhere (`isLegacyBoard`, src/data/graph.ts). */
+ * type (docs/boards.md), a note otherwise. The same reading as the metadata
+ * layer's (`src/data/note-meta.ts`), legacy shape included — a root still
+ * carrying the board property, read until migration 0020 has run everywhere
+ * (`isLegacyBoard`, src/data/graph.ts). */
 function noteKindOf(block: Block): NoteType {
-  if (block.type === BOARD_TYPE) return "board"
-  const byId = noteTypeOf(block.id)
-  return byId === "note" && block.props?.[LEGACY_BOARD_PROP] === true ? "board" : byId
+  return block.type === BOARD_TYPE || block.props?.[LEGACY_BOARD_PROP] === true ? "board" : "note"
 }
 
 /**

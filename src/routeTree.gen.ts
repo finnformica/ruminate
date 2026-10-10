@@ -15,6 +15,8 @@ import { Route as AppRootAdminRouteImport } from './routes/_appRoot.admin'
 import { Route as AppRootChangelogRouteImport } from './routes/_appRoot.changelog'
 import { Route as AppRootSettingsRouteImport } from './routes/_appRoot.settings'
 import { Route as AppRootBoardsSplatRouteImport } from './routes/_appRoot.boards.$'
+import { Route as AppRootCalendarIndexRouteImport } from './routes/_appRoot.calendar.index'
+import { Route as AppRootCalendarSplatRouteImport } from './routes/_appRoot.calendar.$'
 import { Route as AppRootInviteTokenRouteImport } from './routes/_appRoot.invite.$token'
 import { Route as AppRootNotesIndexRouteImport } from './routes/_appRoot.notes.index'
 import { Route as AppRootNotesSplatRouteImport } from './routes/_appRoot.notes_.$'
@@ -50,6 +52,16 @@ const AppRootSettingsRoute = AppRootSettingsRouteImport.update({
 const AppRootBoardsSplatRoute = AppRootBoardsSplatRouteImport.update({
   id: '/boards/$',
   path: '/boards/$',
+  getParentRoute: () => AppRootRoute,
+} as any)
+const AppRootCalendarIndexRoute = AppRootCalendarIndexRouteImport.update({
+  id: '/calendar/',
+  path: '/calendar/',
+  getParentRoute: () => AppRootRoute,
+} as any)
+const AppRootCalendarSplatRoute = AppRootCalendarSplatRouteImport.update({
+  id: '/calendar/$',
+  path: '/calendar/$',
   getParentRoute: () => AppRootRoute,
 } as any)
 const AppRootInviteTokenRoute = AppRootInviteTokenRouteImport.update({
@@ -94,10 +106,12 @@ export interface FileRoutesByFullPath {
   '/changelog': typeof AppRootChangelogRoute
   '/settings': typeof AppRootSettingsRouteWithChildren
   '/boards/$': typeof AppRootBoardsSplatRoute
+  '/calendar/$': typeof AppRootCalendarSplatRoute
   '/invite/$token': typeof AppRootInviteTokenRoute
   '/notes/$': typeof AppRootNotesSplatRoute
   '/settings/$page': typeof AppRootSettingsPageRoute
   '/views/$': typeof AppRootViewsSplatRoute
+  '/calendar/': typeof AppRootCalendarIndexRoute
   '/notes/': typeof AppRootNotesIndexRoute
   '/settings/': typeof AppRootSettingsIndexRoute
   '/views/': typeof AppRootViewsIndexRoute
@@ -107,10 +121,12 @@ export interface FileRoutesByTo {
   '/changelog': typeof AppRootChangelogRoute
   '/': typeof AppRootIndexRoute
   '/boards/$': typeof AppRootBoardsSplatRoute
+  '/calendar/$': typeof AppRootCalendarSplatRoute
   '/invite/$token': typeof AppRootInviteTokenRoute
   '/notes/$': typeof AppRootNotesSplatRoute
   '/settings/$page': typeof AppRootSettingsPageRoute
   '/views/$': typeof AppRootViewsSplatRoute
+  '/calendar': typeof AppRootCalendarIndexRoute
   '/notes': typeof AppRootNotesIndexRoute
   '/settings': typeof AppRootSettingsIndexRoute
   '/views': typeof AppRootViewsIndexRoute
@@ -123,10 +139,12 @@ export interface FileRoutesById {
   '/_appRoot/settings': typeof AppRootSettingsRouteWithChildren
   '/_appRoot/': typeof AppRootIndexRoute
   '/_appRoot/boards/$': typeof AppRootBoardsSplatRoute
+  '/_appRoot/calendar/$': typeof AppRootCalendarSplatRoute
   '/_appRoot/invite/$token': typeof AppRootInviteTokenRoute
   '/_appRoot/notes_/$': typeof AppRootNotesSplatRoute
   '/_appRoot/settings/$page': typeof AppRootSettingsPageRoute
   '/_appRoot/views_/$': typeof AppRootViewsSplatRoute
+  '/_appRoot/calendar/': typeof AppRootCalendarIndexRoute
   '/_appRoot/notes/': typeof AppRootNotesIndexRoute
   '/_appRoot/settings/': typeof AppRootSettingsIndexRoute
   '/_appRoot/views/': typeof AppRootViewsIndexRoute
@@ -139,10 +157,12 @@ export interface FileRouteTypes {
     | '/changelog'
     | '/settings'
     | '/boards/$'
+    | '/calendar/$'
     | '/invite/$token'
     | '/notes/$'
     | '/settings/$page'
     | '/views/$'
+    | '/calendar/'
     | '/notes/'
     | '/settings/'
     | '/views/'
@@ -152,10 +172,12 @@ export interface FileRouteTypes {
     | '/changelog'
     | '/'
     | '/boards/$'
+    | '/calendar/$'
     | '/invite/$token'
     | '/notes/$'
     | '/settings/$page'
     | '/views/$'
+    | '/calendar'
     | '/notes'
     | '/settings'
     | '/views'
@@ -167,10 +189,12 @@ export interface FileRouteTypes {
     | '/_appRoot/settings'
     | '/_appRoot/'
     | '/_appRoot/boards/$'
+    | '/_appRoot/calendar/$'
     | '/_appRoot/invite/$token'
     | '/_appRoot/notes_/$'
     | '/_appRoot/settings/$page'
     | '/_appRoot/views_/$'
+    | '/_appRoot/calendar/'
     | '/_appRoot/notes/'
     | '/_appRoot/settings/'
     | '/_appRoot/views/'
@@ -222,6 +246,20 @@ declare module '@tanstack/react-router' {
       path: '/boards/$'
       fullPath: '/boards/$'
       preLoaderRoute: typeof AppRootBoardsSplatRouteImport
+      parentRoute: typeof AppRootRoute
+    }
+    '/_appRoot/calendar/': {
+      id: '/_appRoot/calendar/'
+      path: '/calendar'
+      fullPath: '/calendar/'
+      preLoaderRoute: typeof AppRootCalendarIndexRouteImport
+      parentRoute: typeof AppRootRoute
+    }
+    '/_appRoot/calendar/$': {
+      id: '/_appRoot/calendar/$'
+      path: '/calendar/$'
+      fullPath: '/calendar/$'
+      preLoaderRoute: typeof AppRootCalendarSplatRouteImport
       parentRoute: typeof AppRootRoute
     }
     '/_appRoot/invite/$token': {
@@ -296,9 +334,11 @@ interface AppRootRouteChildren {
   AppRootSettingsRoute: typeof AppRootSettingsRouteWithChildren
   AppRootIndexRoute: typeof AppRootIndexRoute
   AppRootBoardsSplatRoute: typeof AppRootBoardsSplatRoute
+  AppRootCalendarSplatRoute: typeof AppRootCalendarSplatRoute
   AppRootInviteTokenRoute: typeof AppRootInviteTokenRoute
   AppRootNotesSplatRoute: typeof AppRootNotesSplatRoute
   AppRootViewsSplatRoute: typeof AppRootViewsSplatRoute
+  AppRootCalendarIndexRoute: typeof AppRootCalendarIndexRoute
   AppRootNotesIndexRoute: typeof AppRootNotesIndexRoute
   AppRootViewsIndexRoute: typeof AppRootViewsIndexRoute
 }
@@ -309,9 +349,11 @@ const AppRootRouteChildren: AppRootRouteChildren = {
   AppRootSettingsRoute: AppRootSettingsRouteWithChildren,
   AppRootIndexRoute: AppRootIndexRoute,
   AppRootBoardsSplatRoute: AppRootBoardsSplatRoute,
+  AppRootCalendarSplatRoute: AppRootCalendarSplatRoute,
   AppRootInviteTokenRoute: AppRootInviteTokenRoute,
   AppRootNotesSplatRoute: AppRootNotesSplatRoute,
   AppRootViewsSplatRoute: AppRootViewsSplatRoute,
+  AppRootCalendarIndexRoute: AppRootCalendarIndexRoute,
   AppRootNotesIndexRoute: AppRootNotesIndexRoute,
   AppRootViewsIndexRoute: AppRootViewsIndexRoute,
 }

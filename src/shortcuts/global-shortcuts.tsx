@@ -4,7 +4,6 @@ import { useEffect, useRef } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useIsAdmin } from "../data/features"
 import { isHelpPanelOpenAtom } from "../global-state"
-import { toDateString } from "../utils/date"
 import { GChordMachine } from "./chords"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "./registry"
 
@@ -25,11 +24,11 @@ function isTypingTarget(target: EventTarget | null): boolean {
  *   any input or the block editor's edit-mode textarea, but fire from the
  *   editor's select mode (whose container leaves unbound keys un-prevented, so
  *   they bubble here).
- * - `g` chords (`g d` / `g v` / `g s` / `g c` / `g a`) navigate — same listener, same
+ * - `g` chords (`g v` / `g s` / `g c` / `g a`) navigate — same listener, same
  *   typing guard, via {@link GChordMachine}. An *armed* chord's second key is
  *   additionally intercepted at capture phase so it wins over the block
- *   editor's own single-key select-mode bindings (w/a/s/d — a bare `d` there
- *   is "first child", but `g` then `d` must still reach the daily note).
+ *   editor's own single-key select-mode bindings (w/a/s/d — a bare `s` there
+ *   is "next sibling", but `g` then `s` must still reach the settings).
  * - `⌘[` / `⌘]` walk the router history (needed in the PWA, where the browser
  *   chrome's back button doesn't exist).
  *
@@ -48,14 +47,6 @@ export function GlobalShortcuts() {
 
   useEffect(() => {
     const machine = new GChordMachine({
-      // "Today" is computed at press time, exactly as the sidebar's Calendar
-      // nav item does (src/components/nav-items.tsx).
-      d: () =>
-        navigate({
-          to: "/views/$",
-          params: { _splat: toDateString(new Date()) },
-          search: { query: undefined },
-        }),
       v: () => navigate({ to: "/", search: { query: undefined } }),
       s: () => navigate({ to: "/settings", search: { query: undefined } }),
       c: () => navigate({ to: "/changelog", search: { release: undefined } }),

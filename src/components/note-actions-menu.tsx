@@ -108,17 +108,14 @@ interface EditorActions {
  * **Make this a note** clears it, and a board's outline offers **Open
  * board** to get back. Own notes only (signed out, the sample graph in
  * memory, as **New board** does), and only where the caller can open the
- * board (`openBoard`); a daily or weekly note is what its id says it is,
+ * board (`openBoard`);
  * so neither is offered one. The board page itself adds **Features**,
  * which opens its Features editor (`openFeatures`).
  *
  * **Remove from Views** and **Add to Views** are the note's place in the
  * Views list (docs/metadata.md): its view row's `pinned`, read as the menu
  * opens. Own notes only — a shared note is listed under Shared, by the
- * share, and has no place in the list to give up. A daily or weekly note
- * is offered the pair like any other: it is reachable from the calendar
- * whether or not it is listed, which is the ordinary reason to take one
- * off the list.
+ * share, and has no place in the list to give up.
  */
 export function useNoteMenuEntries() {
   const isSignedOut = useAtomValue(isSignedOutAtom)

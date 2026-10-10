@@ -32,7 +32,6 @@ key navigates. The chords work from the block editor's select mode too.
 
 | Action                                | Shortcut                                              |
 | ------------------------------------- | ----------------------------------------------------- |
-| Go to today's daily note              | <kbd>g</kbd> then <kbd>d</kbd>                        |
 | Go to the Views list                  | <kbd>g</kbd> then <kbd>v</kbd>                        |
 | Go to settings                        | <kbd>g</kbd> then <kbd>s</kbd>                        |
 | Go to the changelog                   | <kbd>g</kbd> then <kbd>c</kbd>                        |

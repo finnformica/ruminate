@@ -135,14 +135,7 @@ export function filterQualifierOptions(
  */
 export const STATIC_QUALIFIER_OPTIONS: Readonly<Record<string, readonly QualifierOption[]>> = {
   // The block types, each with its markdown glyph, then the note types.
-  type: [
-    ...searchTypeOptions(),
-    named("note"),
-    named("daily"),
-    named("weekly"),
-    named("board"),
-    named("template"),
-  ],
+  type: [...searchTypeOptions(), named("note"), named("board"), named("template")],
   has: [named("dates"), named("tasks"), named("title")],
   no: [named("dates"), named("tasks"), named("title")],
 }

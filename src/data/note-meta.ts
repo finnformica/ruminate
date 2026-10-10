@@ -1,8 +1,7 @@
 import type { Heading, Note, NoteId, NoteType, Task } from "../schema"
 import { isHeading } from "../blocks/markers"
 import type { Block, BlockDoc } from "../blocks/types"
-import { formatDate, formatWeek, toDateStringUtc } from "../utils/date"
-import { noteTypeOf } from "../utils/note-type"
+import { toDateStringUtc } from "../utils/date"
 import {
   BOARD_TYPE,
   isLegacyBoard,
@@ -131,22 +130,12 @@ export function noteFromNode(id: NoteId, snapshot: GraphSnapshot): Note | null {
   }
   // A board is a note root of its own type (docs/boards.md) — or, until
   // migrations/0020 has run, a note whose page still carries the old
-  // property; a daily or weekly note is what its id says it is.
-  const type: NoteType =
-    noteTypeOf(id) === "note" && (note.type === BOARD_TYPE || isLegacyBoard(note))
-      ? "board"
-      : noteTypeOf(id)
-  if (type === "daily") dates.add(id)
+  // property.
+  const type: NoteType = note.type === BOARD_TYPE || isLegacyBoard(note) ? "board" : "note"
 
   const text = texts.join("\n")
   let displayName = ""
   switch (type) {
-    case "daily":
-      displayName = title || formatDate(id)
-      break
-    case "weekly":
-      displayName = title || formatWeek(id)
-      break
     case "note":
     case "board":
       if (title) displayName = title

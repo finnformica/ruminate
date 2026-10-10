@@ -195,8 +195,6 @@ describe("the qualifier popover", () => {
       link: null,
       text: "¶",
       note: null,
-      daily: null,
-      weekly: null,
       board: null,
       template: null,
     })

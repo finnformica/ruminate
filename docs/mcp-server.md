@@ -281,7 +281,7 @@ Five things worth knowing about the table:
   of that name being the one on screen rather than a second guess at it.
 - **`list_notes` reads the note rows, then only the notes on the page.** Which notes a
   page names, and in what order, is decided by facts on each note's own row — its
-  `updated_at` prop, and its id, which says whether it is a daily or a weekly. Its task
+  `updated_at` prop and its id. Its task
   counts and preview are not, so those are read for the page alone.
 - **A note-scoped grant pays for its scope.** The visible-node set is a walk seeded at the
   granted notes rather than a pass over a loaded corpus — cheaper, and the same set.
