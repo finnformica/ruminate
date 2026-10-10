@@ -250,6 +250,14 @@ function menuEntries(target: BlockMenuTarget, actions: BlockActions): MenuEntry[
     shortcut: ["⌥", "⇧", "↓"],
     onSelect: () => actions.duplicate(keys),
   })
+  // A second place for a block, by name rather than by clipboard: another
+  // block beneath this one (downstream), or this one beneath another
+  // (upstream), picked in the palette. One row at a time: a selection of
+  // several has no one block to be the source or the target.
+  if (keys.length === 1 && actions.linkDownstream)
+    item({ label: "Add downstream link…", onSelect: () => actions.linkDownstream?.(keys) })
+  if (keys.length === 1 && actions.linkUpstream)
+    item({ label: "Add upstream link…", onSelect: () => actions.linkUpstream?.(keys) })
 
   // Beyond the note: the sidebar, and other people.
   section()

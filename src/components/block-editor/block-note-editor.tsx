@@ -1,11 +1,12 @@
 import { useAtomValue, useSetAtom, useStore } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { toast } from "sonner"
 import { emptyBlock } from "../../blocks/ops"
 import type { BlockDoc, ChangeHint } from "../../blocks/types"
 import { imagesEnabled, uploadImage } from "../../data/images"
 import { fetchLinkPreview } from "../../data/link-previews"
-import { isNoteType } from "../../data/graph"
-import { deleteBlockOps, deleteSubtreeOps, parentCount } from "../../data/ops"
+import { childIdsOf, isNoteType } from "../../data/graph"
+import { deleteBlockOps, deleteSubtreeOps, linkBlockOps, parentCount } from "../../data/ops"
 import { sharedOriginAtom } from "../../data/shared-mode"
 import { useApplyOps } from "../../data/store"
 import { useFoldRule } from "../../data/view-state"
@@ -16,7 +17,13 @@ import { upstreamIndexAtom, useDeveloperDebug } from "../../hooks/is-developer"
 import { resolveBlockSubtrees } from "../../utils/resolve-blocks"
 import { deleteNoteDialogAtom } from "../delete-note-dialog"
 import { boardPickerAtom } from "../board-picker"
-import { BlockEditor, type BlockDebugOptions, type BoardRequest } from "./block-editor"
+import { usePalettePicker } from "../palette"
+import {
+  BlockEditor,
+  type BlockDebugOptions,
+  type BoardRequest,
+  type LinkRequest,
+} from "./block-editor"
 
 /**
  * Ensure a parsed doc always has at least one block to edit. The starter is
@@ -284,6 +291,61 @@ export function BlockNoteEditor({
     [noteId, openBoardPicker],
   )
 
+  // A second place for a block, picked by name (docs/graph-storage.md,
+  // "Mirroring"): the menu's Add downstream link and Add upstream link open
+  // the palette as a picker over the corpus, the rows on screen suggested
+  // before anything is typed. Downstream, the editor lands the pick beneath
+  // the row as a paste of it would; upstream, the row's block is linked
+  // beneath the pick — a block, or a note, where it joins the top level —
+  // by one op written here, since the parent may be in another note, which
+  // the editor's doc cannot say. Only in a note of the reader's own, and
+  // never to or from a note someone shared: a block cannot live in a shared
+  // note and one of your own at once (`src/data/store.ts`).
+  const openPicker = usePalettePicker()
+  const onRequestLink = useCallback(
+    (request: LinkRequest) => {
+      if (noteId === undefined) return
+      const down = request.direction === "downstream"
+      openPicker({
+        label: down ? "Add downstream link" : "Add upstream link",
+        placeholder: down
+          ? "Block to link beneath this one…"
+          : "Block or note to link this beneath…",
+        blocks: true,
+        suggested: request.suggested.map((id) => ({ id, noteId })),
+        keep: (row) =>
+          row.id !== request.blockId &&
+          !sharedOrigin.has(row.noteId) &&
+          (!down || row.kind === "block"),
+        onPick: (choice) => {
+          if (choice.kind === "text") return
+          if (down) {
+            if (choice.kind === "block") request.place(choice.blockId)
+            return
+          }
+          const parentId = choice.kind === "block" ? choice.blockId : choice.noteId
+          const snapshot = jotaiStore.get(graphSnapshotAtom)
+          if (parentId === request.blockId) {
+            toast("A block can't be put inside itself")
+            return
+          }
+          if (childIdsOf(snapshot, parentId).includes(request.blockId)) {
+            toast("That block is already there")
+            return
+          }
+          const ops = linkBlockOps(snapshot, parentId, request.blockId)
+          if (ops.length === 0) return
+          applyOps(ops)
+          // The change may be in another note, where the page cannot show
+          // it: say where the block went.
+          const parent = snapshot.nodes.get(parentId)
+          toast.success(`Linked beneath “${parent?.text.trim() || "Untitled"}”.`)
+        },
+      })
+    },
+    [noteId, openPicker, sharedOrigin, jotaiStore, applyOps],
+  )
+
   // Images (docs/images.md): pasted pictures upload to the Worker — only where
   // the build has the feature on and the reader is signed in (the sample
   // corpus has nowhere to put bytes). Off, the editor never offers it.
@@ -353,6 +415,7 @@ export function BlockNoteEditor({
       onLinkPreview={onLinkPreview}
       onRequestBoard={ownNote ? onRequestBoard : undefined}
       onOpenBoard={onOpenBoard}
+      onRequestLink={ownNote ? onRequestLink : undefined}
       // The starter is what keeps a block to type in; without it (the
       // basket) the last row may go, and the basket goes with it.
       emptyable={!starter}

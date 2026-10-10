@@ -8,6 +8,7 @@ import {
   docToParts,
   isCorpusRoot,
   isNoteType,
+  keyAtEnd,
   parseProps,
   reconcileSortKeys,
   sortKeyBetween,
@@ -299,6 +300,28 @@ export function deleteBlockOps(blockIds: string | string[], snapshot: GraphSnaps
     ...unlinks,
     ...ids.map((id) => ({ op: "delete", id }) as Op),
     ...strandedBlankOps(snapshot, parents, deleted),
+  ]
+}
+
+/**
+ * Link a block beneath a parent — a block, or a note, which puts it at the
+ * note's top level — as the parent's last child: the one `link` a paste of
+ * the block onto the parent would write (docs/graph-storage.md,
+ * "Mirroring"), so the block then genuinely lives in both places. The
+ * block menu's **Add upstream link** writes it. Nothing when the graph
+ * lacks either node, when the block is a note (a note under a block is a
+ * board's affair, `linkBoardOps`), when the two are one (a block cannot be
+ * put inside itself), or when the parent already holds the block directly
+ * (it is already there). A loop is a shape the graph holds, and is linked.
+ */
+export function linkBlockOps(snapshot: GraphSnapshot, parentId: string, blockId: string): Op[] {
+  if (parentId === blockId || !snapshot.nodes.has(parentId)) return []
+  const block = snapshot.nodes.get(blockId)
+  if (!block || isNoteType(block.type)) return []
+  const links = snapshot.childLinks.get(parentId) ?? []
+  if (links.some((link) => link.destination_id === blockId)) return []
+  return [
+    { op: "link", source: parentId, destination: blockId, sortKey: keyAtEnd(snapshot, parentId) },
   ]
 }
 

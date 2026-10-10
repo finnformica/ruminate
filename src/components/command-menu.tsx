@@ -236,9 +236,12 @@ export function CommandMenu() {
   const results = useMemo(() => (keep ? keepResults(searched, keep) : searched), [searched, keep])
   // The typed text as a row of its own, when the picker takes a value.
   const textRow = picking && request.textRow && text.trim() ? request.textRow(text.trim()) : ""
-  const hasRows = deferredQuery
-    ? results.rows.length > 0
-    : recentRoots.length > 0 || viewRoots.length > 0
+  // What is listed with nothing typed: a picker's own suggestions, where it
+  // has them — in place of Recent, and of Views beneath it — else Recent.
+  const suggested = request?.suggested
+  const browseRoots = suggested ?? recentRoots
+  const viewsListed = !deferredQuery && !suggested && viewRoots.length > 0
+  const hasRows = deferredQuery ? results.rows.length > 0 : browseRoots.length > 0 || viewsListed
 
   // The keyboard's way through the rows. With nothing typed there are two
   // lists, Recent and then Views, walked as one: ↓ from the query lands on
@@ -453,8 +456,10 @@ export function CommandMenu() {
                 </CommandItem>
               </Command.Group>
             ) : null}
-            {deferredQuery || recentRoots.length > 0 ? (
-              <Command.Group heading={deferredQuery ? "Results" : "Recent"}>
+            {deferredQuery || browseRoots.length > 0 ? (
+              <Command.Group
+                heading={deferredQuery ? "Results" : suggested ? "Suggested" : "Recent"}
+              >
                 {/* The results block — the count and the rows — as the
                     notes page draws it. ↓ past the last item hands the
                     keyboard to the rows; ↵ straight after typing commits
@@ -463,19 +468,22 @@ export function CommandMenu() {
                   variant="palette"
                   query={deferredQuery}
                   results={results}
-                  browseRoots={recentRoots}
+                  browseRoots={browseRoots}
                   limit={NUM_VISIBLE_RESULTS}
+                  // A picker's suggestions are a view's rows, which may
+                  // run past the first few: the rest load beneath.
+                  more={suggested !== undefined}
                   readOnly
                   initialSelection="none"
                   onOpen={openResult}
                   focusFirstSignal={focusFirstSignal}
                   focusLastSignal={recentLastSignal}
                   onExitTop={takeBackFromRows}
-                  onExitBottom={!deferredQuery && viewRoots.length > 0 ? recentToViews : undefined}
+                  onExitBottom={viewsListed ? recentToViews : undefined}
                 />
               </Command.Group>
             ) : null}
-            {!deferredQuery && viewRoots.length > 0 ? (
+            {viewsListed ? (
               // The Views list, beneath the recent places: a second results
               // block, browsed the same way, walked into from the recent
               // rows and back out of them (or, with nothing recent, straight
