@@ -7,7 +7,7 @@ import { boardFeatures, boardImageIds } from "../../data/boards"
 import type { GraphSnapshot } from "../../data/graph"
 import { graphSnapshotAtom } from "../../global-state"
 import { cx } from "../../utils/cx"
-import { ArrowRightIcon16 } from "../icons"
+import { BoardIcon16 } from "../icons"
 import type { BlockEditorApi } from "./block-item"
 import { FigureFrame, FigureTool } from "./figure-frame"
 
@@ -40,9 +40,9 @@ export function boardCardLine(snapshot: GraphSnapshot, boardId: string): string 
  * textarea: a board is named on its own page), and beneath it what the
  * board holds, live (`boardCardLine`). No icon: in an outline the card is
  * the board's mark, as a picture is an image row's, and the key slot before
- * it is a figure's empty one. **Open board** in the card's corner — an
- * arrow, the way forward, as the nav's — opens the board's page, as **Open
- * link** opens a link block's page. Click anywhere else and the row is selected, and a
+ * it is a figure's empty one. **Open board** in the card's corner — the
+ * board's own glyph, the one its page and its listed row carry — opens the
+ * board's page, as **Open link** opens a link block's page. Click anywhere else and the row is selected, and a
  * double-click selects it too: the row's surface takes the pointer
  * (`block-item.tsx`), and the editor turns an edit of this row into a
  * selection. The card sits in the block frame every framed block shares
@@ -80,18 +80,21 @@ export function BoardCard({
       tools={
         api.openBoard ? (
           <FigureTool label="Open board" onClick={() => api.openBoard?.(block.id)}>
-            <ArrowRightIcon16 />
+            <BoardIcon16 />
           </FigureTool>
         ) : null
       }
     >
       {() => (
         // The link card's surface, to the class: the same card, holding a
-        // board rather than a page.
+        // board rather than a page. Its ink is its own (`text-text`): a
+        // selected row tints the text it inherits towards the accent
+        // (`.block-highlight`, block-editor.css), and a card's title is a
+        // name on a surface, not a line of the note, so it keeps its colour.
         <div
           data-testid="board-card"
           className={cx(
-            "flex w-full overflow-hidden rounded-lg border border-border-secondary bg-bg-card",
+            "flex w-full overflow-hidden rounded-lg border border-border-secondary bg-bg-card text-text",
             "transition-colors duration-150 hover:bg-bg-hover",
           )}
         >

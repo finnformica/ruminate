@@ -431,8 +431,10 @@ a tap, the arrows walking into it) selects it instead (`uneditable`) — and
 beneath it what the board holds, read live off the graph (`boardCardLine`:
 "12 pictures · Location, Object, Material", "No pictures yet" while it is
 empty, four features named and the rest counted). **Open board** in the
-card's corner — an arrow, the way forward, as the nav's — opens the
-board's page; click anywhere else and the row is selected, as any row. The card is a figure in a link card's frame
+card's corner — the board's own glyph — opens the board's page; click
+anywhere else and the row is selected, as any row. Selected, the card
+keeps its own ink: the row's selection tints the text it inherits, and a
+name on a card is not a line of the note. The card is a figure in a link card's frame
 (`figure-frame.tsx`, `isFigureType`): it keeps to a side and takes a
 width, from the handles or the row's menu, and those two props sit on the
 board's own node beside its metadata — one card, however many notes it is
