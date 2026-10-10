@@ -3034,7 +3034,7 @@ describe("BlockEditor context menu", () => {
     // No corpus behind the editor (a clipboard fragment, Storybook): nothing
     // to pick a block from.
     const { container } = render(<Harness initial={"A\nB\nC"} />)
-    expect((await openMenuOn(container, 1)).textContent).not.toContain("link…")
+    expect((await openMenuOn(container, 1)).textContent).not.toContain("stream link")
     await act(async () => {
       fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
     })
@@ -3043,8 +3043,8 @@ describe("BlockEditor context menu", () => {
     const onRequestLink = vi.fn()
     const rendered = render(<Harness initial={"A\nB\nC"} onRequestLink={onRequestLink} />)
     const menu = await openMenuOn(rendered.container, 1)
-    expect(menu.textContent).toContain("Add downstream link…")
-    expect(menu.textContent).toContain("Add upstream link…")
+    expect(menu.textContent).toContain("Add downstream link")
+    expect(menu.textContent).toContain("Add upstream link")
     await act(async () => {
       fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
     })
@@ -3059,7 +3059,7 @@ describe("BlockEditor context menu", () => {
     expect(highlightedAll(four)).toEqual(["B", "C"])
     const onSelection = await openMenuOn(four, 2)
     expect(onSelection.textContent).toContain("Copy 2 blocks")
-    expect(onSelection.textContent).not.toContain("link…")
+    expect(onSelection.textContent).not.toContain("stream link")
   })
 
   it("Add downstream link asks the host for a block, suggesting the rows on screen, and lands the pick beneath the row", async () => {
@@ -3073,7 +3073,7 @@ describe("BlockEditor context menu", () => {
     const serialized = getByTestId("serialized").textContent!
     const idOf = (text: string) => serialized.match(new RegExp(`${text}\\n\\s*id:: (\\S+)`))![1]
     await openMenuOn(container, 0)
-    await pick("Add downstream link…")
+    await pick("Add downstream link")
     expect(onRequestLink).toHaveBeenCalledTimes(1)
     const request = onRequestLink.mock.calls[0][0] as LinkRequest
     expect(request.direction).toBe("downstream")
@@ -3115,7 +3115,7 @@ describe("BlockEditor context menu", () => {
     // Focused on the heading A, the view's title: B and C are the rows. The
     // menu on C.
     await openMenuOn(container, 1)
-    await pick("Add upstream link…")
+    await pick("Add upstream link")
     expect(onRequestLink).toHaveBeenCalledWith({
       direction: "upstream",
       blockId: idC,

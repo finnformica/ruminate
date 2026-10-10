@@ -32,7 +32,7 @@ keyboard that appears and disappears. The block editor
   popup are one list (`menuEntries`) on two surfaces, and it carries only
   what nothing else on the row does, in sections ruled apart: Copy and Copy
   link to block; a link's or a figure's own actions, where the row has
-  them; Move up, Move down and Duplicate, then Add downstream link and Add
+  them; Move up, Move down and Duplicate; Add downstream link and Add
   upstream link (docs/graph-storage.md, "Linking by name" — the only way a
   phone, with no select-mode paste, puts a block in a second place); Add to
   Views and Share; Unlink and Delete. Editing is

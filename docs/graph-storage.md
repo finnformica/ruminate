@@ -684,8 +684,9 @@ block held, keep their note id and show in that note's Unassigned basket
 A paste needs a clipboard and a select-mode paste, which a phone has
 neither of (docs/mobile.md). The block menu — the right-click popup and the
 long-press sheet alike — offers the same link by name instead, one row at a
-time, after Duplicate: **Add downstream link…** puts a block picked from the
-corpus beneath the row, and **Add upstream link…** puts the row's block
+time, in a section of its own after the arranging entries: **Add downstream
+link** puts a block picked from the
+corpus beneath the row, and **Add upstream link** puts the row's block
 beneath the pick. Both open the ⌘K palette as a picker (`usePalettePicker`,
 `src/components/palette.ts`): before anything is typed it lists what is on
 screen under **Suggested** — the note's top rows, or in focus the focused

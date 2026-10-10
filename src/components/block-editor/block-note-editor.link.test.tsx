@@ -80,7 +80,7 @@ describe("linking by name from the note", () => {
         <Note />
       </Provider>,
     )
-    await choose(container, 0, "Add downstream link…")
+    await choose(container, 0, "Add downstream link")
     const request = store.get(paletteRequestAtom)!
     expect(request.label).toBe("Add downstream link")
     // The note's top rows, the row's own block left out; a note is no pick
@@ -121,7 +121,7 @@ describe("linking by name from the note", () => {
         <Note />
       </Provider>,
     )
-    await choose(container, 0, "Add upstream link…")
+    await choose(container, 0, "Add upstream link")
     const request = store.get(paletteRequestAtom)!
     expect(request.label).toBe("Add upstream link")
     expect(request.suggested).toEqual([{ id: "blk_two0000000", noteId: A }])
@@ -137,7 +137,7 @@ describe("linking by name from the note", () => {
     expect(walk(store, A)).toBe(serialize(parse(NOTES[A])))
 
     // Beneath a note: its top level, last.
-    await choose(container, 0, "Add upstream link…")
+    await choose(container, 0, "Add upstream link")
     await act(async () => {
       store.get(paletteRequestAtom)!.onPick({ kind: "note", noteId: B })
     })
