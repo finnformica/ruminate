@@ -60,6 +60,7 @@ module.exports = {
         highlight: "var(--color-text-highlight)",
         success: "var(--color-text-success)",
         danger: "var(--color-text-danger)",
+        changed: "var(--color-text-changed)",
         "on-danger": "var(--color-text-on-danger)",
         pending: "var(--color-text-pending)",
         pinned: "var(--color-text-pinned)",
@@ -89,6 +90,10 @@ module.exports = {
         "selected-hover": "var(--color-bg-selected-hover)",
         "selected-active": "var(--color-bg-selected-active)",
         "selected-faint": "var(--color-bg-selected-faint)",
+        added: "var(--color-bg-added)",
+        removed: "var(--color-bg-removed)",
+        "added-strong": "var(--color-bg-added-strong)",
+        "removed-strong": "var(--color-bg-removed-strong)",
       },
       border: {
         DEFAULT: "var(--color-border)",

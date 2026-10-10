@@ -172,23 +172,17 @@ table. Consequences, accepted and mitigated:
   came with a bump of `CACHE_GENERATION` (`src/data/database-mode.ts`): every
   device discards its local copy once and re-pulls the corpus clean.
 
-### What the database deliberately does not do
+### History
 
-D1 stores current state only, so history-derived features have no source and
-do not exist in the app:
+The tables hold current state; history is the event log beside them
+(docs/event-sourcing.md): every change to a block, link or view, appended on
+the replica and held by each device. The calendar reads it — a day shows
+what was written on it — and a note's version history and a restore from a
+past day will read the same log. History begins where the log did: nothing
+before it was recorded, and the calendar says so for those days.
 
-- **Note version history**: no per-edit log; a save replaces rows.
-- **Past-day reconstruction**: calendar past days show a simple "history isn't
-  available" placeholder instead of a reconstructed roll-up.
 - **File attachments**: uploads were a git-repo feature; legacy `/uploads`
   references in note content render as inert placeholders.
-
-**No event sourcing — reserved.** The store remains state-based (current rows
-only, no per-edit event log). An event/history layer over the database — which
-would bring back version history and day roll-ups — is deliberately reserved
-for later rather than half-built here. The v2 shape was chosen so that
-migration is additive: every mutation is already a text edit, a type change,
-or a link-row change.
 
 ## The contract: `NoteStore`
 
@@ -268,7 +262,7 @@ One row per node. `id` is a minted TEXT id — `blk_…` for blocks **and** page
 alike, since a page is just a node whose `type` is `note`
 (docs/graph-storage.md). (Notes made under a date key — `2026-08-31`,
 `2026-W35` — when the calendar had daily and weekly notes keep it; the id is
-only an id now.) A page's _name_ is not its id but its `text`: the title, which
+only an id now, docs/event-sourcing.md.) A page's _name_ is not its id but its `text`: the title, which
 rides the page's doc as `props.title` between the walk and the write
 (`note-identity.ts`). `type` is stored, not derived — the registry in the
 schema doc (`note`, `text`, `h1`–`h3`, `todo`, `done`, `ul`, `ol`, `quote`,

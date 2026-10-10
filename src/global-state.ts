@@ -654,6 +654,13 @@ export const touchRecentAtom = atom(
 
 export const calendarLayoutAtom = atomWithStorage<"week" | "month">("calendar-layout", "week")
 
+/** How a day's changes are listed on the calendar (`DayChanges`): by the
+ * note they were made in, or in the order they were made. */
+export const calendarChangesViewAtom = atomWithStorage<"notes" | "timeline">(
+  "calendar-changes-view",
+  "notes",
+)
+
 /**
  * The markdown a new block starts with when Enter creates one in the block
  * editor (from anything but a list item, which continues its own list), and
