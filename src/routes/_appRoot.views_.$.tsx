@@ -8,7 +8,14 @@ import { CalendarHeader } from "../components/calendar-header"
 import { DayChanges } from "../components/day-changes"
 import { DaysOfWeek } from "../components/days-of-week"
 import { Details } from "../components/ui/details"
-import { LoadingIcon16, NoteIcon16, OfflineIcon16, ShareIcon16 } from "../components/icons"
+import {
+  CalendarDateIcon16,
+  CalendarIcon16,
+  LoadingIcon16,
+  NoteIcon16,
+  OfflineIcon16,
+  ShareIcon16,
+} from "../components/icons"
 import { Notice } from "../components/notice"
 import { parse } from "../blocks/parse"
 import type { BlockDoc, ChangeHint } from "../blocks/types"
@@ -390,7 +397,19 @@ function NotePage() {
     preventDefault: true,
   })
 
-  const favicon = note ? <NoteFavicon note={note} /> : <NoteIcon16 />
+  // A day or a week is a place on the calendar rather than a note of its
+  // own: the header says so, with the day's number on the icon, and the
+  // note's own name (the date) is the calendar header's to show.
+  const favicon = isDailyNote ? (
+    <CalendarDateIcon16 date={Number(noteId?.slice(-2))} />
+  ) : isWeeklyNote ? (
+    <CalendarIcon16 />
+  ) : note ? (
+    <NoteFavicon note={note} />
+  ) : (
+    <NoteIcon16 />
+  )
+  const pageTitle = isDailyNote || isWeeklyNote ? "Calendar" : note?.displayName || "Untitled"
 
   return (
     <PageLayout
@@ -409,7 +428,7 @@ function NotePage() {
               <span className="flex size-icon shrink-0 text-text-secondary">{favicon}</span>
             </>
           ) : null}
-          <span className="truncate">{note?.displayName || "Untitled"}</span>
+          <span className="truncate">{pageTitle}</span>
         </span>
       }
       icon={share === null ? favicon : undefined}
