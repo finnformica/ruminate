@@ -25,13 +25,14 @@ const block = (id: string, text: string, children: string[] = []): Block => ({
  * one reworded, one removed, one added beneath it, and a fold at the end. */
 const doc: BlockDoc = {
   props: null,
-  rootBlockIds: ["keep", "changed", "gone", "new", "fold:root:x"],
+  rootBlockIds: ["keep", "changed", "gone", "new", "saved", "fold:root:x"],
   blocks: {
     keep: block("keep", "Call the bank"),
     changed: block("changed", "Buy sourdough"),
     gone: block("gone", "Call mum"),
     new: block("new", "Walk along the canal", ["deep"]),
     deep: block("deep", "Take the camera"),
+    saved: block("saved", "Book the dentist"),
     "fold:root:x": block("fold:root:x", ""),
   },
 }
@@ -50,6 +51,7 @@ const marks = new Map<string, DiffMark>([
   ["gone", { kind: "removed" }],
   ["new", { kind: "added" }],
   ["deep", { kind: "added" }],
+  ["saved", { kind: "touched" }],
   ["fold:root:x", { kind: "fold", count: 4, hidden: ["x", "y"] }],
 ])
 
@@ -72,6 +74,7 @@ describe("the block editor drawing a diff", () => {
       "removed −",
       "added +",
       "added +",
+      "touched ·",
       "fold ⋯",
     ])
     // The sign hangs in the gutter of its own row, which indents inside of
@@ -93,6 +96,8 @@ describe("the block editor drawing a diff", () => {
     expect(changed.querySelector("ins")?.textContent).toBe("sourdough")
     expect(changed.textContent).toContain("Buy breadsourdough")
     expect(rowOf(container, "keep").querySelector("del, ins")).toBeNull()
+    // A row last saved on the day, before history began: its sign alone.
+    expect(rowOf(container, "saved").innerHTML).not.toMatch(/bg-bg-(added|removed)/)
   })
 
   it("draws a fold as one quiet row that opens on a click", () => {
