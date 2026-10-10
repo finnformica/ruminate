@@ -76,6 +76,7 @@ import {
   keyOf,
   occurrenceKeys,
   parentKeyOf,
+  siblingKey,
   focusRootKeyOf,
 } from "../../blocks/view"
 import {
@@ -168,6 +169,33 @@ import {
 } from "./block-item"
 export type { BlockDebugOptions } from "./block-item"
 import { useBlockHistory } from "./use-block-history"
+import { kindOf } from "./block-kinds"
+import type { BoardPlacement } from "../../data/boards"
+
+/**
+ * What the editor asks its host for when a slash row wants a board at a
+ * row (`onRequestBoard`, docs/boards.md, "A board in a note"): where it
+ * goes in the graph — under `parentId`, the row's parent block or the
+ * view's own root (the note, or the focused block), in place of the row
+ * when the row is blank, else after it — and `place`, which the host calls
+ * once the graph holds the board linked there, to put the board's row in
+ * the doc as the editor's own structural step (so one undo takes the row
+ * out again, and the row is selected as a pasted one is). The board comes
+ * as a block: its node's text and props, and its children as the graph
+ * has them, so the save that follows diffs it to nothing. Which board —
+ * one that exists, or a new one — is the host's picker's to decide.
+ */
+export interface BoardInsertion {
+  parentId: string
+  placement: BoardPlacement
+  place: (board: Block) => void
+}
+
+export interface BoardRequest extends BoardInsertion {
+  /** The row's line, for the picker to hang off; null when the row is not
+   * on screen. */
+  anchor: Element | null
+}
 
 /** The first row (in document order) of a block present in `restored` but
  * not in `current` — the block an undo brought back, e.g. after a delete. */
@@ -377,6 +405,8 @@ export function BlockEditor({
   knownBlock,
   onImageUpload,
   onLinkPreview,
+  onRequestBoard,
+  onOpenBoard,
   onActivate,
   fixedRoots = false,
   emptyable = false,
@@ -400,6 +430,15 @@ export function BlockEditor({
    * no "Refresh preview".
    */
   onLinkPreview?: (url: string) => Promise<LinkPreview>
+  /**
+   * Put a board at a row (`BoardRequest`): open the picker that makes or
+   * picks one, write it to the graph, and call `place`. Absent = the slash
+   * menu offers no "Board" (a standalone editor, a note someone shared).
+   */
+  onRequestBoard?: (request: BoardRequest) => void
+  /** Open a board's page (a board card's "Open board"). Absent = the card
+   * offers no way there. */
+  onOpenBoard?: (id: string) => void
   /** The note this doc belongs to — what "Copy link to block" links into. */
   noteId?: string
   /**
@@ -627,7 +666,7 @@ export function BlockEditor({
           ? keyOf(focusRootKey, focusRoot.children[0])
           : null
       : (doc.rootBlockIds[0] ?? null)
-  const [focus, setFocus] = useState<FocusRequest | null>(() =>
+  const [focus, setFocusState] = useState<FocusRequest | null>(() =>
     startEditing && firstKey ? { key: firstKey } : null,
   )
   // A note opens with its first block highlighted. A caller can ask for
@@ -641,6 +680,20 @@ export function BlockEditor({
   const collapsed = collapsedProp ?? collapsedInternal
   // The other end of a multi-row selection (Shift+Arrow). null = single select.
   const [anchorKey, setAnchorKey] = useState<string | null>(null)
+  // Every request to edit a row lands here. A row whose text is never
+  // edited in place (`BlockKind.uneditable`: a board's card, whose title is
+  // the board's name) takes a selection instead — from a double-click, a
+  // tap, Enter, the arrows walking into it — so no textarea ever opens on
+  // it and the keyboard stays where it was: on the row, in select mode.
+  const setFocus = (request: FocusRequest | null) => {
+    const block = request ? docRef.current.blocks[idOfKey(request.key)] : undefined
+    if (request && block && kindOf(block.type).uneditable) {
+      setFocusState(null)
+      setSelected(request.key)
+      return
+    }
+    setFocusState(request)
+  }
   const rawHistory = useBlockHistory(onChange, knownBlock)
   // Under `fixedRoots` a change to the root list has nowhere to land (see the
   // prop): it is refused here, at the one funnel every edit goes through,
@@ -1231,7 +1284,9 @@ export function BlockEditor({
       if (!cur) return firstSelectable(restored)
       return movedTo(cur) ?? nearestSurvivor(cur) ?? firstSelectable(restored)
     }
-    setFocus((cur) => {
+    // The state's own updater: a restored row that cannot be edited (a
+    // board's card) simply mounts no textarea (`BlockItem`).
+    setFocusState((cur) => {
       if (!cur) return null
       const key = movedTo(cur.key)
       if (key !== null) return key === cur.key ? cur : { ...cur, key }
@@ -1820,6 +1875,57 @@ export function BlockEditor({
     imageInputKey.current = key
     imageInputRef.current?.click()
   }
+  /**
+   * A slash row asking for a board at `key` (docs/boards.md, "A board in a
+   * note"): the host is told where the board goes — in place of the row
+   * when it is blank, as the image entry takes a blank line over, else
+   * after it — and how to put its row in the doc once the graph has it.
+   */
+  const requestBoard = (key: string, text?: string) => {
+    if (!onRequestBoard) return
+    let current = docRef.current
+    const rowId = idOfKey(key)
+    if (!current.blocks[rowId]) return
+    // The `/phrase` goes first, as its own undo step (⌘Z puts it back), and
+    // the row is judged as that leaves it: a row that was only the phrase
+    // is a blank line, which the board takes over.
+    if (text !== undefined) {
+      const retexted = updateBlock(current, rowId, { text })
+      if (retexted !== current) {
+        history.commit(current, retexted, { type: "structural" })
+        current = retexted
+      }
+    }
+    const target = current.blocks[rowId]
+    const parentKey = parentKeyOf(key)
+    const parentId = parentKey !== null ? idOfKey(parentKey) : (focusRoot?.id ?? noteId)
+    if (parentId === undefined) return
+    const blank =
+      (target.type === "text" || target.type === "ul") &&
+      target.text === "" &&
+      target.children.length === 0
+    onRequestBoard({
+      parentId,
+      placement: blank ? { replace: rowId } : { after: rowId },
+      anchor:
+        containerRef.current?.querySelector(`[data-occurrence="${key}"] [data-block-line]`) ?? null,
+      place: (board) => {
+        const doc = docRef.current
+        // The row went while the picker was open: nowhere to put it.
+        if (!hasOccurrence(doc, key) || doc.blocks[board.id]) return
+        let next = insertAfter(doc, key, board)
+        if (blank) next = removeBlock(next, key).doc
+        // Its own undo step: ⌘Z takes the row out (the board stays, as a
+        // note always does — `partsToOps`), and the row is selected as a
+        // pasted one is, never edited: the card has no textarea.
+        history.commit(doc, next, { type: "structural" })
+        setAnchorKey(null)
+        setFocus(null)
+        setSelected(siblingKey(key, board.id))
+        focusContainer()
+      },
+    })
+  }
   const handleImagePicked = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.currentTarget.files ?? [])
     event.currentTarget.value = ""
@@ -2169,6 +2275,8 @@ export function BlockEditor({
       onImageUpload && !readOnly ? (key, files) => void insertImages(key, files) : undefined,
     requestImage: onImageUpload && !readOnly ? requestImage : undefined,
     openImage: (id) => setLightbox(id),
+    requestBoard: onRequestBoard && !readOnly ? requestBoard : undefined,
+    openBoard: onOpenBoard,
     linkToBlock: readOnly ? undefined : linkToBlock,
     updateLink: readOnly ? undefined : updateLink,
     linkToInline: readOnly ? undefined : linkToInline,

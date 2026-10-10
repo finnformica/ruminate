@@ -1,6 +1,6 @@
 import type { Block, BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
-import { kindOf } from "./block-kinds"
+import { kindOf, slotOf } from "./block-kinds"
 import { Hash } from "./hash"
 
 /**
@@ -22,6 +22,7 @@ export function BlockKey({
   type,
   block,
   olNumber,
+  listed = true,
   className,
 }: {
   type: BlockType
@@ -30,10 +31,14 @@ export function BlockKey({
   block?: Block
   /** A numbered item's number; 1 when the row is listed on its own. */
   olNumber?: number
+  /** Whether the row is listed — a result, a sidebar row — rather than a
+   * row of an outline, for a type whose key depends on that (a board's
+   * favicon is a listed row's; in an outline its card is its mark). */
+  listed?: boolean
   className?: string
 }) {
   const kind = kindOf(type)
-  switch (kind.slot) {
+  switch (slotOf(kind, listed)) {
     case "dot":
       return (
         <span
@@ -84,7 +89,8 @@ export function BlockKey({
  * empty. A list that wants something in the slot regardless asks first. */
 export function hasBlockKey(type: BlockType): boolean {
   const kind = kindOf(type)
-  return kind.slot !== "none" && (kind.slot !== "glyph" || !!kind.glyph || !!kind.glyphNode)
+  const slot = slotOf(kind, true)
+  return slot !== "none" && (slot !== "glyph" || !!kind.glyph || !!kind.glyphNode)
 }
 
 const bareBlock = (type: BlockType): Block => ({

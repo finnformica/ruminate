@@ -274,8 +274,9 @@ const byDisplayName = (a: Note, b: Note) => {
 }
 
 /** Most recently updated first; a note with no timestamp at all sorts to the
- * bottom, by name among its fellows. */
-const byUpdatedAt = (a: Note, b: Note) => {
+ * bottom, by name among its fellows. The Views list's "Recently updated",
+ * and the order the board picker lists boards in (`board-picker.tsx`). */
+export const byUpdatedAt = (a: Note, b: Note) => {
   if (a.updatedAt !== null && b.updatedAt !== null) {
     if (a.updatedAt !== b.updatedAt) return b.updatedAt - a.updatedAt
   } else if (a.updatedAt !== null) {

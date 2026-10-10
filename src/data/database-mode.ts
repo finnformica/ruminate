@@ -250,10 +250,7 @@ export interface DatabaseModeOptions {
 
 /** What the push loop reads and writes of the store: the queue of unpushed
  * events, their acknowledgement, and every row for a full push. */
-type ReplicaStoreAccess = Pick<
-  NoteStore,
-  "getAllRows" | "unpushedEvents" | "markEventsPushed"
->
+type ReplicaStoreAccess = Pick<NoteStore, "getAllRows" | "unpushedEvents" | "markEventsPushed">
 
 interface DatabaseModeRuntime {
   options: DatabaseModeOptions

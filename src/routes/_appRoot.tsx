@@ -4,6 +4,7 @@ import { AppLayout } from "../components/app-layout"
 import { CommandMenu } from "../components/command-menu"
 import { DeleteNoteDialog } from "../components/delete-note-dialog"
 import { DevBar } from "../components/dev-bar"
+import { BoardPicker } from "../components/board-picker"
 import { NewBoardDialog } from "../components/new-board-dialog"
 import { ShareDialog } from "../components/share-note-dialog"
 import { Toaster } from "../components/ui/toaster"
@@ -67,6 +68,7 @@ function RouteComponent() {
       <CommandMenu />
       <ShareDialog />
       <NewBoardDialog />
+      <BoardPicker />
       <DeleteNoteDialog />
       <GlobalShortcuts />
       <DevBar />

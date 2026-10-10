@@ -522,8 +522,10 @@ function strandedBlankOps(
   for (const id of [...deleted]) loosen(id)
   for (let i = 0; i < loose.length; i += 1) {
     const id = loose[i]
-    if (deleted.has(id) || kept.has(id) || !snapshot.nodes.has(id)) continue
-    if (parentsOf(id).size > 0 || !isBlankNode(snapshot, id)) continue
+    const node = snapshot.nodes.get(id)
+    if (deleted.has(id) || kept.has(id) || !node) continue
+    // A note set loose is a note still (see `partsToOps`): never a blank.
+    if (isNoteType(node.type) || parentsOf(id).size > 0 || !isBlankNode(snapshot, id)) continue
     deleted.add(id)
     ops.push({ op: "delete", id })
     loosen(id)
@@ -691,10 +693,16 @@ export function partsToOps(
   // No cascade — a deleted block's children keep their links from it (the
   // store retains them, the walk skips them) and their note, and turn up in
   // the basket.
+  //
+  // A note is a root of its own (a note or a board linked under a block,
+  // docs/boards.md, "A board in a note"): an outline edit can only let go
+  // of it, whatever `dropped` says — never delete it, not even blank or
+  // named to discard. Only `deleteNoteOps` deletes a note.
   const kept = new Set(nodes.map((node) => node.id))
   const deleted = new Set<string>()
   for (const id of reachedBefore) {
-    if (kept.has(id) || !snapshot.nodes.has(id) || parents(id).size > 0) continue
+    const node = snapshot.nodes.get(id)
+    if (kept.has(id) || !node || isNoteType(node.type) || parents(id).size > 0) continue
     if (dropped === "delete" || discard.has(id) || isBlankNode(snapshot, id)) deleted.add(id)
   }
   for (const id of deleted) deletes.push({ op: "delete", id })

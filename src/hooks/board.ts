@@ -11,6 +11,7 @@ import {
   boardLinkUrl,
   clearValueOps,
   defaultFeatureOps,
+  newBoardOps,
   imageLocationOf,
   imageLocationOps,
   imageUploadedOps,
@@ -47,7 +48,7 @@ import {
   releasePendingImage,
   uploadImage,
 } from "../data/images"
-import { BOARD_TYPE, LEGACY_BOARD_PROP, NOTE_TYPE, parseProps, propsJson } from "../data/graph"
+import { BOARD_TYPE, LEGACY_BOARD_PROP, NOTE_TYPE, parseProps } from "../data/graph"
 import { fetchLinkPreview } from "../data/link-previews"
 import { notePropsOps } from "../data/note-meta"
 import { applyOps, deleteBlockOps, type Op } from "../data/ops"
@@ -81,17 +82,11 @@ export function useMakeBoard(): (noteId: NoteId, create?: { title: string }) => 
         ops.push({ op: "setType", id: noteId, type: BOARD_TYPE })
         // The note is edited: its `updated_at` moves with it.
         ops.push(...notePropsOps(noteId, {}, snapshot))
+        // The defaults, against the board as the batch so far leaves it.
+        ops.push(...defaultFeatureOps(applyOps(snapshot, ops, Date.now()), noteId))
       } else if (create) {
-        ops.push({
-          op: "create",
-          id: noteId,
-          type: BOARD_TYPE,
-          text: create.title.trim() || noteId,
-          props: propsJson({ updated_at: new Date().toISOString() }),
-        })
+        ops.push(...newBoardOps(snapshot, noteId, create.title))
       } else return
-      // The defaults, against the board as the batch so far leaves it.
-      ops.push(...defaultFeatureOps(applyOps(snapshot, ops, Date.now()), noteId))
       // A board made from nothing is listed as a note is, by a view row
       // written beside it (`LISTED_VIEW`); a note made a board keeps the
       // row it has — one row per root, and the root is the same.

@@ -8,12 +8,13 @@ import {
   type LinkPreview,
   type LinkProps,
 } from "../blocks/link"
-import type { BlockProps } from "../blocks/types"
+import { asBlockType, type Block, type BlockProps } from "../blocks/types"
 import type { NoteId } from "../schema"
 import {
   BOARD_TYPE,
   childIdsOf,
   isLegacyBoard,
+  isNoteType,
   noteDoc,
   parentIdsOf,
   parseProps,
@@ -480,6 +481,109 @@ export function defaultFeatureOps(snapshot: GraphSnapshot, boardId: NoteId): Op[
       { op: "link", source: boardId, destination: id, sortKey: keys[index] },
     ]
   })
+}
+
+/**
+ * A board made from nothing — **New board**, or `/board` in a note
+ * (docs/boards.md, "A board in a note"): its root node, typed `board` and
+ * named by `title` (its id when the title is blank, as an untitled note
+ * is), stamped as edited now, and the default features written onto it
+ * (`defaultFeatureOps`), as one batch. No view row is written here: whether
+ * the board is listed is the caller's to say (`LISTED_VIEW`,
+ * src/data/views.ts) — **New board** lists it, a board made inside a note
+ * is not listed. Nothing when the id is taken.
+ */
+export function newBoardOps(snapshot: GraphSnapshot, boardId: NoteId, title: string): Op[] {
+  if (snapshot.nodes.has(boardId)) return []
+  const create: Op = {
+    op: "create",
+    id: boardId,
+    type: BOARD_TYPE,
+    text: title.trim() || boardId,
+    props: propsJson({ updated_at: new Date().toISOString() }),
+  }
+  // The defaults, against the board as the batch so far leaves it.
+  return [create, ...defaultFeatureOps(applyOps(snapshot, [create], Date.now()), boardId)]
+}
+
+/**
+ * The board as a row of an outline — the block the editor holds for it
+ * once it is linked under a block (docs/boards.md, "A board in a note"):
+ * the node's text and props, and its children as the graph has them,
+ * exactly as the walk builds a row (`walkGraph`, src/data/graph.ts), so
+ * the save that diffs the doc against the graph finds nothing to write
+ * for it. Null when the graph has no such board.
+ */
+export function boardRow(snapshot: GraphSnapshot, boardId: NoteId): Block | null {
+  const node = snapshot.nodes.get(boardId)
+  if (!node || !isNoteType(node.type)) return null
+  const props = parseProps(node.props)
+  return {
+    id: boardId,
+    type: asBlockType(node.type),
+    text: node.text,
+    ...(props ? { props } : {}),
+    children: childIdsOf(snapshot, boardId),
+  }
+}
+
+/** Where a board goes under its parent (`linkBoardOps`): after a sibling,
+ * or in place of one — a blank row the slash was typed in, which goes. */
+export interface BoardPlacement {
+  /** The sibling the board follows; absent, the board goes last. */
+  after?: string | null
+  /** The row the board takes the place of: unlinked from the parent and,
+   * when nothing else holds it, deleted — a blank line, as the image
+   * entry takes one over. Wins over `after`. */
+  replace?: string | null
+}
+
+/**
+ * A board in a note (docs/boards.md, "A board in a note"): the one `link`
+ * that puts the board's own node under `parentId` — a block, or the note
+ * itself — where the row is, as `/board` and `/link board` write it. The
+ * board is a root still: nothing about it changes, and an outline edit
+ * that removes the row only unlinks it again (`partsToOps`).
+ *
+ * Refused, as nothing: a parent or a board the graph lacks, a node that is
+ * not a note root, a board under itself, and a board already under that
+ * parent — one row per parent, so the picker's guard and this one agree.
+ */
+export function linkBoardOps(
+  snapshot: GraphSnapshot,
+  parentId: string,
+  boardId: NoteId,
+  placement: BoardPlacement = {},
+): Op[] {
+  const board = snapshot.nodes.get(boardId)
+  if (!board || !isNoteType(board.type)) return []
+  if (parentId === boardId || !snapshot.nodes.has(parentId)) return []
+  const links = snapshot.childLinks.get(parentId) ?? []
+  if (links.some((link) => link.destination_id === boardId)) return []
+  const ops: Op[] = []
+  let sortKey: string
+  const replaced = placement.replace
+    ? links.find((l) => l.destination_id === placement.replace)
+    : undefined
+  const after = placement.after
+    ? links.find((l) => l.destination_id === placement.after)
+    : undefined
+  if (replaced) {
+    // The row's place is the board's: the row's link goes first, so its key
+    // is free to take, and the row itself when this was its only place.
+    ops.push({ op: "unlink", source: parentId, destination: replaced.destination_id })
+    if ((snapshot.parentLinks.get(replaced.destination_id)?.length ?? 0) <= 1) {
+      ops.push({ op: "delete", id: replaced.destination_id })
+    }
+    sortKey = replaced.sort_key
+  } else if (after) {
+    const at = links.indexOf(after)
+    sortKey = sortKeyBetween(after.sort_key, links[at + 1]?.sort_key ?? null)
+  } else {
+    sortKey = keyAtEnd(snapshot, parentId)
+  }
+  ops.push({ op: "link", source: parentId, destination: boardId, sortKey })
+  return ops
 }
 
 /**

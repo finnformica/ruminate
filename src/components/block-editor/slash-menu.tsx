@@ -5,7 +5,7 @@ import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
 import { listHeading, listRow } from "../ui/list"
 import { Surface } from "../ui/surface"
-import { CalendarDateIcon16 } from "../icons"
+import { BoardIcon16, CalendarDateIcon16 } from "../icons"
 
 /** Width of the popup (px); the anchor is clamped so it never overflows. */
 export const SLASH_MENU_WIDTH = 256
@@ -34,7 +34,7 @@ function blockGlyph(type: BlockType): string {
 
 /**
  * The slash menu popup: the rows for the current `/phrase`, grouped under
- * "Dates" and "Turn into", with one highlighted. Pure presentation — the
+ * "Dates", "Turn into" and "Insert", with one highlighted. Pure presentation — the
  * block item owns the state (which row is active, what a pick does) and
  * positions the popup under the `/` via `style`.
  *
@@ -104,6 +104,10 @@ export function SlashMenu({
               <span className="grid h-4 w-4 shrink-0 place-items-center text-sm text-text-secondary">
                 {item.kind === "date" ? (
                   <CalendarDateIcon16 date={Number(item.date.slice(-2))} />
+                ) : item.kind === "action" ? (
+                  // An action's row leads with what it puts at the row: a
+                  // board's own icon, the one its rows and cards carry.
+                  <BoardIcon16 />
                 ) : (
                   <span aria-hidden>{blockGlyph(item.type)}</span>
                 )}

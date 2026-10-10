@@ -420,10 +420,7 @@ export async function appendEvents(
  * same. Whatever the writer did not know about is left in the log for a
  * history to show; nothing is rewritten to make it fit.
  */
-function staleEvents(
-  current: CurrentRows,
-  events: readonly RuminateEvent[],
-): Set<RuminateEvent> {
+function staleEvents(current: CurrentRows, events: readonly RuminateEvent[]): Set<RuminateEvent> {
   const stale = new Set<RuminateEvent>()
   const heldAt = (event: RuminateEvent): number | undefined =>
     (event.entity === "block"
