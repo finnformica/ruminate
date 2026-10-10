@@ -28,20 +28,6 @@ export const Default: Story = {
   play: async ({ canvasElement }) => expectFavicon(canvasElement, "favicon-default"),
 }
 
-export const IsDailyNote: Story = {
-  args: {
-    note: parseNote("2023-07-11", ""),
-  },
-  play: async ({ canvasElement }) => expectFavicon(canvasElement, "favicon-daily"),
-}
-
-export const IsWeeklyNote: Story = {
-  args: {
-    note: parseNote("2023-W07", ""),
-  },
-  play: async ({ canvasElement }) => expectFavicon(canvasElement, "favicon-weekly"),
-}
-
 const expectFavicon = async (canvasElement: HTMLElement, favicon: string) => {
   const canvas = within(canvasElement)
   await expect(await canvas.findByTestId(favicon)).toBeTruthy()

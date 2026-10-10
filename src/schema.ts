@@ -2,9 +2,9 @@ import { z } from "zod"
 
 export type NoteId = string
 
-/** What kind of note: a daily or weekly note by its id, a board by the
- * `board` property on its page (docs/boards.md), a plain note otherwise. */
-export type NoteType = "note" | "daily" | "weekly" | "board"
+/** What kind of note: a board by its root's type (docs/boards.md), a plain
+ * note otherwise. */
+export type NoteType = "note" | "board"
 
 /** A heading block: its level (its outline depth, from 1) and text. */
 export type Heading = { level: number; text: string }
@@ -26,9 +26,8 @@ export type Note = {
   /**
    * The note's stable, opaque identity — a minted `blk_` id
    * (docs/graph-storage.md). It never changes, so links and URLs to a
-   * note survive every rename. Daily and weekly notes are the exception and
-   * keep their date ids (`2026-08-31`, `2026-W35`), where the date IS the
-   * identity. Not a name: use `displayName` to show a note to a human.
+   * note survive every rename. Not a name: use `displayName` to show a note
+   * to a human.
    */
   id: NoteId
   /** The type of the note */

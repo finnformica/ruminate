@@ -518,11 +518,11 @@ describe("block-scoped type detection", () => {
     const filterOf = (query: string) => parseQuery(query).filters[0]
     expect(isBlockTypeFilter(filterOf("type:todo"))).toBe(true)
     expect(isBlockTypeFilter(filterOf("-type:heading"))).toBe(true)
-    expect(isBlockTypeFilter(filterOf("type:daily"))).toBe(false)
+    expect(isBlockTypeFilter(filterOf("type:board"))).toBe(false)
     expect(isBlockTypeFilter(filterOf("type:template"))).toBe(false)
     expect(isBlockTypeFilter(filterOf("area:todo"))).toBe(false)
     expect(hasBlockTypeFilter(parseQuery("area:a type:todo").filters)).toBe(true)
-    expect(hasBlockTypeFilter(parseQuery("area:a type:daily").filters)).toBe(false)
+    expect(hasBlockTypeFilter(parseQuery("area:a type:board").filters)).toBe(false)
   })
 })
 

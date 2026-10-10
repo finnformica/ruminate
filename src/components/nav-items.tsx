@@ -25,7 +25,7 @@ import type { BlockType } from "../blocks/types"
 import { APP_SHORTCUTS, formatCombo } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { inlineText } from "../utils/inline-text"
-import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
+import { toDateString } from "../utils/date"
 import { DropdownMenu } from "./ui/dropdown-menu"
 import { IconButton } from "./ui/icon-button"
 import {
@@ -75,9 +75,8 @@ export function NavItems({
   const today = new Date()
   const todayString = toDateString(today)
 
-  // Calendar link is active when viewing any daily or weekly note
-  const noteId = pathname.startsWith("/views/") ? pathname.slice(7) : ""
-  const isCalendarActive = isValidDateString(noteId) || isValidWeekString(noteId)
+  // The Calendar link is current on any of the calendar's pages.
+  const isCalendarActive = pathname === "/calendar" || pathname.startsWith("/calendar/")
   // While Settings is open its pages take the Views list's place, and only
   // that: the links above and the rows below stay where they are, so the
   // sidebar reads as one thing whose middle changed rather than a different
@@ -109,15 +108,12 @@ export function NavItems({
             </li>
             <li>
               <NavLink
-                to="/views/$"
+                to="/calendar/$"
                 params={{ _splat: todayString }}
-                search={{
-                  query: undefined,
-                }}
+                search={{}}
                 activeIcon={<CalendarDateFillIcon16 date={today.getDate()} />}
                 icon={<CalendarDateIcon16 date={today.getDate()} />}
                 forceActive={isCalendarActive}
-                shortcut={formatCombo(APP_SHORTCUTS.goCalendar)}
                 onNavigate={onNavigate}
               >
                 Calendar

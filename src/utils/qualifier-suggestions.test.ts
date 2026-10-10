@@ -112,7 +112,8 @@ describe("filterQualifierOptions", () => {
     // A plain paragraph leads, being the commonest block there is; then the
     // to-dos, as the most searched (`SEARCH_FAMILY_ORDER`).
     expect(values.slice(0, 4)).toEqual(["text", "todo", "done", "task"])
-    expect(values).toContain("daily")
+    expect(values).toContain("board")
+    expect(values).not.toContain("daily")
   })
 })
 

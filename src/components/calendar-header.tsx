@@ -14,53 +14,33 @@ import { Button } from "./ui/button"
 import { IconButton } from "./ui/icon-button"
 import { ChevronLeftIcon16, ChevronRightIcon16 } from "./icons"
 
-type CalendarHeaderProps = {
-  activeNoteId: string
-}
-
-export function CalendarHeader({ activeNoteId }: CalendarHeaderProps) {
+/** The day or week on the page, named, with the way to the one before, the
+ * one after, and back to today. */
+export function CalendarHeader({ activeId }: { activeId: string }) {
   const navigate = useNavigate()
-  const isWeekly = isValidWeekString(activeNoteId)
+  const isWeekly = isValidWeekString(activeId)
 
-  const primaryText = isWeekly ? formatWeek(activeNoteId) : formatDate(activeNoteId)
-  const secondaryText = isWeekly
-    ? formatWeekDistance(activeNoteId)
-    : formatDateDistance(activeNoteId)
+  const primaryText = isWeekly ? formatWeek(activeId) : formatDate(activeId)
+  const secondaryText = isWeekly ? formatWeekDistance(activeId) : formatDateDistance(activeId)
 
   const today = startOfToday()
   const todayString = toDateString(today)
   const thisWeekString = toWeekString(today)
 
+  const go = React.useCallback(
+    (target: string) => navigate({ to: "/calendar/$", params: { _splat: target }, search: {} }),
+    [navigate],
+  )
   const navigateByInterval = React.useCallback(
     (direction: "previous" | "next") => {
-      const date = parseISO(activeNoteId)
+      const date = parseISO(activeId)
       const increment = direction === "next" ? 1 : -1
-
-      const target = isWeekly
-        ? toWeekString(addWeeks(date, increment))
-        : toDateString(addDays(date, increment))
-
-      navigate({
-        to: "/views/$",
-        params: { _splat: target },
-        search: {
-          query: undefined,
-        },
-      })
+      go(
+        isWeekly ? toWeekString(addWeeks(date, increment)) : toDateString(addDays(date, increment)),
+      )
     },
-    [isWeekly, activeNoteId, navigate],
+    [isWeekly, activeId, go],
   )
-
-  const navigateToCurrentPeriod = React.useCallback(() => {
-    const target = isWeekly ? thisWeekString : todayString
-    navigate({
-      to: "/views/$",
-      params: { _splat: target },
-      search: {
-        query: undefined,
-      },
-    })
-  }, [isWeekly, thisWeekString, todayString, navigate])
 
   return (
     <div className="flex items-start justify-between gap-4">
@@ -72,8 +52,8 @@ export function CalendarHeader({ activeNoteId }: CalendarHeaderProps) {
       </div>
       <div className="flex gap-2">
         <Button
-          onClick={navigateToCurrentPeriod}
-          disabled={isWeekly ? activeNoteId === thisWeekString : activeNoteId === todayString}
+          onClick={() => go(isWeekly ? thisWeekString : todayString)}
+          disabled={isWeekly ? activeId === thisWeekString : activeId === todayString}
         >
           {isWeekly ? "This week" : "Today"}
         </Button>
