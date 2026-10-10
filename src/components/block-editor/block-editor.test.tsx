@@ -4927,7 +4927,7 @@ describe('a board at a row (docs/boards.md, "A board in a note")', () => {
     children,
   })
 
-  it("Board and Link board are offered only where the host takes a board request", () => {
+  it("Board is offered only where the host takes a board request", () => {
     const without = render(<Harness initial="" startEditing noteId="n" />)
     typeInto(without.container.querySelector("textarea")!, "/board")
     expect(without.queryByTestId("slash-menu")).toBeNull()
@@ -4936,10 +4936,10 @@ describe('a board at a row (docs/boards.md, "A board in a note")', () => {
       <Harness initial="" startEditing noteId="n" onRequestBoard={vi.fn()} />,
     )
     typeInto(container.querySelector("textarea")!, "/board")
-    expect(slashRows(getByTestId("slash-menu"))).toEqual(["action:board", "action:linkBoard"])
+    expect(slashRows(getByTestId("slash-menu"))).toEqual(["action:board"])
   })
 
-  it("Board asks for a new board after the row, and place puts its card in as one undo step", () => {
+  it("Board asks for a board after the row, hung off its line, and place puts its card in as one undo step", () => {
     const onRequestBoard = vi.fn()
     const { container, getByTestId, queryByTestId } = render(
       <Harness initial="- plan" startEditing noteId="n" onRequestBoard={onRequestBoard} />,
@@ -4951,7 +4951,10 @@ describe('a board at a row (docs/boards.md, "A board in a note")', () => {
     expect(serializedLines(getByTestId)).toEqual(["- plan "])
     expect(onRequestBoard).toHaveBeenCalledTimes(1)
     const request: BoardRequest = onRequestBoard.mock.calls[0][0]
-    expect(request).toMatchObject({ kind: "new", parentId: "n", placement: { after: planId } })
+    expect(request).toMatchObject({ parentId: "n", placement: { after: planId } })
+    expect(request.anchor).toBe(
+      container.querySelector(`[data-occurrence="${planId}"] [data-block-line]`),
+    )
     // The host made and linked the board; its row goes in, selected, not edited.
     act(() => request.place(board("blk_kitchen000", "Kitchen", ["blk_feature000"])))
     expect(idsOf(container)).toEqual([planId, "blk_kitchen000"])
@@ -4967,7 +4970,7 @@ describe('a board at a row (docs/boards.md, "A board in a note")', () => {
     expect(idsOf(container)).toEqual([planId, "blk_kitchen000"])
   })
 
-  it("Link board on a blank row asks for an existing board in its place", () => {
+  it("/link board is the same entry; on a blank row the board takes the row's place", () => {
     const onRequestBoard = vi.fn()
     const { container, getByTestId } = render(
       <Harness initial="" startEditing noteId="n" onRequestBoard={onRequestBoard} />,
@@ -4976,11 +4979,7 @@ describe('a board at a row (docs/boards.md, "A board in a note")', () => {
     typeInto(container.querySelector("textarea")!, "/link b")
     fireEvent.keyDown(container.querySelector("textarea")!, { key: "Enter" })
     const request: BoardRequest = onRequestBoard.mock.calls[0][0]
-    expect(request).toMatchObject({
-      kind: "existing",
-      parentId: "n",
-      placement: { replace: blankId },
-    })
+    expect(request).toMatchObject({ parentId: "n", placement: { replace: blankId } })
     act(() => request.place(board("blk_kitchen000", "Kitchen")))
     expect(idsOf(container)).toEqual(["blk_kitchen000"])
     expect(getByTestId("board-card")).not.toBeNull()

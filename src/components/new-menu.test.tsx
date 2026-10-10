@@ -55,7 +55,7 @@ describe("NewMenu", () => {
     )
     await openMenu()
     fireEvent.click(screen.getByRole("menuitem", { name: /New board/ }))
-    expect(store.get(newBoardDialogAtom)).toEqual({})
+    expect(store.get(newBoardDialogAtom)).toBe(true)
     expect(mocks.navigate).not.toHaveBeenCalled()
   })
 })

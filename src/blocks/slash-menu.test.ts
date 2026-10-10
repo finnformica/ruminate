@@ -216,29 +216,27 @@ describe("image option", () => {
   })
 })
 
-describe("board actions", () => {
+describe("the board action", () => {
   const labels = (items: SlashItem[]) => items.map((item) => item.label)
 
-  test("are offered only where the editor has a note of the reader's own behind it", () => {
+  test("is offered only where the editor has a note of the reader's own behind it", () => {
     expect(labels(slashMenuItems("board", NOW))).toEqual([])
-    expect(labels(slashMenuItems("board", NOW, { boards: true }))).toEqual(["Board", "Link board"])
+    expect(labels(slashMenuItems("board", NOW, { boards: true }))).toEqual(["Board"])
   })
 
-  test("sit under Insert, after the block types", () => {
+  test("sits under Insert, after the block types, as the one row", () => {
     const items = slashMenuItems("", NOW, { boards: true })
     expect(slashGroupOf(items[items.length - 1])).toBe("Insert")
-    expect(items.slice(-2)).toEqual([
+    expect(items.slice(-1)).toEqual([
       { kind: "action", id: "action:board", label: "Board", action: "board" },
-      { kind: "action", id: "action:linkBoard", label: "Link board", action: "linkBoard" },
     ])
   })
 
-  test("answer to their keywords", () => {
+  test("answers to new, link and existing board alike: one entry, the picker decides", () => {
     const on = { boards: true }
-    expect(labels(slashMenuItems("new b", NOW, on))).toEqual(["Board"])
-    expect(labels(slashMenuItems("link b", NOW, on))).toEqual(["Link board"])
-    expect(labels(slashMenuItems("existing", NOW, on))).toEqual(["Link board"])
-    expect(labels(slashMenuItems("add board", NOW, on))).toEqual(["Link board"])
+    for (const q of ["new b", "link b", "existing", "boa"]) {
+      expect(labels(slashMenuItems(q, NOW, on))).toEqual(["Board"])
+    }
   })
 
   test("a pick drops the /phrase and names the action", () => {

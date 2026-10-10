@@ -15,8 +15,7 @@ import { graphSnapshotAtom, isDatabaseModeAtom } from "../../global-state"
 import { upstreamIndexAtom, useDeveloperDebug } from "../../hooks/is-developer"
 import { resolveBlockSubtrees } from "../../utils/resolve-blocks"
 import { deleteNoteDialogAtom } from "../delete-note-dialog"
-import { linkBoardDialogAtom } from "../link-board-dialog"
-import { newBoardDialogAtom } from "../new-board-dialog"
+import { boardPickerAtom } from "../board-picker"
 import { BlockEditor, type BlockDebugOptions, type BoardRequest } from "./block-editor"
 
 /**
@@ -271,21 +270,18 @@ export function BlockNoteEditor({
   )
 
   // A board at a row (docs/boards.md, "A board in a note"): the slash
-  // menu's Board and Link board open the app's dialogs, each told where the
-  // board goes and how to put its row in the doc. Only in a note of the
-  // reader's own: a note someone shared is theirs, and its slash menu
-  // offers neither.
+  // menu's Board opens the board picker at the row, told where the board
+  // goes and how to put its row in the doc. Only in a note of the reader's
+  // own: a note someone shared is theirs, and its slash menu offers no
+  // Board.
   const sharedOrigin = useAtomValue(sharedOriginAtom)
-  const openNewBoard = useSetAtom(newBoardDialogAtom)
-  const openLinkBoard = useSetAtom(linkBoardDialogAtom)
+  const openBoardPicker = useSetAtom(boardPickerAtom)
   const ownNote = noteId !== undefined && !readOnly && !sharedOrigin.has(noteId)
   const onRequestBoard = useCallback(
-    ({ kind, ...into }: BoardRequest) => {
-      if (noteId === undefined) return
-      if (kind === "new") openNewBoard({ into })
-      else openLinkBoard({ noteId, into })
+    (request: BoardRequest) => {
+      if (noteId !== undefined) openBoardPicker({ noteId, ...request })
     },
-    [noteId, openNewBoard, openLinkBoard],
+    [noteId, openBoardPicker],
   )
 
   // Images (docs/images.md): pasted pictures upload to the Worker — only where

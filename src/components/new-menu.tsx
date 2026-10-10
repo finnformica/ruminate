@@ -37,7 +37,7 @@ export function NewMenu() {
         <DropdownMenu.Item
           icon={<BoardIcon16 />}
           shortcut={formatCombo(APP_SHORTCUTS.newBoard)}
-          onClick={() => openNewBoard({})}
+          onClick={() => openNewBoard(true)}
         >
           New board
         </DropdownMenu.Item>

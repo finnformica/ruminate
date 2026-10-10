@@ -8,7 +8,7 @@ import type { BlockType } from "./types"
  * The block editor's **slash menu**: typing `/` at the start of a word opens
  * a picker over the caret with three groups — **dates** (Today, Tomorrow, …
  * or anything the phrase after the `/` resolves to, "friday next week"),
- * **turn into** (the block types) and **insert** (the actions that put
+ * **turn into** (the block types) and **insert** (the action that puts
  * something at the row rather than retyping it: a board, docs/boards.md).
  * Picking a date replaces the `/phrase` with the date; picking a type swaps
  * the block's marker and drops the `/phrase`; picking an action drops the
@@ -144,12 +144,12 @@ const BLOCK_OPTIONS: readonly BlockTypeDef[] = BLOCK_TYPE_DEFS.filter(
 
 /**
  * What an action row asks the editor to do at the row (docs/boards.md, "A
- * board in a note"): `board` makes a new board and links it where the row
- * is; `linkBoard` links a board that already exists there. Neither is a
- * type change — the row's `/phrase` goes and the editor opens the dialog
- * that finishes the job, as the image row asks for a file.
+ * board in a note"): `board` puts a board where the row is — one that
+ * exists, or a new one, as the picker the editor opens decides. Not a type
+ * change — the row's `/phrase` goes and the picker finishes the job, as
+ * the image row asks for a file.
  */
-type SlashAction = "board" | "linkBoard"
+type SlashAction = "board"
 
 interface ActionOption {
   action: SlashAction
@@ -160,11 +160,10 @@ interface ActionOption {
 /** The rows under "Insert", offered where the editor has a note of the
  * reader's own behind it (`options.boards`). */
 const ACTION_OPTIONS: readonly ActionOption[] = [
-  { action: "board", label: "Board", keywords: ["board", "new board"] },
   {
-    action: "linkBoard",
-    label: "Link board",
-    keywords: ["link board", "existing board", "add board"],
+    action: "board",
+    label: "Board",
+    keywords: ["board", "new board", "link board", "existing board"],
   },
 ]
 

@@ -137,12 +137,12 @@ export interface BlockEditorApi {
   requestImage?: (key: string) => void
   /** Expand an image block's picture (the lightbox). */
   openImage?: (id: string) => void
-  /** Put a board at this row (the slash menu's "Board" and "Link board",
-   * docs/boards.md): a new one, or one that exists — with the row's text
-   * as the pick leaves it (the `/phrase` gone), written first as its own
-   * undo step. Absent where the editor has no note of the reader's own
+  /** Put a board at this row (the slash menu's "Board", docs/boards.md):
+   * one that exists, or a new one, as the picker decides — with the row's
+   * text as the pick leaves it (the `/phrase` gone), written first as its
+   * own undo step. Absent where the editor has no note of the reader's own
    * behind it. */
-  requestBoard?: (key: string, kind: "new" | "existing", text?: string) => void
+  requestBoard?: (key: string, text?: string) => void
   /** Open a board's page (a board card's "Open board"). Absent where there
    * is nowhere to go (a standalone editor). */
   openBoard?: (id: string) => void
@@ -496,15 +496,11 @@ export function BlockItem({
     dismissedSlash.current = null
     setSlash(null)
     if (result.action !== undefined) {
-      // An action (a board made or linked here, docs/boards.md): the
-      // `/phrase` goes — the editor writes that with the request, so it
-      // can judge the row as the pick leaves it — and the dialog the editor
-      // opens decides what (if anything) is added at the row.
-      api.requestBoard?.(
-        occurrence.key,
-        result.action === "board" ? "new" : "existing",
-        result.text,
-      )
+      // An action (a board put here, docs/boards.md): the `/phrase` goes —
+      // the editor writes that with the request, so it can judge the row
+      // as the pick leaves it — and the picker the editor opens decides
+      // what (if anything) is added at the row.
+      api.requestBoard?.(occurrence.key, result.text)
       return
     }
     if (result.type !== undefined && !defOf(result.type).turnInto) {

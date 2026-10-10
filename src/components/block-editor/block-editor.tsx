@@ -174,16 +174,16 @@ import type { BoardPlacement } from "../../data/boards"
 
 /**
  * What the editor asks its host for when a slash row wants a board at a
- * row (`onRequestBoard`, docs/boards.md, "A board in a note"): a new
- * board, or one that exists; where it goes in the graph — under
- * `parentId`, the row's parent block or the view's own root (the note, or
- * the focused block), in place of the row when the row is blank, else
- * after it — and `place`, which the host calls once the graph holds the
- * board linked there, to put the board's row in the doc as the editor's
- * own structural step (so one undo takes the row out again, and the row is
- * selected as a pasted one is). The board comes as a block: its node's
- * text and props, and its children as the graph has them, so the save
- * that follows diffs it to nothing.
+ * row (`onRequestBoard`, docs/boards.md, "A board in a note"): where it
+ * goes in the graph — under `parentId`, the row's parent block or the
+ * view's own root (the note, or the focused block), in place of the row
+ * when the row is blank, else after it — and `place`, which the host calls
+ * once the graph holds the board linked there, to put the board's row in
+ * the doc as the editor's own structural step (so one undo takes the row
+ * out again, and the row is selected as a pasted one is). The board comes
+ * as a block: its node's text and props, and its children as the graph
+ * has them, so the save that follows diffs it to nothing. Which board —
+ * one that exists, or a new one — is the host's picker's to decide.
  */
 export interface BoardInsertion {
   parentId: string
@@ -192,7 +192,9 @@ export interface BoardInsertion {
 }
 
 export interface BoardRequest extends BoardInsertion {
-  kind: "new" | "existing"
+  /** The row's line, for the picker to hang off; null when the row is not
+   * on screen. */
+  anchor: Element | null
 }
 
 /** The first row (in document order) of a block present in `restored` but
@@ -429,10 +431,9 @@ export function BlockEditor({
    */
   onLinkPreview?: (url: string) => Promise<LinkPreview>
   /**
-   * Put a board at a row (`BoardRequest`): open the dialog that makes or
+   * Put a board at a row (`BoardRequest`): open the picker that makes or
    * picks one, write it to the graph, and call `place`. Absent = the slash
-   * menu offers no "Board" or "Link board" (a standalone editor, a note
-   * someone shared).
+   * menu offers no "Board" (a standalone editor, a note someone shared).
    */
   onRequestBoard?: (request: BoardRequest) => void
   /** Open a board's page (a board card's "Open board"). Absent = the card
@@ -1880,7 +1881,7 @@ export function BlockEditor({
    * when it is blank, as the image entry takes a blank line over, else
    * after it — and how to put its row in the doc once the graph has it.
    */
-  const requestBoard = (key: string, kind: "new" | "existing", text?: string) => {
+  const requestBoard = (key: string, text?: string) => {
     if (!onRequestBoard) return
     let current = docRef.current
     const rowId = idOfKey(key)
@@ -1904,12 +1905,13 @@ export function BlockEditor({
       target.text === "" &&
       target.children.length === 0
     onRequestBoard({
-      kind,
       parentId,
       placement: blank ? { replace: rowId } : { after: rowId },
+      anchor:
+        containerRef.current?.querySelector(`[data-occurrence="${key}"] [data-block-line]`) ?? null,
       place: (board) => {
         const doc = docRef.current
-        // The row went while the dialog was open: nowhere to put it.
+        // The row went while the picker was open: nowhere to put it.
         if (!hasOccurrence(doc, key) || doc.blocks[board.id]) return
         let next = insertAfter(doc, key, board)
         if (blank) next = removeBlock(next, key).doc
