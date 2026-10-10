@@ -93,13 +93,11 @@ describe("BoardCard", () => {
     expect(getByTestId("board-toolbar")).not.toBeNull()
     fireEvent.click(getByLabelText("Open board"))
     expect(onOpenBoard).toHaveBeenCalledWith("b")
-    // The board's icon is the row's key, in the key slot before the card,
-    // as every row's key is — not a second one inside the card.
-    expect(container.querySelector('[data-testid="note-favicon-slot"]')).not.toBeNull()
-    expect(
-      container.querySelector('[data-testid="note-favicon-slot"] [data-testid="favicon-board"]'),
-    ).not.toBeNull()
-    expect(card.querySelector('[data-testid="favicon-board"]')).toBeNull()
+    // No icon anywhere: in an outline the card is the board's mark, and the
+    // slot before it is the empty one a picture or a link card gets.
+    expect(container.querySelector('[data-testid="favicon-board"]')).toBeNull()
+    expect(container.querySelector('[data-testid="note-favicon-slot"]')).toBeNull()
+    expect(container.querySelector('[data-testid="figure-slot"]')).not.toBeNull()
   })
 
   it("is a note row with the board's favicon when listed", () => {

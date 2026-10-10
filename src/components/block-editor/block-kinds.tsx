@@ -41,6 +41,15 @@ export interface RowContext {
   listed: boolean
 }
 
+/** What stands in a row's key slot (`BlockKind.slot`). */
+export type SlotKind = "checkbox" | "dot" | "hash" | "number" | "glyph" | "none"
+
+/** A kind's slot for a row: the one it names, or the one it gives a
+ * listed or an outline row. */
+export function slotOf(kind: BlockKind, listed: boolean): SlotKind {
+  return typeof kind.slot === "function" ? kind.slot(listed) : kind.slot
+}
+
 export interface BlockKind {
   /** The key in the marker slot: a to-do's checkbox, a bullet's dot, a
    * heading's `#`, a numbered item's number, or a static glyph (a quote's
@@ -48,8 +57,10 @@ export interface BlockKind {
    * image, a link card, a code block) has a frame of its own for a mark —
    * but the slot keeps its width, so the content stays in one column. The
    * collapse chevron is never a key: it has a column of its own before the
-   * slot (`block-item.tsx`). */
-  readonly slot: "checkbox" | "dot" | "hash" | "number" | "glyph" | "none"
+   * slot (`block-item.tsx`). A function, for a type whose slot depends on
+   * whether the row is listed (a board: a favicon among the results, as a
+   * note's; the empty slot before its card in an outline). */
+  readonly slot: SlotKind | ((listed: boolean) => SlotKind)
   /** The row's text is never edited in place: no textarea opens on it,
    * and asking to edit it selects it instead (a board card's title is the
    * board's name, changed on the board's own page). */
@@ -206,19 +217,19 @@ function noteKindOf(block: Block): NoteType {
 }
 
 /**
- * A board is a note root of the other kind: the note row — its key the
- * board's favicon, in the key slot as every row's key is — and, listed (a
- * search result, the Views page, the palette), nothing more. As a row of
- * an outline it is a board linked under the block (docs/boards.md, "A
- * board in a note"), and its content line is drawn as its card
- * (`BoardCard`): the board's name, rendered inside the card and never a
- * textarea — a board is named on its own page, and asking to edit the row
- * selects it (`uneditable`) — with what the board holds beneath. The card
- * is a figure in a link card's frame, starting at the text column after
- * the key, with the layout the figures share.
+ * A board is a note root of the other kind. Listed (a search result, the
+ * Views page, the palette) it is the note row, its key the board's
+ * favicon. As a row of an outline it is a board linked under the block
+ * (docs/boards.md, "A board in a note"), a figure like a picture or a
+ * link card: its slot is the empty one a figure gets, so its card starts
+ * where their figures start, and its content line is drawn as that card
+ * (`BoardCard`) — the board's name, rendered inside the card and never a
+ * textarea (a board is named on its own page, and asking to edit the row
+ * selects it, `uneditable`), with what the board holds beneath.
  */
 const board: BlockKind = {
   ...note,
+  slot: (listed) => (listed ? "glyph" : "none"),
   uneditable: true,
   typography: (_depth, _block, listed) =>
     cx(BODY, "font-sans", listed ? "font-bold" : "font-medium"),

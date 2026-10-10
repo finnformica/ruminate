@@ -24,7 +24,7 @@ import { imageFilesOf } from "../../data/images"
 import { blurLeavesWindow } from "../../utils/window-blur"
 import { IconButton } from "../ui/icon-button"
 import { BlockContent } from "./block-content"
-import { LISTED_HEADING_DEPTH, headingScale, kindOf, type RowContext } from "./block-kinds"
+import { LISTED_HEADING_DEPTH, headingScale, kindOf, type RowContext, slotOf } from "./block-kinds"
 import { caretCoordinates, caretLineFlags, caretOffsetAtPoint } from "./caret"
 import { BlockKey } from "./block-key"
 import { LinkActionsContext, type LinkActions } from "./link-actions"
@@ -318,6 +318,10 @@ export function BlockItem({
   const looped = !!occurrence.looped
   const hasToggle = hasChildren || looped
   const rowContext: RowContext = { block, occurrence, api, depth, editing, listed }
+  // The key slot this row draws, for a type whose slot depends on whether
+  // the row is listed (a board: a favicon among the results, the empty
+  // slot a figure gets before its card).
+  const slot = slotOf(kind, listed)
   // Kept as context by a filter, not found by it (`BlockEditorApi.context`).
   const dimmed = api.context?.has(block.id) ?? false
 
@@ -785,7 +789,7 @@ export function BlockItem({
       data-testid="chevron-column"
       className={cx(
         "relative flex h-[1lh] w-[17px] shrink-0 items-center justify-center",
-        kind.slot === "hash" && headingScale(scaleDepth),
+        slot === "hash" && headingScale(scaleDepth),
       )}
     >
       {toggle}
@@ -827,7 +831,7 @@ export function BlockItem({
       data-testid={testId}
       className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center"
     >
-      <BlockKey type={type} block={block} />
+      <BlockKey type={type} block={block} listed={listed} />
     </span>
   )
   // Whether a finger's tap on the checkbox came down to the right of the
@@ -852,7 +856,7 @@ export function BlockItem({
   // the slot, empty, so its frame starts at the text column like every other
   // row's content.
   const marker =
-    kind.slot === "checkbox" ? (
+    slot === "checkbox" ? (
       // The checkbox IS the todo's marker — a control in the key slot, which
       // keeps its own click (the fold is the chevron column's, beside it).
       // On coarse pointers the box grows its own tap area
@@ -889,9 +893,9 @@ export function BlockItem({
           className={cx("block-checkbox", readOnly ? "cursor-default" : "cursor-pointer")}
         />
       </span>
-    ) : kind.slot === "dot" ? (
+    ) : slot === "dot" ? (
       dotSlot
-    ) : kind.slot === "hash" ? (
+    ) : slot === "hash" ? (
       // Headings hang the same grey `#` as the note / focus titles — the shared
       // `Hash`, at the heading's own scale: the slot carries the heading's
       // size + weight (headingScale + bold, no underline — that lives in
@@ -915,13 +919,13 @@ export function BlockItem({
       >
         <BlockKey type={type} />
       </span>
-    ) : kind.slot === "number" ? (
+    ) : slot === "number" ? (
       // Numbers are read (they carry order), so they sit one step up the ramp
       // from the dot — muted, not faint — and right-align to the slot edge.
       <span className="flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end">
         <BlockKey type={type} olNumber={olNumber} />
       </span>
-    ) : kind.slot === "none" ? (
+    ) : slot === "none" ? (
       glyphSlot("figure-slot")
     ) : (
       glyphSlot(kind.slotTestId ?? "paragraph-slot")
@@ -1160,7 +1164,7 @@ export function BlockItem({
           // A heading's surface reaches further left at the larger scales
           // (`[data-heading-scale]` in block-editor.css), so its chevron and
           // `#` sit as far from the left edge as from the top and bottom.
-          data-heading-scale={kind.slot === "hash" ? HEADING_SCALE_NAMES[scaleDepth] : undefined}
+          data-heading-scale={slot === "hash" ? HEADING_SCALE_NAMES[scaleDepth] : undefined}
           {...linePointer}
           className={cx(
             // Negative margin + padding pairs grow the highlight surface

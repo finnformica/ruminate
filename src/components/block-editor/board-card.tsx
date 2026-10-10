@@ -7,7 +7,7 @@ import { boardFeatures, boardImageIds } from "../../data/boards"
 import type { GraphSnapshot } from "../../data/graph"
 import { graphSnapshotAtom } from "../../global-state"
 import { cx } from "../../utils/cx"
-import { ExternalLinkIcon16 } from "../icons"
+import { ArrowRightIcon16 } from "../icons"
 import type { BlockEditorApi } from "./block-item"
 import { FigureFrame, FigureTool } from "./figure-frame"
 
@@ -38,10 +38,11 @@ export function boardCardLine(snapshot: GraphSnapshot, boardId: string): string 
  * linked under the block, so the card is the board as the graph has it:
  * its name (the node's text — the row's content line, rendered and never a
  * textarea: a board is named on its own page), and beneath it what the
- * board holds, live (`boardCardLine`). The board's icon is the row's key,
- * in the key slot before the card as every row's key is. **Open board** in
- * the card's corner opens the board's page, as **Open link** opens a link
- * block's page. Click anywhere else and the row is selected, and a
+ * board holds, live (`boardCardLine`). No icon: in an outline the card is
+ * the board's mark, as a picture is an image row's, and the key slot before
+ * it is a figure's empty one. **Open board** in the card's corner — an
+ * arrow, the way forward, as the nav's — opens the board's page, as **Open
+ * link** opens a link block's page. Click anywhere else and the row is selected, and a
  * double-click selects it too: the row's surface takes the pointer
  * (`block-item.tsx`), and the editor turns an edit of this row into a
  * selection. The card sits in the block frame every framed block shares
@@ -79,7 +80,7 @@ export function BoardCard({
       tools={
         api.openBoard ? (
           <FigureTool label="Open board" onClick={() => api.openBoard?.(block.id)}>
-            <ExternalLinkIcon16 />
+            <ArrowRightIcon16 />
           </FigureTool>
         ) : null
       }
