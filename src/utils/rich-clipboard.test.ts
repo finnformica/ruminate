@@ -144,6 +144,7 @@ describe("every block type's html survives a foreign app", () => {
     h2: "a heading's level comes from its outline depth; the marker is `#` at any level",
     h3: "as h2",
     note: "a page's title, never a copied block",
+    board: "as note: a board's title",
     link: "its html is the link in a paragraph, which reads back as the inline link — title and address kept; the hover card makes a block of it again",
   }
   const text = "some **bold** text"
@@ -310,12 +311,15 @@ describe("code blocks on the clipboard", () => {
     const { plain, html } = richClipboardFormats(CODE)
     expect(plain.trimEnd()).toBe("```ts\nconst a = 1\n  const b = 2\n```")
     const blocks = extractClipboardBlocks(html)!
+    // The language rides the fence for an older reader, and the props — the
+    // language and, a code block being a figure, its layout — travel whole.
     expect(blocks).toEqual([
       {
         id: "blk_code",
         type: "code",
         text: "const a = 1\n  const b = 2",
         language: "ts",
+        props: { language: "ts" },
         children: [],
       },
     ])

@@ -39,6 +39,9 @@ e2e/__vr_artifacts__
 # Cloudflare Workers / Wrangler
 .wrangler
 .dev.vars
+# wrangler.jsonc with the preview clone swapped in, written by every preview
+# build (scripts/preview-deploy.mjs, docs/preview-databases.md)
+wrangler.preview.generated.jsonc
 
 # Environment variables
 .env

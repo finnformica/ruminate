@@ -51,6 +51,13 @@ import {
   forTenant,
   type TenantDb,
 } from "../tenancy-db"
+import {
+  BOARD_TYPE,
+  LEGACY_BOARD_PROP,
+  isLegacyBoard,
+  parseProps,
+  propsJson,
+} from "../../src/data/graph"
 import type { Env } from "../types"
 import {
   corpusAt,
@@ -66,6 +73,7 @@ import {
   REPLICA_PROTOCOL_HEADER,
   parseReplicaPayload,
   parseSinceCursor,
+  type ReplicaPutPayload,
 } from "./replica-payload"
 import { resolveTenancy, type VerifiedIdentity } from "./tenancy"
 
@@ -207,12 +215,12 @@ export async function replica(
   await readyTenant(tenant)
 
   if (pathname === "/api/replica/notes" && method === "PUT") return replicaPut(request, tenant)
-  if (pathname === "/api/replica/notes") return replicaPull(request, tenant)
+  if (pathname === "/api/replica/notes") return replicaPull(request, tenant, env)
   if (pathname === "/api/replica/events") return replicaEvents(request, tenant)
   if (pathname === "/api/replica/at") return replicaAt(request, tenant)
   if (pathname === "/api/replica/verify") return jsonResponse(await verifyLog(tenant))
   if (pathname === "/api/replica/restore") return replicaRestore(request, tenant)
-  return jsonResponse(await corpusStatus(tenant))
+  return jsonResponse({ ...(await corpusStatus(tenant)), replica_id: replicaId(env) })
 }
 
 // -----------------------------------------------------------------------------
@@ -291,6 +299,16 @@ async function replicaRestore(request: Request, tenant: TenantDb): Promise<Respo
 }
 
 /**
+ * Which database this Worker answers from. Production has no `REPLICA_ID`;
+ * a preview version carries its clone's D1 id (scripts/preview-deploy.mjs).
+ * Every pull and status response says, so a client whose stored cursor came
+ * from a different database can tell — a cursor is a row sequence, and a
+ * rebuilt clone starts its sequence wherever production was that day, which
+ * is behind any device that had pushed to the previous clone.
+ */
+const replicaId = (env: Env): string => env.REPLICA_ID || "production"
+
+/**
  * Row pull — the read half of the replica API (database-authoritative mode's
  * boot + sync source).
  *
@@ -303,7 +321,7 @@ async function replicaRestore(request: Request, tenant: TenantDb): Promise<Respo
  *   `deleted_at` — which is why this response carries nothing but rows (see
  *   `replica-corpus.ts`).
  */
-async function replicaPull(request: Request, tenant: TenantDb): Promise<Response> {
+async function replicaPull(request: Request, tenant: TenantDb, env: Env): Promise<Response> {
   const sinceRaw = new URL(request.url).searchParams.get("since")
   const parsed = sinceRaw === null ? null : parseSinceCursor(sinceRaw)
   if (sinceRaw !== null && parsed === null) return jsonResponse({ error: "invalid_since" }, 400)
@@ -313,9 +331,8 @@ async function replicaPull(request: Request, tenant: TenantDb): Promise<Response
   // corpus, and it leaves with a sequence cursor.
   const since = parsed !== null && parsed >= LEGACY_TIMESTAMP_CURSOR_FLOOR ? null : parsed
 
-  return jsonResponse(
-    since === null ? await corpusPullFull(tenant) : await corpusPullSince(tenant, since),
-  )
+  const body = since === null ? await corpusPullFull(tenant) : await corpusPullSince(tenant, since)
+  return jsonResponse({ ...body, replica_id: replicaId(env) })
 }
 
 async function replicaPut(request: Request, tenant: TenantDb): Promise<Response> {
@@ -334,7 +351,28 @@ async function replicaPut(request: Request, tenant: TenantDb): Promise<Response>
   const payload = parseReplicaPayload(body)
   if (!payload) return jsonResponse({ error: "invalid_payload" }, 400)
 
-  return jsonResponse(await corpusPut(tenant, payload, Date.now(), writerOf(request)))
+  return jsonResponse(
+    await corpusPut(tenant, retypeLegacyBoards(payload), Date.now(), writerOf(request)),
+  )
+}
+
+/**
+ * TRANSITION (migrations/0020): a board pushed in its old shape — a `note`
+ * row whose props carry `board: true`, from a client still on the build
+ * before the type — lands in the new one, so a stale client cannot write
+ * the old shape back over a migrated row (the upsert is last-writer-wins on
+ * `updated_at`, and an edit made after the migration is the newer one).
+ * Removed with `isLegacyBoard` once 0020 has run in production.
+ */
+export function retypeLegacyBoards(payload: ReplicaPutPayload): ReplicaPutPayload {
+  if (!payload.nodes.some(isLegacyBoard)) return payload
+  const nodes = payload.nodes.map((node) => {
+    if (!isLegacyBoard(node)) return node
+    const props = { ...(parseProps(node.props) ?? {}) }
+    delete props[LEGACY_BOARD_PROP]
+    return { ...node, type: BOARD_TYPE, props: propsJson(props) }
+  })
+  return { ...payload, nodes }
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

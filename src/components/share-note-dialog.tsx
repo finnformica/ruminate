@@ -1,7 +1,7 @@
 import { atom, useAtom, useAtomValue } from "jotai"
 import React from "react"
 import { toast } from "sonner"
-import { NOTE_TYPE } from "../data/graph"
+import { isNoteType } from "../data/graph"
 import { requestDatabasePull } from "../data/database-mode"
 import { createShare, type SharePermission } from "../data/shares"
 import { sharedOriginAtom } from "../data/shared-mode"
@@ -63,7 +63,7 @@ export function ShareDialog() {
 
   if (!open) return <Dialog open={false} />
 
-  const isNote = node.type === NOTE_TYPE
+  const isNote = isNoteType(node.type)
   const text = isNote ? (notes.get(node.id)?.displayName ?? node.text) : node.text.trim()
   const label = text.length > LABEL_LENGTH ? `${text.slice(0, LABEL_LENGTH - 1)}…` : text
 

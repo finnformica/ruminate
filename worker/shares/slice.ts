@@ -116,7 +116,6 @@ async function shareView(owner: TenantDb, grant: ShareGrant): Promise<ShareView 
 
 /** What a slice node is now — the parts of it a push may not change. */
 export interface SliceNode {
-  type: string
   notes_id: string | null
   props: string | null
 }
@@ -131,7 +130,7 @@ export async function closureIds(
   if (view === null) return { nodes: new Map(), roots: new Set() }
   const rows = await owner.exec(
     closureCte +
-      `SELECT v.id AS id, n.type, n.notes_id, n.props, (g.id IS NOT NULL) AS is_root ` +
+      `SELECT v.id AS id, n.notes_id, n.props, (g.id IS NOT NULL) AS is_root ` +
       `FROM visible v ` +
       `JOIN nodes n ON n.user_id = :tenant AND n.id = v.id AND n.deleted_at IS NULL ` +
       `LEFT JOIN granted g ON g.id = v.id`,
@@ -142,7 +141,6 @@ export async function closureIds(
   for (const row of rows) {
     const id = String(row.id)
     nodes.set(id, {
-      type: String(row.type),
       notes_id: row.notes_id === null || row.notes_id === undefined ? null : String(row.notes_id),
       props: row.props === null || row.props === undefined ? null : String(row.props),
     })
@@ -223,9 +221,6 @@ const refuse = (refusal: SliceWriteRefusal): SliceWritePlan => ({ ok: false, ref
 const isTombstone = (row: { deleted_at?: number }) =>
   row.deleted_at !== undefined && row.deleted_at !== null
 
-/** The stored note-root type (migrations/0008): a grantee never makes one. */
-const NOTE_TYPE = "note"
-
 /**
  * The props that are the OWNER's to set (docs/metadata.md): how a note is
  * laid out. A push may carry them unchanged — every row carries its props
@@ -271,10 +266,11 @@ const changedOwnerProp = (
  *   else — an id outside the slice, a tombstoned id revived from outside,
  *   an unanchored new row — refuses the WHOLE push, so nothing lands
  *   half-applied.
- * - **A row keeps its shape.** A slice node keeps its type, its home note
- *   (`notes_id`, which lands only on a new row) and the owner's own props
- *   (`OWNER_PROPS`); a new row is never a note and never carries them. The
- *   verbs say what a grantee may write, not what the owner's rows are.
+ * - **A row keeps its home and the owner's props.** A slice node keeps its
+ *   home note (`notes_id`, which lands only on a new row) and the owner's
+ *   own props (`OWNER_PROPS`); a new row never carries them. Its type is an
+ *   edit like any other: `write` may make any block any type, a note or a
+ *   board included, as the owner's own editor may.
  * - **Verbs.** A node tombstone needs `delete`; every other row needs
  *   `write`. Unlinking (a link tombstone) is an edit, not a delete: the
  *   block stays, in the owner's Unassigned basket.
@@ -354,17 +350,10 @@ export function planSliceWrite(
     }
   }
 
-  // The shape rules: what a row IS stays the owner's.
+  // The owner's props stay the owner's.
   for (const node of payload.nodes) {
     const stored = slice.nodes.get(node.id)
     if (stored === undefined) {
-      if (node.type === NOTE_TYPE) {
-        return refuse({
-          status: 403,
-          error: "permission_denied",
-          detail: `Block ${node.id} cannot be a note: a share does not make notes.`,
-        })
-      }
       const key = changedOwnerProp(node.props, null)
       if (key !== null) {
         return refuse({
@@ -374,13 +363,6 @@ export function planSliceWrite(
         })
       }
       continue
-    }
-    if (node.type !== stored.type) {
-      return refuse({
-        status: 403,
-        error: "permission_denied",
-        detail: `Block ${node.id} cannot change type here.`,
-      })
     }
     const key = changedOwnerProp(node.props, stored.props)
     if (key !== null) {

@@ -1,6 +1,6 @@
 // The event log: the one way anything is written to the corpus, and the ways
 // a past moment is read back out of it (docs/event-sourcing.md,
-// migrations/0018).
+// migrations/0023).
 //
 // `events` is the truth. `nodes`, `link` and `views` are its PROJECTIONS —
 // what folding the log yields — and they are written in exactly one place,
@@ -44,7 +44,7 @@
 // That invariant is also how a row the log does not know is recognised: it
 // holds a `seq` above anything in the log. `planReconcile` runs first in
 // every write's batch and records each such row as a snapshot `create`. On a
-// tenant's first write after 0018 that is its whole corpus — genesis, with no
+// tenant's first write after 0023 that is its whole corpus — genesis, with no
 // backfill migration and therefore no window between a migration and the
 // Worker that honours it. Ever after it is a no-op that reads nothing, unless
 // something wrote around the log, in which case the next write repairs it.
@@ -170,7 +170,7 @@ export function planReconcile(ctx: { now: number; appendId: string }): SqlStatem
 }
 
 /** Reconcile on its own — for a read of the log by a tenant who has not
- * written since 0018, whose log would otherwise be empty. */
+ * written since 0023, whose log would otherwise be empty. */
 export async function reconcileLog(tenant: TenantDb, now: number = Date.now()): Promise<void> {
   await tenant.includingDeleted().batch([planReconcile({ now, appendId: mintAppendId() })])
 }

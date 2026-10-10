@@ -1,11 +1,12 @@
 import { useAtomValue, useStore } from "jotai"
 import { selectAtom } from "jotai/utils"
 import React from "react"
-import { NOTE_TYPE, propsJson } from "../data/graph"
+import { NOTE_TYPE, isNoteType, propsJson } from "../data/graph"
 import { notePropsOps } from "../data/note-meta"
 import { deleteNoteOps, type Op } from "../data/ops"
 import { emittedNoteTitle } from "../data/note-identity"
 import { useApplyOps } from "../data/store"
+import { LISTED_VIEW } from "../data/views"
 import { dateMentionsAtom, graphSnapshotAtom, notesAtom } from "../global-state"
 import type { NoteId } from "../schema"
 
@@ -79,7 +80,7 @@ export function useRenameNote() {
       if (!noteId) return false
       const snapshot = store.get(graphSnapshotAtom)
       const note = snapshot.nodes.get(noteId)
-      if (!note || note.type !== NOTE_TYPE) return false
+      if (!note || !isNoteType(note.type)) return false
 
       const title = newTitle.trim()
       const current = emittedNoteTitle(noteId, note.text) ?? ""
@@ -96,8 +97,9 @@ export function useRenameNote() {
 }
 
 /**
- * Create a note: one node (its title, its props, `updated_at` stamped). The
- * blocks come with the first edit (`useNoteDoc`).
+ * Create a note: one node (its title, its props, `updated_at` stamped) and
+ * the view row that lists it (`LISTED_VIEW`, src/data/views.ts), in one
+ * write. The blocks come with the first edit (`useNoteDoc`).
  */
 export function useCreateNote() {
   const store = useStore()
@@ -115,7 +117,7 @@ export function useCreateNote() {
         text: title.trim() || id,
         props: propsJson({ ...props, updated_at: new Date().toISOString() }),
       }
-      apply([op])
+      apply([op], { views: [{ rootId: id, patch: LISTED_VIEW }] })
     },
     [store, apply],
   )

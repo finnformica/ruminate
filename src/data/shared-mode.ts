@@ -7,7 +7,13 @@ import {
   type GraphDiff,
   type NodeRow,
 } from "../../worker/handlers/replica-payload"
-import { NOTE_TYPE, buildGraphSnapshot, indexParents, type GraphSnapshot } from "./graph"
+import {
+  NOTE_TYPE,
+  buildGraphSnapshot,
+  indexParents,
+  isNoteType,
+  type GraphSnapshot,
+} from "./graph"
 import { applyOps, type Op } from "./ops"
 import { opsToRows } from "./ops-rows"
 import {
@@ -233,11 +239,12 @@ export function mergeDiffs(pending: GraphDiff, next: GraphDiff): GraphDiff {
   }
 }
 
-/** The slice's rows with every root that is a block presented as a note. */
+/** The slice's rows with every root that is a block presented as a note. A
+ * root that is a note already — a note or a board — is left as it is. */
 export function asNotes(nodes: NodeRow[], rootIds: readonly string[]): NodeRow[] {
   const roots = new Set(rootIds)
   return nodes.map((node) =>
-    roots.has(node.id) && node.type !== NOTE_TYPE ? { ...node, type: NOTE_TYPE } : node,
+    roots.has(node.id) && !isNoteType(node.type) ? { ...node, type: NOTE_TYPE } : node,
   )
 }
 
@@ -246,7 +253,7 @@ function rootTypesOf(nodes: NodeRow[], rootIds: readonly string[]): Map<string, 
   const roots = new Set(rootIds)
   const types = new Map<string, string>()
   for (const node of nodes) {
-    if (roots.has(node.id) && node.type !== NOTE_TYPE) types.set(node.id, node.type)
+    if (roots.has(node.id) && !isNoteType(node.type)) types.set(node.id, node.type)
   }
   return types
 }
@@ -493,10 +500,12 @@ export function sharedApplyOps(shareId: string, ops: readonly Op[]) {
 
   const now = Date.now()
   const diff = opsToRows(slice.graph, ops, now)
-  // A block root is a note on screen and a block in the owner's rows.
+  // A block root is a note on screen and a block in the owner's rows: the
+  // note type it is shown with goes back as the block's own. Any other type
+  // is the grantee's edit, and lands as it is.
   for (const row of diff.nodes) {
     const stored = slice.rootTypes.get(row.id)
-    if (stored !== undefined) row.type = stored
+    if (stored !== undefined && row.type === NOTE_TYPE) row.type = stored
   }
   activation.slices.set(shareId, { ...slice, graph: applyOps(slice.graph, ops, now) })
   publish(activation)

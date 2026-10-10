@@ -99,6 +99,11 @@ describe("asNotes", () => {
     expect(out.map((row) => row.type)).toEqual(["note", "note", "ul"])
     expect(rows[1].type).toBe("ul")
   })
+
+  it("leaves a board root a board: it is a note already", () => {
+    const rows = [node("blk_board", "Wall", "board"), node("blk_a", "one")]
+    expect(asNotes(rows, ["blk_board"]).map((row) => row.type)).toEqual(["board", "ul"])
+  })
 })
 
 describe("routeOps", () => {
@@ -270,6 +275,24 @@ describe("shared mode", () => {
     expect(pushed.nodes).toEqual([
       expect.objectContaining({ id: "blk_a", type: "ul", text: "changed" }),
     ])
+  })
+
+  it("pushes a block root the grantee retyped with the type they gave it", async () => {
+    vi.useFakeTimers()
+    const stub = stubServer()
+    stub.received = [{ ...SHARE, view: { id: "blk_a", rootId: "blk_a", filter: null, sort: null } }]
+    stub.slice = {
+      nodes: [node("blk_a", "one", "ul")],
+      links: [],
+      view: { id: "blk_a", rootId: "blk_a", filter: null, sort: null },
+    }
+    startSharedMode({ fetchImpl: stub.fetch })
+    await flushSharedMode()
+
+    sharedApplyOps("shr_1", [{ op: "setType", id: "blk_a", type: "board" }])
+    await vi.advanceTimersByTimeAsync(1_500)
+    const pushed = puts(stub)[0].body as { nodes: NodeRow[] }
+    expect(pushed.nodes).toEqual([expect.objectContaining({ id: "blk_a", type: "board" })])
   })
 
   it("coalesces a run of edits into one push", async () => {

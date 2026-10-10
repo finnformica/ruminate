@@ -1,4 +1,4 @@
-import { NOTE_TYPE, type GraphSnapshot } from "../data/graph"
+import { isNoteType, type GraphSnapshot } from "../data/graph"
 
 /**
  * What is upstream of each block: the notes that reach it through child
@@ -13,7 +13,7 @@ export type UpstreamIndex = ReadonlyMap<string, readonly string[]>
 export function buildUpstreamIndex(snapshot: GraphSnapshot): UpstreamIndex {
   const index = new Map<string, string[]>()
   for (const node of snapshot.nodes.values()) {
-    if (node.type !== NOTE_TYPE) continue
+    if (!isNoteType(node.type)) continue
     const seen = new Set<string>()
     const stack = [node.id]
     while (stack.length > 0) {

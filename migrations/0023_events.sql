@@ -1,4 +1,4 @@
--- Migration number: 0018    2026-09-21
+-- Migration number: 0023    2026-10-10
 --
 -- The event log: every change to a block, a link or a view, as an appended
 -- row, in one total order per tenant (docs/event-sourcing.md).
@@ -103,7 +103,9 @@ END;
 -- ## Views that hold no sequence
 --
 -- The 0015 and 0017 backfills wrote their views with `seq = 0` on purpose: an
--- owner's devices had no need to pull them. The log cannot leave them there.
+-- owner's devices had no need to pull them. 0021 since numbered the ones
+-- rooted at a note or a board; the ones rooted at a block are still at 0.
+-- The log cannot leave them there.
 -- The reconcile above finds a row by its `seq`, and a projection row's `seq`
 -- names the event it came from, so a row at 0 is a row the log would never
 -- hold — the fold and the tables would disagree from the first day. They are

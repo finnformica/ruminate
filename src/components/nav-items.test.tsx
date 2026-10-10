@@ -292,6 +292,40 @@ describe("the sidebar's Views list", () => {
     expect(store.get(viewsAtom).has("blk_x")).toBe(false)
   })
 
+  it("a note's ⋯ offers Remove from Views while its row lists it, and Add to Views after", async () => {
+    const store = renderSidebar({ notes: [THREE[0]], blocks: [] })
+    // The row the note was created with, carrying a saved filter too.
+    store.set(
+      viewsAtom,
+      viewMapOf([
+        {
+          id: "a",
+          root_id: "a",
+          filter: "type:todo",
+          sort: null,
+          pinned: true,
+          sort_key: "a0",
+          updated_at: 1,
+        },
+      ]),
+    )
+    fireEvent.click(within(viewRows()[0]).getByRole("button", { name: "Note actions" }))
+    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove from Views" }))
+    // Only the listing goes: the note still opens with its filter, and its
+    // place is kept for when it is added back.
+    expect(store.get(viewsAtom).get("a")).toMatchObject({
+      pinned: false,
+      filter: "type:todo",
+      sort_key: "a0",
+    })
+    fireEvent.click(within(viewRows()[0]).getByRole("button", { name: "Note actions" }))
+    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
+    expect(screen.queryByRole("menuitem", { name: "Remove from Views" })).toBeNull()
+    fireEvent.click(screen.getByRole("menuitem", { name: "Add to Views" }))
+    expect(store.get(viewsAtom).get("a")?.pinned).toBe(true)
+  })
+
   it("a block view's ⋯ is the block's menu — the list's moves, then Copy, Copy link, Share, Remove from Views", async () => {
     renderSidebar({ notes: [THREE[0]], blocks: [BLOCK] })
     fireEvent.click(within(viewRows()[1]).getByRole("button", { name: "Block view actions" }))
@@ -333,23 +367,34 @@ describe("the sidebar's Views list", () => {
     // both lean with the label when the row is current. Nothing reports a
     // state any more.
     for (const icon of icons) expect(icon!.className).not.toContain("nav-item-tint")
-    // The note's favicon is an icon; the block's slot holds its marker.
+    // The note's favicon is an icon; the block's slot holds its KEY — the
+    // editor's own (a bullet's dot), never a markdown dash of the list's.
     expect(icons[0]!.querySelector("svg")).not.toBeNull()
-    expect(icons[1]!.querySelector("[data-glyph]")?.getAttribute("data-glyph")).toBe("-")
+    expect(icons[1]!.querySelector("[data-key]")?.getAttribute("data-key")).toBe("ul")
+    expect(icons[1]!.querySelector(".block-glyph-fill")).not.toBeNull()
   })
 
-  it("leads a block row with the block's own markdown marker, whatever its type", () => {
+  it("leads a block row with the block's key, as the editor draws it, whatever its type", () => {
     const rows: BlockViewRow[] = [
       { ...BLOCK, id: "blk_todo", type: "todo" },
       { ...BLOCK, id: "blk_h2", type: "h2" },
       { ...BLOCK, id: "blk_ol", type: "ol" },
       { ...BLOCK, id: "blk_text", type: "text" },
+      { ...BLOCK, id: "blk_code", type: "code" },
     ]
     renderSidebar({ notes: [], blocks: rows })
-    const glyphs = viewRows().map(
-      (row) => row.querySelector(".nav-item-icon:not(.hidden) [data-glyph]")?.textContent,
+    const keys = viewRows().map((row) =>
+      row.querySelector(".nav-item-icon:not(.hidden) [data-key]")!,
     )
-    expect(glyphs).toEqual(["[ ]", "##", "1.", "¶"])
+    // A to-do's box, a heading's #, a number, a pilcrow — the keys the
+    // block's row in its note carries.
+    expect(keys[0].querySelector(".block-checkbox")).not.toBeNull()
+    expect(keys[1].textContent).toBe("#")
+    expect(keys[2].textContent).toBe("1.")
+    expect(keys[3].textContent).toBe("¶")
+    // A figure has no key (its frame is its mark), so its row says what it
+    // is in markdown.
+    expect(keys[4].textContent).toBe("```")
   })
 
   it("lights the note's row only at the note's root, and the block's only focused on it", () => {

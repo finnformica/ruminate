@@ -18,6 +18,8 @@ import {
   inverseOps,
   isBoard,
   linkPreviewOps,
+  notesFeaturesOf,
+  notesSuggestionOps,
   outlineImageIds,
   removeFeatureOps,
   resetImageOps,
@@ -45,25 +47,28 @@ import {
   releasePendingImage,
   uploadImage,
 } from "../data/images"
-import { NOTE_TYPE, parseProps, propsJson } from "../data/graph"
+import { BOARD_TYPE, LEGACY_BOARD_PROP, NOTE_TYPE, parseProps, propsJson } from "../data/graph"
 import { fetchLinkPreview } from "../data/link-previews"
 import { notePropsOps } from "../data/note-meta"
 import { applyOps, deleteBlockOps, type Op } from "../data/ops"
 import { useApplyOps } from "../data/store"
-import { requestTagSuggestion, SuggestTagsError } from "../data/suggest-tags"
+import { LISTED_VIEW } from "../data/views"
+import { requestNotesSuggestion } from "../data/suggest-notes"
+import { requestTagSuggestion, SuggestError } from "../data/suggest-tags"
+import { emittedNoteTitle } from "../data/note-identity"
 import { blockIndexAtom, graphSnapshotAtom, isDatabaseModeAtom } from "../global-state"
 import type { NoteId } from "../schema"
-import { BOARD_PROP } from "../utils/board-prop"
 import { viewNarrowing } from "../utils/view-narrowing"
 import { useAiAvailable } from "./ai"
 
 /**
- * Making a board (docs/boards.md): the one property set on the note's
- * page, and the default features written onto it as blocks — Location,
- * Object, Material — in one batch. **New board** makes the note first
- * (`create`, with its title); **Make this a board** marks the note that is
- * there. A default the note already has by label is left as it is, so a
- * note with a `Location` block written by hand keeps it.
+ * Making a board (docs/boards.md): the note's root given the `board` type,
+ * and the default features written onto it as blocks — Location, Object,
+ * Material, Link — in one batch. **New board** makes the node first
+ * (`create`, with its title); **Make this a board** retypes the note that
+ * is there. Nothing beneath the root changes. A default the note already
+ * has by label is left as it is, so a note with a `Location` block written
+ * by hand keeps it.
  */
 export function useMakeBoard(): (noteId: NoteId, create?: { title: string }) => void {
   const store = useStore()
@@ -73,19 +78,50 @@ export function useMakeBoard(): (noteId: NoteId, create?: { title: string }) => 
       const snapshot = store.get(graphSnapshotAtom)
       const ops: Op[] = []
       if (snapshot.nodes.has(noteId)) {
-        ops.push(...notePropsOps(noteId, { [BOARD_PROP]: true }, snapshot))
+        ops.push({ op: "setType", id: noteId, type: BOARD_TYPE })
+        // The note is edited: its `updated_at` moves with it.
+        ops.push(...notePropsOps(noteId, {}, snapshot))
       } else if (create) {
         ops.push({
           op: "create",
           id: noteId,
-          type: NOTE_TYPE,
+          type: BOARD_TYPE,
           text: create.title.trim() || noteId,
-          props: propsJson({ [BOARD_PROP]: true, updated_at: new Date().toISOString() }),
+          props: propsJson({ updated_at: new Date().toISOString() }),
         })
       } else return
       // The defaults, against the board as the batch so far leaves it.
       ops.push(...defaultFeatureOps(applyOps(snapshot, ops, Date.now()), noteId))
-      apply(ops)
+      // A board made from nothing is listed as a note is, by a view row
+      // written beside it (`LISTED_VIEW`); a note made a board keeps the
+      // row it has — one row per root, and the root is the same.
+      apply(
+        ops,
+        snapshot.nodes.has(noteId) ? {} : { views: [{ rootId: noteId, patch: LISTED_VIEW }] },
+      )
+    },
+    [store, apply],
+  )
+}
+
+/**
+ * **Make this a note** (docs/boards.md): the board's root given the `note`
+ * type back, and nothing else — the same rows, the same outline. The old
+ * `board` property is cleared with it, so a board from before
+ * migrations/0020 stops being one too (`isLegacyBoard`; the key goes with
+ * that helper).
+ */
+export function useMakeNote(): (noteId: NoteId) => void {
+  const store = useStore()
+  const apply = useApplyOps()
+  return React.useCallback(
+    (noteId) => {
+      const snapshot = store.get(graphSnapshotAtom)
+      if (!snapshot.nodes.has(noteId)) return
+      apply([
+        { op: "setType", id: noteId, type: NOTE_TYPE },
+        ...notePropsOps(noteId, { [LEGACY_BOARD_PROP]: null }, snapshot),
+      ])
     },
     [store, apply],
   )
@@ -176,6 +212,9 @@ function failedToast(message: string, detail: string): void {
   toast.error(message, { duration: 10000, action: copyControl(detail) })
 }
 
+/** What a suggestion with nothing to write is answered with. */
+const NOTHING_TO_ADD = "Nothing to add."
+
 /** A toast control that puts `detail` on the clipboard. */
 const copyControl = (detail: string) => ({
   label: "Copy",
@@ -225,6 +264,10 @@ export interface BoardWrites {
   /** Ask Claude for a caption and tags for a picture, and apply what it
    * says as one undoable batch. Settles when the toast has been shown. */
   suggestTags: (imageId: string) => Promise<void>
+  /** Ask Claude for notes on the features that lack them — given the
+   * board's name and everything its features already say — and write
+   * them as one undoable batch. Settles when the toast has been shown. */
+  suggestNotes: () => Promise<void>
 }
 
 /**
@@ -422,17 +465,44 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
           Date.now(),
         )
         if (ops.length === 0) {
-          toast("Nothing to add.")
+          toast(NOTHING_TO_ADD)
           return
         }
         undoable(ops, "Picture updated")
       } catch (error) {
-        if (error instanceof SuggestTagsError) failedToast(error.message, error.detail)
+        if (error instanceof SuggestError) failedToast(error.message, error.detail)
         else failedToast("Couldn’t suggest tags.", describeError(error))
       }
     },
     [canSuggest, store, boardId, undoable],
   )
+
+  /**
+   * Notes for the features that lack them (docs/boards.md, "Features"):
+   * the board's name and its features as they stand — label, type, one or
+   * several values, the values in use, the notes already written — go to
+   * the notes route, no picture; the answer is read into the writes it
+   * amounts to (`notesSuggestionOps`: only an empty note is written, a
+   * note a person wrote is never overwritten) and applied as one batch
+   * with one Undo. Nothing to add is a toast that says so.
+   */
+  const suggestNotes = React.useCallback(async () => {
+    if (!canSuggest) return
+    const snapshot = store.get(graphSnapshotAtom)
+    const title = emittedNoteTitle(boardId, snapshot.nodes.get(boardId)?.text ?? "") ?? ""
+    try {
+      const suggestion = await requestNotesSuggestion(title, notesFeaturesOf(snapshot, boardId))
+      const ops = notesSuggestionOps(store.get(graphSnapshotAtom), boardId, suggestion, Date.now())
+      if (ops.length === 0) {
+        toast(NOTHING_TO_ADD)
+        return
+      }
+      undoable(ops, "Notes updated")
+    } catch (error) {
+      if (error instanceof SuggestError) failedToast(error.message, error.detail)
+      else failedToast("Couldn’t suggest notes.", describeError(error))
+    }
+  }, [canSuggest, store, boardId, undoable])
 
   /**
    * Pictures added from the board, the editor's way: every row is on the
@@ -521,6 +591,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       deleteImage,
       canSuggest,
       suggestTags,
+      suggestNotes,
     }),
     [
       canUpload,
@@ -535,6 +606,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       deleteImage,
       canSuggest,
       suggestTags,
+      suggestNotes,
     ],
   )
 }

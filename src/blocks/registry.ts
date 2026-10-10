@@ -14,7 +14,7 @@ import type { Block, BlockProps, BlockType } from "./types"
  * `src/components/block-editor/block-kinds.tsx`).
  *
  * Entries are ordered as the slash menu and "Turn into" offer them; siblings
- * that are never offered (`done`, `h2`, `h3`, `note`) follow their family.
+ * that are never offered (`done`, `h2`, `h3`, `note`, `board`) follow their family.
  */
 
 /** A family groups types that toggle into each other and continue alike:
@@ -335,6 +335,21 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     turnInto: false,
     search: null,
   },
+  // A board is a note root of the other kind (docs/boards.md): the same
+  // family, so everything that treats a note row as a note — never turned
+  // into, never a search result, its title a name — treats a board's so.
+  {
+    id: "board",
+    family: "note",
+    label: "Board",
+    keywords: [],
+    marker: "",
+    listItem: false,
+    marked: false,
+    splitsAs: "text",
+    turnInto: false,
+    search: null,
+  },
 ]
 
 const DEFS_BY_ID = new Map(BLOCK_TYPE_DEFS.map((def) => [def.id, def]))
@@ -342,6 +357,13 @@ const DEFS_BY_ID = new Map(BLOCK_TYPE_DEFS.map((def) => [def.id, def]))
 /** The registry entry for a type. */
 export function defOf(type: BlockType): BlockTypeDef {
   return DEFS_BY_ID.get(type) ?? DEFS_BY_ID.get("text")!
+}
+
+/** Is this a note root's type (the `note` family: a note or a board)? The
+ * registry's own answer, for the block modules; the graph's is `isNoteType`
+ * (`src/data/graph.ts`), over the stored string. */
+export function isNoteFamily(type: BlockType): boolean {
+  return defOf(type).family === "note"
 }
 
 /** The type of the same family that is offered and typed by hand: `todo`
@@ -394,10 +416,12 @@ export function searchTypeValues(): Record<string, readonly BlockType[]> {
 }
 
 /** The markdown glyph that stands for a type — what the qualifier picker
- * draws beside a `type:` row, and the sidebar beside a block view: the
- * type's marker, or what stands for it where the marker is not a prefix
- * (a numbered item's number, a code fence, an image's `![]`, a link
- * block's `[]()`, a paragraph's pilcrow). */
+ * draws beside a `type:` row, and the sidebar beside a block view of a
+ * type that has no key of its own (a figure): the type's marker, or what
+ * stands for it where the marker is not a prefix (a numbered item's
+ * number, a code fence, an image's `![]`, a link block's `[]()`, a
+ * paragraph's pilcrow). A block's KEY — the glyph its row carries — is
+ * `BlockKey` (`src/components/block-editor/block-key.tsx`). */
 export function typeGlyph(type: BlockType): string {
   return searchGlyph(defOf(type))
 }

@@ -1,3 +1,4 @@
+import { OBJECT_NOTES } from "../../data/boards"
 import { TextArea } from "./text-area"
 
 export default {
@@ -10,14 +11,13 @@ export default {
 
 export const Default = {
   args: {
-    placeholder: "Add notes…",
+    placeholder: "Notes…",
   },
 }
 
 export const Flush = {
   args: {
     variant: "flush",
-    defaultValue:
-      "The thing the picture is of, such as furniture, lighting, cutlery, plants or decoration",
+    defaultValue: OBJECT_NOTES,
   },
 }

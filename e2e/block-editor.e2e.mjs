@@ -107,9 +107,11 @@ for (const name of ["export async function fetchNotes", "Some text with"]) {
   await page.keyboard.press("Escape")
 }
 {
-  // The panel is the row's surface: its box is the line's box, so a one-line
-  // code block is exactly as tall as a one-line paragraph, and its text
-  // starts in the same column as a paragraph's.
+  // The panel sits in the block frame (block-frame.tsx), as a picture does:
+  // 10px off the row's surface above and below, and as far from the
+  // surface's right edge as from its left — the text column is 54px in, so
+  // the frame is centred in the surface. Its text sits the panel's padding
+  // and border in from the text column.
   const geo = await page.evaluate(() => {
     const box = (sel) => document.querySelector(sel).getBoundingClientRect()
     const line = box('[data-block-row="blk_cl"] [data-block-line]')
@@ -126,18 +128,23 @@ for (const name of ["export async function fetchNotes", "Some text with"]) {
     }
   })
   check(
-    "code panel is the row's surface",
-    [geo.left, geo.right, geo.top, geo.bottom].every((d) => Math.abs(d) <= 1),
-    `left=${geo.left} right=${geo.right} top=${geo.top} bottom=${geo.bottom}`,
+    "code panel is inset from the row's surface, the same at the left and the right",
+    Math.abs(geo.left - 54) <= 1 && Math.abs(geo.right - geo.left) <= 1,
+    `left=${geo.left} right=${geo.right}`,
   )
   check(
-    "one-line code block is as tall as a paragraph",
-    Math.abs(geo.oneLineCode - geo.oneLinePara) <= 1,
+    "code panel is inset from the row's surface, the same above and below",
+    Math.abs(geo.top - 10) <= 1 && Math.abs(geo.bottom - geo.top) <= 1,
+    `top=${geo.top} bottom=${geo.bottom}`,
+  )
+  check(
+    "one-line code block is a paragraph plus the frame's and the panel's room",
+    Math.abs(geo.oneLineCode - geo.oneLinePara - 16 - 18) <= 1,
     `code=${geo.oneLineCode.toFixed(1)} para=${geo.oneLinePara.toFixed(1)}`,
   )
   check(
-    "code text starts in the text column",
-    Math.abs(geo.codeText - geo.paraText) <= 1,
+    "code text starts the panel's padding and border in from the text column",
+    Math.abs(geo.codeText - geo.paraText - 13) <= 1,
     `code=${geo.codeText} para=${geo.paraText}`,
   )
   // ``` then Enter: the new, empty code block is one full line tall at once

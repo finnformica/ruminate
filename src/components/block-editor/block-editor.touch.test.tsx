@@ -74,6 +74,21 @@ function stubCaretAt(node: Node, offset: number): () => void {
   }
 }
 
+describe("a touch screen's gutter", () => {
+  it("indents by the wider marker gap, so a parent's key stays over its children's chevrons", () => {
+    // The level's indent is the chevron column's centre-to-centre distance
+    // to the key: 24px at the pointer's 8px gap, 28px at the finger's 12px.
+    const { container } = render(<Harness initial={"- Parent\n  - Child"} />)
+    const child = rows(container)[1]
+    expect(child.style.paddingLeft).toBe("28px")
+    expect(child.querySelector<HTMLElement>("[data-guide]")!.style.left).toBe("12px")
+    cleanup()
+    coarse = false
+    const { container: fine } = render(<Harness initial={"- Parent\n  - Child"} />)
+    expect(rows(fine)[1].style.paddingLeft).toBe("24px")
+  })
+})
+
 describe("a touch screen's tap", () => {
   it("edits the row in one tap, where a click would only select it", () => {
     const { container } = render(<Harness initial={"Alpha\nBeta"} />)

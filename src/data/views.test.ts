@@ -1,3 +1,4 @@
+import { sampleViews } from "./sample-graph"
 import { createStore } from "jotai"
 import { describe, expect, it } from "vitest"
 import {
@@ -113,10 +114,15 @@ describe("orphanedViews / deletedIdsOf", () => {
 })
 
 describe("the atoms", () => {
-  it("serve the sample view signed out: a block of the welcome note is a view", () => {
+  it("serve the sample views signed out: every sample note listed, and a block of the welcome note", () => {
     const store = createStore()
-    expect([...store.get(viewRootIdsAtom)]).toEqual(["blk_welcome003"])
-    expect(store.get(viewByRootAtom).get("blk_welcome003")?.pinned).toBe(true)
+    const roots = [...store.get(viewRootIdsAtom)]
+    expect(roots).toContain("readme")
+    expect(roots).toContain("blk_welcome003")
+    for (const row of sampleViews()) {
+      expect(row.pinned).toBe(true)
+      expect(store.get(viewByRootAtom).get(row.root_id)?.pinned).toBe(true)
+    }
   })
 
   it("index the views by root, and every root with a row as a set", () => {

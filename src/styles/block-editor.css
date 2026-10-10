@@ -60,13 +60,6 @@
   --block-ring-bottom: transparent;
 }
 
-/* A code block's panel (block-kinds.tsx) is drawn exactly where the row's
- * surface is, so the ring would sit under its border: the border takes the
- * ring's colour instead, and follows it through the inactive demotion. */
-.block-highlight .block-code-panel {
-  border-color: var(--block-ring);
-}
-
 /* ── Inactive selection ──────────────────────────────────────────────────────
  * When the editor doesn't own the keyboard (focus is in the sidebar, a dialog,
  * the page), the selection demotes
@@ -124,13 +117,12 @@
 
 /* ── Heading surface reach ───────────────────────────────────────────────────
  * A heading's line is taller than a paragraph's, so the collapse chevron's
- * 20px square, centred on the marker slot, sits well inside the surface's
+ * 20px square, centred on the chevron column, sits well inside the surface's
  * top and bottom edges at the larger scales (~11px at the top scale) but only
- * 3.5px inside its left edge (measured: the slot starts 4px in and the
- * square, centred on it, outgrows it by 2.5px a side, less a 2px lean of the
- * heading's slot). The surface reaches further left on such a heading —
- * by exactly that difference — so the chevron, and the `#` it swaps with,
- * sit the same distance from every edge. A negative margin paired with
+ * 4.5px inside its left edge (the column starts 4px in and the square,
+ * centred on it, outgrows it by 1.5px a side). The surface reaches further
+ * left on such a heading — by exactly that difference — so the chevron, and
+ * the `#` beside it, sit the same distance from every edge. A negative margin paired with
  * padding, as every other reach of the surface: the text column never
  * moves. The reach is the scale's own line box (font size × leading, as
  * `headingScale` sets them) plus the surface's 2px above and below, less the
@@ -180,62 +172,17 @@
   }
 }
 
-/* ── Collapse toggle reveal ──────────────────────────────────────────────────
- * A parent's collapse chevron lives in its marker slot — the key there (dot,
- * `#`, number, `>`) swaps for it; a paragraph's empty slot simply hosts it; a
- * todo's checkbox fills its slot, so its chevron sits beside, in the gutter —
- * see block-item.tsx.
- * It is invisible until the pointer is over the CONTROL'S OWN AREA — the
- * 20px square, never the whole row — so the chevron and its hover surface
- * appear together, and a row can be read and edited without chrome
- * surfacing. The slot (`.block-toggle-slot`) is that area: the chevron's
- * square covers the slot, so hovering the slot IS hovering the chevron; the
- * key (`.block-key`) fades out as the chevron fades in, in the same slot, so
- * nothing moves. Three things pin the chevron visible: a
- * collapsed block (hidden content is never a secret — the key hides for the
- * duration), a parent paragraph (its slot holds no key, so there is nothing
- * for the chevron to stand in for and nothing to mark the fold without it),
- * and a device with nothing to hover with, where the chevron stands in for
- * the key outright, exactly as the old always-on gutter toggle did. The
- * fades ride the elements' own opacity transitions (block-item.tsx). */
-.block-toggle {
-  opacity: 0;
-}
-.block-key {
-  transition: opacity 150ms ease-out;
-}
-@media (hover: hover) and (pointer: fine) {
-  .block-toggle:hover,
-  .block-toggle-slot:hover .block-toggle {
-    opacity: 1;
-  }
-  .block-toggle-slot:hover .block-key {
-    opacity: 0;
-  }
-}
-@media (hover: none), (pointer: coarse) {
-  .block-toggle {
-    opacity: 1;
-  }
-  .block-key {
-    opacity: 0;
-  }
-}
-/* A parent todo's checkbox slot also reveals the chevron beside it: hover
- * the box and the chevron shows exactly as if hovered itself, so the fold
- * control is found from the marker everyone looks at, while the box keeps
- * its own click. */
-@media (hover: hover) and (pointer: fine) {
-  .block-toggle-hint:hover ~ .block-toggle-beside .block-toggle {
-    opacity: 1;
-  }
-}
-.block-toggle:focus-visible,
-.block-toggle.block-toggle-pinned {
-  opacity: 1;
-}
-.block-key.block-key-hidden {
-  opacity: 0;
+/* ── Collapse toggle ─────────────────────────────────────────────────────────
+ * A parent's chevron lives in the chevron column every row carries before
+ * its key slot (block-item.tsx), and it is always shown: nothing swaps out
+ * or fades in for it, so a row's key — dot, `#`, number, `>`, `¶`, the
+ * checkbox — never moves or hides, and hidden content is never a secret.
+ * The column is where the indent guide hangs, so the thread of a subtree
+ * drops straight out of the control that folds it. All the stylesheet
+ * holds for it is the focus ring; the glyph's quarter turn rides its own
+ * transform transition (block-item.tsx). */
+.block-toggle:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-border-focus);
 }
 
 /* ── Todo checkbox ───────────────────────────────────────────────────────────
@@ -256,10 +203,10 @@
 }
 
 /* Coarse pointers: the box is drawn a size up (it overhangs the 15px slot
- * evenly, so the guide line still hangs from its centre) and its hit area
- * grows through a pseudo-element — up and down only, and a little to the
- * LEFT, where a parent todo's always-showing chevron square ends where the
- * box begins. Never to the RIGHT: a tap past the box is a tap at the start
+ * evenly) and its hit area grows through a pseudo-element — up and down
+ * only, and a little to the LEFT, short of the chevron column's wider
+ * finger target (block-item.tsx), which ends 3.5px past its column. Never
+ * to the RIGHT: a tap past the box is a tap at the start
  * of the line, and one the phone snaps onto the box anyway is handed back
  * to the text (`tapMissedBox`, block-item.tsx). */
 @media (pointer: coarse) {
@@ -279,7 +226,10 @@
   border-color: var(--neutral-a8);
 }
 
-.block-checkbox:checked {
+/* `[data-checked]` is the static picture of a ticked box that `BlockKey`
+ * draws where there is no input to tick (a sidebar row). */
+.block-checkbox:checked,
+.block-checkbox[data-checked] {
   border-color: transparent;
   background-color: var(--accent-9);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5.2 4.2 7.4 8 2.8' fill='none' stroke='white' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -289,7 +239,8 @@
 }
 /* The tick grows with the coarse pointer's larger box. */
 @media (pointer: coarse) {
-  .block-checkbox:checked {
+  .block-checkbox:checked,
+  .block-checkbox[data-checked] {
     background-size: 12px 12px;
   }
 }
@@ -301,7 +252,8 @@
 
 /* Amber is the one accent whose step 9 is light, so its checkmark is drawn in
  * the dark contrast color (--accent-contrast: #21201c) instead of white. */
-[data-accent="amber"] .block-checkbox:checked {
+[data-accent="amber"] .block-checkbox:checked,
+[data-accent="amber"] .block-checkbox[data-checked] {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5.2 4.2 7.4 8 2.8' fill='none' stroke='%2321201c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
@@ -309,7 +261,8 @@
   .block-checkbox {
     border-color: var(--color-text);
   }
-  .block-checkbox:checked {
+  .block-checkbox:checked,
+  .block-checkbox[data-checked] {
     background-color: var(--color-text);
   }
 }
@@ -346,12 +299,13 @@
  * hangs into the page gutter, so the outline reads as indented beneath it
  * rather than the title as one more row at the text column. The page says
  * how far (`--note-header-pull`, set on its padded wrapper; unset means the
- * header keeps the column): the full marker-slot offset, 27px, puts the
- * header's text at the content column's edge and the hanging `#` in the
- * gutter, which the 3xl glyph needs some 30px of — the wide (40px) gutter
- * has it, the 16–20px ones on a narrow page do not, so there the header
- * stays at the text column. The block rows never take the variable: the
- * text column is theirs and does not move. */
+ * header keeps the column): 27px — the key slot and its gap — sets the
+ * outline in beneath the title's text by exactly that, and stands the
+ * title's `#` over the rows' chevron column, with the title's own surface
+ * reaching 31px into the gutter — the wide (40px) gutter has it, the
+ * 16–20px ones on a narrow page do not, so there the header stays at the
+ * text column. The block rows never take the variable: the text column is
+ * theirs and does not move. */
 .note-header {
   margin-left: calc(-1 * var(--note-header-pull, 0px));
 }

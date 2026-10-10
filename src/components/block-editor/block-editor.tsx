@@ -5,6 +5,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import type React from "react"
 import type { ClipboardEvent, FocusEvent, KeyboardEvent, MouseEvent, TouchEvent } from "react"
 import { isDatabaseModeAtom, newBlockMarkerAtom } from "../../global-state"
+import { isNoteType } from "../../data/graph"
 import { sharedOriginAtom } from "../../data/shared-mode"
 import { shareDialogAtom } from "../share-note-dialog"
 import type { Block, BlockDoc, ChangeHint } from "../../blocks/types"
@@ -61,7 +62,8 @@ import {
   type Mode,
 } from "../../blocks/commands"
 import { resolveKey, type KeyLike } from "../../blocks/keymap"
-import { parse } from "../../blocks/parse"
+import { parse, parseWithLevels } from "../../blocks/parse"
+import { lastBlockPath, sectionUnderHeadings } from "../../blocks/sections"
 import { blockLines } from "../../blocks/serialize"
 import {
   ancestorKeys,
@@ -133,6 +135,7 @@ import {
   insertBlocksAsFirstChildren,
   insertAfter,
   insertFirstChild,
+  insertLastChild,
   remintCollidingIds,
   removeBlock,
   spliceBlocks,
@@ -357,6 +360,7 @@ export function BlockEditor({
   focusFirstMode = "select",
   initialSelection = "first",
   newRootSignal,
+  appendRootSignal,
   refocusSignal,
   readOnly = false,
   menuEntries,
@@ -452,6 +456,9 @@ export function BlockEditor({
   initialSelection?: "first" | "none"
   /** Bump this (e.g. Cmd+Enter on the note title) to add a new root block. */
   newRootSignal?: number
+  /** Bump this (a click in the room beneath the note) to edit a block at
+   * the end: the last one if it is already empty, else a new one after it. */
+  appendRootSignal?: number
   /** Bump this (the global `i` shortcut) to refocus the editor, restoring the
    * last selected block (or the first). */
   refocusSignal?: number
@@ -1086,36 +1093,38 @@ export function BlockEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refocusSignal])
 
-  // Enter or Cmd+Enter on a title — the note's (`newRootSignal`) or the focus
-  // title's — adds a fresh root block at the top and edits it. The block is of
-  // the type Enter makes (Settings → Editor, "New block markdown"), as one
-  // made at the end of a block would be.
-  const newRootBlock = () => {
+  // A fresh root block at one END of the view, edited: at the top for Enter
+  // or Cmd+Enter on a title — the note's (`newRootSignal`) or the focus
+  // title's — and at the bottom for a click in the room beneath the note
+  // (`appendRootSignal`). The block is of the type Enter makes (Settings →
+  // Editor, "New block markdown"), as one made at the end of a block would
+  // be. While focused, "a root" means a child of the focus root at that end
+  // — the focused subtree is the page.
+  const edgeRootBlock = (end: "top" | "bottom") => {
     if (readOnly) return
     const current = docRef.current
     const type = typeOfMarker(newBlockMarker)
-    // While focused, "a new root" means a new first child of the focus root —
-    // the focused subtree is the page.
     const focused = focusRootId && current.blocks[focusRootId] ? focusRootId : null
-    // An empty block already first (a fresh note's starter, or one just
-    // added) is the new block: edit it, made that type, rather than
-    // stacking another above.
-    const firstId = focused ? current.blocks[focused].children[0] : current.rootBlockIds[0]
-    const first = firstId ? current.blocks[firstId] : undefined
+    const siblings = focused ? current.blocks[focused].children : current.rootBlockIds
+    // An empty block already at that end (a fresh note's starter, or one
+    // just added) is the new block: edit it, made that type, rather than
+    // stacking another beside it.
+    const edgeId = end === "top" ? siblings[0] : siblings[siblings.length - 1]
+    const edge = edgeId ? current.blocks[edgeId] : undefined
     if (
-      first &&
-      (first.type === "text" || first.type === type) &&
-      first.text === "" &&
-      first.children.length === 0
+      edge &&
+      (edge.type === "text" || edge.type === type) &&
+      edge.text === "" &&
+      edge.children.length === 0
     ) {
-      if (first.type !== type) {
+      if (edge.type !== type) {
         const retyped: BlockDoc = {
           ...current,
-          blocks: { ...current.blocks, [first.id]: { ...first, type } },
+          blocks: { ...current.blocks, [edge.id]: { ...edge, type } },
         }
         history.commit(current, retyped, { type: "structural" })
       }
-      const key = focused ? keyOf(focusRootKeyOf(current, focused), first.id) : first.id
+      const key = focused ? keyOf(focusRootKeyOf(current, focused), edge.id) : edge.id
       setAnchorKey(null)
       setSelected(key)
       setFocus({ key })
@@ -1123,10 +1132,15 @@ export function BlockEditor({
     }
     const fresh = emptyBlock(type)
     const next: BlockDoc = focused
-      ? insertFirstChild(current, focused, fresh)
+      ? end === "top"
+        ? insertFirstChild(current, focused, fresh)
+        : insertLastChild(current, focused, fresh)
       : {
           ...current,
-          rootBlockIds: [fresh.id, ...current.rootBlockIds],
+          rootBlockIds:
+            end === "top"
+              ? [fresh.id, ...current.rootBlockIds]
+              : [...current.rootBlockIds, fresh.id],
           blocks: { ...current.blocks, [fresh.id]: fresh },
         }
     const key = focused ? keyOf(focusRootKeyOf(current, focused), fresh.id) : fresh.id
@@ -1135,10 +1149,21 @@ export function BlockEditor({
     setSelected(key)
     setFocus({ key })
   }
+  const newRootBlock = () => edgeRootBlock("top")
   useEffect(() => {
     if (newRootSignal) newRootBlock()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newRootSignal])
+  // The counter's value on mount is not a click: the note page's editor is
+  // keyed by note, and one mounting under a counter bumped for the note
+  // before it must not add a block to the note it opens.
+  const seenAppendRoot = useRef(appendRootSignal)
+  useEffect(() => {
+    if (appendRootSignal === seenAppendRoot.current) return
+    seenAppendRoot.current = appendRootSignal
+    if (appendRootSignal) edgeRootBlock("bottom")
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appendRootSignal])
 
   // The focus title's rename: the focused block's text, one history step.
   const renameFocusRoot = (text: string): boolean => {
@@ -1875,7 +1900,7 @@ export function BlockEditor({
     const target = current.blocks[targetId]
     if (!target) return
     const whole = wholeTextLink(target.text)
-    const inPlace = whole !== null && whole.url === href && target.type !== "note"
+    const inPlace = whole !== null && whole.url === href && !isNoteType(target.type)
     const text = (inPlace ? whole.title : title).trim()
     let next: BlockDoc
     let id: string
@@ -1995,7 +2020,7 @@ export function BlockEditor({
     if (previous === null || previous === focus?.key || readOnly) return
     const current = docRef.current
     const block = current.blocks[idOfKey(previous)]
-    if (!block || block.type === "code" || block.type === "note") return
+    if (!block || block.type === "code" || isNoteType(block.type)) return
     const text = linkifyPastedText(block.text)
     if (text === block.text) return
     history.commit(current, updateBlock(current, block.id, { text }), { type: "structural" })
@@ -2184,7 +2209,7 @@ export function BlockEditor({
         op === "structural" ? { type: "structural" } : { type: "text", blockId: id },
       )
     },
-    onPaste: (key, before, pasted, after) => {
+    onPaste: (key, before, pasted, after, exact) => {
       // Re-form the block's text with the pasted text spliced in at the caret,
       // then parse (import) the whole thing so markdown markers and blank
       // lines become the right blocks. The current block keeps its type —
@@ -2197,20 +2222,38 @@ export function BlockEditor({
         pasted.includes("\n") ? pasted.indexOf("\n") : undefined,
       )
       const pasteDefinesType = before === "" && leadingMarker(pastedFirstLine) !== null
-      // Reminting keeps a pasted `id::` from clobbering an existing block.
-      let sub = remintCollidingIds(parse(before + pasted + after), doc)
+      const parsed = parseWithLevels(before + pasted + after)
+      let sub = parsed.doc
       const currentType = doc.blocks[idOfKey(key)]?.type
       if (!pasteDefinesType && currentType !== undefined && sub.rootBlockIds.length > 0) {
         sub = updateType(sub, sub.rootBlockIds[0], currentType)
       }
+      // Foreign content is sectioned under its headings; Ruminate's own copy
+      // keeps its tree. The row's own text (anything before the caret) is the
+      // reader's, never a heading that gathers the paste.
+      if (!exact) {
+        const closed = new Set(before !== "" ? sub.rootBlockIds.slice(0, 1) : [])
+        sub = sectionUnderHeadings(sub, parsed.headingLevels, closed)
+      }
+      // Reminting keeps a pasted `id::` from clobbering an existing block.
+      sub = remintCollidingIds(sub, doc)
+      // The text after the caret ends the paste's last block in reading order
+      // — under a heading, once sectioned, rather than a root.
+      const lastRoot = sub.rootBlockIds[sub.rootBlockIds.length - 1]
+      const lastPath = lastRoot === undefined ? [] : lastBlockPath(sub, lastRoot)
       const result = spliceBlocks(doc, key, sub)
       if (!result) return
       history.commit(doc, result.doc, { type: "structural" })
+      // The pasted blocks took the row's place among its siblings. Every row
+      // above the caret's is opened, so the caret is on screen.
+      let lastKey = keyOf(parentKeyOf(key), result.lastId)
+      for (const id of lastPath.slice(1)) {
+        setCollapsedState(lastKey, false)
+        lastKey = keyOf(lastKey, id)
+      }
       // Place the caret at the paste boundary — just before the trailing text.
-      const last = result.doc.blocks[result.lastId]
+      const last = result.doc.blocks[idOfKey(lastKey)]
       const caret = Math.max(0, last.text.length - after.length)
-      // The pasted blocks took the row's place among its siblings.
-      const lastKey = keyOf(parentKeyOf(key), result.lastId)
       setSelected(lastKey)
       setFocus({ key: lastKey, caret })
     },
@@ -2517,7 +2560,7 @@ export function BlockEditor({
     // first (exact rebuild, no markdown parsing), then converted foreign html
     // — and fall back to text/plain parsed as markdown, exactly as before.
     const html = event.clipboardData?.getData("text/html") ?? ""
-    let pasted: BlockDoc | null = null
+    let pasted: ReturnType<typeof parseWithLevels> | null = null
     if (html.trim() !== "") {
       const embedded = extractClipboardBlocks(html)
       if (embedded && embedded.length > 0) {
@@ -2548,15 +2591,16 @@ export function BlockEditor({
         return
       }
       const converted = htmlToMarkdown(html)
-      if (converted.trim() !== "") pasted = parse(converted)
+      if (converted.trim() !== "") pasted = parseWithLevels(converted)
     }
     if (!pasted) {
       if (normalized.trim() === "") return
-      pasted = parse(normalized)
+      pasted = parseWithLevels(normalized)
     }
-    // Remint any pasted ids that already exist here (e.g. content copied with
-    // its `id::` lines) so the paste never clobbers an existing block.
-    const sub = remintCollidingIds(pasted, doc)
+    // Foreign content is sectioned under its headings, then any pasted ids
+    // that already exist here (content copied with its `id::` lines) are
+    // reminted so the paste never clobbers an existing block.
+    const sub = remintCollidingIds(sectionUnderHeadings(pasted.doc, pasted.headingLevels), doc)
     const result = insertBlocksAsFirstChildren(doc, targetId, sub)
     if (!result) return
     settleAfterPaste(sub.rootBlockIds, result.doc)
@@ -2700,9 +2744,10 @@ export function BlockEditor({
           aria-label="Focus path"
           data-testid="focus-breadcrumb"
           // `note-header` hangs the trail into the page gutter with the
-          // title (block-editor.css): the first crumb's text keeps starting
-          // where the marker slot does, now the focus title's hanging #.
-          className="note-header mb-3 flex min-w-0 items-center gap-0.5 font-content text-sm text-text-secondary"
+          // title (block-editor.css), and the 25px sets it in past the
+          // chevron column and its gap, as the title is: the first crumb's
+          // text keeps starting where the key slot does, the focus title's #.
+          className="note-header mb-3 flex min-w-0 items-center gap-0.5 pl-[25px] font-content text-sm text-text-secondary"
         >
           <button type="button" className={crumbClass} onClick={() => navigateFocus(null)}>
             {noteTitle?.trim() || "Note"}

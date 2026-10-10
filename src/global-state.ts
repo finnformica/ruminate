@@ -12,7 +12,7 @@ import {
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { DEFAULT_EXPANDED_LEVELS, clampExpandedLevels } from "./blocks/default-collapsed"
 import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
-import { NOTE_TYPE, type GraphSnapshot, type LinkDirections } from "./data/graph"
+import { isNoteType, type GraphSnapshot, type LinkDirections } from "./data/graph"
 import { asBlockType, type BlockType } from "./blocks/types"
 import { orderedNoteIds } from "./data/note-order"
 import {
@@ -326,13 +326,26 @@ export const sortedNotesAtom = atom((get) => {
   })
 })
 
-/** The user's OWN notes, in `sortedNotesAtom` order — what the sidebar lists
- * under Notes. Shared notes are in the graph too (search, hover cards and
- * the editor read them like any other) but are listed under Shared. */
+/** The user's OWN notes, every one, in `sortedNotesAtom` order. Shared
+ * notes are in the graph too (search, hover cards and the editor read them
+ * like any other) but are listed under Shared. */
 export const ownSortedNotesAtom = atom((get) => {
   const origin = get(sharedOriginAtom)
   const notes = get(sortedNotesAtom)
   return origin.size === 0 ? notes : notes.filter((note) => !origin.has(note.id))
+})
+
+/**
+ * The own notes in the Views list: those whose root's view row says so
+ * (`pinned`, `src/data/views.ts`), in `ownSortedNotesAtom` order. Every
+ * note and board is created with such a row, so this is every note until
+ * one is removed from Views — which takes it off this list and nothing
+ * else: `sortedNotesAtom` and the rest keep every note, so the note is still
+ * found by search, Recent, the calendar and its links.
+ */
+const listedNotesAtom = atom((get) => {
+  const byRoot = get(viewByRootAtom)
+  return get(ownSortedNotesAtom).filter((note) => byRoot.get(note.id)?.pinned === true)
 })
 
 /** The notes shared with the user, each with the share it came through, in
@@ -380,9 +393,10 @@ const byEntryUpdatedAt = (a: ViewEntry, b: ViewEntry) => {
 }
 
 /**
- * **The Views list**: every note of the user's own, and every block made a
- * view of its own (`blockViewsAtom`), as one list in the chosen order
- * (`noteSortAtom`) — what the sidebar draws under **Views**, the Views page
+ * **The Views list**: the roots whose view row lists them — the user's own
+ * notes and boards that are (`listedNotesAtom`), and every block made a
+ * view of its own (`blockViewsAtom`) — as one list in the chosen order
+ * (`noteSortAtom`): what the sidebar draws under **Views**, the Views page
  * lists, and the palette's Views group holds with nothing typed. Shared
  * notes are not here: they are rows in someone else's corpus, listed apart
  * (`sharedNotesAtom`); a block view IN a shared note is, since the view is
@@ -401,7 +415,7 @@ const byEntryUpdatedAt = (a: ViewEntry, b: ViewEntry) => {
  */
 export const viewEntriesAtom = atom((get): ViewEntry[] => {
   const entries: ViewEntry[] = [
-    ...get(ownSortedNotesAtom).map((note): ViewEntry => ({
+    ...get(listedNotesAtom).map((note): ViewEntry => ({
       kind: "note",
       id: note.id,
       noteId: note.id,
@@ -484,10 +498,10 @@ export const searchBlocksAtom = atom((get) => {
 
 /**
  * A BLOCK made a view of its own (docs/metadata.md): a block with a view
- * row rooted at it, and the note to open it in. A note is a view by being a
- * note; a block is one by having a row, which puts it in the Views list
- * beside the notes, from where it opens focused on — a focused view of that
- * one block and what is beneath it.
+ * row rooted at it, and the note to open it in. A row is what lists a node,
+ * a note's and a block's alike; a block's puts it in the Views list beside
+ * the notes, from where it opens focused on — a focused view of that one
+ * block and what is beneath it.
  */
 export interface BlockView {
   id: string
@@ -523,7 +537,7 @@ export const blockViewsAtom = atom((get) => {
   const viewIds = new Set<string>()
   for (const id of get(viewRootIdsAtom)) {
     const node = graph.nodes.get(id)
-    if (node && node.type !== NOTE_TYPE) viewIds.add(id)
+    if (node && !isNoteType(node.type)) viewIds.add(id)
   }
   if (viewIds.size === 0) return NO_BLOCK_VIEWS
 

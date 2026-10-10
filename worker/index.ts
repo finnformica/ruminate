@@ -9,6 +9,7 @@
 import type { Env } from "./types"
 import { admin, ADMIN_PREFIX } from "./handlers/admin"
 import { anthropicKey, ANTHROPIC_KEY_PATH } from "./handlers/anthropic-key"
+import { boardNotes, BOARD_NOTES_PATH } from "./handlers/board-notes"
 import { boardTag, BOARD_TAG_PATH } from "./handlers/board-tag"
 import { features, FEATURES_PATH } from "./handlers/features"
 import { githubAuth } from "./handlers/github-auth"
@@ -44,6 +45,7 @@ export default {
     if (pathname === PREFERENCES_PATH) return preferences(request, env)
     if (pathname === ANTHROPIC_KEY_PATH) return anthropicKey(request, env)
     if (pathname === BOARD_TAG_PATH) return boardTag(request, env)
+    if (pathname === BOARD_NOTES_PATH) return boardNotes(request, env)
     if (pathname === ADMIN_PREFIX || pathname.startsWith(`${ADMIN_PREFIX}/`)) {
       return admin(request, env)
     }

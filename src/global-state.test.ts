@@ -230,19 +230,22 @@ describe("blockViewsAtom", () => {
 })
 
 describe("viewEntriesAtom", () => {
-  const viewRow = (id: string, sort_key: string | null) => ({
+  const viewRow = (id: string, sort_key: string | null, pinned = true) => ({
     id,
     root_id: id,
     filter: null,
     sort: null,
-    pinned: true,
+    pinned,
     sort_key,
     updated_at: 2,
   })
+  /** The rows every note is created with (src/data/views.ts): what lists
+   * it. The fixtures' notes get theirs here, as a pull would hand them over. */
+  const LISTED = [viewRow("tasks", null), viewRow("misc", null)]
 
-  it("is every note and every block view, by name in the default sort", async () => {
+  it("is every listed note and every block view, by name in the default sort", async () => {
     const { store, unsubscribe } = await signedInStore(FILES)
-    store.set(viewsAtom, viewMapOf([viewRow("blk_milk", null)]))
+    store.set(viewsAtom, viewMapOf([...LISTED, viewRow("blk_milk", null)]))
     // "buy milk" sorts between "misc" and "Today" by name.
     expect(store.get(viewEntriesAtom).map((entry) => `${entry.kind}:${entry.id}`)).toEqual([
       "block:blk_milk",
@@ -252,10 +255,32 @@ describe("viewEntriesAtom", () => {
     unsubscribe()
   })
 
+  it("is the rows that say so: a note with no row, or an unpinned one, is not in Views — and is still a note", async () => {
+    const { store, unsubscribe } = await signedInStore(FILES)
+    // No row at all for "misc", and "tasks" removed from Views: its row
+    // stays (a saved filter would stay with it), unpinned.
+    store.set(viewsAtom, viewMapOf([viewRow("tasks", null, false), viewRow("blk_milk", null)]))
+    expect(store.get(viewEntriesAtom).map((entry) => `${entry.kind}:${entry.id}`)).toEqual([
+      "block:blk_milk",
+    ])
+    // Everything else that lists notes keeps every note: search, Recent,
+    // the calendar and the block index read these.
+    expect(store.get(ownSortedNotesAtom).map((note) => note.id)).toEqual(["misc", "tasks"])
+    expect(store.get(notesAtom).has("tasks")).toBe(true)
+    // Listed again, it is back where its name puts it.
+    store.set(viewsAtom, viewMapOf([...LISTED, viewRow("blk_milk", null)]))
+    expect(store.get(viewEntriesAtom).map((entry) => entry.id)).toEqual([
+      "blk_milk",
+      "misc",
+      "tasks",
+    ])
+    unsubscribe()
+  })
+
   it("lists the notes then the blocks in the manual sort until something is dragged", async () => {
     const { store, unsubscribe } = await signedInStore(FILES)
     store.set(noteSortAtom, "manual")
-    store.set(viewsAtom, viewMapOf([viewRow("blk_milk", null)]))
+    store.set(viewsAtom, viewMapOf([...LISTED, viewRow("blk_milk", null)]))
     expect(store.get(viewEntriesAtom).map((entry) => `${entry.kind}:${entry.id}`)).toEqual([
       "note:misc",
       "note:tasks",
@@ -273,6 +298,7 @@ describe("viewEntriesAtom", () => {
         viewRow("blk_milk", "a0"),
         viewRow("tasks", "a1"),
         // Never dragged: no key, so it joins the end.
+        viewRow("misc", null),
       ]),
     )
     expect(store.get(viewEntriesAtom).map((entry) => entry.id)).toEqual([
@@ -290,7 +316,7 @@ describe("viewEntriesAtom", () => {
 
   it("leaves the keys alone in an automatic sort, and keeps shared notes out", async () => {
     const { store, unsubscribe } = await signedInStore(FILES)
-    store.set(viewsAtom, viewMapOf([viewRow("misc", "a0")]))
+    store.set(viewsAtom, viewMapOf([viewRow("misc", "a0"), viewRow("tasks", null)]))
     store.set(sharedOriginAtom, new Map([["misc", "share-1"]]))
     expect(store.get(viewEntriesAtom).map((entry) => entry.id)).toEqual(["tasks"])
     unsubscribe()

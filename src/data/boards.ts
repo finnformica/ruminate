@@ -10,10 +10,10 @@ import {
 } from "../blocks/link"
 import type { BlockProps } from "../blocks/types"
 import type { NoteId } from "../schema"
-import { BOARD_PROP, FEATURE_PROP } from "../utils/board-prop"
 import {
-  NOTE_TYPE,
+  BOARD_TYPE,
   childIdsOf,
+  isLegacyBoard,
   noteDoc,
   parentIdsOf,
   parseProps,
@@ -22,6 +22,7 @@ import {
   type GraphSnapshot,
 } from "./graph"
 import { unassignedIds } from "./basket"
+import type { NotesFeature, NotesSuggestion } from "./auto-notes"
 import type { TagFeature, TagSuggestion } from "./auto-tag"
 import { applyOps, type Op } from "./ops"
 
@@ -30,9 +31,9 @@ import { applyOps, type Op } from "./ops"
  * few features — a location, an object, a material, a link to where it
  * came from — you can set on each one from a form instead of the outline.
  *
- * A board is a note whose page carries `board: true` (`BOARD_PROP`):
+ * A board is a note whose root node is of type `board` (`BOARD_TYPE`):
  * made by **New board**, drawn with its own icon, opened on its own page.
- * Beneath that one property nothing here is a new kind of thing. Its pictures
+ * Beneath that one type nothing here is a new kind of thing. Its pictures
  * are the image blocks written in the note: the ones its outline reaches,
  * and the ones nothing reaches yet, which sit in the note's Unassigned
  * basket (`basket.ts`) as any such block does. A picture added from the
@@ -67,7 +68,8 @@ import { applyOps, type Op } from "./ops"
  * (`link`), kept as a link block and drawn as its card, which the model is
  * never asked about.
  */
-export type FeatureType = "text" | "link" | "place"
+export const FEATURE_TYPES = ["text", "place", "link"] as const
+export type FeatureType = (typeof FEATURE_TYPES)[number]
 
 /** What the `feature` prop on a block carries. */
 export interface FeatureSpec {
@@ -94,6 +96,12 @@ export interface BoardFeature extends FeatureSpec {
  * board** (`defaultFeatureOps`), and the names a board from before
  * features were blocks is read by. The one place the defaults live.
  */
+/** What the Object feature's notes say — the one example of a note the
+ * model is shown when it writes notes (`AUTO_NOTES_SYSTEM_PROMPT`), so the
+ * example is always a note a board actually carries. */
+export const OBJECT_NOTES =
+  "the thing the picture is of, such as furniture, lighting, cutlery, plants or decoration"
+
 export const DEFAULT_FEATURES: readonly { label: string; spec: FeatureSpec }[] = [
   {
     label: "Location",
@@ -105,12 +113,7 @@ export const DEFAULT_FEATURES: readonly { label: string; spec: FeatureSpec }[] =
   },
   {
     label: "Object",
-    spec: {
-      type: "text",
-      multi: true,
-      notes:
-        "the thing the picture is of, such as furniture, lighting, cutlery, plants or decoration",
-    },
+    spec: { type: "text", multi: true, notes: OBJECT_NOTES },
   },
   { label: "Material", spec: { type: "text", multi: true, notes: "what that thing is made of" } },
   { label: "Link", spec: { type: "link", multi: true } },
@@ -139,16 +142,32 @@ const normalise = (text: string) => text.trim().toLocaleLowerCase()
  * model's answer is matched to the features it was asked about. */
 const sameLabel = (a: string, b: string) => normalise(a) === normalise(b)
 
+/** Whether a value names one of the feature types. */
+export const isFeatureType = (value: unknown): value is FeatureType =>
+  (FEATURE_TYPES as readonly unknown[]).includes(value)
+
 /** Whether a feature's values are link blocks. */
 export const isLinkType = (type: FeatureType): boolean => type === "link"
 
-/** Whether the note is a board: a note whose page carries `board: true`
- * (`BOARD_PROP`). The board page refuses any other note, and the writes
- * here write to nothing else. */
+/** Whether a feature is the one a picture's location is offered to. */
+const isPlaceType = (type: FeatureType): boolean => type === "place"
+
+/**
+ * The property on a block that makes it one of a board's features
+ * (docs/boards.md, "Features"): `{ feature: { type, multi, notes } }` in
+ * the props of a direct child of the board's page, whose text is the
+ * feature's label and whose children are its values.
+ */
+const FEATURE_PROP = "feature"
+
+/** Whether the note is a board: a note root of type `board` (`BOARD_TYPE`)
+ * — or, until migrations/0020 has run, a note whose page still carries the
+ * old property (`isLegacyBoard`). The board page refuses any other note,
+ * and the writes here write to nothing else. */
 export function isBoard(snapshot: GraphSnapshot, boardId: NoteId): boolean {
   const node = snapshot.nodes.get(boardId)
-  if (!node || node.type !== NOTE_TYPE) return false
-  return parseProps(node.props)?.[BOARD_PROP] === true
+  if (!node) return false
+  return node.type === BOARD_TYPE || isLegacyBoard(node)
 }
 
 /**
@@ -164,7 +183,7 @@ export function featureSpecOf(props: BlockProps | null): FeatureSpec | null {
   const raw = props?.[FEATURE_PROP]
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null
   const { type, multi, notes, meaning } = raw as Record<string, unknown>
-  const kind: FeatureType = type === "link" || type === "place" ? type : "text"
+  const kind: FeatureType = isFeatureType(type) ? type : "text"
   const written = typeof notes === "string" ? notes : typeof meaning === "string" ? meaning : ""
   const said = written.trim()
   return { type: kind, multi: multi === true, ...(said !== "" ? { notes: said } : {}) }
@@ -675,6 +694,20 @@ export function linkPreviewOps(
   return ops
 }
 
+/** The board's features as the notes route is told them (docs/boards.md,
+ * "Features"): all text already on the board — each label, type, whether
+ * it takes several values, the values in use and the notes as they stand,
+ * link features included. */
+export function notesFeaturesOf(snapshot: GraphSnapshot, boardId: NoteId): NotesFeature[] {
+  return boardFeatures(snapshot, boardId).map((state) => ({
+    label: state.feature.label,
+    type: state.feature.type,
+    multi: state.feature.multi,
+    values: state.values.map((value) => value.text.trim()).filter((text) => text !== ""),
+    notes: state.feature.notes,
+  }))
+}
+
 /** The board's features as the tagging route is told them (docs/boards.md,
  * "Tagging with Claude"): each label, whether it takes several values,
  * its notes, the values in use, and — for a place feature — that the
@@ -690,7 +723,7 @@ export function tagFeaturesOf(snapshot: GraphSnapshot, boardId: NoteId): TagFeat
         multi: feature.multi,
         ...(feature.notes !== "" ? { notes: feature.notes } : {}),
         values: state.values.map((value) => value.text.trim()).filter((text) => text !== ""),
-        ...(feature.type === "place" ? { place: true } : {}),
+        ...(isPlaceType(feature.type) ? { place: true } : {}),
       },
     ]
   })
@@ -741,6 +774,41 @@ export function suggestionOps(
       if (carriedTexts.has(normalise(text))) continue
       take(setValueOps(current, boardId, feature.id, imageId, { text }))
     }
+  }
+  return ops
+}
+
+/**
+ * Notes a model suggested for the board's features (`NotesSuggestion`,
+ * src/data/auto-notes.ts) as the writes they amount to: one batch,
+ * undoable as one. Each answer is matched to a feature by the label the
+ * model was given (trimmed, whatever its case), and written only where the
+ * feature's notes are empty — a note a person wrote is never overwritten
+ * — through `updateFeatureOps`, the batch built up against the snapshot
+ * as each write would leave it. An empty batch is a suggestion with
+ * nothing to add.
+ */
+export function notesSuggestionOps(
+  snapshot: GraphSnapshot,
+  boardId: NoteId,
+  suggestion: NotesSuggestion,
+  now: number,
+): Op[] {
+  const ops: Op[] = []
+  if (!isBoard(snapshot, boardId)) return ops
+  let current = snapshot
+  const written = new Set<string>()
+  for (const entry of suggestion.notes) {
+    const notes = entry.notes.trim()
+    if (notes === "") continue
+    const state = boardFeatures(current, boardId).find(
+      (each) => each.feature.notes === "" && sameLabel(each.feature.label, entry.label),
+    )
+    if (!state || written.has(state.feature.id)) continue
+    written.add(state.feature.id)
+    const batch = updateFeatureOps(current, boardId, state.feature.id, { notes })
+    ops.push(...batch)
+    current = applyOps(current, batch, now)
   }
   return ops
 }

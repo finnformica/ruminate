@@ -51,7 +51,7 @@ import { BLOCK_TYPES } from "../../src/blocks/types"
 import { generateNKeysBetween } from "fractional-indexing"
 import { blockId } from "../../src/blocks/id"
 import { imagePropsOf } from "../../src/blocks/image"
-import { NOTE_TYPE, propsJson, sortKeyBetween } from "../../src/data/graph"
+import { isNoteType, propsJson, sortKeyBetween } from "../../src/data/graph"
 import { IMAGE_LINK_TTL_SECONDS, signImageLink } from "../handlers/image-links"
 import { imageUrlOf } from "../handlers/image-policy"
 import { deleteBlockOps, deleteNoteOps, deleteSubtreeOps, type Op } from "../../src/data/ops"
@@ -361,10 +361,10 @@ const preview = (text: string, words = 20): string => {
   return parts.length > words ? `${parts.slice(0, words).join(" ")}…` : parts.join(" ")
 }
 
-/** The block types a tool may write. `note` is not one of them: a note is
- * made by a person, never by an agent (docs/mcp-server.md), so no tool can
- * mint one by naming the type. */
-const WRITABLE_TYPES = BLOCK_TYPES.filter((type) => type !== NOTE_TYPE)
+/** The block types a tool may write. `note` and `board` are not among
+ * them: a note is made by a person, never by an agent (docs/mcp-server.md),
+ * so no tool can mint one by naming the type. */
+const WRITABLE_TYPES = BLOCK_TYPES.filter((type) => !isNoteType(type))
 
 const blockTypeArg = (description: string) =>
   z.optional(
@@ -575,7 +575,7 @@ function linkable(context: ToolRunContext, parentId: string, blockId: string): T
   if (parentId === blockId) {
     return { ok: false, message: "A block cannot be put under itself." }
   }
-  if (nodeOf(graph, blockId)?.type === NOTE_TYPE) {
+  if (isNoteType(nodeOf(graph, blockId)?.type ?? "")) {
     return { ok: false, message: `${blockId} is a note; a note cannot be linked under a block.` }
   }
   return sharedOutsideScope(context, blockId)
@@ -1299,7 +1299,7 @@ export const TOOLS: ToolDef[] = [
 
       const parent = nodeOf(graph, parentId)
       if (!parent) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
-      if (parent.type !== NOTE_TYPE) {
+      if (!isNoteType(parent.type)) {
         const refusal = sharedOutsideScope(context, parentId)
         if (refusal) return refusal
       }
@@ -1309,7 +1309,7 @@ export const TOOLS: ToolDef[] = [
       // under a note belongs to that note; one added under a block inherits
       // the note that block was written in, which is what the editor does
       // when you press Enter.
-      const notesId = parent.type === NOTE_TYPE ? parent.id : parent.notes_id
+      const notesId = isNoteType(parent.type) ? parent.id : parent.notes_id
       if (notesId === undefined) {
         return {
           ok: false,
@@ -1436,7 +1436,7 @@ export const TOOLS: ToolDef[] = [
 
       const row = nodeOf(graph, id)
       if (!row) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
-      if (row.type === NOTE_TYPE) {
+      if (isNoteType(row.type)) {
         return {
           ok: false,
           message: `${id} is a note, not a block. Retitle it with \`update_note\`.`,
@@ -1660,7 +1660,7 @@ export const TOOLS: ToolDef[] = [
 
       const row = nodeOf(context.graph, blockId)
       if (!row) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
-      if (row.type === NOTE_TYPE) {
+      if (isNoteType(row.type)) {
         return { ok: false, message: `${blockId} is a note. Delete it with \`delete_note\`.` }
       }
       const refusal = sharedOutsideScope(context, blockId)

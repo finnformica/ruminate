@@ -20,6 +20,8 @@ import {
   imageValues,
   inverseOps,
   linkPreviewOps,
+  notesFeaturesOf,
+  notesSuggestionOps,
   removeFeatureOps,
   resetImageOps,
   setCaptionOps,
@@ -30,6 +32,7 @@ import {
   updateFeatureOps,
 } from "./boards"
 import {
+  BOARD_TYPE,
   buildGraphSnapshot,
   childIdsOf,
   docToGraph,
@@ -56,9 +59,9 @@ function graphOf(notes: Record<string, string>): GraphSnapshot {
   const nodes = []
   const links = []
   for (const [id, markdown] of Object.entries(notes)) {
-    // Every note in a fixture is a board: the page carries the property.
-    const g = docToGraph(id, serialize(parse(markdown)), 1, { board: true })
-    nodes.push(...g.nodes)
+    // Every note in a fixture is a board: its root is retyped.
+    const g = docToGraph(id, serialize(parse(markdown)), 1)
+    nodes.push(...g.nodes.map((n) => (n.id === id ? { ...n, type: BOARD_TYPE } : n)))
     links.push(...g.links)
   }
   return buildGraphSnapshot(nodes, links)
@@ -1023,8 +1026,9 @@ describe("the defaults", () => {
     ])
     // Together at the top, the pictures where they were.
     expect(childIdsOf(next, "b").slice(-2)).toEqual(["blk_pic1000000", "blk_pic2000000"])
+    // Made a note again (**Make this a note**), it is no board to write to.
     const plain = graphOf({ b: "" })
-    const unmade = applyOps(plain, [{ op: "setProps", id: "b", props: null }], NOW)
+    const unmade = applyOps(plain, [{ op: "setType", id: "b", type: "note" }], NOW)
     expect(defaultFeatureOps(unmade, "b")).toEqual([])
   })
 })
@@ -1200,6 +1204,59 @@ describe("the Features editor", () => {
       "create",
       "link",
     ])
+  })
+})
+
+describe("notes suggested by the model", () => {
+  it("describes the board's features with everything they already say, links included", () => {
+    expect(notesFeaturesOf(boardOf(), "b")).toEqual([
+      {
+        label: "Location",
+        type: "place",
+        multi: false,
+        values: ["Mauritius", "Lisbon"],
+        notes: DEFAULT_FEATURES[0].spec.notes,
+      },
+      { label: "Object", type: "text", multi: true, values: [], notes: OBJECT_SPEC.notes },
+    ])
+  })
+
+  it("writes only the notes that are empty, by label, as one batch that undoes whole", () => {
+    let snapshot = boardOf()
+    snapshot = applyOps(snapshot, updateFeatureOps(snapshot, "b", OBJECT, { notes: "" }), NOW)
+    snapshot = applyOps(snapshot, addFeatureOps(snapshot, "b", "blk_colour0000"), NOW)
+    snapshot = applyOps(snapshot, [{ op: "setText", id: "blk_colour0000", text: "Colour" }], NOW)
+    const ops = notesSuggestionOps(
+      snapshot,
+      "b",
+      {
+        notes: [
+          { label: "location", notes: "rewritten" },
+          { label: "OBJECT", notes: " the thing the picture is of " },
+          { label: "Object", notes: "again" },
+          { label: "Colour", notes: "  " },
+          { label: "Nothing", notes: "x" },
+        ],
+      },
+      NOW,
+    )
+    expect(kinds(ops)).toEqual(["setProps"])
+    const next = applyOps(snapshot, ops, NOW)
+    expect(boardFeatures(next, "b").map((s) => s.feature.notes)).toEqual([
+      DEFAULT_FEATURES[0].spec.notes,
+      "the thing the picture is of",
+      "",
+    ])
+    const undone = applyOps(next, inverseOps(ops, snapshot) as Op[], NOW)
+    expect(boardFeatures(undone, "b").map((s) => s.feature.notes)).toEqual([
+      DEFAULT_FEATURES[0].spec.notes,
+      "",
+      "",
+    ])
+    expect(notesSuggestionOps(snapshot, "b", { notes: [] }, NOW)).toEqual([])
+    expect(
+      notesSuggestionOps(snapshot, "nope", { notes: [{ label: "Object", notes: "x" }] }, NOW),
+    ).toEqual([])
   })
 })
 

@@ -109,6 +109,8 @@ export async function createShare(share: CreateShareBody): Promise<GivenShare> {
   return body.share
 }
 
+/** End a share from either side — Revoke on one I gave, Leave on one I was
+ * given: the same request, scoped by the server to whichever side I am on. */
 export async function revokeShare(id: string): Promise<void> {
   await request(`/${encodeURIComponent(id)}`, { method: "DELETE" })
 }

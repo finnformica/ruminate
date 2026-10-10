@@ -1,8 +1,14 @@
 import React from "react"
-import { isLinkType, type BoardFeatureState, type FeatureType } from "../../data/boards"
+import {
+  FEATURE_TYPES,
+  isLinkType,
+  type BoardFeatureState,
+  type FeatureType,
+} from "../../data/boards"
 import { useAiAvailable } from "../../hooks/ai"
 import type { BoardWrites } from "../../hooks/board"
 import { useCoarsePointer } from "../../hooks/coarse-pointer"
+import { usePending } from "../../hooks/pending"
 import { cx } from "../../utils/cx"
 import { Button } from "../ui/button"
 import { Checkbox } from "../ui/checkbox"
@@ -17,14 +23,13 @@ import {
   GlobeIcon16,
   LinkIcon16,
   PlusIcon16,
+  SparklesIcon16,
   TrashIcon16,
-  XIcon16,
 } from "../icons"
 
 /** The types a feature can be, as the menu names them, and the glyph each
  * wears: lines of text for a name, a globe for a place, a link. */
 const TYPE_LABELS: Record<FeatureType, string> = { text: "Text", link: "Link", place: "Place" }
-const TYPES: readonly FeatureType[] = ["text", "place", "link"]
 const TYPE_ICONS: Record<FeatureType, React.ReactNode> = {
   text: <AlignLeftIcon16 />,
   place: <GlobeIcon16 />,
@@ -45,9 +50,12 @@ const heading = "text-sm font-normal text-text-secondary"
  * board's own writes, and the page shows it. **Add feature** in the last
  * row makes a text feature named "New feature" with its name selected,
  * ready to be typed over. The order is the page's: a feature is reordered
- * by moving its block in the outline. On a phone the table is a sheet
- * from the foot of the screen, the notes beneath each name and **Add
- * feature** pinned at the bottom.
+ * by moving its block in the outline. **Suggest** in the title bar —
+ * there, like the Notes column, only while a model can be asked — writes
+ * the notes the features lack from what the board already says, as one
+ * change with one Undo (docs/boards.md, "Features"). On a phone the table
+ * is a sheet from the foot of the screen, the notes beneath each name and
+ * **Add feature** pinned at the bottom.
  */
 export function BoardFeaturesDialog({
   open,
@@ -62,6 +70,22 @@ export function BoardFeaturesDialog({
 }) {
   const coarse = useCoarsePointer()
   const notes = useAiAvailable().available
+  // The model's notes for the features that lack them: busy from the
+  // press until the toast, as the picture window's Suggest is.
+  const [suggest, suggesting] = usePending(() => writes.suggestNotes())
+  const suggestControl = notes ? (
+    // The icon's slot is where the spinner goes. On a phone the title bar
+    // has no room for the word, so the sparkles stand alone there.
+    <Button
+      size="small"
+      aria-label="Suggest notes"
+      icon={<SparklesIcon16 />}
+      loading={suggesting}
+      onClick={() => suggest()}
+    >
+      <span className="hidden sm:inline">Suggest</span>
+    </Button>
+  ) : null
   // The feature just added, whose name takes the focus, selected.
   const [focusId, setFocusId] = React.useState<string | null>(null)
   const add = () => {
@@ -79,15 +103,7 @@ export function BoardFeaturesDialog({
   if (coarse) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <Sheet.Content title="Features">
-          <div className="flex h-12 shrink-0 items-center justify-between border-b border-border-secondary pl-4 pr-2">
-            <span aria-hidden className="font-bold">
-              Features
-            </span>
-            <IconButton aria-label="Close" disableTooltip onClick={onClose}>
-              <XIcon16 />
-            </IconButton>
-          </div>
+        <Sheet.Content title="Features" titleBar actions={suggestControl}>
           <div data-testid="board-features" className="min-h-0 flex-1 overflow-y-auto px-4">
             <div
               className={cx(
@@ -126,7 +142,7 @@ export function BoardFeaturesDialog({
     // stays in reach.
     <Dialog open={open} modal="trap-focus" onOpenChange={onOpenChange}>
       {open ? (
-        <Dialog.Content title="Features" className="max-w-xl">
+        <Dialog.Content title="Features" actions={suggestControl} className="max-w-xl">
           <table data-testid="board-features" className="w-full border-collapse">
             <thead>
               <tr className={heading}>
@@ -220,7 +236,7 @@ function useFeatureCells({ state, focus, writes }: RowProps) {
         }
       />
       <DropdownMenu.Content align="start" width={160}>
-        {TYPES.map((type) => (
+        {FEATURE_TYPES.map((type) => (
           <DropdownMenu.Item
             key={type}
             icon={TYPE_ICONS[type]}

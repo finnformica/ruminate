@@ -19,6 +19,17 @@
  * through the board's ordinary writes.
  */
 
+import {
+  MAX_CAPTION_LENGTH,
+  MAX_FEATURES,
+  MAX_SUGGESTED_VALUES,
+  MAX_SUGGESTED_VALUE_LENGTH,
+  cut,
+  readLabel,
+  readNotes,
+  readValues,
+} from "./ai-limits"
+
 /**
  * Who answers: `anthropic` — the Messages API with the user's own key — or
  * `cloudflare` — Workers AI, free within Cloudflare's daily allowance,
@@ -35,16 +46,6 @@ export const AUTO_TAG_MODEL = "claude-haiku-4-5"
 /** The model the Worker asks of Workers AI: an open vision model that reads
  * a picture and chat-completion messages. */
 export const CLOUDFLARE_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it"
-
-/** Calls one account may make in a UTC day — a fuse on the user's own bill
- * (the key is theirs), not a quota. */
-export const AUTO_TAG_DAILY_LIMIT = 300
-
-/** The most the picture's bytes may weigh: the API takes five megabytes of
- * base64, which is three and three-quarter of raw bytes. A sanity limit —
- * the client sends a copy fitted for the model (`visionCopy`,
- * src/data/image-fit.ts), which is far below it. */
-export const AUTO_TAG_MAX_IMAGE_BYTES = Math.floor((5 * 1024 * 1024 * 3) / 4)
 
 /** The picture formats the API reads. AVIF, which the editor accepts, is
  * not among them. */
@@ -112,17 +113,6 @@ export interface TagResponse {
   log?: string
 }
 
-// Limits on what is sent and what is read back, so a board cannot stuff
-// the prompt and an answer cannot stuff the graph.
-const MAX_FEATURES = 12
-const MAX_VALUES_PER_FEATURE = 200
-const MAX_LABEL_LENGTH = 60
-const MAX_NOTES_LENGTH = 500
-const MAX_VALUE_LENGTH = 60
-const MAX_CAPTION_LENGTH = 120
-/** How many values the model may give one feature at once. */
-const MAX_SUGGESTED_VALUES = 5
-
 const normalise = (text: string) => text.trim().toLocaleLowerCase()
 
 /**
@@ -139,20 +129,11 @@ export function readTagRequest(raw: unknown): TagRequest | null {
   for (const entry of record.features) {
     if (typeof entry !== "object" || entry === null) return null
     const feature = entry as Record<string, unknown>
-    if (typeof feature.label !== "string" || typeof feature.multi !== "boolean") return null
-    if (!Array.isArray(feature.values) || feature.values.length > MAX_VALUES_PER_FEATURE) {
-      return null
-    }
-    const label = feature.label.trim().slice(0, MAX_LABEL_LENGTH)
-    if (label === "") return null
-    const notes =
-      typeof feature.notes === "string" ? feature.notes.trim().slice(0, MAX_NOTES_LENGTH) : ""
-    const values: string[] = []
-    for (const value of feature.values) {
-      if (typeof value !== "string") return null
-      const text = value.trim().slice(0, MAX_VALUE_LENGTH)
-      if (text !== "") values.push(text)
-    }
+    if (typeof feature.multi !== "boolean") return null
+    const label = readLabel(feature.label)
+    const values = readValues(feature.values)
+    if (label === null || values === null) return null
+    const notes = readNotes(feature.notes)
     features.push({
       label,
       multi: feature.multi,
@@ -284,10 +265,6 @@ export function tagOutputSchema(): Record<string, unknown> {
   }
 }
 
-/** The most a NEW value may be: it becomes a menu option. A value in use
- * is never shortened (`MAX_VALUE_LENGTH` is for the request). */
-export const MAX_SUGGESTED_VALUE_LENGTH = 30
-
 /** The first code point upper-cased, the rest as it was. */
 const capitalised = (text: string): string => {
   const [first = "", ...rest] = Array.from(text)
@@ -342,7 +319,7 @@ export function readTagSuggestion(
   if (typeof raw !== "object" || raw === null) return null
   const record = raw as Record<string, unknown>
   if (typeof record.caption !== "string" || !Array.isArray(record.features)) return null
-  const caption = capitalised(record.caption.trim().slice(0, MAX_CAPTION_LENGTH))
+  const caption = capitalised(cut(record.caption, MAX_CAPTION_LENGTH))
   const asked = new Set(features.map((feature) => normalise(feature.label)))
   const answered = new Map<string, string[]>()
   // Each entry as it came, in order, for the positional reading.
@@ -379,8 +356,7 @@ export function readTagSuggestion(
         named ?? (byPosition && atIndex && !asked.has(atIndex.label) ? atIndex.values : [])
       for (const given of givens) {
         const existing = inUse.get(normalise(given))
-        const text =
-          existing ?? styledValue(given.slice(0, MAX_SUGGESTED_VALUE_LENGTH).trim(), feature.values)
+        const text = existing ?? styledValue(cut(given, MAX_SUGGESTED_VALUE_LENGTH), feature.values)
         if (text === "" || seen.has(normalise(text))) continue
         seen.add(normalise(text))
         values.push(text)

@@ -10,41 +10,60 @@ the header's **New** menu (or <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>B</kbd>), makes
 opens it at `/boards/<note id>`; its header is the note's own — Sort, Filter
 and the ⋯ menu, where **Open note** opens the note beneath it.
 
-## One property, and nothing else new in the data
+## One type, and nothing else new in the data
 
-A board is a note whose page carries `board: true` among its metadata
-(`BOARD_PROP`, `src/utils/board-prop.ts`), beside its font and width. That
-one property is what makes it a board: the note's kind is `board`
-(`NoteType`, derived in `src/data/note-meta.ts`), which gives it its icon in
-every list, sends its rows to the board page rather than the outline
-(`useOpenNote`, `src/hooks/open-note.ts`), lists it under `type:board` in a
-search, and is what the board page checks before it draws anything — a
-note without it is refused and opened as a note.
+A board is a note whose root node is of type `board` rather than `note`
+(`BOARD_TYPE`, beside `NOTE_TYPE` in `src/data/graph.ts`;
+docs/graph-schema-v2.md). The two are the note types — `NOTE_TYPES`, and
+`isNoteType` is the question — so everywhere a note is listed, counted,
+ordered, deleted, shared or walked, a board is one; the registry knows the
+type (`src/blocks/registry.ts`, the `note` family), so a board linked under
+a block walks as a `board` row, drawn as a note row is with the board's own
+icon in the favicon slot. That one type is what makes it a board: the note's
+kind is `board` (`NoteType`, derived in `src/data/note-meta.ts`), which
+gives it its icon in every list, sends its rows to the board page rather
+than the outline (`useOpenNote`, `src/hooks/open-note.ts`), lists it under
+`type:board` in a search, and is what the board page checks before it draws
+anything (`isBoard`) — a note of any other type is refused and opened as a
+note. Its metadata — font, width, `updated_at` — is its `props`, as a
+note's.
 
-The property is a note's **default surface**, nothing more, and the note's
-menu toggles it: **Make this a board** on any plain note sets it and opens
-the board; **Make this a note** on a board clears it. Nothing else about the
-note changes either way — the same rows, the same outline, the same id and
-URL — and no structure is required first: a note with no pictures makes an
-empty board, and the outline of a board is one click away (**Open note**
-in the board's ⋯ menu, **Open board** in the outline's). A daily or weekly
-note is what its id says it is and cannot be made a board.
+The type is a note's **default surface**, nothing more, and the note's menu
+changes it: **Make this a board** on any plain note sets the root's type to
+`board` (`useMakeBoard`, `src/hooks/board.ts`, one `setType`) and opens the
+board; **Make this a note** on a board sets it back (`useMakeNote`). Nothing
+else about the note changes either way — the same rows, the same outline,
+the same id and URL; nothing beneath the root is touched — and no structure
+is required first: a note with no pictures makes an empty board, and the
+outline of a board is one click away (**Open note** in the board's ⋯ menu,
+**Open board** in the outline's). A daily or weekly note is what its id says
+it is and cannot be made a board. The editor never retypes a root either
+way: a doc carries a note's text and props, never its kind, so an edit to a
+board's outline leaves it a board (`partsToOps`, `src/data/ops.ts`).
 
-Beneath that property, every piece of a board is a block the outline
+Until 2026-W41 a board was a `note` row whose props carried `board: true`;
+migrations/0020 retyped every such row. While that migration has yet to run
+where a build is pointed, the old shape is still read as a board through one
+helper (`isLegacyBoard`, `src/data/graph.ts`), and the replica retypes a
+board a stale client pushes in that shape (`worker/handlers/replica.ts`) so
+it cannot write it back over the migrated row. Both go once 0020 has run in
+production.
+
+Beneath that type, every piece of a board is a block the outline
 already understands, which is what lets the board and the outline be two
 surfaces on one graph with no special-casing between them: a picture pasted
 into the outline is on the board, a picture added from the board is in the
 note, and a board's features and values can be written by hand in the
 outline and the form picks them up.
 
-| on the board       | in the graph                                                                                                                                                                                                                                      |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| the board          | a note whose page props hold `board: true`                                                                                                                                                                                                        |
-| its pictures       | the image blocks written in the note (docs/images.md): the ones the outline reaches, and the ones in its Unassigned basket                                                                                                                        |
-| a feature          | a direct child of the page whose props carry `feature` (`FEATURE_PROP`, `src/utils/board-prop.ts`): its type, whether a picture may carry several of its values, and what it means to the model. Its text is its label; the block is its identity |
-| a feature's values | the feature block's children, in order (`Mauritius`, `Lisbon` under `Location`)                                                                                                                                                                   |
-| a picture's value  | a `child` link from the value block to the picture: the value is a second parent, exactly as copy and select-mode paste make                                                                                                                      |
-| a link value       | a value of a feature of type `link`, whose block is a link block (docs/links.md): the page's card, address and preview in its props, with the same `child` link from it to the picture — so the pictures from one page share one card             |
+| on the board       | in the graph                                                                                                                                                                                                                                 |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the board          | a note whose root node is of type `board`                                                                                                                                                                                                    |
+| its pictures       | the image blocks written in the note (docs/images.md): the ones the outline reaches, and the ones in its Unassigned basket                                                                                                                   |
+| a feature          | a direct child of the page whose props carry `feature` (`FEATURE_PROP`, `src/data/boards.ts`): its type, whether a picture may carry several of its values, and what it means to the model. Its text is its label; the block is its identity |
+| a feature's values | the feature block's children, in order (`Mauritius`, `Lisbon` under `Location`)                                                                                                                                                              |
+| a picture's value  | a `child` link from the value block to the picture: the value is a second parent, exactly as copy and select-mode paste make                                                                                                                 |
+| a link value       | a value of a feature of type `link`, whose block is a link block (docs/links.md): the page's card, address and preview in its props, with the same `child` link from it to the picture — so the pictures from one page share one card        |
 
 So a board's outline reads:
 
@@ -71,7 +90,7 @@ feature as a bullet with its label, the prop out of sight.)
 
 ## Features
 
-**A feature is a block, as a board is a property.** The `feature` prop on a
+**A feature is a block, as a board is a type.** The `feature` prop on a
 direct child of the page is what makes it one (`featureSpecOf`,
 `src/data/boards.ts`, reads it leniently: a `feature` that is an object is
 a feature, a type it does not name is `text`, `multi` holds only when it
@@ -155,6 +174,24 @@ the features' order is the page's, so a feature is reordered by moving
 its block in the outline. On a phone the table is a sheet from the foot
 of the screen (`Sheet`, the phone's drawers), the notes beneath each name
 and **Add feature** pinned full-width at the bottom.
+
+**Suggest writes the notes a board lacks.** The Features editor's title
+bar carries **Suggest** — the sparkles, as the picture window's — there,
+like the Notes column, only while a model can be asked. It sends the
+board's name and its features as they stand — each label, type, whether it
+takes several values, the values in use (the surest sign of what a feature
+means) and the notes already written, so the style matches; link features
+included, as they have a note of their own now, and no picture
+(`notesFeaturesOf`, `requestNotesSuggestion`,
+src/data/suggest-notes.ts) — to `POST /api/boards/notes`, and the model
+writes one line for every feature that lacks a note: what the feature
+means and how to answer it, under 120 characters, no full stop. It does
+not add, rename or remove features. The answer is matched to the features
+by label (`readNotesSuggestion`, src/data/auto-notes.ts) and written only
+where the notes are empty (`notesSuggestionOps`) — a note a person wrote
+is never overwritten — as one batch with one toast, **Notes updated**,
+whose **Undo** takes them all back. Nothing to write is **Nothing to
+add.**; a refusal is the failure toast with its **Copy**.
 
 **Removing a feature deletes nothing.** The remove takes the `feature` key
 off the block's props and keeps the rest (a block named as a feature of
@@ -349,17 +386,23 @@ off the picture), and answers with
 a caption and, per feature, the values that fit — an existing value
 spelled as given, or a short new one. Nothing is tagged unasked.
 
-**Two providers, one path.** The request (`TagRequest`) says nothing about
-who is asked; the Worker's handler resolves that itself and the providers
-differ only in how the picture and the features go out and how the raw
-answer comes back (`TagProvider`, worker/handlers/board-tag.ts: a picture
-and the features in, the model's text out). Everything else is shared —
-the day's count, the refusal codes, one step that reads the text leniently
-(`extractJson`: a code fence or words around the object are stripped) into
-a `TagSuggestion` through the same `readTagSuggestion` (trimmed,
-de-duplicated, capped, one value for a single-value feature; an answer
-that is not a suggestion is a 422) — and on the client one `suggestionOps`
-batch through `suggestTags`.
+**Two providers, one path, two callers.** The request (`TagRequest`) says
+nothing about who is asked; the Worker resolves that itself, in one module
+every route that asks a model goes through (worker/ai.ts): the router over
+the Worker's own truth, the two providers behind one `ask` — a system
+prompt, a user prompt, the schema the answer is held to and, when the
+caller has one, a picture, the model's text out — the gateway and its log
+id, and the refusals and their bodies. The tag route (`board-tag.ts`) and
+the notes route (`board-notes.ts`, above under "Features") are thin
+callers of it, each reading its own request and its own answer — one step
+that reads the text leniently (`extractJson`: a code fence or words around
+the object are stripped) into a `TagSuggestion` through `readTagSuggestion`
+(trimmed, de-duplicated, capped, one value for a single-value feature; an
+answer that is not a suggestion is a 422) or a `NotesSuggestion` through
+`readNotesSuggestion` — and on the client one batch each, `suggestionOps`
+through `suggestTags` and `notesSuggestionOps` through `suggestNotes`. The
+day's count is one fuse for both: a note suggested is a call spent, as a
+picture tagged is.
 
 - **Anthropic** — the Messages API with the user's own key, open to every
   signed-in user who keeps one under Settings → AI, with a JSON schema the
@@ -429,11 +472,13 @@ the answer is held to (structured output) to the Messages API, as
 rather than the Worker reading them from D1, on purpose: the browser's
 graph is the one that knows the board now (a value picked a moment ago may
 not have reached the replica yet), and the Worker trusts the form as
-prompt text only and writes nothing to the graph. Refusals are codes the
-client puts into words (src/data/suggest-tags.ts): not a form with a
-picture and features (400), nothing set up (412), a key Anthropic refuses
-(422), the day's calls spent (429 — a fuse of 300 a day per account
-whoever answers, counted in `ai_usage`, migrations/0019; the `calls_*`
+prompt text only and writes nothing to the graph. Refusals are codes
+named once, each with the status it answers at (`SUGGEST_CODES`,
+src/data/ai-codes.ts), that the client puts into words
+(src/data/suggest-tags.ts): not a form with a picture and features (400),
+nothing set up (412), a key Anthropic refuses (422), the day's calls spent
+(429 — a fuse of `AUTO_TAG_DAILY_LIMIT` a day per account whoever answers,
+counted in `ai_usage`, migrations/0019; the `calls_*`
 columns 0018 gave the key's row are no longer written), a picture too
 large or in a format the API does not read (413, 415), Cloudflare chosen
 with no binding (501), the provider failing (502), and an answer that is
@@ -482,8 +527,10 @@ src/data/auto-tag.ts). The caption's first letter is upper-cased. A value
 that matches one in use — trimmed, whatever its case — comes back spelled
 exactly as the value in use, so `setValueOps` links the board's own value
 rather than making a near-duplicate. A new value is cut to 30 characters
-(`MAX_SUGGESTED_VALUE_LENGTH`: it becomes a menu option; a value in use is
-never shortened) and takes the style of the feature's values in use: when
+(`MAX_SUGGESTED_VALUE_LENGTH`, with every other cap the AI requests and
+answers are held to, in src/data/ai-limits.ts: it becomes a menu option; a
+value in use is never shortened) and takes the style of the feature's
+values in use: when
 every one starts upper-case its first letter is upper-cased, when every one
 starts lower-case it is lower-cased, and mixed or none in use means
 upper-cased. The prompt asks the model for the same style — the same case,
@@ -501,7 +548,8 @@ is reused and a new one made, the batch built up against the snapshot as
 each write would leave it. It fills in and never overrides what a person set, and
 it is one toast — **Picture updated** — with one **Undo**. Nothing to add
 is a toast that says so. Only a failure's toast offers **Copy**: a call that
-went through can be read in the gateway log.
+went through is in the history, and on the Cloudflare path in the gateway
+log too.
 
 The prompt tells the model what each feature is (`notes` on
 `BoardFeature`, from the block's prop — what the Features editor's
@@ -511,6 +559,31 @@ the picture is of, such as … Values in use: cutlery, potted plant"; a
 feature with no notes is sent without them), and an answer that names the
 features under other labels — "Objects", "Materials" — is still read, by
 position, when it has one entry per feature in order.
+
+**The history** keeps every call made, for good. The one step a route
+takes from the ask to its answer (`askAndRead`, worker/ai.ts) writes one
+row to `ai_history` (migrations/0022, worker/ai-history.ts) however the
+call ends — an answer read, an answer the reader made nothing of
+(`bad_answer`), a refusal the provider passed on, a failure — and nothing
+for a call refused before the model was asked (a bad request, a spent
+day). A row says what the call was for (`kind`, a name each use of a model
+is given once in src/data/ai-kinds.ts: `board-tag`, `board-notes`), who
+answered (the provider, its model, the gateway log id where there is
+one), what was sent (the system prompt and the user prompt as the chosen
+provider had it — the Cloudflare path's own wording on that path — and a
+picture's type and size, never its bytes), what came back (`answer`, the
+model's text as it came, and `result`, what was read from it, as JSON),
+and how it went (`outcome`: `ok` or the refusal's code, with the
+provider's words in `detail` when it failed), with when it was asked and
+how long it took. Each text column is cut to `MAX_HISTORY_TEXT_LENGTH`
+(src/data/ai-limits.ts). It records what was offered, not what was kept:
+the client applies the answer through the board's ordinary writes and may
+undo it, and the row does not know. The row is written after the response
+is in hand, so a write that fails is logged and loses the row, never the
+answer. Nothing reads the table yet: it is the record an interface over
+past suggestions would be built on, and the control plane's, like the
+usage count — D1 only, reached through `controlPlaneDriver`, never
+replicated to a browser.
 
 Deliberately not done: encrypting the key at rest; tagging a picture that
 is not an upload (an external picture's bytes are at its own address);

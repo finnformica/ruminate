@@ -20,7 +20,7 @@ import { useSavedView, useWriteView } from "../hooks/views"
 import { filterText, narrowingParam, resolveNarrowing } from "../utils/view-filter"
 
 /**
- * A board (docs/boards.md): a note whose page carries the `board` property,
+ * A board (docs/boards.md): a note whose root node is of type `board`,
  * shown as a wall of its pictures, with a window to caption and tag the one
  * you pick. Its header is the note's own — Sort, Filter and the ⋯ menu —
  * and the Filter leads with the board's features and takes the words to

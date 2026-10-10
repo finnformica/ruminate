@@ -5,10 +5,11 @@ import type { BlockDoc, ChangeHint } from "../blocks/types"
 import type { ExpandedRule } from "../blocks/view"
 import { basketDoc, basketToOps } from "../data/basket"
 import { filteredView, isNarrowed, type FilteredView } from "../data/filter-view"
-import { NOTE_TYPE, blockView, noteView, type LinkDirections } from "../data/graph"
+import { blockView, isNoteType, noteView, type LinkDirections } from "../data/graph"
 import { notePropsOps } from "../data/note-meta"
 import { docToOps } from "../data/ops"
 import { useApplyOps } from "../data/store"
+import { LISTED_VIEW } from "../data/views"
 import { blockIndexAtom, graphSnapshotAtom } from "../global-state"
 import { viewNarrowing } from "../utils/view-narrowing"
 import type { NoteId } from "../schema"
@@ -120,7 +121,7 @@ export function useNoteDoc({
   const rootId = focusBlockId && view?.doc.rootBlockIds[0] === focusBlockId ? focusBlockId : null
   const exists =
     noteId !== undefined &&
-    (rootId ? snapshot.nodes.get(noteId)?.type === NOTE_TYPE : view !== null)
+    (rootId ? isNoteType(snapshot.nodes.get(noteId)?.type ?? "") : view !== null)
   // Once the note has been seen, its absence means "deleted", not "new".
   const seenRef = useRef(exists)
   if (exists) seenRef.current = true
@@ -133,7 +134,7 @@ export function useNoteDoc({
       if (noteId === undefined) return
       // Diff against the graph as it is NOW (edits can outrun renders).
       const current = store.get(graphSnapshotAtom)
-      const note = current.nodes.get(noteId)?.type === NOTE_TYPE ? noteId : null
+      const note = isNoteType(current.nodes.get(noteId)?.type ?? "") ? noteId : null
       if (note === null) {
         if (seenRef.current) return // deleted underneath: let it stay deleted
         if (isEmptyDoc(next)) return // nothing worth creating a note for
@@ -157,7 +158,14 @@ export function useNoteDoc({
         ...next,
         props: { ...(next.props ?? {}), updated_at: new Date().toISOString() },
       }
-      apply(docToOps(noteId, stamped, current, hint?.discard, noteId, shown))
+      // A first edit to a note that is not in the graph yet — a daily note
+      // typed into, a fresh `/views/<id>` — is what creates it, so the row
+      // that lists it (`LISTED_VIEW`, src/data/views.ts) is written beside
+      // the `create`, as `useCreateNote` writes it.
+      apply(
+        docToOps(noteId, stamped, current, hint?.discard, noteId, shown),
+        note === null ? { views: [{ rootId: noteId, patch: LISTED_VIEW }] } : {},
+      )
     },
     [noteId, rootId, store, apply],
   )

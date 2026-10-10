@@ -57,12 +57,20 @@ export interface CorpusMigrations {
    * migration, so the local ladder only bumps its version and the cache
    * re-pulls (`LOCAL_V6_SQL`). */
   retireViewProps?: string
+  /** migrations/0020: a board's root retyped from `note` with a `board` prop
+   * to `board` — a data migration, so the local ladder only bumps its
+   * version and the cache re-pulls (`LOCAL_V7_SQL`). */
+  boardType?: string
+  /** migrations/0021: a pinned view row for every note and board — a data
+   * migration, so the local ladder only bumps its version and the cache
+   * re-pulls (`LOCAL_V8_SQL`). */
+  noteViews?: string
 }
 
 /** Which v3 shape the ladder should produce (see the module header). */
 export type CorpusTenancy = "single" | "columns"
 
-const CORPUS_SCHEMA_VERSION = "6"
+const CORPUS_SCHEMA_VERSION = "8"
 
 /**
  * The single-tenant v5 step: the `views` table (migrations/0015) — the
@@ -95,6 +103,26 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '5');
  */
 const LOCAL_V6_SQL = `
 INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '6');
+`
+
+/**
+ * The single-tenant v7 step: nothing but the version. migrations/0020 is a
+ * data migration — it retypes every board's root from `note` to `board` —
+ * and data migrations run once, against D1; the local store is a cache and
+ * re-pulls the retyped rows (`CACHE_GENERATION`, database-mode.ts).
+ */
+const LOCAL_V7_SQL = `
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '7');
+`
+
+/**
+ * The single-tenant v8 step: nothing but the version. migrations/0021 is a
+ * data migration — it gives every note and board a pinned view row — and
+ * data migrations run once, against D1; the local store is a cache and
+ * re-pulls the rows (`CACHE_GENERATION`, database-mode.ts).
+ */
+const LOCAL_V8_SQL = `
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '8');
 `
 
 /**
@@ -195,6 +223,36 @@ async function applyV6(
   await driver.execScript(migrations.retireViewProps)
 }
 
+async function applyV7(
+  driver: SqlDriver,
+  migrations: CorpusMigrations,
+  tenancy: CorpusTenancy,
+): Promise<void> {
+  if (tenancy === "single") {
+    await driver.execScript(LOCAL_V7_SQL)
+    return
+  }
+  if (!migrations.boardType) {
+    throw new Error('ensureCorpusSchema: "columns" tenancy needs migrations.boardType (0020)')
+  }
+  await driver.execScript(migrations.boardType)
+}
+
+async function applyV8(
+  driver: SqlDriver,
+  migrations: CorpusMigrations,
+  tenancy: CorpusTenancy,
+): Promise<void> {
+  if (tenancy === "single") {
+    await driver.execScript(LOCAL_V8_SQL)
+    return
+  }
+  if (!migrations.noteViews) {
+    throw new Error('ensureCorpusSchema: "columns" tenancy needs migrations.noteViews (0021)')
+  }
+  await driver.execScript(migrations.noteViews)
+}
+
 /**
  * Bring `driver`'s database to the current corpus schema: apply the full
  * migration ladder when empty, migrate a v1/v2/v3 database in place, and
@@ -221,6 +279,8 @@ export async function ensureCorpusSchema(
     await applyV4(driver, migrations, tenancy)
     await applyV5(driver, migrations, tenancy)
     await applyV6(driver, migrations, tenancy)
+    await applyV7(driver, migrations, tenancy)
+    await applyV8(driver, migrations, tenancy)
   } else {
     // In "columns" mode `meta` is keyed by (user_id, key), so this can see more
     // than one row — every tenant shares one DDL version, so any of them
@@ -233,29 +293,43 @@ export async function ensureCorpusSchema(
       await applyV4(driver, migrations, tenancy)
       await applyV5(driver, migrations, tenancy)
       await applyV6(driver, migrations, tenancy)
-      await applyV6(driver, migrations, tenancy)
+      await applyV7(driver, migrations, tenancy)
+      await applyV8(driver, migrations, tenancy)
     } else if (version === "2") {
       await applyV3(driver, migrations, tenancy)
       await applyV4(driver, migrations, tenancy)
       await applyV5(driver, migrations, tenancy)
       await applyV6(driver, migrations, tenancy)
-      await applyV6(driver, migrations, tenancy)
+      await applyV7(driver, migrations, tenancy)
+      await applyV8(driver, migrations, tenancy)
     } else if (version === "3") {
       await applyV4(driver, migrations, tenancy)
       await applyV5(driver, migrations, tenancy)
       await applyV6(driver, migrations, tenancy)
-      await applyV6(driver, migrations, tenancy)
+      await applyV7(driver, migrations, tenancy)
+      await applyV8(driver, migrations, tenancy)
     } else if (version === "4") {
       await applyV5(driver, migrations, tenancy)
       await applyV6(driver, migrations, tenancy)
+      await applyV7(driver, migrations, tenancy)
+      await applyV8(driver, migrations, tenancy)
+    } else if (version === "5") {
       await applyV6(driver, migrations, tenancy)
+      await applyV7(driver, migrations, tenancy)
+      await applyV8(driver, migrations, tenancy)
+    } else if (version === "6") {
+      await applyV7(driver, migrations, tenancy)
+      await applyV8(driver, migrations, tenancy)
+    } else if (version === "7") {
+      await applyV8(driver, migrations, tenancy)
     } else if (version !== CORPUS_SCHEMA_VERSION) {
       await driver.execScript(RESET_SQL + full)
       await applyV3(driver, migrations, tenancy)
       await applyV4(driver, migrations, tenancy)
       await applyV5(driver, migrations, tenancy)
       await applyV6(driver, migrations, tenancy)
-      await applyV6(driver, migrations, tenancy)
+      await applyV7(driver, migrations, tenancy)
+      await applyV8(driver, migrations, tenancy)
     }
   }
 }

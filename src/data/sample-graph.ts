@@ -123,21 +123,21 @@ export function sampleGraph(): GraphSnapshot {
 }
 
 /**
- * The signed-out views (`src/data/views.ts`): one block of the welcome note
- * made a view of its own, so the sidebar's **Views** shows a block row
- * beside the notes before anyone signs in. Edits to these are as fleeting
- * as edits to the sample graph.
+ * The signed-out views (`src/data/views.ts`): the row that lists each
+ * sample note — a row is what lists a node, signed out as signed in — and
+ * one block of the welcome note made a view of its own, so the sidebar's
+ * **Views** shows a block row beside the notes before anyone signs in.
+ * Edits to these are as fleeting as edits to the sample graph.
  */
 export function sampleViews(): ViewRow[] {
-  return [
-    {
-      id: "blk_welcome003",
-      root_id: "blk_welcome003",
-      filter: null,
-      sort: null,
-      pinned: true,
-      sort_key: null,
-      updated_at: 0,
-    },
-  ]
+  const listed = (rootId: string): ViewRow => ({
+    id: rootId,
+    root_id: rootId,
+    filter: null,
+    sort: null,
+    pinned: true,
+    sort_key: null,
+    updated_at: 0,
+  })
+  return [...NOTES.map((note) => listed(note.id)), listed("blk_welcome003")]
 }

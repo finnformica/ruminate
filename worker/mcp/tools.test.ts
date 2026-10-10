@@ -1031,6 +1031,7 @@ describe("the published schemas", () => {
     expect(schema.$defs.newBlock.properties.children.items.$ref).toBe("#/$defs/newBlock")
     // And an agent is never offered the one type it may not create.
     expect(schema.$defs.newBlock.properties.type.enum).not.toContain("note")
+    expect(schema.$defs.newBlock.properties.type.enum).not.toContain("board")
   })
 })
 

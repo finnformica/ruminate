@@ -75,7 +75,12 @@
 // it never touches the snapshot directly.
 
 import { basketRootIds } from "../../src/data/basket"
-import { NOTE_TYPE, buildGraphSnapshot, parseProps, type GraphSnapshot } from "../../src/data/graph"
+import {
+  buildGraphSnapshot,
+  isNoteType,
+  parseProps,
+  type GraphSnapshot,
+} from "../../src/data/graph"
 import { noteFromNode } from "../../src/data/note-meta"
 import { opsToRows } from "../../src/data/ops-rows"
 import { noteIds, parentsIndex, reachableFrom, type Op } from "../../src/data/ops"
@@ -128,7 +133,7 @@ function visibleNodes(grant: Grant, snapshot: GraphSnapshot): Set<string> | null
 
   const granted = new Set<string>()
   for (const id of grant.noteIds) {
-    if (snapshot.nodes.get(id)?.type === NOTE_TYPE) granted.add(id)
+    if (isNoteType(snapshot.nodes.get(id)?.type ?? "")) granted.add(id)
   }
 
   // The seeds: the granted notes, and every block written in one. The second
@@ -379,9 +384,7 @@ export async function parentsView(
   // The notes come off the closure's own node rows, so they are exactly the
   // notes that reach the block (plus the block itself when it IS a note, which
   // is what `notesReaching` reports for one).
-  const notes = [...above.nodes, ...seed]
-    .filter((row) => row.type === NOTE_TYPE)
-    .map((row) => row.id)
+  const notes = [...above.nodes, ...seed].filter((row) => isNoteType(row.type)).map((row) => row.id)
 
   const [children, subtrees] = await Promise.all([
     linksFrom(tenant, parents),
@@ -477,7 +480,7 @@ export const nodeOf = (graph: ScopedGraph, id: string) =>
 /** A visible NOTE node, or null — what every note-addressed tool starts with. */
 export function noteNodeOf(graph: ScopedGraph, id: string) {
   const row = nodeOf(graph, id)
-  return row !== null && row.type === NOTE_TYPE ? row : null
+  return row !== null && isNoteType(row.type) ? row : null
 }
 
 /** A note's `Note` — title, tasks, headings, preview text — exactly as

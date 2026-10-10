@@ -11,6 +11,7 @@ describe("figure layout props", () => {
   it("names the types laid out as figures", () => {
     expect(isFigureType("image")).toBe(true)
     expect(isFigureType("link")).toBe(true)
+    expect(isFigureType("code")).toBe(true)
     expect(isFigureType("text")).toBe(false)
     expect(isFigureType("note")).toBe(false)
   })

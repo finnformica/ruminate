@@ -46,7 +46,6 @@ export function LinkCard({
   api,
   title,
   editing,
-  pointer,
 }: {
   block: Block
   occurrence: Occurrence
@@ -56,32 +55,25 @@ export function LinkCard({
   title: ReactNode
   /** The title line is a textarea right now. */
   editing: boolean
-  /** The row's click and double-click, for the card's plain surface. */
-  pointer: Pick<React.HTMLAttributes<HTMLElement>, "onClick" | "onDoubleClick">
 }) {
   const props = linkPropsOf(block)
   const { url } = props
   const editable = !api.readOnly
 
-  // The card's own surface takes the row's click; its links, tools and the
-  // title being edited keep theirs.
-  const plain = (event: React.MouseEvent<HTMLElement>) =>
-    !(event.target as Element).closest("a, button, textarea, [data-block-body]")
-  const surface = {
-    onClick: (event: React.MouseEvent<HTMLElement>) => plain(event) && pointer.onClick?.(event),
-    onDoubleClick: (event: React.MouseEvent<HTMLElement>) =>
-      plain(event) && pointer.onDoubleClick?.(event),
-  }
-
+  // The card's plain surface is the row's: a click there selects the row
+  // and a double-click edits it, as anywhere on the row does (the row's
+  // surface takes the pointer, block-item.tsx). Its links and tools stop
+  // their own clicks there, so they never double as a selection.
   const card = (
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
     <div
       data-testid="link-card"
       className={cx(
         "flex w-full overflow-hidden rounded-lg border border-border-secondary bg-bg-card",
         "transition-colors duration-150 hover:bg-bg-hover",
+        // A container, so the body can drop the page's picture when the
+        // card is too narrow to hold it beside the text (`LinkCardBody`).
+        "@container/card",
       )}
-      {...surface}
     />
   )
   const inner = <LinkCardBody props={props} text={block.text} title={title} editing={editing} />
@@ -171,7 +163,12 @@ export function LinkCardBody({
           onClick={(event) => event.stopPropagation()}
           // A third of the card, never narrower than a thumbnail is
           // legible at, never more than half: the text keeps its column.
-          className="block w-1/3 min-w-32 max-w-[min(15rem,50%)] shrink-0 self-stretch"
+          // In a card narrower than 20rem (a phone's column, a card nested
+          // a level or two in) the thumbnail would leave the text no column
+          // at all — a title wrapping a letter or two to a line — so the
+          // picture goes and the text has the card (the card is the
+          // container: `@container/card`, above).
+          className="hidden w-1/3 min-w-32 max-w-[min(15rem,50%)] shrink-0 self-stretch @[20rem]/card:block"
         >
           <img
             src={picture}

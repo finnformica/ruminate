@@ -1,10 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest"
-import {
-  AUTO_TAG_MAX_IMAGE_BYTES,
-  AUTO_TAG_MODEL,
-  CLOUDFLARE_AI_MODEL,
-  type TagFeature,
-} from "../../src/data/auto-tag"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { MAX_HISTORY_TEXT_LENGTH, AUTO_TAG_MAX_IMAGE_BYTES } from "../../src/data/ai-limits"
+import { AUTO_TAG_MODEL, CLOUDFLARE_AI_MODEL, type TagFeature } from "../../src/data/auto-tag"
 import { spendAiCall } from "../ai-usage"
 import { setFeatureAudience } from "../features"
 import { createMcpTestEnv, type McpTestEnv } from "../mcp/test-support"
@@ -757,5 +753,124 @@ describe("a location with the request", () => {
     ).toBe(200)
     const text = ai.calls[0].input.messages[1].content[1].text as string
     expect(text).toContain("The picture was taken at: Ljubljana; Slovenia")
+  })
+})
+
+describe("the history", () => {
+  const history = () =>
+    harness.control.exec(
+      "SELECT user_id, created_at, kind, provider, model, log, system, prompt, image_type, " +
+        "image_bytes, answer, result, outcome, detail FROM ai_history ORDER BY id",
+    )
+
+  it("writes nothing for a call refused before the model is asked", async () => {
+    await keepKey()
+    expect((await send(tagRequest({ features: null }))).status).toBe(400)
+    expect(await history()).toEqual([])
+    expect((await send(tagRequest(), { dailyLimit: 1 })).status).toBe(200)
+    expect((await send(tagRequest(), { dailyLimit: 1 })).status).toBe(429)
+    expect(await history()).toHaveLength(1)
+  })
+
+  it("keeps an answered call under its kind: the prompt sent, the picture's size, the text and what was read", async () => {
+    await keepKey()
+    expect((await send(tagRequest())).status).toBe(200)
+    const rows = await history()
+    expect(rows).toHaveLength(1)
+    const row = rows[0]
+    expect(row).toMatchObject({
+      user_id: USER,
+      created_at: 5000,
+      kind: "board-tag",
+      provider: "anthropic",
+      model: AUTO_TAG_MODEL,
+      log: null,
+      image_type: "image/jpeg",
+      image_bytes: PICTURE.byteLength,
+      answer: JSON.stringify(GOOD),
+      outcome: "ok",
+      detail: null,
+    })
+    expect(JSON.parse(String(row.result))).toEqual(READ)
+    // The prompt as Anthropic was sent it: the system prompt beside the
+    // text the stub saw, not the Cloudflare wording.
+    const { body } = anthropic.calls[0]
+    expect(row.system).toBe(body.system)
+    expect(row.prompt).toBe(body.messages[0].content[1].text)
+    expect(String(row.prompt)).not.toContain("Answer with JSON only")
+  })
+
+  it("keeps the Cloudflare path's own prompt and the gateway log", async () => {
+    await allowCloudflare()
+    await optIntoCloudflare()
+    const ai = fakeAi(() => completion(JSON.stringify(GOOD)))
+    ai.binding.aiGatewayLogId = "01LOG"
+    Object.assign(harness.env, { AI: ai.binding })
+    expect((await send(tagRequest())).status).toBe(200)
+    const [row] = await history()
+    expect(row).toMatchObject({
+      kind: "board-tag",
+      provider: "cloudflare",
+      model: CLOUDFLARE_AI_MODEL,
+      log: "01LOG",
+      outcome: "ok",
+    })
+    const sent = ai.calls[0].input.messages[1].content[1].text
+    expect(row.prompt).toBe(sent)
+    expect(row.system).toBe(ai.calls[0].input.messages[0].content)
+  })
+
+  it("keeps a failed call under the refusal's code, with the provider's words", async () => {
+    await keepKey()
+    anthropic.reply = () =>
+      new Response(
+        JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "x" } }),
+        { status: 529, headers: { "Content-Type": "application/json" } },
+      )
+    expect((await send(tagRequest())).status).toBe(502)
+    anthropic.reply = () => messageWith({ caption: "", features: [] }, "refusal")
+    expect((await send(tagRequest())).status).toBe(422)
+    anthropic.reply = () => messageWith({ caption: 3 })
+    expect((await send(tagRequest())).status).toBe(422)
+
+    const rows = await history()
+    expect(rows.map((row) => [row.outcome, row.answer, row.result])).toEqual([
+      ["provider_error", null, null],
+      ["refused", null, null],
+      ["bad_answer", JSON.stringify({ caption: 3 }), null],
+    ])
+    expect(rows[0].detail).toMatch(/529|overloaded/)
+    expect(rows[1].detail).toBe("refused")
+    expect(rows.every((row) => row.kind === "board-tag" && row.user_id === USER)).toBe(true)
+  })
+
+  it("cuts a prompt a board stuffed to the size a row keeps", async () => {
+    await keepKey()
+    const values = Array.from({ length: 200 }, (_, i) => `v${i}`.padEnd(60, "x"))
+    const features = Array.from({ length: 12 }, (_, i) => ({
+      label: `Feature ${i}`,
+      multi: true,
+      values,
+    }))
+    expect((await send(tagRequest({ features }))).status).toBe(200)
+    const [row] = await history()
+    expect(String(row.prompt).length).toBe(MAX_HISTORY_TEXT_LENGTH)
+    expect(anthropic.calls[0].body.messages[0].content[1].text.length).toBeGreaterThan(
+      MAX_HISTORY_TEXT_LENGTH,
+    )
+  })
+
+  it("never fails a call for a row it cannot write", async () => {
+    await keepKey()
+    await harness.control.execScript("DROP TABLE ai_history")
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const response = await send(tagRequest())
+      expect(response.status).toBe(200)
+      expect((await bodyOf(response)).suggestion).toEqual(READ)
+      expect(quiet).toHaveBeenCalledOnce()
+    } finally {
+      quiet.mockRestore()
+    }
   })
 })

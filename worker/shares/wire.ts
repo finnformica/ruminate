@@ -5,6 +5,7 @@
 
 import type { LinkRow, NodeRow } from "../handlers/replica-payload"
 import type { Permission } from "../mcp/grant"
+import type { ShareEndedBy } from "./grant"
 
 /**
  * The view a share is of (migrations/0017): the owner's row, as the share
@@ -27,6 +28,9 @@ export interface GivenShare {
   permissions: Permission[]
   createdAt: number
   revokedAt: number | null
+  /** Who ended it — the owner (Revoke) or the grantee (Leave) — once
+   * `revokedAt` is set. */
+  revokedBy: ShareEndedBy | null
 }
 
 /** A share as its GRANTEE sees it: who shared it (login and display name,

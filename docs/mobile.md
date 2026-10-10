@@ -12,8 +12,10 @@ A mouse has two clicks and a keyboard beside it; a finger has one tap and a
 keyboard that appears and disappears. The block editor
 (`src/components/block-editor/`) reads the two differently.
 
-- **A tap edits.** With a mouse a click selects a row and a double-click edits
-  it. A finger's tap edits the row straight away, with the caret where the tap
+- **A tap edits.** With a mouse a click anywhere on a row's surface that is
+  not a control — its text, its key, the chevron column, the padding — selects
+  the row, and a double-click edits it (from the start of the line when the
+  click fell left of the text). A finger's tap edits the row straight away, with the caret where the tap
   landed when the body's text is the stored text as is (`caretOffsetAtPoint`,
   `caret.ts`); where the rendered text differs from the stored text (`**bold**`,
   a link) the caret goes to the end. The whole row is the tap target — the
@@ -152,8 +154,8 @@ keyboard that appears and disappears. The block editor
   autocorrect off with it. (If a fresh block still opens unshifted on iOS, that
   is WebKit not re-reading the attribute when focus is moved by script while
   the keyboard is already up — a known quirk with no page-side fix.)
-- **Chrome is sized for a finger.** The collapse chevron always shows (nothing
-  to hover with) at a 12px glyph on a 36×32px target; the focus dot's hit area
+- **Chrome is sized for a finger.** The collapse chevron, always shown in its
+  column on every screen, is drawn at 14px on a 24×32px target; the focus dot's hit area
   is 26px; the todo checkbox is drawn at 17px and grows its hit area through a
   pseudo-element, up and down and a little left but never right, and the
   marker gap widens from 8px to 12px; the type scale steps body text up (16px,
@@ -176,7 +178,7 @@ keyboard that appears and disappears. The block editor
   `Button`, `DropdownMenu`, `TextInput`, the search boxes); shortcut keycaps
   are hidden where there is nothing to press (`Keys`, `coarse:hidden`).
 - Hover-only affordances show outright on touch: the note card's buttons, the
-  code block's language. The image figure's toolbar is the exception by
+  code block's language. A figure's toolbar is the exception by
   design — hidden until the row is selected (a long press), so a stray tap
   never lands on it.
 - The block menu may take most of the screen on a phone (`coarse:max-h-[80svh]`)

@@ -25,6 +25,9 @@ const ALIGN_SELF: Record<FigureAlign, string> = {
   right: "self-end",
 }
 
+/** The toolbar's name, by what the figure is. */
+const NOUN_LABELS = { image: "Image", link: "Link", code: "Code block" } as const
+
 const ALIGN_LABELS: Record<FigureAlign, string> = {
   left: "Align left",
   center: "Align centre",
@@ -60,19 +63,26 @@ export interface FrameState {
 
 /**
  * The frame every figure block sits in — a picture (`image-figure.tsx`),
- * a link block's card (`link-card.tsx`): the layout the figure types share
+ * a link block's card (`link-card.tsx`), a code block's panel
+ * (`block-kinds.tsx`): the layout the figure types share
  * (`src/blocks/figure.ts`), drawn once.
  *
- * No chrome of its own: the row's padding is the figure's spacing. The
- * block's `align` keeps the figure to one side of the row, and its `size`
+ * No chrome of its own: the block frame's inset (`block-frame.tsx`) is the
+ * figure's spacing. The block's `align` keeps the figure to one side of the
+ * row, and its `size`
  * makes it a fraction of the row's width; absent, the figure is the width
  * it gave the frame (`naturalWidth` — a picture's own pixels no wider than
- * the row, a card the row's full width) or, giving none, shrinks to fit.
+ * the row, a card or a code panel the row's full width) or, giving none,
+ * shrinks to fit.
  * The caption, when there is one, is the frame's width exactly and goes
  * wherever the figure goes.
  *
  * In an editable editor the frame carries the figure's controls, revealed
- * on hover or while the row is selected, and never in the way of reading:
+ * while the pointer is over the row (the figure or the room around it) and
+ * never otherwise — a selected row shows none, so they never stand on the
+ * content while it is read or moved through; a touch screen, which has no
+ * hover, shows them while the row is selected — and never in the way of
+ * reading:
  * a handle at the figure's side drags it wider or narrower — one at each
  * side of a centred figure, which grows from both sides at once; only at
  * the free side of a figure kept to the left or right, which grows away
@@ -97,8 +107,8 @@ export function FigureFrame({
   occurrence: Occurrence
   api: BlockEditorApi
   /** What the figure is, for the controls' labels and test ids
-   * (`image-resize-left`, `link-toolbar`). */
-  noun: "image" | "link"
+   * (`image-resize-left`, `link-toolbar`, `code-figure`). */
+  noun: "image" | "link" | "code"
   /** The frame's width when the block sets no size: a CSS width, or
    * undefined to shrink to the figure. */
   naturalWidth?: string
@@ -139,7 +149,15 @@ export function FigureFrame({
     const frame = frameRef.current
     const row = frame?.parentElement
     if (!frame || !row) return
-    const rowWidth = row.getBoundingClientRect().width
+    // The row's width is the frame's room: the block frame's content box
+    // (`block-frame.tsx`), without the padding that sets it in from the
+    // row's surface — a `size` is a fraction of that room, as a `100%`
+    // width is.
+    const rowStyle = getComputedStyle(row)
+    const rowWidth =
+      row.getBoundingClientRect().width -
+      (parseFloat(rowStyle.paddingLeft) || 0) -
+      (parseFloat(rowStyle.paddingRight) || 0)
     const startWidth = frame.getBoundingClientRect().width
     if (rowWidth <= 0) return
     const startX = event.clientX
@@ -164,12 +182,20 @@ export function FigureFrame({
   }
 
   // The controls: hidden — not just faded, so a stray tap never lands on
-  // them — until the frame is hovered or its row is selected.
+  // them — until the pointer is over the ROW (`group/row`, block-item.tsx:
+  // the figure, its caption, the room beside a narrow one), and through a
+  // drag. Selection alone never shows them on a fine pointer: handles
+  // standing on a selected picture while the keyboard moves down the note
+  // were in the way of the picture. A coarse pointer has no hover, so there
+  // the selected row (a long press) is what reveals them (docs/mobile.md).
   const reveal = cx(
     "transition-opacity duration-150",
-    selected || dragSize !== null
+    dragSize !== null
       ? "visible opacity-100"
-      : "invisible opacity-0 group-hover/figure:visible group-hover/figure:opacity-100",
+      : cx(
+          "invisible opacity-0 group-hover/row:visible group-hover/row:opacity-100",
+          selected && "coarse:visible coarse:opacity-100",
+        ),
   )
 
   return (
@@ -179,7 +205,7 @@ export function FigureFrame({
       data-align={align}
       data-size={shownSize}
       className={cx(
-        "group/figure relative flex max-w-full flex-col gap-1.5",
+        "relative flex max-w-full flex-col gap-1.5",
         ALIGN_SELF[align],
         dragSize !== null && "select-none",
       )}
@@ -230,7 +256,7 @@ export function FigureFrame({
             ))}
             <div
               role="toolbar"
-              aria-label={`${noun === "image" ? "Image" : "Link"} layout`}
+              aria-label={`${NOUN_LABELS[noun]} layout`}
               data-testid={`${noun}-toolbar`}
               className={cx(
                 "absolute right-2 top-2 flex gap-0.5 p-0.5",

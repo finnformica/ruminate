@@ -19,6 +19,9 @@ import { parsePermissions, serializePermissions, type Permission } from "../mcp/
 
 export { PERMISSIONS, type Permission } from "../mcp/grant"
 
+/** Who retired a share: its owner (Revoke) or the person it was for (Leave). */
+export type ShareEndedBy = "owner" | "grantee"
+
 /** One share's authority. Produced only by `shareFromRow`. */
 export interface ShareGrant {
   readonly id: string
@@ -37,6 +40,9 @@ export interface ShareGrant {
   readonly permissions: ReadonlySet<Permission>
   readonly createdAt: number
   readonly revokedAt: number | null
+  /** Which side ended it: the owner revoking what they gave, or the grantee
+   * leaving what they were given. Null while the share is live. */
+  readonly revokedBy: ShareEndedBy | null
 }
 
 /** The `shares` columns a grant is built from. */
@@ -48,6 +54,7 @@ export interface ShareRow {
   permissions: string
   created_at: number
   revoked_at: number | null
+  revoked_by?: string | null
 }
 
 /** Mint a `ShareGrant` from a row — the ONE mint there is. A revoked row is
@@ -63,6 +70,7 @@ export function shareFromRow(row: ShareRow): ShareGrant {
     permissions: parsePermissions(row.permissions),
     createdAt: row.created_at,
     revokedAt: row.revoked_at ?? null,
+    revokedBy: row.revoked_by === "owner" || row.revoked_by === "grantee" ? row.revoked_by : null,
   }
 }
 

@@ -17,7 +17,7 @@ import {
   type ReplicaChangesBody,
   type ReplicaCorpusBody,
 } from "./replica-payload"
-import { replica, requireSession } from "./replica"
+import { replica, requireSession, retypeLegacyBoards } from "./replica"
 import {
   applyControlPlane,
   asFakeD1,
@@ -162,8 +162,8 @@ async function openTenant(id: number, existing?: SqlDriver): Promise<TenantDb> {
 }
 
 /**
- * Attach the sequence the replica would have assigned. `planReplicaPut`
- * writes deletes first, then nodes, then links, and each statement takes the
+ * Attach the sequence the replica would have assigned. `rowsToEvents`
+ * derives deletes first, then nodes, then links, and each event takes the
  * next value — so a push of two nodes and one link lays down 1, 2, 3.
  */
 const withSeq = <T>(row: T, seq: number): T & { seq: number } => ({ ...row, seq })
@@ -671,7 +671,13 @@ describe("tenant scoping — the adversarial suite", () => {
     const body = (await (
       await get(env, "bob-token", "/api/replica/notes")
     ).json()) as ReplicaCorpusBody
-    expect(body).toEqual({ nodes: [], links: [], views: [], cursor: null })
+    expect(body).toEqual({
+      nodes: [],
+      links: [],
+      views: [],
+      cursor: null,
+      replica_id: "production",
+    })
   })
 
   it("B's since-pull contains none of A's rows", async () => {
@@ -682,7 +688,13 @@ describe("tenant scoping — the adversarial suite", () => {
     // Exhaustive, because a since-pull now carries nothing BUT rows: any of
     // A's ids appearing here would be a cross-tenant disclosure — her views
     // included, which is where a pin on a note she shared would live.
-    expect(body).toEqual({ nodes: [], links: [], views: [], cursor: null })
+    expect(body).toEqual({
+      nodes: [],
+      links: [],
+      views: [],
+      cursor: null,
+      replica_id: "production",
+    })
   })
 
   it("B's status counts none of A's rows", async () => {
@@ -922,6 +934,41 @@ describe("tenant scoping — the adversarial suite", () => {
       ).toBe(400)
     })
   })
+
+  // Which database answered (docs/preview-databases.md): production has no
+  // REPLICA_ID; a preview version carries its clone's id. Every pull and the
+  // status say, so a client can tell a rebuilt clone from the one it last
+  // pulled and discard a cursor that no longer means anything.
+  describe("replica_id", () => {
+    type Labelled = { replica_id?: string; nodes?: unknown[] }
+    const labelled = async (env: Env, path: string) =>
+      (await (await get(env, "alice-token", path)).json()) as Labelled
+
+    it('is "production" without the var, on pulls and status alike', async () => {
+      const { env } = await seededEnv()
+      const full = await labelled(env, "/api/replica/notes")
+      const since = await labelled(env, "/api/replica/notes?since=0")
+      const status = await labelled(env, "/api/replica/status")
+      expect(full.replica_id).toBe("production")
+      expect(since.replica_id).toBe("production")
+      expect(status.replica_id).toBe("production")
+    })
+
+    it("is the REPLICA_ID var when set, and an empty var counts as unset", async () => {
+      const { env } = await seededEnv()
+      const preview = { ...env, REPLICA_ID: "11111111-2222-4333-8444-555555555555" }
+      const full = await labelled(preview, "/api/replica/notes")
+      const status = await labelled(preview, "/api/replica/status")
+      expect(full.replica_id).toBe("11111111-2222-4333-8444-555555555555")
+      expect(status.replica_id).toBe("11111111-2222-4333-8444-555555555555")
+      // The rows are the same rows: the id is a label, not a filter.
+      expect(full.nodes?.length).toBeGreaterThan(0)
+
+      const blank = { ...env, REPLICA_ID: "" }
+      const body = await labelled(blank, "/api/replica/notes")
+      expect(body.replica_id).toBe("production")
+    })
+  })
 })
 
 describe("the control plane is not tenant data", () => {
@@ -969,6 +1016,46 @@ describe("the control plane is not tenant data", () => {
     expect(response.status).toBe(403)
     expect(await response.json()).toEqual({ error: "sign_in_required" })
     expect(await driver.exec("SELECT github_id FROM users WHERE github_id = 4343")).toEqual([])
+  })
+})
+
+describe("the legacy board guard (migrations/0020; removed with isLegacyBoard)", () => {
+  const legacy: NodeRow = {
+    id: "blk_board00000",
+    type: "note",
+    text: "Wall",
+    props: '{"board":true,"width":"full"}',
+    updated_at: 200,
+  }
+
+  it("retypes a board pushed in its old shape, strips the prop and leaves the rest alone", () => {
+    const bare: NodeRow = { ...legacy, id: "blk_board00001", props: '{"board":true}' }
+    const links = [link]
+    const out = retypeLegacyBoards({ nodes: [legacy, bare, node], links })
+    expect(out.nodes).toEqual([
+      { ...legacy, type: "board", props: '{"width":"full"}' },
+      { ...bare, type: "board", props: null },
+      node,
+    ])
+    expect(out.links).toBe(links)
+    // A payload with nothing to retype is the same object.
+    const plain = { nodes: [node], links: [link] }
+    expect(retypeLegacyBoards(plain)).toBe(plain)
+  })
+
+  it("a stale client's push lands as a board over the migrated row, never as a note again", async () => {
+    const tenant = await openTenant(1)
+    await corpusPut(
+      tenant,
+      { nodes: [{ ...legacy, type: "board", props: null, updated_at: 101 }], links: [] },
+      NOW,
+    )
+    // The route's guard, on a push that is the newer version.
+    await corpusPut(tenant, retypeLegacyBoards({ nodes: [legacy], links: [] }), NOW)
+    const { nodes } = await corpusPullFull(tenant)
+    expect(nodes.map(({ id, type, props }) => ({ id, type, props }))).toEqual([
+      { id: legacy.id, type: "board", props: '{"width":"full"}' },
+    ])
   })
 })
 

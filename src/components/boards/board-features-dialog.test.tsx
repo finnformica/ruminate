@@ -28,6 +28,7 @@ const writes = {
   addFeature: () => null,
   updateFeature: () => {},
   removeFeature: () => {},
+  suggestNotes: async () => {},
 } as unknown as BoardWrites
 
 const dialog = () =>
@@ -64,6 +65,22 @@ describe("BoardFeaturesDialog", () => {
     expect(screen.getAllByLabelText("Name")).toHaveLength(2)
     expect(screen.getAllByLabelText("Multiple values")).toHaveLength(2)
     expect(screen.getAllByLabelText(/^Notes on/)).toHaveLength(2)
+    pointer.coarse = false
+  })
+
+  it("offers Suggest in the title bar only while a model can be asked, on both shapes", () => {
+    ai.available = false
+    dialog()
+    expect(screen.queryByRole("button", { name: "Suggest notes" })).toBeNull()
+    cleanup()
+    ai.available = true
+    dialog()
+    expect(screen.getByRole("button", { name: "Suggest notes" })).toBeTruthy()
+    cleanup()
+    pointer.coarse = true
+    dialog()
+    expect(screen.getByRole("button", { name: "Suggest notes" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy()
     pointer.coarse = false
   })
 })

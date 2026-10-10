@@ -5,7 +5,7 @@ append-only log per tenant. The log is the truth; `nodes`, `link` and `views`
 are what folding it yields, kept current in the same transaction as every
 append. Code: `src/data/events.ts` (the vocabulary and the fold),
 `worker/handlers/event-log.ts` (append, reconcile, reading the past),
-`migrations/0018_events.sql`.
+`migrations/0023_events.sql`.
 
 ## Why
 
@@ -166,9 +166,10 @@ History therefore begins at each tenant's snapshot. Earlier states were never
 recorded; a moment before it is answered as the snapshot, and the response
 says so (`earliest`).
 
-`0018` also renumbers the views that 0015/0017 deliberately left at `seq = 0`:
-reconcile finds rows by `seq`, so a row at 0 would never enter the log. Each
-device pulls those few rows once.
+`0023` also renumbers the views that 0015/0017 deliberately left at `seq = 0`
+and 0021 did not reach (the ones rooted at blocks): reconcile finds rows by
+`seq`, so a row at 0 would never enter the log. Each device pulls those few
+rows once.
 
 ## Reading the past
 
