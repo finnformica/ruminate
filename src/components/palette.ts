@@ -1,5 +1,6 @@
 import { atom, useSetAtom } from "jotai"
 import { useCallback } from "react"
+import type { ResultRoot } from "../hooks/results-doc"
 import type { NoteId } from "../schema"
 import type { ResultRow } from "../utils/rank-results"
 
@@ -15,7 +16,8 @@ import type { ResultRow } from "../utils/rank-results"
  * What the palette does with a request (`command-menu.tsx`): it opens with
  * the request's query set — as ⌘P presets `type:heading in:<note>` — and
  * its placeholder; the rows a request keeps are listed (`keep`), the rest
- * left out; the typed text is offered as the first row when the request
+ * left out; with nothing typed it lists what the asker suggests
+ * (`suggested`) in place of its own Recent and Views lists; the typed text is offered as the first row when the request
  * words it (`textRow`), and ↵ on the query picks it; a row picked (↵, a
  * click) is handed back as the block or the note it is; Esc, a click
  * outside or ⌘K cancels. Nothing of the palette's own — the date row, the
@@ -42,6 +44,10 @@ export interface PaletteRequest {
    * Applies to search results; the palette's Recent and Views lists, shown
    * with nothing typed, are browsed as they are. */
   keep?: (row: ResultRow) => boolean
+  /** What to list before anything is typed, under **Suggested**, in place
+   * of the palette's Recent and Views lists: the rows the asker has in
+   * view, say. Browsed as those are, each row opening into its blocks. */
+  suggested?: ResultRoot[]
   /** Offer the typed text itself as the first row, worded by this
    * ("Contains “alice”"): a picker that takes a value as well as a row. */
   textRow?: (text: string) => string

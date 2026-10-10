@@ -336,7 +336,7 @@ describe("the sidebar's Views list", () => {
       "Move down",
       "Copy",
       "Copy link to block",
-      "Share…",
+      "Share",
       "Remove from Views",
     ])
     // Every item leads with an icon, as the note's menu does; Remove wears

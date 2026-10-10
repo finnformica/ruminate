@@ -227,8 +227,8 @@ someone else's rows does not belong in it. So shared notes live in memory
   read-only — never a second rendering of the title or the outline. What
   differs for a share is data: the rows come from the slice, and writes are
   refused at the store.
-- **Where to share from**: a note's **⋯** menu (**Share…**) shares the note;
-  a block's right-click menu (**Share…**) shares that block, as the root.
+- **Where to share from**: a note's **⋯** menu (**Share**) shares the note;
+  a block's right-click menu (**Share**) shares that block, as the root.
   One dialog, asking for the address and the verbs. Settings → Sharing is the
   overview: what this account has shared and with whom (with **Revoke**), and
   what has been shared with it (with **Leave**). Either side may end a share,

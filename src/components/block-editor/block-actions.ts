@@ -66,6 +66,15 @@ export interface BlockActions {
   /** Share the block — and everything beneath it — with someone
    * (docs/sharing.md). Absent where the rows are not the user's own. */
   share?: (keys: string[]) => void
+  /** Link another block beneath the row's — picked in the palette — as a
+   * paste of it onto the row would (docs/graph-storage.md, "Mirroring"):
+   * "Add downstream link". The first of `keys`. Absent where the editor
+   * has no corpus to pick from (Storybook, a note someone shared). */
+  linkDownstream?: (keys: string[]) => void
+  /** Link the row's block beneath another — a block or a note, picked in
+   * the palette — the way round a paste cannot reach from here: "Add
+   * upstream link". The first of `keys`. Absent as `linkDownstream` is. */
+  linkUpstream?: (keys: string[]) => void
   /** Open a link's card (`link-hover-card.tsx`) outright — a touch screen
    * has nothing to hover with. */
   editLink?: (keys: string[], href: string) => void

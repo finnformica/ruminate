@@ -63,7 +63,7 @@ The Views page is browsed: <kbd>↵</kbd> (or a click) opens the highlighted
 row, and nothing writes. A right-click on a row opens the menu its sidebar
 row has: a note's **⋯** menu on a note's row, and on a block's row the
 block's menu away from its note — **Copy**, **Copy link to block**,
-**Share…**, **Remove from Views** — with none of the editing the note's own
+**Share**, **Remove from Views** — with none of the editing the note's own
 menu carries. A filtered view **edits in place**: <kbd>↵</kbd>
 edits the row as it would in its note, the change lands in the note, and the
 only thing refused is adding a block beside a result or removing one from the
@@ -221,7 +221,10 @@ block at once (`src/blocks/commands.ts`), so a single block is simply a
 selection of one. The right-click menu is the same: opened on a row of the
 selection, its Copy, Duplicate, the moves, Unlink and Delete take the whole
 selection and say how many blocks that is (**Delete 3 blocks**); opened on
-a row outside it, that row alone.
+a row outside it, that row alone. Its **Add downstream link** and **Add
+upstream link** — a second place for a block, picked by name in the palette
+rather than by copy and paste (docs/graph-storage.md, "Linking by name") —
+are offered on a single row only.
 
 A mouse selects a run of blocks too: sweeping across rows selects every row the
 sweep touched (the anchor stays at the end the sweep began, so <kbd>⇧</kbd>

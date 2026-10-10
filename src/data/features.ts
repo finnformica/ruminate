@@ -13,7 +13,7 @@ import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github
  * The feature flags as this account may use them (src/data/feature-flags.ts),
  * read from `GET /api/features` once per sign-in. The Worker enforces the
  * flags on each feature's own routes; this is only what the client draws —
- * the Settings panels, the Share… menu items, the Admin link.
+ * the Settings panels, the Share menu items, the Admin link.
  *
  * Until the request has answered, the last answer this account got on this
  * device stands (`seedFeatures`, from localStorage), and before there has

@@ -197,6 +197,26 @@ export interface BoardRequest extends BoardInsertion {
   anchor: Element | null
 }
 
+/**
+ * A second place for a block, picked by name (`onRequestLink`; the menu's
+ * **Add downstream link** and **Add upstream link**): the host opens the
+ * palette as a picker over the corpus and hands the pick back.
+ *
+ * Downstream, the picked block lands beneath the row's block, as a paste of
+ * it onto the row would (`place`, docs/graph-storage.md, "Mirroring").
+ * Upstream, the row's block goes beneath the pick — a block, or a note,
+ * where it joins the top level — which the host writes itself: the parent
+ * may be in another note, which this doc cannot say.
+ */
+export type LinkRequest = {
+  /** The row's block. */
+  blockId: string
+  /** What the picker suggests before anything is typed: the view's top rows
+   * — the note's, or the focused block and its children — the row's own
+   * block left out. */
+  suggested: string[]
+} & ({ direction: "downstream"; place: (pickedId: string) => void } | { direction: "upstream" })
+
 /** The first row (in document order) of a block present in `restored` but
  * not in `current` — the block an undo brought back, e.g. after a delete. */
 function findReappeared(current: BlockDoc, restored: BlockDoc): string | null {
@@ -268,11 +288,10 @@ function embeddedPasteFragment(
       sub = subtreeDoc(doc, block.id)
     } else {
       const live = (resolved as Record<string, string | null>)[block.id] ?? null
-      sub = live !== null ? parse(live) : clipboardBlocksToDocWithIds([block])
-      // A block the doc already holds keeps the doc's copy — the live subtree
-      // only supplies what this doc has not seen (a loop back into the doc
-      // names the doc's own block, and must not overwrite it).
-      for (const id of Object.keys(sub.blocks)) if (id in doc.blocks) delete sub.blocks[id]
+      sub = withoutDocBlocks(
+        live !== null ? parse(live) : clipboardBlocksToDocWithIds([block]),
+        doc,
+      )
     }
     out = {
       props: null,
@@ -281,6 +300,32 @@ function embeddedPasteFragment(
     }
   }
   return out
+}
+
+/** `sub` less the blocks `doc` already holds: a block the doc has keeps the
+ * doc's copy — a live subtree only supplies what this doc has not seen (a
+ * loop back into the doc names the doc's own block, and must not overwrite
+ * it). */
+function withoutDocBlocks(sub: BlockDoc, doc: BlockDoc): BlockDoc {
+  for (const id of Object.keys(sub.blocks)) if (id in doc.blocks) delete sub.blocks[id]
+  return sub
+}
+
+/**
+ * The fragment that links the one block `id` beneath a row — a paste's
+ * single root, with no clipboard behind it (`embeddedPasteFragment`): the
+ * doc's own copy when the doc holds the block, else its live subtree from
+ * the corpus, less what the doc already has. Null when the corpus no longer
+ * holds it.
+ */
+function linkFragment(
+  id: string,
+  doc: BlockDoc,
+  resolveBlocks?: (ids: string[]) => Record<string, string | null>,
+): BlockDoc | null {
+  if (id in doc.blocks) return subtreeDoc(doc, id)
+  const live = resolveBlocks?.([id])[id] ?? null
+  return live === null ? null : withoutDocBlocks(parse(live), doc)
 }
 
 /** The subtree under `id` as this doc holds it, as a fragment rooted there. */
@@ -407,6 +452,7 @@ export function BlockEditor({
   onLinkPreview,
   onRequestBoard,
   onOpenBoard,
+  onRequestLink,
   onActivate,
   fixedRoots = false,
   emptyable = false,
@@ -439,6 +485,13 @@ export function BlockEditor({
   /** Open a board's page (a board card's "Open board"). Absent = the card
    * offers no way there. */
   onOpenBoard?: (id: string) => void
+  /**
+   * Link a block beneath the row, or the row's block beneath another, by
+   * name (`LinkRequest`): open the palette as a picker and, downstream,
+   * call `place` with the pick; upstream, write the link. Absent = the menu
+   * offers neither (a standalone editor, a note someone shared).
+   */
+  onRequestLink?: (request: LinkRequest) => void
   /** The note this doc belongs to — what "Copy link to block" links into. */
   noteId?: string
   /**
@@ -2193,6 +2246,56 @@ export function BlockEditor({
   // list of one. Copy and cut are here rather than commands: the clipboard
   // is a side effect the pure command layer never touches.
   const firstId = (keys: string[]) => idOfKey(keys[0])
+  /**
+   * A second place for a block, picked by name (`onRequestLink`). The host
+   * is told the row's block and what to suggest — the view's top rows: the
+   * note's, or in focus the focused block and its children — and, for a
+   * downstream link, how to land the pick: beneath the row as a paste of
+   * the block would (`linkFragment`, by the paste's rules — a block cannot
+   * be put inside itself, one already there is left as it is, a loop is
+   * linked). Upstream the host writes the link, since the parent may be in
+   * another note.
+   */
+  const requestLink = (key: string, direction: LinkRequest["direction"]) => {
+    if (!onRequestLink) return
+    const current = docRef.current
+    const blockId = idOfKey(key)
+    if (!current.blocks[blockId]) return
+    const rows = focusRoot
+      ? [focusRoot.id, ...(current.blocks[focusRoot.id]?.children ?? [])]
+      : current.rootBlockIds
+    const suggested = rows.filter((id) => id !== blockId)
+    if (direction === "upstream") {
+      onRequestLink({ direction, blockId, suggested })
+      return
+    }
+    onRequestLink({
+      direction,
+      blockId,
+      suggested,
+      place: (pickedId) => {
+        const doc = docRef.current
+        // The row went while the picker was open: nowhere to put it.
+        if (!hasOccurrence(doc, key)) return
+        if (pickedId === blockId) {
+          toast("A block can't be put inside itself")
+          return
+        }
+        if (doc.blocks[blockId]?.children.includes(pickedId)) {
+          toast("That block is already here")
+          return
+        }
+        const fragment = linkFragment(pickedId, doc, resolveBlocks)
+        if (!fragment) {
+          toast("That block no longer exists")
+          return
+        }
+        placeUnder(key, fragment, doc)
+        focusContainer()
+      },
+    })
+  }
+
   const blockActions: BlockActions = {
     indent: (keys) => runOnRows("indent", keys),
     outdent: (keys) => runOnRows("outdent", keys),
@@ -2225,6 +2328,10 @@ export function BlockEditor({
       : undefined,
     view: canView ? (keys) => new Set(keys.map(idOfKey)).forEach(toggleView) : undefined,
     share: canShare ? (keys) => openShareDialog(firstId(keys)) : undefined,
+    linkDownstream:
+      onRequestLink && !readOnly ? (keys) => requestLink(keys[0], "downstream") : undefined,
+    linkUpstream:
+      onRequestLink && !readOnly ? (keys) => requestLink(keys[0], "upstream") : undefined,
     editLink: (keys, href) => setLinkCard({ key: keys[0], href }),
     turnIntoLink: (keys, href, title) => linkToBlock(keys[0], href, title === href ? "" : title),
     openImage: (keys) => setLightbox(firstId(keys)),
@@ -2612,6 +2719,27 @@ export function BlockEditor({
     })
   }
 
+  /**
+   * Land a fragment as the first children of the row `target` — a paste's
+   * blocks, or the one block a pick links beneath the row — in `current`:
+   * reveal the target so the arrival is visible, fold each arriving root so
+   * a big subtree lands as one line rather than dumping its whole tree into
+   * the view, commit the step, and select the last root.
+   */
+  const placeUnder = (target: string, sub: BlockDoc, current: BlockDoc) => {
+    const result = insertBlocksAsFirstChildren(current, idOfKey(target), sub)
+    if (!result) return
+    setCollapsedState(target, false)
+    for (const id of sub.rootBlockIds) {
+      if ((result.doc.blocks[id]?.children.length ?? 0) > 0)
+        setCollapsedState(keyOf(target, id), true)
+    }
+    history.commit(current, result.doc, { type: "structural" })
+    setAnchorKey(null)
+    setFocus(null)
+    setSelected(keyOf(target, result.lastId))
+  }
+
   // Select-mode paste: parse the clipboard into blocks and insert them after
   // the last block of the current selection — no need to enter edit mode first.
   // (Edit-mode paste is handled by the focused textarea and guarded out here.)
@@ -2637,18 +2765,6 @@ export function BlockEditor({
     // that is a link from the target down to what you pasted, which is what
     // "paste here" means when a block is the thing selected (a sibling would
     // be "paste next to"). The focused title reaches the same place: its body.
-
-    /** Land a pasted fragment under `target`: reveal the target so the paste
-     * is visible, and fold each pasted root so a big subtree arrives as one
-     * line rather than dumping its whole tree into the view. */
-    const settleAfterPaste = (rootIds: string[], nextDoc: BlockDoc) => {
-      setCollapsedState(target, false)
-      for (const id of rootIds) {
-        // Pasted roots land as the target's first children.
-        if ((nextDoc.blocks[id]?.children.length ?? 0) > 0)
-          setCollapsedState(keyOf(target, id), true)
-      }
-    }
     if (plain) {
       // Paste-as-plain: one new paragraph block, newlines collapsed to spaces
       // (a block is a single line in the serialized format). Bypasses the html
@@ -2689,13 +2805,7 @@ export function BlockEditor({
           toast(others.length > 1 ? "Those blocks are already here" : "That block is already here")
           return
         }
-        const linked = insertBlocksAsFirstChildren(doc, targetId, fragment)
-        if (!linked) return
-        settleAfterPaste(fragment.rootBlockIds, linked.doc)
-        history.commit(doc, linked.doc, { type: "structural" })
-        setAnchorKey(null)
-        setFocus(null)
-        setSelected(keyOf(target, linked.lastId))
+        placeUnder(target, fragment, doc)
         return
       }
       const converted = htmlToMarkdown(html)
@@ -2709,13 +2819,7 @@ export function BlockEditor({
     // that already exist here (content copied with its `id::` lines) are
     // reminted so the paste never clobbers an existing block.
     const sub = remintCollidingIds(sectionUnderHeadings(pasted.doc, pasted.headingLevels), doc)
-    const result = insertBlocksAsFirstChildren(doc, targetId, sub)
-    if (!result) return
-    settleAfterPaste(sub.rootBlockIds, result.doc)
-    history.commit(doc, result.doc, { type: "structural" })
-    setAnchorKey(null)
-    setFocus(null)
-    setSelected(keyOf(target, result.lastId))
+    placeUnder(target, sub, doc)
   }
 
   // The rows a DOM text selection touches, in view order, each as one block

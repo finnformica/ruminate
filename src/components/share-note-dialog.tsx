@@ -12,7 +12,7 @@ import { Dialog } from "./ui/dialog"
 import { TextInput } from "./ui/text-input"
 
 /**
- * "Share…" from a note's menu, or from a block's right-click menu
+ * "Share" from a note's menu, or from a block's right-click menu
  * (docs/sharing.md): the root is already chosen — the note, or that block —
  * so the dialog asks for the address and the verbs. Read is always granted;
  * edit and delete are opted into, and the sentence above the button says

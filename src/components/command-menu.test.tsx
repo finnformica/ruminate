@@ -979,6 +979,61 @@ describe("as a picker", () => {
     expect(screen.queryByPlaceholderText("Parent…")).toBeNull()
   })
 
+  it("lists what the request suggests, in place of Recent and Views, until a query is typed", async () => {
+    const onPick = vi.fn()
+    mocks.results = {
+      mode: "blocks",
+      hits: [NVIDIA],
+      notes: [RESEARCH],
+      titleMatches: [],
+      rows: rowsOf([NVIDIA]),
+    }
+    // A recent place and a view, which the palette would list on its own.
+    renderMenu({
+      request: {
+        placeholder: "Block…",
+        suggested: [
+          { id: "blk_gpus", noteId: "research" },
+          { id: "blk_milk", noteId: "research" },
+        ],
+        onPick,
+      },
+      notes: [makeNote("journal")],
+      touches: [{ id: "journal", at: 9000 }],
+      views: [JOURNAL],
+    })
+    expect(screen.getByText("Suggested")).toBeTruthy()
+    expect(screen.queryByText("Recent")).toBeNull()
+    expect(screen.queryByText("Views")).toBeNull()
+    expect(rowIds()).toEqual(["blk_gpus", "blk_milk"])
+    // A suggested row picked is handed back as its block.
+    const input = screen.getByPlaceholderText("Block…") as HTMLInputElement
+    for (let i = 0; i < 3 && document.activeElement !== editor(); i += 1) {
+      fireEvent.keyDown(input, { key: "ArrowDown" })
+    }
+    expect(document.activeElement).toBe(editor())
+    fireEvent.keyDown(editor(), { key: "ArrowDown" })
+    fireEvent.keyDown(editor(), { key: "Enter" })
+    expect(onPick).toHaveBeenCalledWith({ kind: "block", noteId: "research", blockId: "blk_milk" })
+    cleanup()
+
+    // Typing searches the corpus: the suggestions give way to the results.
+    renderMenu({
+      request: {
+        placeholder: "Block…",
+        suggested: [{ id: "blk_gpus", noteId: "research" }],
+        onPick,
+      },
+    })
+    const again = screen.getByPlaceholderText("Block…") as HTMLInputElement
+    fireEvent.change(again, { target: { value: "nvidia" } })
+    await waitFor(() => {
+      expect(screen.getByText("Results")).toBeTruthy()
+    })
+    expect(screen.queryByText("Suggested")).toBeNull()
+    expect(rowIds()).toEqual(["blk_nvidia"])
+  })
+
   it("lists only the rows the request keeps, and hands a picked row back as its block", async () => {
     const onPick = vi.fn()
     mocks.results = {
