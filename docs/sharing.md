@@ -150,11 +150,12 @@ any row would leave the slice:
   else's corpus, visible to nobody; a tombstoned id revived from outside would
   be a write to a row the grantee cannot see.
 - A link row must have both ends in the closure or among those new ids.
-- A row keeps its shape. A slice node keeps its type, its home note
-  (`notes_id` lands only on a new row) and the owner's own props — `font`,
-  `width` (docs/metadata.md) — which a push may carry unchanged but
-  never change; a new row is never a note and never carries them. The verbs
-  say what a grantee may write, not what the owner's rows are.
+- A row keeps its home note (`notes_id` lands only on a new row) and the
+  owner's own props — `font`, `width` (docs/metadata.md) — which a push may
+  carry unchanged but never change; a new row never carries them. A type is
+  an edit like any other: `write` may make any block any type, a note or a
+  board included, exactly as the owner's own editor may. No type is
+  special-cased at the boundary.
 - Time is the server's: a pushed `updated_at` or `deleted_at` is clamped to
   the request's clock, so a grantee cannot claim a row into the future and
   win every edit the owner makes after it.
@@ -214,8 +215,9 @@ someone else's rows does not belong in it. So shared notes live in memory
   no page of its own to open; so on the way into the snapshot a root that is
   not a note is given the note type. It lists in the sidebar, opens at
   `/views/<id>` with its text as the title and its children as the outline,
-  and searches like any note. A push puts the row's own type back, so the
-  owner's block never becomes a note.
+  and searches like any note. A push puts the row's own type back while it
+  still carries the note type it is shown with, so the owner's block never
+  becomes a note by being shared; a type the grantee gave it lands as given.
 - **Reading a share without write**: the same block editor as the reader's
   own notes, with editing off (`BlockEditor.browse`): the highlight moves, a
   click highlights, folds open and close and are kept per device, the

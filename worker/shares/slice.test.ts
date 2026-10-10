@@ -21,7 +21,6 @@ const grantWith = (permissions: string): ShareGrant =>
 
 /** The slice as stored: a note root pinned by its owner, two bullets in it. */
 const stored = (type: string, props: string | null = null): SliceNode => ({
-  type,
   notes_id: type === "note" ? null : "blk_note",
   props,
 })
@@ -131,20 +130,19 @@ describe("planSliceWrite", () => {
     })
   })
 
-  it("keeps a row's type: no change on a slice node, and never a note for a new one", () => {
-    expect(plan("read,write,delete", [node("blk_a", { type: "note" })])).toMatchObject({
-      ok: false,
-      refusal: { error: "permission_denied", detail: expect.stringContaining("type") },
-    })
-    expect(plan("read,write", [node("blk_note", { type: "ul" })]).ok).toBe(false)
-    expect(
-      plan("read,write", [node("blk_new", { type: "note" })], [link("blk_a", "blk_new")]),
-    ).toMatchObject({ ok: false, refusal: { error: "permission_denied" } })
-    // A board is a note root too (migrations/0020): a share makes none.
-    expect(
-      plan("read,write", [node("blk_new", { type: "board" })], [link("blk_a", "blk_new")]),
-    ).toMatchObject({ ok: false, refusal: { error: "permission_denied" } })
-    expect(plan("read,write", [node("blk_a", { type: "ul" })]).ok).toBe(true)
+  it("lets write change a row's type: any block, a note or a board included", () => {
+    expect(plan("read,write", [node("blk_a", { type: "todo" })]).ok).toBe(true)
+    expect(plan("read,write", [node("blk_a", { type: "board" })]).ok).toBe(true)
+    const root = (type: string) => node("blk_note", { type, props: '{"width":"wide"}' })
+    expect(plan("read,write", [root("board")]).ok).toBe(true)
+    expect(plan("read,write", [root("ul")]).ok).toBe(true)
+    for (const type of ["note", "board"]) {
+      expect(plan("read,write", [node("blk_new", { type })], [link("blk_a", "blk_new")]).ok).toBe(
+        true,
+      )
+    }
+    // Still a write: a read-only share changes no type.
+    expect(plan("read", [node("blk_a", { type: "todo" })]).ok).toBe(false)
   })
 
   it("keeps the owner's props: carried unchanged, never changed or introduced", () => {
