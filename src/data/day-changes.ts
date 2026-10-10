@@ -4,6 +4,7 @@ import { isValidDateString, isValidWeekString, toDateStringUtc, toWeekString } f
 import { fold, projectRows, type LoggedEvent, type LogState } from "./events"
 import { buildGraphSnapshot, isNoteType, noteDoc, type GraphSnapshot } from "./graph"
 import { emittedNoteTitle } from "./note-identity"
+import { keyOf } from "../blocks/view"
 
 /**
  * What a day (or a week) on the calendar shows: the notes written on it, each
@@ -37,9 +38,11 @@ import { emittedNoteTitle } from "./note-identity"
  * **removed** — and is spliced back where it stood, so it draws as a row —
  * and one in both whose text or type differs was **changed**, carrying the
  * words that went and the words that came (`diffWords`). Everything else is
- * unchanged, and drawn as the note's own view draws it: the outline whole,
- * folded where the reader's folds and the depth setting fold it, with every
- * change kept in sight (`components/day-changes.tsx`).
+ * unchanged, and drawn as the note's own view draws it — folded where the
+ * reader's folds and the depth setting fold it — then cut down to the
+ * changes and a row of context on either side (`foldContext`): the rows
+ * between fold behind one row that says how many, as a pull request's do,
+ * and open a few at a time.
  *
  * ## Before history began
  *
@@ -67,7 +70,16 @@ export interface WordSegment {
 
 /** What the period did to one block of a note's outline. */
 export type DiffMark =
-  { kind: "added" } | { kind: "removed" } | { kind: "changed"; words: WordSegment[] }
+  | { kind: "added" }
+  | { kind: "removed" }
+  | { kind: "changed"; words: WordSegment[] }
+  /** A folded row with changes somewhere beneath it, `count` of them. */
+  | { kind: "hidden"; count: number }
+  /** A synthetic row standing for `count` unchanged rows above the next
+   * change, below the last, or between two (`foldContext`). */
+  | { kind: "fold"; count: number; position: FoldPosition }
+
+export type FoldPosition = "above" | "below" | "between"
 
 export interface NoteChange {
   id: string
@@ -402,6 +414,153 @@ function spliceRemoved(after: BlockDoc, before: BlockDoc, marks: Map<string, Dif
     blocks[parent] = { ...blocks[parent], children: list }
   }
   return { ...after, blocks, rootBlockIds: lists.get(null) as string[] }
+}
+
+// -----------------------------------------------------------------------------
+// The context: what to show around the changes
+// -----------------------------------------------------------------------------
+
+/** Rows of context kept on either side of a change before a run folds. */
+const FOLD_CONTEXT = 1
+/** How many more rows a click on a fold reveals. */
+export const FOLD_REVEAL = 3
+
+export interface FoldOptions {
+  /** The occurrence keys the reader's folds close (`collapsedKeysOf`): their
+   * children are not shown, so a change beneath one is `hidden`. */
+  collapsed: ReadonlySet<string>
+  /** How many rows each fold has been opened by, by fold id. */
+  revealed: ReadonlyMap<string, number>
+  context?: number
+}
+
+/**
+ * A note's outline cut down to its changes, the way a pull request shows a
+ * file: a changed row, a row of context on either side, and a run of
+ * unchanged rows between folded behind one synthetic row (`fold:<parent
+ * key|root>:<first id>`) that says how many it stands for — and, once
+ * clicked, gives back `revealed` rows from the end nearest the change (both
+ * ends, between two). A row whose fold is closed but holds a change is kept
+ * and marked `hidden`, so the reader knows to open it. Pure: the doc and
+ * marks in, a doc and marks to draw out. The real rows keep their ids and
+ * keys, so the reader's folds still apply to them.
+ */
+export function foldContext(
+  doc: BlockDoc,
+  marks: ReadonlyMap<string, DiffMark>,
+  options: FoldOptions,
+): { doc: BlockDoc; marks: Map<string, DiffMark> } {
+  const context = options.context ?? FOLD_CONTEXT
+  const out = new Map(marks)
+  const blocks: Record<string, Block> = { ...doc.blocks }
+
+  // The changes beneath a block, through open and closed folds alike.
+  const beneath = new Map<string, number>()
+  const countBeneath = (id: string, path: Set<string>): number => {
+    const known = beneath.get(id)
+    if (known !== undefined) return known
+    if (path.has(id)) return 0
+    path.add(id)
+    let n = 0
+    for (const child of doc.blocks[id]?.children ?? []) {
+      n += (marks.has(child) ? 1 : 0) + countBeneath(child, path)
+    }
+    path.delete(id)
+    beneath.set(id, n)
+    return n
+  }
+  // The rows a hidden run stands for: the run's blocks and what shows
+  // beneath each, folds closed where the reader closed them.
+  const visibleRows = (id: string, key: string, path: Set<string>): number => {
+    if (path.has(id)) return 0
+    const block = doc.blocks[id]
+    if (!block) return 0
+    if (options.collapsed.has(key)) return 1
+    path.add(id)
+    const n =
+      1 +
+      block.children.reduce((sum, child) => sum + visibleRows(child, keyOf(key, child), path), 0)
+    path.delete(id)
+    return n
+  }
+
+  const foldList = (list: readonly string[], parentKey: string | null, path: Set<string>) => {
+    const interesting = list.map((id) => {
+      const key = keyOf(parentKey, id)
+      if (marks.has(id)) return true
+      const below = countBeneath(id, path)
+      if (below > 0 && options.collapsed.has(key) && !out.has(id)) {
+        out.set(id, { kind: "hidden", count: below })
+      }
+      return below > 0
+    })
+    if (!interesting.some(Boolean)) return [...list]
+    const keep = interesting.map((_, i) => {
+      for (let k = Math.max(0, i - context); k <= Math.min(list.length - 1, i + context); k += 1) {
+        if (interesting[k]) return true
+      }
+      return false
+    })
+
+    const result: string[] = []
+    const pushFold = (foldId: string, hidden: string[], position: FoldPosition) => {
+      const count = hidden.reduce(
+        (sum, id) => sum + visibleRows(id, keyOf(parentKey, id), new Set(path)),
+        0,
+      )
+      blocks[foldId] = { id: foldId, type: "text", text: "", children: [] }
+      out.set(foldId, { kind: "fold", count, position })
+      result.push(foldId)
+    }
+    let run: string[] = []
+    const flush = (position: FoldPosition) => {
+      if (run.length === 0) return
+      const foldId = `fold:${parentKey ?? "root"}:${run[0]}`
+      const opened = Math.min(run.length, options.revealed.get(foldId) ?? 0)
+      if (opened >= run.length || run.length < 2) {
+        result.push(...run)
+      } else if (position === "above") {
+        pushFold(foldId, run.slice(0, run.length - opened), position)
+        result.push(...run.slice(run.length - opened))
+      } else if (position === "below") {
+        result.push(...run.slice(0, opened))
+        pushFold(foldId, run.slice(opened), position)
+      } else {
+        const top = Math.ceil(opened / 2)
+        const bottom = opened - top
+        result.push(...run.slice(0, top))
+        pushFold(foldId, run.slice(top, run.length - bottom), position)
+        result.push(...run.slice(run.length - bottom))
+      }
+      run = []
+    }
+    list.forEach((id, index) => {
+      if (keep[index]) {
+        flush(run.length === index ? "above" : "between")
+        result.push(id)
+      } else {
+        run.push(id)
+      }
+    })
+    flush("below")
+    return result
+  }
+
+  const walk = (list: readonly string[], parentKey: string | null, path: Set<string>) => {
+    for (const id of list) {
+      const block = doc.blocks[id]
+      if (!block || path.has(id) || block.children.length === 0) continue
+      const key = keyOf(parentKey, id)
+      if (options.collapsed.has(key) || countBeneath(id, path) === 0) continue
+      path.add(id)
+      walk(block.children, key, path)
+      blocks[id] = { ...blocks[id], children: foldList(block.children, key, path) }
+      path.delete(id)
+    }
+  }
+  walk(doc.rootBlockIds, null, new Set())
+  const rootBlockIds = foldList(doc.rootBlockIds, null, new Set())
+  return { doc: { ...doc, blocks, rootBlockIds }, marks: out }
 }
 
 // -----------------------------------------------------------------------------

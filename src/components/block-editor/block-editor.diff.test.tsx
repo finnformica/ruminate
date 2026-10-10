@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render } from "@testing-library/react"
+import { cleanup, fireEvent, render } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Block, BlockDoc } from "../../blocks/types"
 import type { DiffMark } from "../../data/day-changes"
@@ -22,16 +22,20 @@ const block = (id: string, text: string, children: string[] = []): Block => ({
 })
 
 /** The outline a past day leaves (`src/data/day-changes.ts`): one row kept,
- * one reworded, one removed, and one added with a row beneath it. */
+ * one reworded, one removed, one added with a row beneath it, a closed row
+ * hiding a change, and a fold at the end. */
 const doc: BlockDoc = {
   props: null,
-  rootBlockIds: ["keep", "changed", "gone", "new"],
+  rootBlockIds: ["keep", "changed", "gone", "new", "closed", "fold:root:x"],
   blocks: {
     keep: block("keep", "Call the bank"),
     changed: block("changed", "Buy sourdough"),
     gone: block("gone", "Call mum"),
     new: block("new", "Walk along the canal", ["deep"]),
     deep: block("deep", "Take the camera"),
+    closed: block("closed", "Later", ["inside"]),
+    inside: block("inside", "Ring the plumber"),
+    "fold:root:x": block("fold:root:x", ""),
   },
 }
 const marks = new Map<string, DiffMark>([
@@ -49,6 +53,8 @@ const marks = new Map<string, DiffMark>([
   ["gone", { kind: "removed" }],
   ["new", { kind: "added" }],
   ["deep", { kind: "added" }],
+  ["closed", { kind: "hidden", count: 1 }],
+  ["fold:root:x", { kind: "fold", count: 4, position: "below" }],
 ])
 
 const signsOf = (container: HTMLElement) =>
@@ -62,9 +68,24 @@ const rowOf = (container: HTMLElement, id: string) =>
 describe("the block editor drawing a diff", () => {
   it("puts a sign at the edge of every row, in the one column whatever the depth", () => {
     const { container } = render(
-      <BlockEditor doc={doc} onChange={() => {}} readOnly browse diff={{ marks }} />,
+      <BlockEditor
+        doc={doc}
+        onChange={() => {}}
+        readOnly
+        browse
+        diff={{ marks }}
+        collapsed={new Set(["closed"])}
+      />,
     )
-    expect(signsOf(container)).toEqual(["same ", "changed ~", "removed −", "added +", "added +"])
+    expect(signsOf(container)).toEqual([
+      "same ",
+      "changed ~",
+      "removed −",
+      "added +",
+      "added +",
+      "hidden ⋯",
+      "fold ⋯",
+    ])
     // The sign hangs in the gutter of its own row, which indents inside of
     // it, so the nested row's sign is where the root rows' are.
     const deepSign = rowOf(container, "deep").querySelector("[data-testid=diff-sign]")!
@@ -74,7 +95,14 @@ describe("the block editor drawing a diff", () => {
 
   it("tints a whole row added or removed, and says a changed row in its words", () => {
     const { container } = render(
-      <BlockEditor doc={doc} onChange={() => {}} readOnly browse diff={{ marks }} />,
+      <BlockEditor
+        doc={doc}
+        onChange={() => {}}
+        readOnly
+        browse
+        diff={{ marks }}
+        collapsed={new Set(["closed"])}
+      />,
     )
     expect(rowOf(container, "new").innerHTML).toContain("bg-bg-added")
     expect(rowOf(container, "gone").innerHTML).toContain("bg-bg-removed")
@@ -86,8 +114,28 @@ describe("the block editor drawing a diff", () => {
     expect(rowOf(container, "keep").querySelector("del, ins")).toBeNull()
   })
 
+  it("draws a fold as one quiet row, without a key, that opens on a click", () => {
+    const expandFold = vi.fn()
+    const { container } = render(
+      <BlockEditor
+        doc={doc}
+        onChange={() => {}}
+        readOnly
+        browse
+        initialSelection="none"
+        diff={{ marks, expandFold }}
+        collapsed={new Set(["closed"])}
+      />,
+    )
+    const fold = container.querySelector<HTMLElement>("[data-testid=diff-fold]")!
+    expect(fold.textContent).toBe("4 rows below")
+    fireEvent.click(fold)
+    expect(expandFold).toHaveBeenCalledWith("fold:root:x")
+  })
+
   it("leaves the gutter alone when the outline is not a diff", () => {
     const { container } = render(<BlockEditor doc={doc} onChange={() => {}} readOnly />)
     expect(container.querySelector("[data-testid=diff-sign]")).toBeNull()
+    expect(container.querySelector("[data-testid=diff-fold]")).toBeNull()
   })
 })

@@ -24,7 +24,7 @@ import { imageFilesOf } from "../../data/images"
 import { blurLeavesWindow } from "../../utils/window-blur"
 import { IconButton } from "../ui/icon-button"
 import { BlockContent } from "./block-content"
-import type { DiffMark } from "../../data/day-changes"
+import type { DiffMark, FoldPosition } from "../../data/day-changes"
 import { LISTED_HEADING_DEPTH, headingScale, kindOf, type RowContext, slotOf } from "./block-kinds"
 import { caretCoordinates, caretLineFlags, caretOffsetAtPoint } from "./caret"
 import { BlockKey } from "./block-key"
@@ -54,6 +54,8 @@ export interface FocusRequest {
 
 export interface BlockDiff {
   marks: ReadonlyMap<string, DiffMark>
+  /** Open a fold row (`DiffMark`, kind `fold`) by a few more rows. */
+  expandFold?: (foldId: string) => void
 }
 
 export interface BlockEditorApi {
@@ -1067,6 +1069,12 @@ export function BlockItem({
       <LinkActionsContext.Provider value={linkActions}>
         {mark?.kind === "changed" ? (
           <WordDiff segments={mark.words} />
+        ) : mark?.kind === "fold" ? (
+          <FoldRow
+            count={mark.count}
+            position={mark.position}
+            onExpand={() => api.diff?.expandFold?.(block.id)}
+          />
         ) : kind.body ? (
           kind.body(block)
         ) : (
@@ -1180,7 +1188,8 @@ export function BlockItem({
             "absolute -left-6 top-0.5 flex h-[1lh] w-[15px] select-none items-center justify-center font-mono text-sm leading-relaxed",
             mark?.kind === "added" && "text-text-success",
             mark?.kind === "removed" && "text-text-danger",
-            mark?.kind === "changed" && "text-text-changed",
+            (mark?.kind === "changed" || mark?.kind === "hidden") && "text-text-changed",
+            mark?.kind === "fold" && "text-text-tertiary",
           )}
         >
           {mark?.kind === "added"
@@ -1189,7 +1198,9 @@ export function BlockItem({
               ? "−"
               : mark?.kind === "changed"
                 ? "~"
-                : ""}
+                : mark?.kind === "hidden" || mark?.kind === "fold"
+                  ? "⋯"
+                  : ""}
         </span>
       ) : null}
       {occurrence.guideKeys.map((guideKey, level) => (
@@ -1278,7 +1289,9 @@ export function BlockItem({
           )}
         >
           {chevronColumn}
-          {marker}
+          {/* A fold row is a line of text standing for rows, not a block:
+              no key of its own. */}
+          {mark?.kind === "fold" ? null : marker}
           {kind.before?.(rowContext)}
           {kind.wrap ? kind.wrap(content, rowContext) : content}
           {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}
@@ -1379,5 +1392,30 @@ function WordDiff({ segments }: { segments: readonly { kind: string; text: strin
         ),
       )}
     </>
+  )
+}
+
+/** A run of unchanged rows, folded, as a pull request folds the lines around
+ * a change: one quiet row saying how many, which gives back a few at a time
+ * (`FOLD_REVEAL`). */
+function FoldRow({
+  count,
+  position,
+  onExpand,
+}: {
+  count: number
+  position: FoldPosition
+  onExpand: () => void
+}) {
+  const rows = count === 1 ? "1 row" : `${count} rows`
+  return (
+    <button
+      type="button"
+      data-testid="diff-fold"
+      className="focus-ring -mx-1 rounded px-1 text-left text-sm text-text-tertiary hover:text-text-secondary"
+      onClick={onExpand}
+    >
+      {position === "above" ? `${rows} above` : position === "below" ? `${rows} below` : rows}
+    </button>
   )
 }

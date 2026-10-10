@@ -3,12 +3,12 @@ import { addDays, parseISO, startOfISOWeek } from "date-fns"
 import { useAtom, useAtomValue } from "jotai"
 import React from "react"
 import { collapsedKeysOf } from "../blocks/default-collapsed"
-import type { BlockDoc } from "../blocks/types"
 import {
+  FOLD_REVEAL,
   changesIn,
   daysWithChanges,
+  foldContext,
   sittingsIn,
-  type DiffMark,
   type NoteChange,
   type PeriodChanges,
   type Sitting,
@@ -284,19 +284,29 @@ function NoteList({ notes }: { notes: NoteChange[] }) {
  * the top while its outline scrolls under it, then the outline in the block
  * editor's read-only mode with every row marked (`BlockEditor.diff`,
  * `block-item.tsx`). The outline folds as the note's own view folds — the
- * reader's folds over the depth setting (`useFoldRule`) — except that a row
- * with a change beneath it is held open, so nothing the day did is hidden.
+ * reader's folds over the depth setting (`useFoldRule`), a closed row with
+ * changes beneath it marked so — and is cut down to the changes and a row
+ * of context each side, the rows between folded behind "n rows above" /
+ * "n rows below" that open a few at a time (`foldContext`).
  */
 function NoteSection({ change }: { change: NoteChange }) {
   const title = change.title || (isMintedNoteId(change.id) ? "Untitled" : change.id)
   const { expanded, setFold } = useFoldRule(change.id)
-  const collapsed = React.useMemo(() => {
-    const marked = markedBeneath(change.doc, change.marks)
-    return new Set(
-      collapsedKeysOf(change.doc, expanded).filter((key) => !marked.has(lastSegment(key))),
-    )
-  }, [change.doc, change.marks, expanded])
-  const diff = React.useMemo(() => ({ marks: change.marks }), [change.marks])
+  const collapsed = React.useMemo(
+    () => new Set(collapsedKeysOf(change.doc, expanded)),
+    [change.doc, expanded],
+  )
+  const [revealed, setRevealed] = React.useState<ReadonlyMap<string, number>>(() => new Map())
+  const expandFold = React.useCallback(
+    (foldId: string) =>
+      setRevealed((prev) => new Map(prev).set(foldId, (prev.get(foldId) ?? 0) + FOLD_REVEAL)),
+    [],
+  )
+  const shown = React.useMemo(
+    () => foldContext(change.doc, change.marks, { collapsed, revealed }),
+    [change.doc, change.marks, collapsed, revealed],
+  )
+  const diff = React.useMemo(() => ({ marks: shown.marks, expandFold }), [shown.marks, expandFold])
   return (
     <section aria-label={title} className="flex flex-col gap-2">
       {/* -mx-2 / px-2: the name's surface reaches the rows' edges, so the
@@ -327,7 +337,7 @@ function NoteSection({ change }: { change: NoteChange }) {
       {/* Nothing highlighted: a page of notes is read, not arrowed through,
           and a highlight would scroll its row into view on mount. */}
       <BlockEditor
-        doc={change.doc}
+        doc={shown.doc}
         onChange={noop}
         readOnly
         browse
@@ -339,26 +349,3 @@ function NoteSection({ change }: { change: NoteChange }) {
     </section>
   )
 }
-
-/** The blocks with a marked row somewhere beneath them. */
-function markedBeneath(doc: BlockDoc, marks: ReadonlyMap<string, DiffMark>): Set<string> {
-  const holds = new Map<string, boolean>()
-  const walk = (id: string, path: Set<string>): boolean => {
-    const known = holds.get(id)
-    if (known !== undefined) return known
-    if (path.has(id)) return false
-    path.add(id)
-    let below = false
-    for (const child of doc.blocks[id]?.children ?? []) {
-      if (walk(child, path) || marks.has(child)) below = true
-    }
-    path.delete(id)
-    holds.set(id, below)
-    return below
-  }
-  for (const id of doc.rootBlockIds) walk(id, new Set())
-  return new Set([...holds].filter(([, below]) => below).map(([id]) => id))
-}
-
-/** The block an occurrence key ends in (`keyOf`: ids joined by `/`). */
-const lastSegment = (key: string) => key.slice(key.lastIndexOf("/") + 1)

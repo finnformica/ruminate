@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest"
+import type { Block, BlockDoc } from "../blocks/types"
 import {
   changesIn,
   daysWithChanges,
   diffWords,
+  foldContext,
   localDayOf,
   periodMatcher,
   sittingsIn,
+  type DiffMark,
   type NoteChange,
 } from "./day-changes"
 import { EVENT_VERSION, linkEntityId, type LoggedEvent } from "./events"
@@ -388,5 +391,92 @@ describe("diffWords", () => {
     expect(diffWords("", "new")).toEqual([{ kind: "added", text: "new" }])
     expect(diffWords("old", "")).toEqual([{ kind: "removed", text: "old" }])
     expect(diffWords("same", "same")).toEqual([{ kind: "same", text: "same" }])
+  })
+})
+
+describe("foldContext", () => {
+  const block = (id: string, children: string[] = []): Block => ({
+    id,
+    type: "text",
+    text: id,
+    children,
+  })
+  /** Nine rows, the fifth changed; the second has two children, the sixth one. */
+  const doc: BlockDoc = {
+    props: null,
+    rootBlockIds: ["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9"],
+    blocks: {
+      ...Object.fromEntries(
+        ["r1", "r3", "r4", "r5", "r7", "r8", "r9"].map((id) => [id, block(id)]),
+      ),
+      r2: block("r2", ["c1", "c2"]),
+      c1: block("c1"),
+      c2: block("c2"),
+      r6: block("r6", ["c3"]),
+      c3: block("c3"),
+    },
+  }
+  const marks = new Map<string, DiffMark>([["r5", { kind: "changed", words: [] }]])
+  const none = new Set<string>()
+  /** The rows in order, a fold as `⋯n above|below|between`. */
+  const shape = (out: ReturnType<typeof foldContext>) =>
+    out.doc.rootBlockIds.map((id) => {
+      const mark = out.marks.get(id)
+      return mark?.kind === "fold" ? `⋯${mark.count} ${mark.position}` : id
+    })
+
+  it("keeps a row of context beside each change and folds the rest, counting what shows", () => {
+    const out = foldContext(doc, marks, { collapsed: none, revealed: new Map() })
+    // r1..r3 above: r2's two children show too, so five rows; r7..r9 below.
+    expect(shape(out)).toEqual(["⋯5 above", "r4", "r5", "r6", "⋯3 below"])
+    // A closed fold counts as one row.
+    const closed = foldContext(doc, marks, { collapsed: new Set(["r2"]), revealed: new Map() })
+    expect(shape(closed)).toEqual(["⋯3 above", "r4", "r5", "r6", "⋯3 below"])
+  })
+
+  it("gives back a few rows from the end nearest the change, and dissolves once open", () => {
+    const once = foldContext(doc, marks, {
+      collapsed: none,
+      revealed: new Map([["fold:root:r1", 2]]),
+    })
+    expect(shape(once)).toEqual(["⋯1 above", "r2", "r3", "r4", "r5", "r6", "⋯3 below"])
+    const below = foldContext(doc, marks, {
+      collapsed: none,
+      revealed: new Map([["fold:root:r7", 3]]),
+    })
+    expect(shape(below)).toEqual(["⋯5 above", "r4", "r5", "r6", "r7", "r8", "r9"])
+  })
+
+  it("folds between two changes from both ends", () => {
+    const two = new Map<string, DiffMark>([
+      ["r1", { kind: "added" }],
+      ["r9", { kind: "added" }],
+    ])
+    const out = foldContext(doc, two, { collapsed: none, revealed: new Map() })
+    expect(shape(out)).toEqual(["r1", "r2", "⋯6 between", "r8", "r9"])
+    const opened = foldContext(doc, two, {
+      collapsed: none,
+      revealed: new Map([["fold:root:r3", 3]]),
+    })
+    expect(shape(opened)).toEqual(["r1", "r2", "r3", "r4", "⋯3 between", "r7", "r8", "r9"])
+  })
+
+  it("marks a closed row that hides a change, and folds inside an open one", () => {
+    const deep = new Map<string, DiffMark>([["c2", { kind: "added" }]])
+    const closed = foldContext(doc, deep, { collapsed: new Set(["r2"]), revealed: new Map() })
+    // r4..r9, with r6's child: seven rows.
+    expect(shape(closed)).toEqual(["r1", "r2", "r3", "⋯7 below"])
+    expect(closed.marks.get("r2")).toEqual({ kind: "hidden", count: 1 })
+    expect(closed.doc.blocks.r2.children).toEqual(["c1", "c2"])
+
+    const open = foldContext(doc, deep, { collapsed: none, revealed: new Map() })
+    expect(open.marks.get("r2")).toBeUndefined()
+    // c1 is c2's context, so nothing folds inside r2.
+    expect(open.doc.blocks.r2.children).toEqual(["c1", "c2"])
+  })
+
+  it("leaves a list with nothing beneath it whole", () => {
+    const out = foldContext(doc, new Map(), { collapsed: none, revealed: new Map() })
+    expect(out.doc).toEqual(doc)
   })
 })
