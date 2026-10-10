@@ -31,6 +31,7 @@ import { useCreateNote, useNoteById, useRenameNote, useSetNoteProps } from "../h
 import { useSavedView, useWriteView } from "../hooks/views"
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
+import { useOpenNote } from "../hooks/open-note"
 import { pathToBlock } from "../data/graph"
 import { narrowingParam, resolveNarrowing } from "../utils/view-filter"
 import { FilterMenu, SortMenu } from "../components/view-controls"
@@ -95,6 +96,8 @@ function NotePage() {
   const { _splat: noteId } = Route.useParams()
   const { block: focusBlockId, filter: filterParam, sort: sortParam } = Route.useSearch()
   const navigate = Route.useNavigate()
+  // A board card's "Open board" (docs/boards.md, "A board in a note").
+  const openNote = useOpenNote()
 
   // Global state
   const isSignedOut = useAtomValue(isSignedOutAtom)
@@ -533,6 +536,7 @@ function NotePage() {
                   }}
                   noteTitle={note?.displayName ?? ""}
                   context={context}
+                  onOpenBoard={(id) => void openNote(id)}
                   onEditingChange={setEditingBlockId}
                   // Narrowed, there is no starter row to type into. A new
                   // row lands in the note as it does anywhere (Enter on a

@@ -1,4 +1,3 @@
-import type React from "react"
 import type { ReactNode } from "react"
 import { figureAlignOf, type FigureAlign } from "../../blocks/figure"
 import { BLOCK_TYPE_DEFS } from "../../blocks/registry"
@@ -11,6 +10,7 @@ import { noteTypeOf } from "../../utils/note-type"
 import { NoteFavicon } from "../note-favicon"
 import { BlockFrame } from "./block-frame"
 import type { BlockEditorApi } from "./block-item"
+import { BoardCard } from "./board-card"
 import { LinkCard } from "./link-card"
 import { CodeHighlight } from "./code-highlight"
 import { CodePanel } from "./code-panel"
@@ -36,6 +36,18 @@ export interface RowContext {
    * hides an empty line (an image's caption) must keep it while it is being
    * typed into. */
   editing: boolean
+  /** The row is LISTED — a results view's (`BlockEditorApi.fixedRoots`),
+   * one among many — rather than a row of an outline. */
+  listed: boolean
+}
+
+/** What stands in a row's key slot (`BlockKind.slot`). */
+export type SlotKind = "checkbox" | "dot" | "hash" | "number" | "glyph" | "none"
+
+/** A kind's slot for a row: the one it names, or the one it gives a
+ * listed or an outline row. */
+export function slotOf(kind: BlockKind, listed: boolean): SlotKind {
+  return typeof kind.slot === "function" ? kind.slot(listed) : kind.slot
 }
 
 export interface BlockKind {
@@ -45,8 +57,14 @@ export interface BlockKind {
    * image, a link card, a code block) has a frame of its own for a mark —
    * but the slot keeps its width, so the content stays in one column. The
    * collapse chevron is never a key: it has a column of its own before the
-   * slot (`block-item.tsx`). */
-  readonly slot: "checkbox" | "dot" | "hash" | "number" | "glyph" | "none"
+   * slot (`block-item.tsx`). A function, for a type whose slot depends on
+   * whether the row is listed (a board: a favicon among the results, as a
+   * note's; the empty slot before its card in an outline). */
+  readonly slot: SlotKind | ((listed: boolean) => SlotKind)
+  /** The row's text is never edited in place: no textarea opens on it,
+   * and asking to edit it selects it instead (a board card's title is the
+   * board's name, changed on the board's own page). */
+  readonly uneditable?: boolean
   /** The glyph for a `glyph` slot, or null for an empty slot. */
   readonly glyph?: string | null
   /** A RENDERED key for a `glyph` slot, where the key depends on the block
@@ -198,11 +216,35 @@ function noteKindOf(block: Block): NoteType {
   return byId === "note" && block.props?.[LEGACY_BOARD_PROP] === true ? "board" : byId
 }
 
+/**
+ * A board is a note root of the other kind. Listed (a search result, the
+ * Views page, the palette) it is the note row, its key the board's
+ * favicon. As a row of an outline it is a board linked under the block
+ * (docs/boards.md, "A board in a note"), a figure like a picture or a
+ * link card: its slot is the empty one a figure gets, so its card starts
+ * where their figures start, and its content line is drawn as that card
+ * (`BoardCard`) — the board's name, rendered inside the card and never a
+ * textarea (a board is named on its own page, and asking to edit the row
+ * selects it, `uneditable`), with what the board holds beneath.
+ */
+const board: BlockKind = {
+  ...note,
+  slot: (listed) => (listed ? "glyph" : "none"),
+  uneditable: true,
+  typography: (_depth, _block, listed) =>
+    cx(BODY, "font-sans", listed ? "font-bold" : "font-medium"),
+  wrap: (content, context) =>
+    context.listed
+      ? content
+      : figureWrap("board-block", (title, { block, occurrence, api }) => (
+          <BoardCard block={block} occurrence={occurrence} api={api} title={lineOf(title)} />
+        ))(content, context),
+}
+
 export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
   text,
   note,
-  // A board is a note root of the other kind: the same row, its own favicon.
-  board: note,
+  board,
   ul: { slot: "dot", typography: () => BODY },
   ol: { slot: "number", typography: () => BODY },
   todo,
@@ -330,7 +372,7 @@ const lineOf = (content: ReactNode) => <div className="flex min-w-0">{content}</
 function figureWrap(
   testId: string,
   figure: (content: ReactNode, context: RowContext) => ReactNode,
-): BlockKind["wrap"] {
+): NonNullable<BlockKind["wrap"]> {
   return (content, context) => <BlockFrame testId={testId}>{figure(content, context)}</BlockFrame>
 }
 

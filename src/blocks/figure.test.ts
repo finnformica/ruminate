@@ -12,6 +12,7 @@ describe("figure layout props", () => {
     expect(isFigureType("image")).toBe(true)
     expect(isFigureType("link")).toBe(true)
     expect(isFigureType("code")).toBe(true)
+    expect(isFigureType("board")).toBe(true)
     expect(isFigureType("text")).toBe(false)
     expect(isFigureType("note")).toBe(false)
   })

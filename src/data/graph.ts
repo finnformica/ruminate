@@ -611,7 +611,7 @@ export function walkGraph(
         : block.children
     const beneathUp = up ? (block.upstream ?? []).filter((parentId) => !path.has(parentId)) : []
     if (beneathDown.length === 0 && beneathUp.length === 0) return true
-    if (!expanded(key, level)) {
+    if (!expanded(key, level, block.type)) {
       collapsed.add(key)
       return true
     }
