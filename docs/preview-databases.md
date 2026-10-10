@@ -30,13 +30,6 @@ on every push to a non-production branch. In order:
    and exits 0 — no version is uploaded, so a branch that has not been opened
    as a PR has no preview at all, rather than one against production. The
    build itself still runs; the gate is not a way to save build minutes.
-   Two consequences worth knowing. A branch pushed _before_ its PR is opened
-   gets no preview until its next push, and Cloudflare's PR comment reports
-   that build as successful with no preview link — push again, or retry the
-   build in the dashboard. And when GitHub cannot be asked at all (a 403
-   from the unauthenticated rate limit, GitHub down) the script says so and
-   previews anyway: the preview runs against a clone, never production, so a
-   preview nobody asked for is the cheaper mistake.
 2. **Fingerprint.** A SHA-256 over the sorted `migrations/*.sql` names and
    contents, for the branch and for `origin/main`.
 3. **Choose the clone.**
@@ -152,16 +145,9 @@ made against the previous clone, which no longer exists anyway.
    (D1 Edit) and `CLOUDFLARE_ACCOUNT_ID` (`a84767ecbbb94d3154e915832507314d`).
    Without them the workflow exits 0 without deleting anything, and the sweep
    does the work on the next preview build.
-4. **A `GITHUB_TOKEN` build variable (secret).** The repository is public,
-   so the PR lookups need no permissions — but the unauthenticated limit is
-   60 requests an hour _per address_, and the build runners' egress address
-   is shared with every other Workers Builds project, so without a token the
-   lookups answer 403 on a busy afternoon (seen 2026-10-10: every preview
-   build that day failed at the gate). A fine-grained token with no
-   permissions at all — public repository access, read-only — lifts the
-   limit to 5,000 an hour. With the gate's fallback the build still previews
-   without one, but the sweep (step 6) and the per-branch choice (step 3)
-   degrade without GitHub, so set it.
+4. **A `GITHUB_TOKEN` build variable is optional.** The repository is public,
+   so the PR lookups need no token; one raises the unauthenticated rate limit
+   of 60 requests an hour, which a busy afternoon of pushes could reach.
 5. **The branch alias's OAuth callback** is unchanged by any of this: sign-in
    on a preview works through the callback already registered for the branch
    alias URL, and the clone carries the `users` table, so the same GitHub id
