@@ -9,7 +9,8 @@
 // migrate, and every preview wrote its test edits into. This script gives
 // each pull request a clone of production to preview against instead:
 //
-//   1. gate      — no open PR for this branch → no preview at all (exit 0)
+//   1. gate      — no open PR for this branch → no preview at all (exit 0);
+//                  GitHub unanswerable (rate-limited, down) → preview anyway
 //   2. fingerprint the branch's migrations, and main's
 //   3. choose    — same as main → the shared clone; otherwise this branch's own
 //   4. reuse or rebuild the clone (production → export → import)
@@ -78,12 +79,20 @@ step(`branch ${branch}`)
 const ownPulls = await github(
   `/repos/${REPO}/pulls?state=open&head=${encodeURIComponent(`finnformica:${branch}`)}`,
 )
-if (ownPulls === null) fail("GitHub API unreachable; cannot tell whether this branch has a PR")
-if (openPullBranches(ownPulls).length === 0) {
+if (ownPulls === null) {
+  // GitHub could not be asked — most often a 403 from the unauthenticated
+  // rate limit, which the build runners' shared address exhausts on a busy
+  // afternoon (the doc's GITHUB_TOKEN build variable is the cure). The
+  // preview goes ahead: it runs against a clone, never production, so a
+  // preview nobody asked for costs a version upload, while a PR left
+  // without one reads as a successful build with no link to show for it.
+  step(`GitHub cannot be asked whether ${branch} has a PR; previewing anyway`)
+} else if (openPullBranches(ownPulls).length === 0) {
   step(`no open PR for ${branch}; skipping preview`)
   process.exit(0)
+} else {
+  step(`open PR found for ${branch}`)
 }
-step(`open PR found for ${branch}`)
 
 // -----------------------------------------------------------------------------
 // 2. Fingerprints: this branch's migrations, and main's
@@ -392,7 +401,15 @@ async function github(route) {
   try {
     const response = await fetch(url, { headers: githubHeaders() })
     if (!response.ok) {
-      console.warn(`[preview] GitHub answered ${response.status} for ${route}`)
+      // The rate-limit headers tell a 403 for exhaustion from a 403 for
+      // anything else, and say when the window opens again.
+      const remaining = response.headers.get("x-ratelimit-remaining")
+      const reset = response.headers.get("x-ratelimit-reset")
+      const limit =
+        remaining !== null
+          ? ` (rate limit remaining ${remaining}${reset ? `, resets ${new Date(Number(reset) * 1000).toISOString()}` : ""})`
+          : ""
+      console.warn(`[preview] GitHub answered ${response.status} for ${route}${limit}`)
       return null
     }
     return await response.json()
