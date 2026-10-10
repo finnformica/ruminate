@@ -143,7 +143,14 @@ function Content({
           onPointerDown={onPointerDown}
         >
           <ChildMenusContext.Provider value={children_.context}>
-            <div className="grid max-h-[45svh] scroll-py-1 overflow-auto p-1">{children}</div>
+            {/* One column the rows can shrink in (`minmax(0,1fr)`): a grid's
+                auto column is never narrower than its widest row's content,
+                so a submenu trigger's value ("Mauritius, Lisbon") would set
+                the column wider than the menu and the rows would scroll
+                sideways, instead of the value truncating as it is meant to. */}
+            <div className="grid max-h-[45svh] grid-cols-[minmax(0,1fr)] scroll-py-1 overflow-auto p-1">
+              {children}
+            </div>
             {footer ? <div className="border-t border-border-secondary p-1.5">{footer}</div> : null}
           </ChildMenusContext.Provider>
         </Menu.Popup>
@@ -271,12 +278,22 @@ const SubmenuTrigger = React.forwardRef<HTMLDivElement, SubmenuTriggerProps>(
         openOnHover={openOnHover ?? !coarse}
         {...props}
       >
-        <div className="flex w-0 grow items-center gap-3">
+        {/* The label keeps its width and the value has what is left, up to
+            just over half the row — so a narrow row reads "Type  Todo, D…"
+            and never "T…  Todo, Done": the label is what the row is, and
+            the submenu shows the value whole. The value starts from
+            nothing (`basis-0`) and takes the room with a far greater grow
+            than the label's, so the label only ever shrinks when it alone
+            does not fit, and the label takes up what the value's cap
+            leaves, keeping the chevron at the end. */}
+        <div className="flex min-w-0 grow items-center gap-3">
           {icon ? <div className="flex text-text-secondary">{icon}</div> : null}
           <span className="grow truncate">{children}</span>
         </div>
         {value ? (
-          <span className="min-w-0 max-w-[55%] shrink truncate text-text-secondary">{value}</span>
+          <span className="min-w-0 max-w-[55%] grow-[1000] basis-0 truncate text-right text-text-secondary">
+            {value}
+          </span>
         ) : null}
         <ChevronRightIcon12 className="shrink-0 text-text-tertiary" />
       </Menu.SubmenuTrigger>

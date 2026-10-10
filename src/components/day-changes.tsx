@@ -1,7 +1,6 @@
 import { Link } from "@tanstack/react-router"
 import { addDays, parseISO, startOfISOWeek } from "date-fns"
 import { useAtom, useAtomValue } from "jotai"
-import type { Note } from "../schema"
 import React from "react"
 import {
   changesIn,
@@ -19,19 +18,12 @@ import {
 import type { LoggedEvent } from "../data/events"
 import { isMintedNoteId } from "../data/note-identity"
 import { writerTimezone } from "../data/writer-identity"
-import {
-  calendarChangesViewAtom,
-  dateMentionsAtom,
-  isDatabaseModeAtom,
-  notesAtom,
-} from "../global-state"
-import { useDateMentions } from "../hooks/note"
+import { calendarChangesViewAtom, isDatabaseModeAtom } from "../global-state"
 import { cx } from "../utils/cx"
 import { formatDate, isValidWeekString, toDateString, toWeekString } from "../utils/date"
 import { BlockEditor } from "./block-editor/block-editor"
+import { useDateMarks } from "./date-mentions"
 import { NoteIcon16 } from "./icons"
-import { NoteFavicon } from "./note-favicon"
-import { listRow } from "./ui/list"
 import { Button } from "./ui/button"
 import { Skeleton } from "./ui/skeleton"
 import { surface } from "./ui/surface"
@@ -63,52 +55,19 @@ export function useEventLog(): LoggedEvent[] | null {
 }
 
 /** The days something was written on, or a note names in a date-valued
- * property (`dateMentionsAtom`, docs/metadata.md), and the weeks holding
- * them — what the calendar dots. */
+ * property (`useDateMarks`), and the weeks holding them — what the calendar
+ * dots. */
 export function useCalendarMarks(log: LoggedEvent[] | null): ReadonlySet<string> {
-  const mentions = useAtomValue(dateMentionsAtom)
+  const dates = useDateMarks()
   return React.useMemo(() => {
-    const marked = log === null ? new Set<string>() : daysWithChanges(log, writerTimezone())
-    for (const id of mentions.keys()) marked.add(id)
-    for (const id of [...marked]) {
-      if (!isValidWeekString(id)) marked.add(toWeekString(parseISO(id)))
+    const marked = new Set(dates)
+    if (log === null) return marked
+    for (const day of daysWithChanges(log, writerTimezone())) {
+      marked.add(day)
+      marked.add(toWeekString(parseISO(day)))
     }
     return marked
-  }, [log, mentions])
-}
-
-/**
- * The notes that name a day or a week in a date-valued property — a
- * birthday, a due date (docs/metadata.md) — listed beneath the day's
- * changes. Nothing when none does.
- */
-export function DateMentions({ periodId }: { periodId: string }) {
-  const ids = useDateMentions(periodId)
-  const notes = useAtomValue(notesAtom)
-  const mentioned = ids.map((id) => notes.get(id)).filter((note): note is Note => !!note)
-  if (mentioned.length === 0) return null
-  return (
-    <section aria-label="Notes with this date" className="flex flex-col gap-2">
-      <h2 className="font-bold text-text">Notes with this date</h2>
-      <ul className="-mx-3 flex flex-col">
-        {mentioned.map((note) => (
-          <li key={note.id}>
-            <Link
-              to="/views/$"
-              params={{ _splat: note.id }}
-              search={{ query: undefined }}
-              className={cx(listRow(), "focus-ring text-text")}
-            >
-              <span className="flex size-icon shrink-0 text-text-secondary">
-                <NoteFavicon note={note} />
-              </span>
-              <span className="truncate">{note.displayName}</span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
-  )
+  }, [log, dates])
 }
 
 /**
