@@ -547,12 +547,12 @@ describe("select-mode paste", () => {
   it("pastes parsed blocks INTO the selected block, without entering edit mode", () => {
     const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
     const root = editorRoot(container)
-    paste(root, "# New heading\r\n- new bullet")
+    paste(root, "New heading\r\n- new bullet")
     const md = getByTestId("serialized").textContent!
     const lines = md.split("\n").filter((l) => !l.includes("id::") && l.trim() !== "")
     // Indented under A, not beside it: pasting onto a selected block links the
     // content downstream from it — "paste here", not "paste next to".
-    expect(lines).toEqual(["A", "  # New heading", "  - new bullet", "B"])
+    expect(lines).toEqual(["A", "  New heading", "  - new bullet", "B"])
     // Nothing landed between A's subtree and B — B is still a root.
     expect(lines.indexOf("B")).toBe(lines.length - 1)
     // No textarea opened; the last inserted block is highlighted.
@@ -659,7 +659,8 @@ describe("select-mode paste", () => {
     fireEvent.paste(textarea, {
       clipboardData: { getData: (type: string) => (type === "text/plain" ? "# Header\n- a" : "") },
     })
-    expect(serializedLines(getByTestId)).toEqual(["# Header", "- a"])
+    // The heading's own marker, and (foreign text) the bullet sectioned under it.
+    expect(serializedLines(getByTestId)).toEqual(["# Header", "  - a"])
   })
 
   it("edit-mode paste converts the html flavor and splits into blocks", () => {
@@ -671,7 +672,125 @@ describe("select-mode paste", () => {
           type === "text/html" ? "<h2>Head</h2><ul><li>item</li></ul>" : "Head item",
       },
     })
-    expect(serializedLines(getByTestId)).toEqual(["# Head", "- item"])
+    expect(serializedLines(getByTestId)).toEqual(["# Head", "  - item"])
+  })
+})
+
+describe("paste sections foreign content under its headings", () => {
+  function paste(target: HTMLElement, text: string, html = "") {
+    fireEvent.paste(target, {
+      clipboardData: { getData: (type: string) => (type === "text/html" ? html : text) },
+    })
+  }
+
+  const renderedBlocks = (container: HTMLElement): string[] =>
+    Array.from(container.querySelectorAll('[data-testid="block-body"]'))
+      .filter((el) => !el.closest("[data-folding]"))
+      .map((el) => el.textContent ?? "")
+
+  // The shape a meeting-notes app copies: headings beside their lists.
+  const MEETING_HTML =
+    "<h3>Launch Plan</h3><ul><li>Go-live target<ul><li>Window: 7–9 AM UK</li></ul></li>" +
+    "<li>Soft go-live first</li></ul>" +
+    "<h3>Next Steps</h3><ul><li>Make copy changes</li></ul>" +
+    "<p>Chat with meeting transcript</p>"
+
+  it("select mode: each heading gathers its section, and lands folded", () => {
+    const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
+    paste(editorRoot(container), "flat plain flavour", MEETING_HTML)
+    expect(serializedLines(getByTestId)).toEqual([
+      "A",
+      "  # Launch Plan",
+      "    - Go-live target",
+      "      - Window: 7–9 AM UK",
+      "    - Soft go-live first",
+      "  # Next Steps",
+      "    - Make copy changes",
+      // Nothing marks where the last section ends, so trailing text joins it.
+      "    Chat with meeting transcript",
+      "B",
+    ])
+    // Pasted roots with children arrive folded, as any pasted subtree does.
+    expect(renderedBlocks(container)).toContain("Launch Plan")
+    expect(renderedBlocks(container)).toContain("Next Steps")
+    expect(renderedBlocks(container)).not.toContain("Go-live target")
+  })
+
+  it("select mode: plain markdown text is sectioned too, by heading level", () => {
+    const { container, getByTestId } = render(<Harness initial={"A"} />)
+    paste(editorRoot(container), "## Launch\n### Timing\n- 7–9 AM\n## Marketing\n- SEO")
+    expect(serializedLines(getByTestId)).toEqual([
+      "A",
+      "  # Launch",
+      "    # Timing",
+      "      - 7–9 AM",
+      "  # Marketing",
+      "    - SEO",
+    ])
+  })
+
+  it("select mode: a heading the source already nested under keeps its own tree", () => {
+    const { container, getByTestId } = render(<Harness initial={"A"} />)
+    paste(editorRoot(container), "# Plan\n  - inside\n- after")
+    expect(serializedLines(getByTestId)).toEqual(["A", "  # Plan", "    - inside", "  - after"])
+  })
+
+  it("select mode: Ruminate's own copy keeps a heading beside its siblings", () => {
+    const formats = richClipboardFormats("# Kept flat\n- sibling")
+    const { container, getByTestId } = render(<Harness initial={"A"} />)
+    paste(editorRoot(container), formats.plain, formats.html)
+    expect(serializedLines(getByTestId)).toEqual(["A", "  # Kept flat", "  - sibling"])
+  })
+
+  it("edit mode: Ruminate's own copy keeps a heading beside its siblings", () => {
+    const formats = richClipboardFormats("# Kept flat\n- sibling")
+    const { container, getByTestId } = render(<Harness initial={""} startEditing />)
+    paste(container.querySelector("textarea")!, formats.plain, formats.html)
+    expect(serializedLines(getByTestId)).toEqual(["# Kept flat", "- sibling"])
+  })
+
+  it("edit mode: Mod+Shift+V still pastes plain text into the one block", () => {
+    const { container, getByTestId } = render(<Harness initial={""} startEditing />)
+    const textarea = container.querySelector("textarea")!
+    fireEvent.keyDown(textarea, { key: "v", metaKey: true, shiftKey: true })
+    paste(textarea, "# One\n- two", "<h1>One</h1><ul><li>two</li></ul>")
+    expect(serializedLines(getByTestId)).toEqual(["# One - two"])
+  })
+
+  it("edit mode: the caret lands in the nested last block, before the text after it", () => {
+    const { container, getByTestId } = render(<Harness initial={"tail"} startEditing />)
+    const textarea = container.querySelector("textarea")!
+    textarea.setSelectionRange(0, 0)
+    paste(textarea, "# Head\n- one\n- two")
+    // The row's text after the caret ends the paste's last block.
+    expect(serializedLines(getByTestId)).toEqual(["# Head", "  - one", "  - twotail"])
+    const editing = container.querySelector("textarea")!
+    expect(editing.value).toBe("twotail")
+    expect(editing.selectionStart).toBe(3)
+  })
+
+  it("edit mode: the row's own text never gathers the paste", () => {
+    // Pasting at the end of an existing heading: the heading is the reader's,
+    // so the pasted lines stay beside it, as they always did.
+    const { container, getByTestId } = render(<Harness initial={"# Title"} startEditing />)
+    const textarea = container.querySelector("textarea")!
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+    paste(textarea, "\n- a\n- b")
+    expect(serializedLines(getByTestId)).toEqual(["# Title", "- a", "- b"])
+  })
+
+  it("edit mode: the row's existing children follow the pasted section", () => {
+    const { container, getByTestId } = render(<Harness initial={"x\n  - old"} startEditing />)
+    const textarea = container.querySelector("textarea")!
+    textarea.setSelectionRange(0, textarea.value.length) // the paste replaces "x"
+    paste(textarea, "# Head\n- new")
+    expect(serializedLines(getByTestId)).toEqual(["# Head", "  - new", "  - old"])
+  })
+
+  it("edit mode: a paste with no headings is unchanged", () => {
+    const { container, getByTestId } = render(<Harness initial={""} startEditing />)
+    paste(container.querySelector("textarea")!, "one\n- two\n  - three")
+    expect(serializedLines(getByTestId)).toEqual(["one", "- two", "  - three"])
   })
 })
 

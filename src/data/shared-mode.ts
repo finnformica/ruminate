@@ -500,10 +500,12 @@ export function sharedApplyOps(shareId: string, ops: readonly Op[]) {
 
   const now = Date.now()
   const diff = opsToRows(slice.graph, ops, now)
-  // A block root is a note on screen and a block in the owner's rows.
+  // A block root is a note on screen and a block in the owner's rows: the
+  // note type it is shown with goes back as the block's own. Any other type
+  // is the grantee's edit, and lands as it is.
   for (const row of diff.nodes) {
     const stored = slice.rootTypes.get(row.id)
-    if (stored !== undefined) row.type = stored
+    if (stored !== undefined && row.type === NOTE_TYPE) row.type = stored
   }
   activation.slices.set(shareId, { ...slice, graph: applyOps(slice.graph, ops, now) })
   publish(activation)

@@ -119,8 +119,10 @@ export interface BlockEditorApi {
    * slash-menu pick, so one undo puts the typed `/phrase` back).
    */
   onBlockChange: (id: string, patch: BlockPatch, op?: "text" | "structural") => void
-  /** Replace the row with blocks imported from pasted markdown, placing the caret. */
-  onPaste: (key: string, before: string, pasted: string, after: string) => void
+  /** Replace the row with blocks imported from pasted markdown, placing the
+   * caret. `exact` is Ruminate's own copy, whose tree is kept as it was;
+   * anything else is sectioned under its headings (`sectionUnderHeadings`). */
+  onPaste: (key: string, before: string, pasted: string, after: string, exact: boolean) => void
   /**
    * Resolve a key event to an editor command (via the keymap) and run it.
    * Every keyboard interaction funnels through here; returns whether the event
@@ -652,10 +654,12 @@ export function BlockItem({
     // to markdown — falling back to the plain text.
     const html = event.clipboardData?.getData("text/html") ?? ""
     let pasted = normalized
+    let exact = false
     if (html.trim() !== "") {
       const embedded = extractClipboardBlocks(html)
       if (embedded && embedded.length > 0) {
         pasted = clipboardBlocksToMarkdown(embedded)
+        exact = true
       } else {
         const converted = htmlToMarkdown(html)
         if (converted.trim() !== "") pasted = converted
@@ -684,7 +688,7 @@ export function BlockItem({
     const el = event.currentTarget
     const before = el.value.slice(0, el.selectionStart)
     const after = el.value.slice(el.selectionEnd)
-    api.onPaste(occurrence.key, before, pasted, after)
+    api.onPaste(occurrence.key, before, pasted, after, exact)
   }
 
   // The chevron: a parent's fold control. It lives in the CHEVRON COLUMN
