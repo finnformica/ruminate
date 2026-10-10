@@ -126,6 +126,15 @@ export function DayChanges({ periodId, log }: { periodId: string; log: LoggedEve
           </div>
         ) : null}
       </div>
+      {changes?.approximate ? (
+        // The log was seeded from the rows it found (docs/event-sourcing.md,
+        // "Before history began"): a row's last save is all it knows of
+        // the days before, so those rows draw as last saved, not written.
+        <p className="text-sm text-text-secondary">
+          History before this update is approximate: a row appears on the day it was last saved,
+          marked <span className="font-mono">·</span>, without what changed in it.
+        </p>
+      ) : null}
       {changes === null ? (
         <Skeleton className="h-24" />
       ) : changes.notes.length === 0 ? (
@@ -260,10 +269,16 @@ function Timeline({
       {sittings.map((sitting, index) => (
         <li key={`${sitting.device}:${sitting.at}:${index}`} className="flex flex-col gap-3">
           <h3 className="flex items-baseline gap-2 text-text">
-            <span className="font-bold">{sittingLabel(sitting, viewerTz, isWeek)}</span>
+            <span className="font-bold">
+              {sitting.device === "snapshot"
+                ? "Last saved"
+                : sittingLabel(sitting, viewerTz, isWeek)}
+            </span>
             <span className="text-text-secondary">
               {sitting.notes.length === 1 ? "1 note" : `${sitting.notes.length} notes`}
-              {sitting.tz !== null && sitting.tz !== viewerTz ? ` · ${utcOffset(sitting.tz)}` : ""}
+              {sitting.device !== "snapshot" && sitting.tz !== null && sitting.tz !== viewerTz
+                ? ` · ${utcOffset(sitting.tz)}`
+                : ""}
             </span>
           </h3>
           <NoteCards notes={sitting.notes} expandFold={expandFold} />
@@ -351,13 +366,20 @@ function NoteCard({
         </Link>
         {change.kind !== "edited" ? (
           <span className="rounded bg-bg-secondary px-1.5 text-sm text-text-secondary">
-            {change.kind === "created" ? "New" : "Deleted"}
+            {change.kind === "created"
+              ? "New"
+              : change.kind === "deleted"
+                ? "Deleted"
+                : "Last saved"}
           </span>
         ) : null}
         <span className="ml-auto flex shrink-0 gap-2 font-mono text-sm">
           {change.added > 0 ? <span className="text-text-success">+{change.added}</span> : null}
           {change.removed > 0 ? <span className="text-text-danger">−{change.removed}</span> : null}
           {change.changed > 0 ? <span className="text-text-changed">~{change.changed}</span> : null}
+          {change.touched > 0 ? (
+            <span className="text-text-tertiary">·{change.touched}</span>
+          ) : null}
         </span>
       </header>
       <div className="px-3 py-2">

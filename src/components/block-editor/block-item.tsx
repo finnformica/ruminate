@@ -1184,7 +1184,7 @@ export function BlockItem({
             mark?.kind === "added" && "text-text-success",
             mark?.kind === "removed" && "text-text-danger",
             mark?.kind === "changed" && "text-text-changed",
-            mark?.kind === "fold" && "text-text-tertiary",
+            (mark?.kind === "fold" || mark?.kind === "touched") && "text-text-tertiary",
           )}
         >
           {mark?.kind === "added"
@@ -1195,7 +1195,9 @@ export function BlockItem({
                 ? "~"
                 : mark?.kind === "fold"
                   ? "⋯"
-                  : ""}
+                  : mark?.kind === "touched"
+                    ? "·"
+                    : ""}
         </span>
       ) : null}
       {occurrence.guideKeys.map((guideKey, level) => (

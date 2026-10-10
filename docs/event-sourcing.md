@@ -265,6 +265,16 @@ period's changes, and **in order**, sitting by sitting — a sitting being one
 device's run of edits with no pause over half an hour (`sittingsIn`), labelled
 with the writer's clock and, where it is not the reader's, the writer's zone.
 
+**Before history began.** The log was seeded from the rows the replica held
+(the reconcile above): one snapshot `create` per row, stamped with the row's
+last save and no zone. A snapshot says the row was saved then, not what
+changed in it, so on its day the row draws as **last saved** — a grey `·` in
+the gutter, no tint — rather than added, a note of nothing but such rows is
+**Last saved** rather than **New**, and the page says the period is
+approximate. In the ordered reading the seeded rows are one sitting of their
+own, ahead of the day's edits. A tombstone's snapshot is skipped. Every edit
+after the seed is exact against it.
+
 There are no daily or weekly notes: a day is not a note and nothing is written
 on the calendar page itself. A note that was kept under a date-shaped id
 before is an ordinary note now, still at `/views/<id>`; such an id with no
