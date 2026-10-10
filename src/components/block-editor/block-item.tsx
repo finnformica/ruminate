@@ -54,7 +54,6 @@ export interface FocusRequest {
 
 export interface BlockDiff {
   marks: ReadonlyMap<string, DiffMark>
-  expandFold?: (foldId: string) => void
 }
 
 export interface BlockEditorApi {
@@ -1068,8 +1067,6 @@ export function BlockItem({
       <LinkActionsContext.Provider value={linkActions}>
         {mark?.kind === "changed" ? (
           <WordDiff segments={mark.words} />
-        ) : mark?.kind === "fold" ? (
-          <FoldRow count={mark.count} onExpand={() => api.diff?.expandFold?.(block.id)} />
         ) : kind.body ? (
           kind.body(block)
         ) : (
@@ -1184,7 +1181,6 @@ export function BlockItem({
             mark?.kind === "added" && "text-text-success",
             mark?.kind === "removed" && "text-text-danger",
             mark?.kind === "changed" && "text-text-changed",
-            mark?.kind === "fold" && "text-text-tertiary",
           )}
         >
           {mark?.kind === "added"
@@ -1193,9 +1189,7 @@ export function BlockItem({
               ? "−"
               : mark?.kind === "changed"
                 ? "~"
-                : mark?.kind === "fold"
-                  ? "⋯"
-                  : ""}
+                : ""}
         </span>
       ) : null}
       {occurrence.guideKeys.map((guideKey, level) => (
@@ -1385,20 +1379,5 @@ function WordDiff({ segments }: { segments: readonly { kind: string; text: strin
         ),
       )}
     </>
-  )
-}
-
-/** A run of unchanged rows, folded: one quiet row saying how many, which
- * opens them. */
-function FoldRow({ count, onExpand }: { count: number; onExpand: () => void }) {
-  return (
-    <button
-      type="button"
-      data-testid="diff-fold"
-      className="focus-ring -mx-1 rounded px-1 text-left text-sm text-text-tertiary hover:text-text-secondary"
-      onClick={onExpand}
-    >
-      {count === 1 ? "1 unchanged row" : `${count} unchanged rows`}
-    </button>
   )
 }

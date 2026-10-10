@@ -250,12 +250,14 @@ curl -s "$ORIGIN/api/replica/events?entity=block&entity_id=blk_…" \
 A day (or a week) of the calendar is a page of its own (`/calendar/<day>`,
 `/calendar/<week>`; `src/routes/_appRoot.calendar.$.tsx`) that shows what was
 written on it (`src/data/day-changes.ts`, `src/components/day-changes.tsx`):
-every note changed on it, drawn by the block editor in its read-only mode
-with what the day did to each row marked (`BlockEditor.diff`,
-`block-item.tsx`) — a row added or removed sits on its tint with a `+` or `−`
-at the editor's edge, a reworded row shows the words that went and came, and
-a run of unchanged rows folds behind one row that says how many, a row of
-context kept on either side (`FOLD_CONTEXT`), the shape of a pull request.
+every note changed on it, laid out as its own page is — the name, which
+stays at the top while the outline scrolls under it, then the outline in the
+block editor's read-only mode — with what the day did to each row marked
+(`BlockEditor.diff`, `block-item.tsx`): a row added or removed sits on its
+tint with a `+` or `−` at the editor's edge, and a reworded row shows the
+words that went and came. The outline folds as the note's own view folds (the
+reader's folds over the depth setting, `useFoldRule`), except that a row with
+a change beneath it is held open.
 "Before" is the fold of everything placed ahead of the day's first event;
 "after" is that fold with the day's events — and only the day's — applied on
 top, so what shows is what the day's edits did, whatever landed around them
@@ -267,14 +269,17 @@ with the writer's clock and, where it is not the reader's, the writer's zone.
 
 **Before history began.** The log was seeded from the rows the replica held
 (the reconcile above): one snapshot `create` per row, stamped with the row's
-last save. A snapshot says the row existed, not what any day did to it, so
-the calendar never reads one as a day's writing: no day is dotted for it, and
-a day before the first real edit says where history begins. A snapshot's
-`seq` is the row's old one and says nothing about when it was saved (a note's
-row, re-stamped on every save, keeps the seq it was made with), so the
-calendar reads the log as the snapshots first, then the edits by `seq`
-(`byPlace`): the seeded rows are always in a day's "before", and every edit
-after the seed is exact against them.
+last save. The calendar reads a snapshot as the row written on that day —
+the last save before the log is the nearest thing to a date it has — so a
+note's rows show as added on the days they were last saved, and history
+begins on the earliest. A tombstone's snapshot is skipped, and so is a
+note's own row (its stamp is the note's last save, not a day anything was
+written; the note is placed at the very beginning of history so its rows are
+found on their own days). A snapshot's `seq` is the row's old one and says
+nothing about when it was saved, so the calendar reads the log as the notes'
+snapshots first, then the other snapshots by the day they were saved, then
+the edits by `seq` (`byPlace`); every edit after the seed is exact against
+the rows it found.
 
 There are no daily or weekly notes: a day is not a note and nothing is written
 on the calendar page itself. A note that was kept under a date-shaped id

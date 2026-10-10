@@ -37,22 +37,26 @@ import { emittedNoteTitle } from "./note-identity"
  * **removed** — and is spliced back where it stood, so it draws as a row —
  * and one in both whose text or type differs was **changed**, carrying the
  * words that went and the words that came (`diffWords`). Everything else is
- * unchanged, and a run of unchanged rows is **folded** behind one row that
- * says how many it stands for, a row of context kept on either side of a
- * change (`FOLD_CONTEXT`), the shape a reader knows from a pull request.
+ * unchanged, and drawn as the note's own view draws it: the outline whole,
+ * folded where the reader's folds and the depth setting fold it, with every
+ * change kept in sight (`components/day-changes.tsx`).
  *
  * ## Before history began
  *
  * The log was seeded from the rows that predate it: one snapshot `create`
  * per row (`batch: "snapshot"`, docs/event-sourcing.md), stamped with the
- * row's last save. A snapshot says the row existed, not what any day did
- * to it, so it is never a day's event: no day is dotted for it, and history
- * begins on the first day with a real edit (`earliest`). The seeded rows
- * are the beginning of history whatever `seq` they hold (a note's row,
- * re-stamped on every save, keeps the seq it was made with), so the log is
- * read as the snapshots first, then every edit by `seq` (`byPlace`), and a
- * day's "before" — everything placed ahead of its first event — always
- * holds them. Every edit after the seed is exact against it.
+ * row's last save and no zone. The calendar reads a snapshot as the row
+ * written on that day — its last save before the log is the nearest thing
+ * to a date it has — so a note's rows show as added on the days they were
+ * last saved, and history begins on the earliest. A tombstone's snapshot is
+ * skipped: a row that was already gone is not a row the day wrote.
+ *
+ * A snapshot's `seq` is the row's old one, which says nothing about when the
+ * row was saved — a note's row, re-stamped on every save, keeps the seq it
+ * was made with. So the log is read in the order snapshots first, by the day
+ * they were saved, then every edit by `seq` (`byPlace`): the seeded rows are
+ * the beginning of history, whatever seq they hold, and a day's "before" is
+ * everything placed ahead of its first event in that order.
  */
 
 /** A word diff's piece: a run of text that both have, or only one of them. */
@@ -63,12 +67,7 @@ export interface WordSegment {
 
 /** What the period did to one block of a note's outline. */
 export type DiffMark =
-  | { kind: "added" }
-  | { kind: "removed" }
-  | { kind: "changed"; words: WordSegment[] }
-  /** A synthetic row standing for a run of unchanged rows, `count` of them
-   * (descendants included), with the ids it hides. */
-  | { kind: "fold"; count: number; hidden: string[] }
+  { kind: "added" } | { kind: "removed" } | { kind: "changed"; words: WordSegment[] }
 
 export interface NoteChange {
   id: string
@@ -80,7 +79,7 @@ export interface NoteChange {
   removed: number
   changed: number
   /** The outline to draw: the after-outline with the removed blocks spliced
-   * back where they stood and unchanged runs folded. */
+   * back where they stood. */
   doc: BlockDoc
   marks: Map<string, DiffMark>
 }
@@ -105,20 +104,24 @@ export interface Sitting {
   notes: NoteChange[]
 }
 
-export interface ChangeOptions {
-  /** Fold rows the reader has opened: left unfolded. */
-  expanded?: ReadonlySet<string>
-}
-
 /** The batch the replica seeds the log with (`planReconcile`). */
 const SNAPSHOT_BATCH = "snapshot"
 const isSnapshot = (event: LoggedEvent) => event.batch === SNAPSHOT_BATCH
-/** An event the calendar reads as something written on its day: an edit —
- * never a snapshot — and not a view's row. */
-const isWriting = (event: LoggedEvent) => !isSnapshot(event) && event.entity !== "view"
+/** A snapshot of a row that was already deleted: not a row the day wrote. */
+const isTombstoneSnapshot = (event: LoggedEvent) =>
+  isSnapshot(event) && typeof (event.patch as { deleted_at?: unknown }).deleted_at === "number"
+/** The snapshot of a note's own row. Its stamp is the note's last save, not
+ * a day anything was written: the note is placed at the very beginning of
+ * history, so its rows are found on their own days. */
+const isNoteSnapshot = (event: LoggedEvent) =>
+  isSnapshot(event) &&
+  event.entity === "block" &&
+  isNoteType(String((event.patch as { type?: unknown }).type))
+/** An event the calendar reads as something written: not a view's row, and
+ * not a snapshot that stands for no day's writing. */
+const isWriting = (event: LoggedEvent) =>
+  event.entity !== "view" && !isTombstoneSnapshot(event) && !isNoteSnapshot(event)
 
-/** Rows of context kept on either side of a change before a run folds. */
-const FOLD_CONTEXT = 1
 /** A pause longer than this ends a sitting (`sittingsIn`). */
 const SITTING_GAP_MS = 30 * 60_000
 
@@ -138,14 +141,22 @@ export function periodMatcher(periodId: string): ((day: string) => boolean) | nu
 }
 
 /** The order the calendar reads the log in (see the module header): the
- * snapshots first, then the edits, by seq within each. Snapshots always
- * hold lower seqs than edits, so the fold — which applies by seq — agrees. */
-const byPlace = (a: LoggedEvent, b: LoggedEvent): number => {
-  const snapA = isSnapshot(a)
-  const snapB = isSnapshot(b)
-  if (snapA !== snapB) return snapA ? -1 : 1
-  return a.seq - b.seq
-}
+ * notes' own snapshots first, then the other snapshots by the day they were
+ * saved on, then the edits by seq — seq within each. Snapshots always hold
+ * lower seqs than edits, so the fold — which applies by seq — agrees. */
+const byPlace =
+  (viewerTz: number) =>
+  (a: LoggedEvent, b: LoggedEvent): number => {
+    const tierA = isNoteSnapshot(a) ? 0 : isSnapshot(a) ? 1 : 2
+    const tierB = isNoteSnapshot(b) ? 0 : isSnapshot(b) ? 1 : 2
+    if (tierA !== tierB) return tierA - tierB
+    if (tierA === 1) {
+      const dayA = localDayOf(a, viewerTz)
+      const dayB = localDayOf(b, viewerTz)
+      if (dayA !== dayB) return dayA < dayB ? -1 : 1
+    }
+    return a.seq - b.seq
+  }
 
 /** Every day (in the viewer's zone, or the writer's where it said) something
  * was written on — what the calendar dots. A view's row is not writing. */
@@ -160,17 +171,17 @@ export function changesIn(
   log: readonly LoggedEvent[],
   periodId: string,
   viewerTz: number,
-  options: ChangeOptions = {},
 ): PeriodChanges {
   const inPeriod = periodMatcher(periodId)
-  const sorted = [...log].sort(byPlace)
-  const edits = sorted.filter((event) => !isSnapshot(event))
+  const sorted = [...log].sort(byPlace(viewerTz))
   const earliest =
-    edits.length === 0 ? null : edits.map((event) => localDayOf(event, viewerTz)).sort()[0]
+    sorted.length === 0 ? null : sorted.map((event) => localDayOf(event, viewerTz)).sort()[0]
   if (inPeriod === null) return { events: 0, notes: [], earliest }
-  const periodEvents = edits.filter((event) => inPeriod(localDayOf(event, viewerTz)))
+  const periodEvents = sorted.filter(
+    (event) => (!isSnapshot(event) || isWriting(event)) && inPeriod(localDayOf(event, viewerTz)),
+  )
   if (periodEvents.length === 0) return { events: 0, notes: [], earliest }
-  const notes = changesOf(sorted, periodEvents, options)
+  const notes = changesOf(sorted, periodEvents, byPlace(viewerTz))
   return { events: periodEvents.length, notes, earliest }
 }
 
@@ -183,15 +194,16 @@ export function sittingsIn(
   log: readonly LoggedEvent[],
   periodId: string,
   viewerTz: number,
-  options: ChangeOptions & { gapMs?: number } = {},
+  options: { gapMs?: number } = {},
 ): Sitting[] {
   const inPeriod = periodMatcher(periodId)
   if (inPeriod === null) return []
   const gapMs = options.gapMs ?? SITTING_GAP_MS
-  const sorted = [...log].sort(byPlace)
+  const sorted = [...log].sort(byPlace(viewerTz))
   const periodEvents = sorted.filter(
-    (event) => !isSnapshot(event) && inPeriod(localDayOf(event, viewerTz)),
+    (event) => (!isSnapshot(event) || isWriting(event)) && inPeriod(localDayOf(event, viewerTz)),
   )
+  // The seeded rows come first (`byPlace`), as the replica's own sittings.
   const runs: LoggedEvent[][] = []
   for (const event of periodEvents) {
     const run = runs.at(-1)
@@ -208,7 +220,7 @@ export function sittingsIn(
     tz: run[0].tz ?? null,
     device: deviceOf(run[0]),
     events: run.length,
-    notes: changesOf(sorted, run, options),
+    notes: changesOf(sorted, run, byPlace(viewerTz)),
   }))
 }
 
@@ -224,10 +236,10 @@ const deviceOf = (event: LoggedEvent) => event.device.split(".")[0]
 function changesOf(
   sorted: readonly LoggedEvent[],
   run: readonly LoggedEvent[],
-  options: ChangeOptions,
+  place: (a: LoggedEvent, b: LoggedEvent) => number,
 ): NoteChange[] {
   const first = run[0]
-  const before = sorted.filter((event) => byPlace(event, first) < 0)
+  const before = sorted.filter((event) => place(event, first) < 0)
   const graphBefore = graphOf(fold(before))
   const graphAfter = graphOf(fold([...before, ...run]))
 
@@ -244,7 +256,7 @@ function changesOf(
 
   const notes: NoteChange[] = []
   for (const id of touched) {
-    const change = noteChange(graphBefore, graphAfter, id, options)
+    const change = noteChange(graphBefore, graphAfter, id)
     if (change !== null) notes.push(change)
   }
   notes.sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0))
@@ -292,14 +304,13 @@ function notesHolding(graph: GraphSnapshot, blockId: string): string[] {
 /**
  * A note's change between two graphs: null when neither holds it, or both
  * hold it unchanged. The doc returned is the after-outline with the removed
- * blocks spliced back where they stood (`spliceRemoved`) and unchanged runs
- * folded (`foldUnchanged`); `marks` says what each row is.
+ * blocks spliced back where they stood (`spliceRemoved`); `marks` says what
+ * each row is.
  */
 function noteChange(
   before: GraphSnapshot,
   after: GraphSnapshot,
   noteId: string,
-  options: ChangeOptions = {},
 ): NoteChange | null {
   const docBefore = noteDoc(noteId, before)
   const docAfter = noteDoc(noteId, after)
@@ -320,7 +331,6 @@ function noteChange(
   const changed = countMarks(marks, "changed")
   if (added + removed + changed === 0 && docBefore !== null && docAfter !== null) return null
 
-  const folded = foldUnchanged(doc, marks, options.expanded ?? new Set())
   const node = after.nodes.get(noteId) ?? before.nodes.get(noteId)
   return {
     id: noteId,
@@ -329,7 +339,7 @@ function noteChange(
     added,
     removed,
     changed,
-    doc: folded,
+    doc,
     marks,
   }
 }
@@ -392,88 +402,6 @@ function spliceRemoved(after: BlockDoc, before: BlockDoc, marks: Map<string, Dif
     blocks[parent] = { ...blocks[parent], children: list }
   }
   return { ...after, blocks, rootBlockIds: lists.get(null) as string[] }
-}
-
-/**
- * Fold the unchanged runs of every children list: a block is touched when it
- * or anything beneath it is marked; a run of untouched rows longer than two
- * folds, keeping `FOLD_CONTEXT` rows beside each touched one, into one
- * synthetic row (`fold:<parent>:<index>`) that says how many rows — the run's
- * blocks and their descendants — it stands for. A fold the reader opened
- * (`expanded`) stays open.
- */
-function foldUnchanged(
-  doc: BlockDoc,
-  marks: Map<string, DiffMark>,
-  expanded: ReadonlySet<string>,
-): BlockDoc {
-  const touched = new Map<string, boolean>()
-  const isTouched = (id: string, path = new Set<string>()): boolean => {
-    const known = touched.get(id)
-    if (known !== undefined) return known
-    if (path.has(id)) return false
-    path.add(id)
-    const own = marks.has(id)
-    const below = (doc.blocks[id]?.children ?? []).some((child) => isTouched(child, path))
-    touched.set(id, own || below)
-    return own || below
-  }
-  const rows = (id: string, path = new Set<string>()): number => {
-    if (path.has(id)) return 0
-    path.add(id)
-    return 1 + (doc.blocks[id]?.children ?? []).reduce((n, child) => n + rows(child, path), 0)
-  }
-  const blocks: Record<string, Block> = { ...doc.blocks }
-
-  const foldList = (parent: string | null, list: readonly string[]): string[] => {
-    if (list.length === 0) return [...list]
-    const keep = list.map((id) => isTouched(id))
-    if (!keep.some(Boolean)) return [...list]
-    for (let i = 0; i < list.length; i += 1) {
-      if (!isTouched(list[i])) continue
-      for (
-        let k = Math.max(0, i - FOLD_CONTEXT);
-        k <= Math.min(list.length - 1, i + FOLD_CONTEXT);
-        k += 1
-      )
-        keep[k] = true
-    }
-    const out: string[] = []
-    let run: string[] = []
-    const flush = () => {
-      if (run.length === 0) return
-      const foldId = `fold:${parent ?? "root"}:${run[0]}`
-      if (run.length < 2 || expanded.has(foldId)) {
-        out.push(...run)
-      } else {
-        blocks[foldId] = { id: foldId, type: "text", text: "", children: [] }
-        marks.set(foldId, {
-          kind: "fold",
-          count: run.reduce((n, id) => n + rows(id), 0),
-          hidden: [...run],
-        })
-        out.push(foldId)
-      }
-      run = []
-    }
-    list.forEach((id, index) => {
-      if (keep[index]) {
-        flush()
-        out.push(id)
-      } else {
-        run.push(id)
-      }
-    })
-    flush()
-    return out
-  }
-
-  const rootBlockIds = foldList(null, doc.rootBlockIds)
-  for (const [id, block] of Object.entries(doc.blocks)) {
-    if (block.children.length === 0 || !isTouched(id)) continue
-    blocks[id] = { ...blocks[id], children: foldList(id, block.children) }
-  }
-  return { ...doc, blocks, rootBlockIds }
 }
 
 // -----------------------------------------------------------------------------

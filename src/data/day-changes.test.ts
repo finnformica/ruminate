@@ -62,12 +62,13 @@ function writer(tz: number | null = 0, device = "dev.tab") {
       }),
     /** A row the replica seeded the log with (`planReconcile`): stamped with
      * its last save, no zone, batch `snapshot`. */
-    snapshot: (at: number, id: string, text: string, note: string | null) => ({
+    snapshot: (at: number, id: string, text: string, note: string | null, deletedAt?: number) => ({
       ...make(at, "block", id, "create", {
         type: note === null ? "note" : "text",
         text,
         props: null,
         notes_id: note,
+        ...(deletedAt === undefined ? {} : { deleted_at: deletedAt }),
       }),
       batch: "snapshot",
       device: "replica",
@@ -94,7 +95,7 @@ const placed = (log: LoggedEvent[]) =>
 /**
  * A change's outline as the reader sees it: one line per row, in order,
  * indented by depth, each led by its mark — `+`, `−`, `~` (with the word
- * diff), `⋯n` for a fold of n rows, or `=` for an unchanged row.
+ * diff), or `=` for an unchanged row.
  */
 function rowsOf(change: NoteChange): string[] {
   const out: string[] = []
@@ -103,8 +104,7 @@ function rowsOf(change: NoteChange): string[] {
       const block = change.doc.blocks[id]
       const mark = change.marks.get(id)
       const pad = "  ".repeat(depth)
-      if (mark?.kind === "fold") out.push(`${pad}⋯${mark.count}`)
-      else if (mark?.kind === "changed") {
+      if (mark?.kind === "changed") {
         const words = mark.words
           .map((w) =>
             w.kind === "same" ? w.text : w.kind === "added" ? `{+${w.text}+}` : `[-${w.text}-]`,
@@ -260,8 +260,9 @@ describe("changesIn", () => {
 
   describe("before history began", () => {
     // The replica seeded the log from the rows it held (one snapshot per
-    // row, stamped with its last save): a note and a row on the 7th, a row
-    // on the 8th; then, on the 9th, a real edit.
+    // row, stamped with its last save): a note and a row last saved on the
+    // 7th, a row on the 8th, a row deleted on the 8th. Then, on the 9th, a
+    // real edit.
     const seeded = () => {
       const w = writer()
       return [
@@ -270,28 +271,63 @@ describe("changesIn", () => {
         w.snapshotLink(utc("2026-10-07T10:00:00Z"), "n", "a", "a0"),
         w.snapshot(utc("2026-10-08T10:00:00Z"), "b", "two", "n"),
         w.snapshotLink(utc("2026-10-08T10:00:00Z"), "n", "b", "a1"),
+        w.snapshot(utc("2026-10-08T11:00:00Z"), "gone", "old", "n", utc("2026-10-08T11:00:00Z")),
         w.edit(utc("2026-10-09T12:00:00Z"), "a", "one, edited"),
       ]
     }
 
-    it("never shows a snapshot as a day's writing: history begins at the first edit", () => {
+    it("shows a seeded row as added on the day it was last saved", () => {
       const seventh = changesIn(seeded(), "2026-10-07", 0)
-      expect(seventh).toEqual({ events: 0, notes: [], earliest: "2026-10-09" })
-      expect(changesIn(seeded(), "2026-10-08", 0).notes).toEqual([])
-      expect([...daysWithChanges(seeded(), 0)]).toEqual(["2026-10-09"])
+      expect(seventh.events).toBe(2)
+      // The note itself stands at the beginning of history, so its rows are
+      // additions to it, not a new note.
+      expect(seventh.notes[0]).toMatchObject({ kind: "edited", added: 1 })
+      expect(rowsOf(seventh.notes[0])).toEqual(["+ one"])
+      // The 7th's row is context on the 8th; the tombstone's snapshot is no
+      // row the day wrote; the note's own re-stamp (the 9th) is not a row.
+      const eighth = changesIn(seeded(), "2026-10-08", 0)
+      expect(eighth.events).toBe(2)
+      expect(eighth.notes[0]).toMatchObject({ kind: "edited", added: 1 })
+      expect(rowsOf(eighth.notes[0])).toEqual(["= one", "+ two"])
+      expect(seventh.earliest).toBe("2026-10-07")
     })
 
     it("diffs a real edit exactly against the seeded rows, whatever seq they hold", () => {
       // The note's own row was re-stamped last, so its snapshot holds the
       // lowest seq and the latest stamp: the seeded rows are the beginning
-      // of history all the same.
+      // of history all the same, and the 9th finds the row it edits.
       const ninth = changesIn(seeded(), "2026-10-09", 0)
       expect(ninth.events).toBe(1)
       expect(ninth.notes[0]).toMatchObject({ kind: "edited", changed: 1, added: 0 })
       expect(rowsOf(ninth.notes[0])).toEqual(["~ one{+, edited+}", "= two"])
-      const sittings = sittingsIn(seeded(), "2026-10-09", 0)
-      expect(sittings.map((s) => s.device)).toEqual(["dev"])
-      expect(rowsOf(sittings[0].notes[0])).toEqual(["~ one{+, edited+}", "= two"])
+    })
+
+    it("dots a snapshot's day, but not a tombstone's nor a note's own re-stamp", () => {
+      expect([...daysWithChanges(seeded(), 0)].sort()).toEqual([
+        "2026-10-07",
+        "2026-10-08",
+        "2026-10-09",
+      ])
+      const w = writer()
+      const nothingWritten = [
+        w.snapshot(utc("2026-10-08T11:00:00Z"), "gone", "old", "n", utc("2026-10-08T11:00:00Z")),
+        w.snapshot(utc("2026-10-06T11:00:00Z"), "n", "Plans", null),
+      ]
+      expect(daysWithChanges(nothingWritten, 0)).toEqual(new Set())
+    })
+
+    it("lists the seeded rows as the replica's own sittings, ahead of the day's edits", () => {
+      const w = writer()
+      const log = [
+        w.snapshot(utc("2026-10-09T08:00:00Z"), "n", "Plans", null),
+        w.snapshot(utc("2026-10-09T08:00:00Z"), "a", "one", "n"),
+        w.snapshotLink(utc("2026-10-09T08:00:00Z"), "n", "a", "a0"),
+        w.edit(utc("2026-10-09T12:00:00Z"), "a", "one, edited"),
+      ]
+      const sittings = sittingsIn(log, "2026-10-09", 0)
+      expect(sittings.map((s) => s.device)).toEqual(["replica", "dev"])
+      expect(rowsOf(sittings[0].notes[0])).toEqual(["+ one"])
+      expect(rowsOf(sittings[1].notes[0])).toEqual(["~ one{+, edited+}"])
     })
   })
 })
