@@ -260,7 +260,7 @@ describe("ResultsEditor (a browsed row's menu)", () => {
     expect(labels(menu)).toEqual([
       "Copy markdown",
       "Copy ID",
-      "Share…",
+      "Share",
       "Rename",
       "Remove from Views",
       "Print",
@@ -283,7 +283,7 @@ describe("ResultsEditor (a browsed row's menu)", () => {
   it("a block's row opens the block's menu away from its note, with Add to Views for a block that is none", async () => {
     await renderResults([{ id: "blk_semis", noteId: "research" }])
     const menu = await menuOn("blk_semis")
-    expect(labels(menu)).toEqual(["Copy", "Copy link to block", "Share…", "Add to Views"])
+    expect(labels(menu)).toEqual(["Copy", "Copy link to block", "Share", "Add to Views"])
     for (const absent of ["Move up", "Duplicate", "Delete", "Unlink", "Turn into"]) {
       expect(menu.textContent).not.toContain(absent)
     }

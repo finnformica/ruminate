@@ -85,7 +85,7 @@ interface EditorActions {
 
 /**
  * **The note's menu, as entries** (`MenuEntry`, one list for every surface):
- * Copy markdown, Copy ID, Share…, Rename, the board entries, then Print,
+ * Copy markdown, Copy ID, Share, Rename, the board entries, then Print,
  * then Delete. The sidebar's ⋯ on a note row draws it (`NoteActionsMenu`), the open note's
  * header draws it with its own extras around it, and the Views page draws
  * it on a right-click of a note's row (`results-editor.tsx`) — so a note has
@@ -264,7 +264,7 @@ export function useNoteMenuEntries() {
         { kind: "item", label: "Copy ID", icon: <CopyIcon16 />, onSelect: () => copy(noteId) },
         {
           kind: "item",
-          label: "Share…",
+          label: "Share",
           icon: <ShareIcon16 />,
           disabled: !canShare,
           onSelect: () => openShare(noteId),

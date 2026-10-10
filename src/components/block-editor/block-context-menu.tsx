@@ -268,7 +268,7 @@ function menuEntries(target: BlockMenuTarget, actions: BlockActions): MenuEntry[
       label: target.inViews ? "Remove from Views" : "Add to Views",
       onSelect: () => actions.view?.(keys),
     })
-  if (actions.share) item({ label: "Share…", onSelect: () => actions.share?.(keys) })
+  if (actions.share) item({ label: "Share", onSelect: () => actions.share?.(keys) })
 
   // Removing, last and apart.
   section()

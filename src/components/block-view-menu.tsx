@@ -15,7 +15,7 @@ import { shareDialogAtom } from "./share-note-dialog"
 /**
  * **A block's menu outside its note, as entries** (`MenuEntry`): the block
  * menu (`block-context-menu.tsx`) cut to what reaches beyond the note and
- * does not edit — Copy, Copy link to block, Share… — and then the block's
+ * does not edit — Copy, Copy link to block, Share — and then the block's
  * place in Views: **Remove from Views** on a block view, **Add to Views** on
  * a block that is not one yet (a search result in the palette).
  *
@@ -50,7 +50,7 @@ export function useBlockViewMenuEntries() {
         { kind: "item", label: "Copy link to block", icon: <LinkIcon16 />, onSelect: copyLink },
         {
           kind: "item",
-          label: "Share…",
+          label: "Share",
           icon: <ShareIcon16 />,
           disabled: !canShare,
           onSelect: () => openShare(blockId),
