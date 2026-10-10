@@ -20,6 +20,7 @@ import {
 } from "../data/database-mode"
 import type { LoggedEvent } from "../data/events"
 import { isMintedNoteId } from "../data/note-identity"
+import { useStuck } from "../hooks/in-view"
 import { useFoldRule } from "../data/view-state"
 import { writerTimezone } from "../data/writer-identity"
 import { calendarChangesViewAtom, isDatabaseModeAtom } from "../global-state"
@@ -307,11 +308,24 @@ function NoteSection({ change }: { change: NoteChange }) {
     [change.doc, change.marks, collapsed, revealed],
   )
   const diff = React.useMemo(() => ({ marks: shown.marks, expandFold }), [shown.marks, expandFold])
+  // While the name is stuck at the top, the rows fade under it the way the
+  // page's content fades under its edge (`.scroll-fade`, index.css).
+  const { ref: sentinel, stuck } = useStuck<HTMLDivElement>()
   return (
     <section aria-label={title} className="flex flex-col gap-2">
+      <div ref={sentinel} aria-hidden className="h-0" />
       {/* -mx-2 / px-2: the name's surface reaches the rows' edges, so the
           rows pass under it whole. */}
-      <header className="sticky top-0 z-10 -mx-2 flex items-center gap-2 bg-bg px-2 py-2">
+      <header
+        data-stuck={stuck || undefined}
+        className="sticky top-0 z-10 -mx-2 flex items-center gap-2 bg-bg px-2 py-2"
+      >
+        {stuck ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-full h-8 bg-linear-to-b from-bg to-transparent"
+          />
+        ) : null}
         <Link
           to="/views/$"
           params={{ _splat: change.id }}

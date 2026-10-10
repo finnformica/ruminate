@@ -68,6 +68,36 @@ export function useNearView<T extends Element>(
   return { ref: setElement, near }
 }
 
+/**
+ * Whether a sticky element has stuck — its place in the flow has scrolled
+ * above the top of its scroll container — by an IntersectionObserver on a
+ * sentinel put where the element would be if it were not sticky (the
+ * calendar's note names, `day-changes.tsx`, which draw the page's scroll
+ * fade beneath them while stuck). False where there is no observer (jsdom).
+ */
+export function useStuck<T extends Element>(): {
+  /** Goes on the sentinel: an empty element just before the sticky one. */
+  ref: React.RefObject<T>
+  stuck: boolean
+} {
+  const ref = useRef<T>(null)
+  const [stuck, setStuck] = useState(false)
+  useEffect(() => {
+    const element = ref.current
+    if (!element || typeof IntersectionObserver === "undefined") return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const top = entry.rootBounds?.top ?? 0
+        setStuck(!entry.isIntersecting && entry.boundingClientRect.top < top)
+      },
+      { root: scrollParentOf(element) },
+    )
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  return { ref, stuck }
+}
+
 /** The nearest ancestor that scrolls, or null for the viewport. */
 function scrollParentOf(element: Element): Element | null {
   for (let node = element.parentElement; node; node = node.parentElement) {
