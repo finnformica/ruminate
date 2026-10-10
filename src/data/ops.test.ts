@@ -19,6 +19,7 @@ import {
   deleteNoteOps,
   deleteSubtreeOps,
   docToOps,
+  linkBlockOps,
   notesTouchedBy,
   parentCount,
   type Op,
@@ -670,6 +671,52 @@ describe("notesTouchedBy", () => {
     expect([
       ...notesTouchedBy(snapshot, [{ op: "create", id: "new", type: "ul", text: "", props: null }]),
     ]).toEqual([])
+  })
+})
+
+describe("linkBlockOps", () => {
+  const TWO = {
+    a: "- one\n  id:: blk_one0000000\n  - deep\n    id:: blk_deep000000\n- two\n  id:: blk_two0000000\n",
+    b: "- b\n  id:: blk_b000000000\n",
+  }
+
+  it("links the block last under a block, or a note, in this note or another", () => {
+    const snapshot = graphOf(TWO)
+    // Under a block of another note: the one link, after what it holds.
+    const ops = linkBlockOps(snapshot, "blk_b000000000", "blk_one0000000")
+    expect(kinds(ops)).toEqual(["link"])
+    const linked = applyOps(snapshot, ops, 2)
+    expect(walk(linked, "b")).toBe(
+      "- b\n  id:: blk_b000000000\n  - one\n    id:: blk_one0000000\n    - deep\n      id:: blk_deep000000\n",
+    )
+    expect(parentCount(linked, "blk_one0000000")).toBe(2)
+    // Under a note: the block joins its top level, last.
+    const toNote = applyOps(snapshot, linkBlockOps(snapshot, "b", "blk_two0000000"), 2)
+    expect(walk(toNote, "b")).toBe("- b\n  id:: blk_b000000000\n- two\n  id:: blk_two0000000\n")
+    // Within the note: two under one, after deep.
+    const within = applyOps(snapshot, linkBlockOps(snapshot, "blk_one0000000", "blk_two0000000"), 2)
+    expect(walk(within, "a")).toBe(
+      "- one\n  id:: blk_one0000000\n  - deep\n    id:: blk_deep000000\n  - two\n    id:: blk_two0000000\n- two\n  id:: blk_two0000000\n",
+    )
+  })
+
+  it("refuses a block inside itself, one already there, a note as the block, and the unknown", () => {
+    const snapshot = graphOf(TWO)
+    expect(linkBlockOps(snapshot, "blk_one0000000", "blk_one0000000")).toEqual([])
+    expect(linkBlockOps(snapshot, "blk_one0000000", "blk_deep000000")).toEqual([])
+    expect(linkBlockOps(snapshot, "blk_one0000000", "b")).toEqual([])
+    expect(linkBlockOps(snapshot, "blk_one0000000", "blk_nowhere000")).toEqual([])
+    expect(linkBlockOps(snapshot, "blk_nowhere000", "blk_one0000000")).toEqual([])
+  })
+
+  it("links a loop: a block beneath its own descendant is a shape the graph holds", () => {
+    const snapshot = graphOf(TWO)
+    const ops = linkBlockOps(snapshot, "blk_deep000000", "blk_one0000000")
+    expect(kinds(ops)).toEqual(["link"])
+    expect(parentIdsOf(applyOps(snapshot, ops, 2), "blk_one0000000").sort()).toEqual([
+      "a",
+      "blk_deep000000",
+    ])
   })
 })
 

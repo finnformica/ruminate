@@ -222,7 +222,10 @@ block at once (`src/blocks/commands.ts`), so a single block is simply a
 selection of one. The right-click menu is the same: opened on a row of the
 selection, its Copy, Duplicate, the moves, Unlink and Delete take the whole
 selection and say how many blocks that is (**Delete 3 blocks**); opened on
-a row outside it, that row alone.
+a row outside it, that row alone. Its **Add downstream link…** and **Add
+upstream link…** — a second place for a block, picked by name in the palette
+rather than by copy and paste (docs/graph-storage.md, "Linking by name") —
+are offered on a single row only.
 
 A mouse selects a run of blocks too: sweeping across rows selects every row the
 sweep touched (the anchor stays at the end the sweep began, so <kbd>⇧</kbd>

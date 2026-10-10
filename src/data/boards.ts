@@ -15,6 +15,7 @@ import {
   childIdsOf,
   isLegacyBoard,
   isNoteType,
+  keyAtEnd,
   noteDoc,
   parentIdsOf,
   parseProps,
@@ -349,12 +350,6 @@ export function imageValues(
 ): BoardValue[] {
   const parents = new Set(parentIdsOf(snapshot, imageId))
   return state.values.filter((value) => parents.has(value.id))
-}
-
-/** The sort key that puts a new child last under `parentId`. */
-function keyAtEnd(snapshot: GraphSnapshot, parentId: string): string {
-  const links = snapshot.childLinks.get(parentId) ?? []
-  return sortKeyBetween(links.length ? links[links.length - 1].sort_key : null, null)
 }
 
 /**

@@ -355,6 +355,12 @@ export function sortKeyBetween(a: string | null, b: string | null): string {
   return generateKeyBetween(a, b)
 }
 
+/** The sort key that puts a new child last under `parentId`. */
+export function keyAtEnd(snapshot: GraphSnapshot, parentId: string): string {
+  const links = snapshot.childLinks.get(parentId) ?? []
+  return sortKeyBetween(links.length ? links[links.length - 1].sort_key : null, null)
+}
+
 // -----------------------------------------------------------------------------
 // The walk: graph → doc
 // -----------------------------------------------------------------------------

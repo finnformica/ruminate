@@ -11,7 +11,12 @@ import { richClipboardFormats } from "../../utils/rich-clipboard"
 import { ImageUploadError, type UploadedImage } from "../../data/images"
 import type { LinkPreview } from "../../blocks/link"
 import { LinkPreviewError } from "../../data/link-previews"
-import { BlockEditor, type BlockDebugOptions, type BoardRequest } from "./block-editor"
+import {
+  BlockEditor,
+  type BlockDebugOptions,
+  type BoardRequest,
+  type LinkRequest,
+} from "./block-editor"
 import { getDefaultStore } from "jotai"
 import { viewRootIdsAtom, viewsAtom } from "../../data/views"
 
@@ -65,6 +70,7 @@ function Harness({
   onEditingChange,
   onRequestBoard,
   onOpenBoard,
+  onRequestLink,
 }: {
   initial?: string
   /** A doc built by hand — for shapes markdown cannot express (a shared block). */
@@ -87,6 +93,7 @@ function Harness({
   onEditingChange?: (id: string | null) => void
   onRequestBoard?: (request: BoardRequest) => void
   onOpenBoard?: (id: string) => void
+  onRequestLink?: (request: LinkRequest) => void
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? withStarter(parse(initial)))
   return (
@@ -112,6 +119,7 @@ function Harness({
         onEditingChange={onEditingChange}
         onRequestBoard={onRequestBoard}
         onOpenBoard={onOpenBoard}
+        onRequestLink={onRequestLink}
       />
       <pre data-testid="serialized">{serialize(doc)}</pre>
       {/* Markdown carries no layout, so image props are shown as themselves. */}
@@ -3020,6 +3028,99 @@ describe("BlockEditor context menu", () => {
     const { container } = render(<Harness initial={"A\nB"} />)
     const menu = await openMenuOn(container, 1)
     expect(menu.textContent).not.toContain("Views")
+  })
+
+  it("offers Add downstream link and Add upstream link with a corpus to pick from, on one row", async () => {
+    // No corpus behind the editor (a clipboard fragment, Storybook): nothing
+    // to pick a block from.
+    const { container } = render(<Harness initial={"A\nB\nC"} />)
+    expect((await openMenuOn(container, 1)).textContent).not.toContain("link…")
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    })
+    cleanup()
+
+    const onRequestLink = vi.fn()
+    const rendered = render(<Harness initial={"A\nB\nC"} onRequestLink={onRequestLink} />)
+    const menu = await openMenuOn(rendered.container, 1)
+    expect(menu.textContent).toContain("Add downstream link…")
+    expect(menu.textContent).toContain("Add upstream link…")
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    })
+    cleanup()
+
+    // On a selection of several rows there is no one block to be the source
+    // or the target: neither is offered.
+    const { container: four } = render(<Harness initial={"A\nB\nC\nD"} onRequestLink={vi.fn()} />)
+    const root = editorRoot(four)
+    selectNth(root, 1)
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true })
+    expect(highlightedAll(four)).toEqual(["B", "C"])
+    const onSelection = await openMenuOn(four, 2)
+    expect(onSelection.textContent).toContain("Copy 2 blocks")
+    expect(onSelection.textContent).not.toContain("link…")
+  })
+
+  it("Add downstream link asks the host for a block, suggesting the rows on screen, and lands the pick beneath the row", async () => {
+    const onRequestLink = vi.fn()
+    const { container, getByTestId } = render(
+      <>
+        <Harness initial={"A\nB\n  C"} onRequestLink={onRequestLink} />
+        <Toaster />
+      </>,
+    )
+    const serialized = getByTestId("serialized").textContent!
+    const idOf = (text: string) => serialized.match(new RegExp(`${text}\\n\\s*id:: (\\S+)`))![1]
+    await openMenuOn(container, 0)
+    await pick("Add downstream link…")
+    expect(onRequestLink).toHaveBeenCalledTimes(1)
+    const request = onRequestLink.mock.calls[0][0] as LinkRequest
+    expect(request.direction).toBe("downstream")
+    expect(request.blockId).toBe(idOf("A"))
+    // The view's top rows, the row's own block left out.
+    expect(request.suggested).toEqual([idOf("B")])
+    if (request.direction !== "downstream") throw new Error("unreachable")
+
+    // The pick: C, which the doc holds under B, is now under A as well —
+    // one block in two places, as a paste of it would leave it.
+    await act(async () => {
+      request.place(idOf("C"))
+    })
+    expect(serializedLines(getByTestId)).toEqual(["A", "  C", "B", "  C"])
+    expect(highlightedText(container)).toBe("C")
+    // A block cannot be put inside itself, and one already there is left as
+    // it is: each says so, and nothing changes.
+    const after = getByTestId("serialized").textContent
+    await act(async () => {
+      request.place(idOf("A"))
+    })
+    expect(await screen.findByText("A block can't be put inside itself")).not.toBeNull()
+    await act(async () => {
+      request.place(idOf("C"))
+    })
+    expect(await screen.findByText("That block is already here")).not.toBeNull()
+    expect(getByTestId("serialized").textContent).toBe(after)
+    toast.dismiss()
+  })
+
+  it("Add upstream link asks the host to write the link, suggesting the focused block and its rows", async () => {
+    const onRequestLink = vi.fn()
+    const initialDoc = withStarter(parse("# A\n  B\n  C"))
+    const idA = initialDoc.rootBlockIds[0]
+    const [idB, idC] = initialDoc.blocks[idA].children
+    const { container } = render(
+      <Harness initialDoc={initialDoc} focusRootId={idA} onRequestLink={onRequestLink} />,
+    )
+    // Focused on the heading A, the view's title: B and C are the rows. The
+    // menu on C.
+    await openMenuOn(container, 1)
+    await pick("Add upstream link…")
+    expect(onRequestLink).toHaveBeenCalledWith({
+      direction: "upstream",
+      blockId: idC,
+      suggested: [idA, idB],
+    })
   })
 
   it("opens on a row with the standard actions, and selects that row", async () => {

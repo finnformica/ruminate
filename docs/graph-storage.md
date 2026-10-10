@@ -686,6 +686,30 @@ unless it is blank. Nothing cascades: a removed block, and what a deleted
 block held, keep their note id and show in that note's Unassigned basket
 (`basket.ts`), from which a paste links them back.
 
+### Linking by name
+
+A paste needs a clipboard and a select-mode paste, which a phone has
+neither of (docs/mobile.md). The block menu — the right-click popup and the
+long-press sheet alike — offers the same link by name instead, one row at a
+time, after Duplicate: **Add downstream link…** puts a block picked from the
+corpus beneath the row, and **Add upstream link…** puts the row's block
+beneath the pick. Both open the ⌘K palette as a picker (`usePalettePicker`,
+`src/components/palette.ts`): before anything is typed it lists what is on
+screen under **Suggested** — the note's top rows, or in focus the focused
+block and its children, the row's own block left out — in place of Recent
+and Views, each row opening into its blocks; typing searches the whole
+corpus. A downstream pick lands as a paste of the block would
+(`linkFragment` → `placeUnder` in `block-editor.tsx`: the doc's own copy,
+or the live subtree; self refused with a toast, a twin left as it is, a
+loop linked), as one undo step, the row selected. An upstream pick is one
+`link` op written straight to the graph (`linkBlockOps`, `src/data/ops.ts`):
+the parent may be a block or a note — where the block joins the top level,
+last — in this note or any other, which the open doc cannot express, so it
+is not an undo step; a toast says where the block went. Only a note of the
+reader's own offers the entries, and a note someone shared is never a pick,
+since a block cannot live in a shared note and one of your own at once
+(`src/data/store.ts`).
+
 ## History: the git era, and schema v1
 
 Until this architecture landed, Ruminate was a git app: notes were markdown
