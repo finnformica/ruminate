@@ -29,7 +29,15 @@ on every push to a non-production branch. In order:
    request (drafts count). Without one it says so (`no open PR for <branch>`)
    and exits 0 — no version is uploaded, so a branch that has not been opened
    as a PR has no preview at all, rather than one against production. The
-   build itself still runs; the gate is not a way to save build minutes.
+   build itself still runs; the gate is not a way to save build minutes. A
+   GitHub that cannot be asked — a 403 from the rate limit, an outage — no
+   longer fails the build: the script says so (`GitHub cannot be asked
+whether <branch> has a PR; previewing anyway`) and carries on, because a
+   preview nobody asked for costs one version upload against a clone, whereas
+   a PR left without one reads as a successful build with no link to show for
+   it. The gate is decided per push, so a branch pushed before its PR is
+   opened gets no preview until its next push; until then Cloudflare's PR
+   comment shows a successful build with no preview link.
 2. **Fingerprint.** A SHA-256 over the sorted `migrations/*.sql` names and
    contents, for the branch and for `origin/main`.
 3. **Choose the clone.**
@@ -145,9 +153,20 @@ made against the previous clone, which no longer exists anyway.
    (D1 Edit) and `CLOUDFLARE_ACCOUNT_ID` (`a84767ecbbb94d3154e915832507314d`).
    Without them the workflow exits 0 without deleting anything, and the sweep
    does the work on the next preview build.
-4. **A `GITHUB_TOKEN` build variable is optional.** The repository is public,
-   so the PR lookups need no token; one raises the unauthenticated rate limit
-   of 60 requests an hour, which a busy afternoon of pushes could reach.
+4. **A `GITHUB_TOKEN` build variable is recommended** (secret). The repository
+   is public, so the PR lookups need no token to be answered — but without one
+   they are anonymous, and GitHub's anonymous limit of 60 calls an hour is per
+   address, while Cloudflare's build runners share one egress address across
+   every Workers Builds customer. That limit is routinely exhausted before a
+   build starts, and GitHub answers 403; the script's warning carries the
+   `x-ratelimit-remaining` and `x-ratelimit-reset` headers so that 403 can be
+   told from any other. A fine-grained token with no permissions at all
+   suffices on a public repository and lifts the limit to 5,000 calls an hour
+   for that token alone. With the gate's fallback (step 1) the build survives
+   without a token, but two steps still degrade when GitHub answers 403: the
+   sweep (step 6) deletes nothing, and the shared-versus-per-branch choice
+   (step 3) falls back to a per-branch clone whenever main's migrations have
+   to be read from GitHub rather than from `origin/main`.
 5. **The branch alias's OAuth callback** is unchanged by any of this: sign-in
    on a preview works through the callback already registered for the branch
    alias URL, and the clone carries the `users` table, so the same GitHub id

@@ -9,7 +9,8 @@
 // migrate, and every preview wrote its test edits into. This script gives
 // each pull request a clone of production to preview against instead:
 //
-//   1. gate      — no open PR for this branch → no preview at all (exit 0)
+//   1. gate      — no open PR for this branch → no preview at all (exit 0);
+//                 GitHub unreachable or rate-limited → preview anyway
 //   2. fingerprint the branch's migrations, and main's
 //   3. choose    — same as main → the shared clone; otherwise this branch's own
 //   4. reuse or rebuild the clone (production → export → import)
@@ -78,12 +79,22 @@ step(`branch ${branch}`)
 const ownPulls = await github(
   `/repos/${REPO}/pulls?state=open&head=${encodeURIComponent(`finnformica:${branch}`)}`,
 )
-if (ownPulls === null) fail("GitHub API unreachable; cannot tell whether this branch has a PR")
-if (openPullBranches(ownPulls).length === 0) {
+if (ownPulls === null) {
+  // Without a token the lookup is anonymous, and GitHub's anonymous limit
+  // (60 calls an hour per address) is shared by every Workers Builds customer
+  // behind Cloudflare's egress address — so a 403 here is the normal case,
+  // not an outage. Failing the build on it is the wrong way round: the
+  // preview runs against a clone of production, never production itself, so
+  // a preview nobody asked for costs one version upload, whereas a PR left
+  // without one reads as a successful build with no link to show for it.
+  // Only a clear "no open PR" skips the upload.
+  step(`GitHub cannot be asked whether ${branch} has a PR; previewing anyway`)
+} else if (openPullBranches(ownPulls).length === 0) {
   step(`no open PR for ${branch}; skipping preview`)
   process.exit(0)
+} else {
+  step(`open PR found for ${branch}`)
 }
-step(`open PR found for ${branch}`)
 
 // -----------------------------------------------------------------------------
 // 2. Fingerprints: this branch's migrations, and main's
@@ -392,7 +403,11 @@ async function github(route) {
   try {
     const response = await fetch(url, { headers: githubHeaders() })
     if (!response.ok) {
-      console.warn(`[preview] GitHub answered ${response.status} for ${route}`)
+      // A 403 is GitHub's answer to an exhausted rate limit as well as to a
+      // forbidden route; the rate-limit headers tell the two apart.
+      console.warn(
+        `[preview] GitHub answered ${response.status} for ${route} (${rateLimit(response)})`,
+      )
       return null
     }
     return await response.json()
@@ -402,6 +417,19 @@ async function github(route) {
     )
     return null
   }
+}
+
+/** The rate-limit headers of a GitHub response, for a warning: how many calls
+ * remain in the window, and when the window resets (an ISO timestamp). */
+function rateLimit(response) {
+  const remaining = response.headers.get("x-ratelimit-remaining")
+  const reset = response.headers.get("x-ratelimit-reset")
+  if (remaining === null && reset === null) return "no rate-limit headers"
+  const resetAt =
+    reset !== null && /^\d+$/.test(reset)
+      ? new Date(Number(reset) * 1000).toISOString()
+      : (reset ?? "unknown")
+  return `rate limit: ${remaining ?? "unknown"} remaining, resets ${resetAt}`
 }
 
 // Function declarations, not consts: the steps above run at module top level,
