@@ -1,7 +1,6 @@
 import { atom, getDefaultStore } from "jotai"
 import {
   LEGACY_TIMESTAMP_CURSOR_FLOOR,
-  emptyGraphDiff,
   type ReplicaChangesBody,
   type ViewRow,
 } from "../../worker/handlers/replica-payload"
@@ -13,8 +12,16 @@ import {
   planPullApplication,
   type D1NoteSource,
 } from "./d1-note-source"
+import {
+  coalesceTyping,
+  opsToEvents,
+  viewChangeToEvent,
+  type EventContext,
+  type RuminateEvent,
+} from "./events"
 import { buildGraphSnapshot, isNoteType, type GraphSnapshot } from "./graph"
 import { applyOps, notesTouchedBy, type Op } from "./ops"
+import { mintWriterId, writerDevice, writerTimezone } from "./writer-identity"
 import { resetReplicaAccess } from "./replica-access"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import type { CorpusRows } from "./deleted-notes"
@@ -50,9 +57,12 @@ import {
  *          not this one → serve local contents immediately → pull from D1
  *          (full on first boot, since-cursor after) → apply rows into the store
  *   edits  the editor's ops (src/data/ops.ts) apply to the graph atom at
- *          once, coalesce for a moment, then write the SQL store as rows and
- *          hand the row diff to the replica push queue (replica-sync.ts —
- *          write-behind, coalesced)
+ *          once and become the EVENTS they amount to (`opsToEvents`,
+ *          docs/event-sourcing.md); those coalesce for a moment, then land in
+ *          the SQL store — appended to the device's log and applied to its
+ *          rows in one transaction — and the push loop (replica-sync.ts —
+ *          write-behind, coalesced) sends the log's unpushed tail to the
+ *          replica
  *   sync   visibility/focus/online triggers re-run the since-cursor pull;
  *          hiding the tab flushes the push queue immediately. While the
  *          browser says it is offline neither pulls nor pushes are attempted
@@ -131,6 +141,14 @@ const OWNER_KEY = "store_owner"
  * note, which the new code reads as an empty Views list until the pull
  * fills it.
  *
+ * Generation `9` is the cache's `seq` columns (`LOCAL_V9_SQL`,
+ * src/data/corpus-schema.ts): every row now records the replica's sequence
+ * for it as last pulled, which is what an edit made here says it believed it
+ * was changing (`base_seq`, docs/event-sourcing.md). The ladder adds the
+ * columns empty; one re-pull fills them. Not a correctness matter — a null
+ * `base_seq` is "the writer did not say" — but a cache whose every row says
+ * that is a history that cannot tell an offline week's edit from a fresh one.
+ *
  * This is why the constant is bumped rather than merely re-documented: every
  * device that already booted on generation `2` has `"2"` stamped in its meta,
  * so folding a new change into the old number is a wipe that never fires.
@@ -141,7 +159,7 @@ const OWNER_KEY = "store_owner"
  * when the tab hides, so the window is small — but it is real, and it is why
  * this is bumped deliberately rather than routinely.
  */
-export const CACHE_GENERATION = "8"
+export const CACHE_GENERATION = "9"
 /**
  * The database the local copy was last pulled from — `"production"`, or a
  * preview clone's id — as the replica reports it (`replica_id` on every pull,
@@ -223,12 +241,16 @@ export interface DatabaseModeOptions {
    * null to run without pushing. */
   openReplicaSync?: (
     getNoteCount: () => number,
-    getAllRows: NoteStore["getAllRows"],
+    store: ReplicaStoreAccess,
   ) => Promise<ReplicaSyncHandle | null>
   /** Injectable for tests; defaults to the real authed fetch source. */
   source?: D1NoteSource
   pullRetryMs?: number
 }
+
+/** What the push loop reads and writes of the store: the queue of unpushed
+ * events, their acknowledgement, and every row for a full push. */
+type ReplicaStoreAccess = Pick<NoteStore, "getAllRows" | "unpushedEvents" | "markEventsPushed">
 
 interface DatabaseModeRuntime {
   options: DatabaseModeOptions
@@ -244,6 +266,9 @@ interface DatabaseModeRuntime {
   generation: number
   /** Ops applied to the graph atom and not yet written to the store. */
   pendingOps: Op[]
+  /** The same ops (and view writes) as the events they amount to — what the
+   * flush writes. A typing run coalesces to one event before it lands. */
+  pendingEvents: RuminateEvent[]
   /** Notes those ops touched — whose rollups the flush refreshes. */
   pendingNoteIds: Set<NoteId>
   opsFlushTimer: ReturnType<typeof setTimeout> | null
@@ -308,14 +333,16 @@ async function defaultOpenStore() {
   return { store, persistence: driver.persistence, persistenceReason: driver.persistenceReason }
 }
 
-async function defaultOpenReplicaSync(
-  getNoteCount: () => number,
-  getAllRows: NoteStore["getAllRows"],
-) {
+async function defaultOpenReplicaSync(getNoteCount: () => number, store: ReplicaStoreAccess) {
   const { startReplicaSync } = await import("./replica-sync")
   // Every tab pushes its own writes; concurrent tabs converge by per-row
   // last-writer-wins at the replica.
-  return startReplicaSync({ getNoteCount, getAllRows })
+  return startReplicaSync({
+    getNoteCount,
+    getAllRows: () => store.getAllRows(),
+    getUnpushedEvents: () => store.unpushedEvents(),
+    markEventsPushed: (seqs) => store.markEventsPushed(seqs),
+  })
 }
 
 /** How many notes the graph holds (the diagnostics' note count). */
@@ -340,6 +367,7 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     lastRepairAt: 0,
     generation,
     pendingOps: [],
+    pendingEvents: [],
     pendingNoteIds: new Set(),
     opsFlushTimer: null,
     pendingViews: [],
@@ -412,10 +440,13 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
       try {
         const replica = await (options.openReplicaSync ?? defaultOpenReplicaSync)(
           () => noteCount(jotai().get(databaseGraphAtom)),
-          () => {
-            const store = activation.store
-            if (!store) return Promise.resolve({ nodes: [], links: [], views: [] })
-            return store.getAllRows()
+          {
+            getAllRows: () =>
+              activation.store?.getAllRows() ??
+              Promise.resolve({ nodes: [], links: [], views: [] }),
+            unpushedEvents: () => activation.store?.unpushedEvents() ?? Promise.resolve([]),
+            markEventsPushed: (seqs) =>
+              activation.store?.markEventsPushed(seqs) ?? Promise.resolve(),
           },
         )
         if (runtime !== activation) {
@@ -455,11 +486,14 @@ export function stopDatabaseMode() {
     document.removeEventListener("visibilitychange", onPageHidden)
   }
   enqueue(async () => {
-    // Ops still coalescing are written before the store closes (no replica
-    // to notify any more — the next boot's full push carries them).
-    const ops = stopped.pendingOps
+    // Events still coalescing are written before the store closes (no
+    // replica to notify any more — they wait in the log, and the next boot's
+    // push loop finds them unpushed).
+    const events = coalesceTyping(stopped.pendingEvents)
     stopped.pendingOps = []
-    if (ops.length > 0) await stopped.store?.applyOps(ops).catch(recordWriteError)
+    stopped.pendingEvents = []
+    stopped.pendingViews = []
+    if (events.length > 0) await stopped.store?.applyEvents(events).catch(recordWriteError)
     await stopped.store?.close().catch(() => {})
   })
   const store = jotai()
@@ -477,44 +511,76 @@ export function stopDatabaseMode() {
 // -----------------------------------------------------------------------------
 
 /**
- * Apply a batch of graph ops (`src/data/ops.ts`) — the app's one change path.
- * The graph atom takes the ops synchronously (the screen never waits); the
- * store write coalesces for `OPS_FLUSH_MS` and then lands the same rows and
- * hands the row diff to the replica queue. Nothing here parses or
- * reconciles: the ops are the rows. The view writes a batch carries
- * (`ViewWrite`: the row a new note is listed by) land with it, through
- * `databaseApplyViews`, after the tombstones its deletes leave.
+ * The envelope one gesture's events share (docs/event-sourcing.md): a batch
+ * id, this tab, the command when the caller names one, the writer's clock and
+ * its zone. The ids are minted here; `events.ts` makes none.
  */
-export function databaseApplyOps(ops: readonly Op[], views: readonly ViewWrite[] = []) {
-  const activation = runtime
-  if (!activation) return
-  if (ops.length === 0) {
-    databaseApplyViews(patchedViews(jotai().get(viewByRootAtom), views, Date.now()))
-    return
+function eventContext(now: number, cause?: string): EventContext {
+  return {
+    batch: mintWriterId("bat"),
+    device: writerDevice(),
+    ...(cause ? { cause } : {}),
+    at: now,
+    tz: writerTimezone(),
+    mintId: () => mintWriterId("evt"),
   }
+}
 
-  const store = jotai()
-  const before = store.get(databaseGraphAtom)
-  const after = applyOps(before, ops, Date.now())
-  store.set(databaseGraphAtom, after)
-  // Notes that reached a touched node before (an unlink) or after (a link).
-  for (const note of notesTouchedBy(before, ops)) activation.pendingNoteIds.add(note)
-  for (const note of notesTouchedBy(after, ops)) activation.pendingNoteIds.add(note)
-  activation.pendingOps.push(...ops)
-  patchStatus({ emptyOffline: false })
-  // A deleted node takes its view with it: the one place the graph reaches
-  // into the views table (`src/data/views.ts`). Then the batch's own rows.
-  const now = Date.now()
-  databaseApplyViews([
-    ...orphanedViews(store.get(viewsAtom), deletedIdsOf(ops), now),
-    ...patchedViews(store.get(viewByRootAtom), views, now),
-  ])
-
+/** Arm the coalescing flush: a run of ops (or view rows) is one store write. */
+function scheduleFlush(activation: DatabaseModeRuntime) {
   if (activation.opsFlushTimer !== null) clearTimeout(activation.opsFlushTimer)
   activation.opsFlushTimer = setTimeout(() => {
     activation.opsFlushTimer = null
     if (runtime === activation) enqueue(() => flushOps(activation))
   }, OPS_FLUSH_MS)
+}
+
+/**
+ * Apply a batch of graph ops (`src/data/ops.ts`) — the app's one change path.
+ * The graph atom takes the ops synchronously (the screen never waits); the
+ * ops become the events they amount to against the graph they were planned
+ * on (`opsToEvents`), which coalesce for `OPS_FLUSH_MS` and then land in the
+ * store — the device's log and its rows, in one write — for the push loop to
+ * carry. Nothing here parses or reconciles: the ops are the events. The view
+ * writes a batch carries (`ViewWrite`: the row a new note is listed by) land
+ * with it, in the same batch, after the tombstones its deletes leave.
+ * `cause` names the command, when the caller has one, for the history.
+ */
+export function databaseApplyOps(
+  ops: readonly Op[],
+  views: readonly ViewWrite[] = [],
+  cause?: string,
+) {
+  const activation = runtime
+  if (!activation) return
+  const now = Date.now()
+  const ctx = eventContext(now, cause)
+  if (ops.length === 0) {
+    queueViewRows(activation, patchedViews(jotai().get(viewByRootAtom), views, now), ctx)
+    return
+  }
+
+  const store = jotai()
+  const before = store.get(databaseGraphAtom)
+  const after = applyOps(before, ops, now)
+  store.set(databaseGraphAtom, after)
+  // Notes that reached a touched node before (an unlink) or after (a link).
+  for (const note of notesTouchedBy(before, ops)) activation.pendingNoteIds.add(note)
+  for (const note of notesTouchedBy(after, ops)) activation.pendingNoteIds.add(note)
+  activation.pendingOps.push(...ops)
+  activation.pendingEvents.push(...opsToEvents(before, ops, ctx))
+  patchStatus({ emptyOffline: false })
+  // A deleted node takes its view with it: the one place the graph reaches
+  // into the views table (`src/data/views.ts`). Then the batch's own rows.
+  queueViewRows(
+    activation,
+    [
+      ...orphanedViews(store.get(viewsAtom), deletedIdsOf(ops), now),
+      ...patchedViews(store.get(viewByRootAtom), views, now),
+    ],
+    ctx,
+  )
+  scheduleFlush(activation)
 }
 
 /**
@@ -526,32 +592,42 @@ export function databaseApplyOps(ops: readonly Op[], views: readonly ViewWrite[]
 /**
  * Land view rows (`src/data/views.ts`) — a pin, a saved filter, a tombstone
  * — the way ops land: the atom at once, the store and the replica behind it.
- * Views are not ops and never coalesce with them: a row is the whole change,
- * so it is written as it comes, and the replica takes it from the same
- * `notifyGraphChange` a graph diff goes through.
+ * Views are written as rows, so each row becomes the one event it amounts
+ * to against the row the atom held (`viewChangeToEvent`): a create, an
+ * update of what changed, a delete, a revival — or nothing, when the row
+ * says what the atom already said.
  */
-export function databaseApplyViews(views: readonly ViewRow[]) {
+export function databaseApplyViews(views: readonly ViewRow[], cause?: string) {
   const activation = runtime
   if (!activation || views.length === 0) return
+  queueViewRows(activation, views, eventContext(Date.now(), cause))
+}
+
+function queueViewRows(
+  activation: DatabaseModeRuntime,
+  views: readonly ViewRow[],
+  ctx: EventContext,
+) {
+  if (views.length === 0) return
   const store = jotai()
-  store.set(viewsAtom, applyViewRows(store.get(viewsAtom), views))
+  const held = store.get(viewsAtom)
+  for (const row of views) {
+    const event = viewChangeToEvent(held.get(row.id), row, ctx)
+    if (event !== null) activation.pendingEvents.push(event)
+  }
+  store.set(viewsAtom, applyViewRows(held, views))
   activation.pendingViews.push(...views)
-  enqueue(async () => {
-    if (runtime !== activation || !activation.store) return
-    try {
-      await activation.store.applyViews(views)
-      activation.pendingViews = activation.pendingViews.filter((row) => !views.includes(row))
-      activation.replica?.notifyGraphChange([], { ...emptyGraphDiff(), views: [...views] })
-    } catch (error) {
-      recordWriteError(error)
-      scheduleRepair(activation)
-    }
-  })
+  scheduleFlush(activation)
 }
 
 export function requestDatabaseFlush(): Promise<void> {
   const activation = runtime
-  if (!activation || activation.pendingOps.length === 0) return Promise.resolve()
+  if (
+    !activation ||
+    (activation.pendingEvents.length === 0 && activation.pendingViews.length === 0)
+  ) {
+    return Promise.resolve()
+  }
   if (activation.opsFlushTimer !== null) {
     clearTimeout(activation.opsFlushTimer)
     activation.opsFlushTimer = null
@@ -589,14 +665,29 @@ function onPageHidden() {
  */
 async function flushOps(activation: DatabaseModeRuntime) {
   if (runtime !== activation || !activation.store) return
-  const ops = activation.pendingOps
+  // A typing run is one event, not one per keystroke — coalesced here, where
+  // the whole run is in hand, and again in the store against the unpushed
+  // tail of the log (`NoteStore.applyEvents`).
+  const events = coalesceTyping(activation.pendingEvents)
+  const views = activation.pendingViews
   const notes = [...activation.pendingNoteIds]
-  if (ops.length === 0) return
+  if (events.length === 0 && views.length === 0) return
   activation.pendingOps = []
+  activation.pendingEvents = []
   activation.pendingNoteIds = new Set()
   try {
-    const diff = await activation.store.applyOps(ops)
-    activation.replica?.notifyGraphChange(notes, diff)
+    if (events.length > 0) {
+      await activation.store.applyEvents(events, {
+        frozen: activation.replica?.inFlightEventIds?.() ?? new Set(),
+      })
+    }
+    activation.pendingViews = activation.pendingViews.filter((row) => !views.includes(row))
+    if (events.length > 0) {
+      activation.replica?.notifyChange(
+        notes,
+        views.map((row) => row.id),
+      )
+    }
     patchDiagnostics({ notes: noteCount(jotai().get(databaseGraphAtom)) })
   } catch (error) {
     recordWriteError(error)
@@ -640,6 +731,7 @@ function scheduleRepair(activation: DatabaseModeRuntime) {
     // rows (the pending ops are in it already, so they are dropped here and
     // land through the rebuild).
     activation.pendingOps = []
+    activation.pendingEvents = []
     activation.pendingNoteIds = new Set()
     activation.pendingViews = []
     const graph = jotai().get(databaseGraphAtom)

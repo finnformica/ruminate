@@ -1,5 +1,9 @@
+// tenant-guard: exempt — the raw reads below prove what a pushed view wrote.
 import { describe, expect, it } from "vitest"
-import { parseReplicaPayload, planReplicaPut, toViewRow, type ViewRow } from "./replica-payload"
+import { ensureTenantMeta, forTenant } from "../tenancy-db"
+import { corpusPut } from "./replica-corpus"
+import { parseReplicaPayload, toViewRow, type ViewRow } from "./replica-payload"
+import { createTenantTestDriver } from "./sqlite-test-driver"
 
 /**
  * Views on the wire: what a client may push, and what the replica does with
@@ -58,37 +62,52 @@ describe("parseReplicaPayload, views", () => {
   })
 })
 
-describe("planReplicaPut, views", () => {
-  const sqlFor = (payload: Parameters<typeof planReplicaPut>[0]) =>
-    planReplicaPut(payload, 1).map((statement) => statement.sql)
+describe("a pushed view, through the log", () => {
+  async function open() {
+    const driver = await createTenantTestDriver()
+    const tenant = forTenant(driver, { id: 111, login: "u111", name: null })
+    await ensureTenantMeta(tenant)
+    const stored = () =>
+      driver.exec("SELECT id, filter, pinned, updated_at, seq FROM views WHERE user_id = 111")
+    return { driver, tenant, stored }
+  }
 
-  it("upserts under last-writer-wins, scoped to the tenant", () => {
-    const [sql] = sqlFor({ nodes: [], links: [], views: [view()] })
-    expect(sql).toContain("INSERT INTO views")
-    expect(sql).toContain(":tenant")
-    // The same guard every other row write has: a stale push cannot clobber.
-    expect(sql).toContain("WHERE excluded.updated_at >= views.updated_at")
+  it("lands under last-writer-wins: a stale push cannot clobber", async () => {
+    const { tenant, stored } = await open()
+    await corpusPut(tenant, { nodes: [], links: [], views: [view({ updated_at: 200 })] })
+    await corpusPut(tenant, {
+      nodes: [],
+      links: [],
+      views: [view({ filter: "type:stale", updated_at: 100 })],
+    })
+    expect(await stored()).toEqual([
+      { id: "view_1", filter: "type:todo", pinned: 1, updated_at: 200, seq: 1 },
+    ])
   })
 
-  it("binds pinned as the integer the column holds", () => {
-    const [statement] = planReplicaPut({ nodes: [], links: [], views: [view()] }, 1)
-    expect(statement.params).toEqual(["view_1", "blk_a", "type:todo", null, 1, "a0", 100, null])
-    const [off] = planReplicaPut({ nodes: [], links: [], views: [view({ pinned: false })] }, 1)
-    expect(off.params[4]).toBe(0)
+  it("stores pinned as the integer the column holds, on and off", async () => {
+    const { tenant, stored } = await open()
+    await corpusPut(tenant, { nodes: [], links: [], views: [view()] })
+    expect((await stored())[0].pinned).toBe(1)
+    await corpusPut(tenant, {
+      nodes: [],
+      links: [],
+      views: [view({ pinned: false, updated_at: 300 })],
+    })
+    expect((await stored())[0].pinned).toBe(0)
   })
 
-  it("plans nothing when a client pushes no views", () => {
-    expect(sqlFor({ nodes: [], links: [] }).filter((sql) => sql.includes("views"))).toEqual([])
-  })
-
-  it("takes its sequence from all three tables", () => {
+  it("takes its sequence from the one the whole corpus shares", async () => {
     // One cursor covers the corpus, so a view write must not reuse a number a
     // node already holds — nor the other way round.
-    for (const sql of sqlFor({ nodes: [], links: [], views: [view()] })) {
-      expect(sql).toContain("MAX(seq) AS s FROM nodes")
-      expect(sql).toContain("MAX(seq) FROM link")
-      expect(sql).toContain("MAX(seq) FROM views")
-    }
+    const { driver, tenant, stored } = await open()
+    const node = { id: "blk_a", type: "note", text: "A", props: null, updated_at: 1 }
+    await corpusPut(tenant, { nodes: [node], links: [] })
+    await corpusPut(tenant, { nodes: [], links: [], views: [view()] })
+    await corpusPut(tenant, { nodes: [{ ...node, text: "A2", updated_at: 2 }], links: [] })
+    expect((await stored())[0].seq).toBe(2)
+    const [row] = await driver.exec("SELECT seq FROM nodes WHERE user_id = 111 AND id = 'blk_a'")
+    expect(row.seq).toBe(3)
   })
 })
 

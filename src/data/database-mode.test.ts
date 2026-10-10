@@ -1,11 +1,7 @@
 import { sampleViews } from "./sample-graph"
 import { getDefaultStore } from "jotai"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type {
-  GraphDiff,
-  ReplicaChangesBody,
-  ReplicaCorpusBody,
-} from "../../worker/handlers/replica-payload"
+import type { ReplicaChangesBody, ReplicaCorpusBody } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
@@ -30,7 +26,9 @@ import type { ReplicaSyncHandle } from "./replica-sync"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import type { NoteStore } from "./note-store"
 import { openSqlNoteStore } from "./sql-note-store"
+import { applyOpsToStore } from "./store-test-support"
 import { viewRootIdsAtom, viewsAtom, type ViewRow } from "./views"
+import type { RuminateEvent } from "./events"
 
 /**
  * Boot-flow tests for database-authoritative mode, at the highest level the
@@ -39,13 +37,14 @@ import { viewRootIdsAtom, viewsAtom, type ViewRow } from "./views"
  */
 
 function stubReplica(pending: NoteId[] = [], pendingViews: string[] = []) {
-  const calls = { changes: [] as { noteIds: NoteId[]; diff: GraphDiff }[], stopped: false }
+  const calls = { changes: [] as { noteIds: NoteId[]; viewIds: string[] }[], stopped: false }
   const handle: ReplicaSyncHandle = {
-    notifyGraphChange: (noteIds, diff) => calls.changes.push({ noteIds, diff }),
+    notifyChange: (noteIds, viewIds) => calls.changes.push({ noteIds, viewIds }),
     requestFullPush: () => {},
     refreshRemoteStatus: () => {},
     pendingNoteIds: () => new Set(pending),
     pendingViewIds: () => new Set(pendingViews),
+    inFlightEventIds: () => new Set(),
     stop: () => {
       calls.stopped = true
     },
@@ -167,9 +166,18 @@ const NOTE_B = "- B\n  id:: blk_b000000000\n"
  * ops, applied in turn. Markdown is only the fixture's spelling. */
 async function seedNotes(store: NoteStore, notes: Record<string, string>) {
   for (const [id, markdown] of Object.entries(notes)) {
-    await store.applyOps(docToOps(id, parse(markdown), await store.getGraph()))
+    await applyOpsToStore(store, docToOps(id, parse(markdown), await store.getGraph()))
   }
 }
+
+/** The store's queue as `[entity.action, entity_id]`, in the order made. */
+const queued = async (store: NoteStore) =>
+  (await store.unpushedEvents()).map((event) => [
+    `${event.entity}.${event.action}`,
+    event.entity_id,
+  ])
+const ofEntity = (events: RuminateEvent[], entity: RuminateEvent["entity"]) =>
+  events.filter((event) => event.entity === entity)
 
 /** A note's markdown projection off the store's live graph, or null. */
 const noteOf = async (store: NoteStore, id: string) => rollup(id, await store.getGraph())
@@ -280,7 +288,7 @@ describe("database mode boot", () => {
 })
 
 describe("database mode saves", () => {
-  it("a new note's ops write the SQL store, update the atom, and hand their diff to the push queue", async () => {
+  it("a new note's ops write the SQL store, update the atom, and queue their events for the push", async () => {
     const { source } = stubSource({})
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
@@ -292,10 +300,17 @@ describe("database mode saves", () => {
     expect(await noteOf(store, "note-a")).toBe("- hello\n  id:: blk_a000000000\n")
     expect(calls.changes).toHaveLength(1)
     expect(calls.changes[0].noteIds).toEqual(["note-a"])
-    const diff = calls.changes[0].diff
-    expect(diff.nodes.map((node) => node.id).sort()).toEqual(["blk_a000000000", "note-a"])
-    expect(diff.links).toHaveLength(1)
-    expect(diff.deleteNodes).toEqual([])
+    // The store's log holds what the editor did, as events the push loop sends.
+    expect(await queued(store)).toEqual([
+      ["block.create", "note-a"],
+      ["block.create", "blk_a000000000"],
+      ["link.create", "note-a|blk_a000000000|child"],
+    ])
+    const [created] = await store.unpushedEvents()
+    expect(created).toMatchObject({
+      device: expect.stringMatching(/^[0-9a-z]+\.[0-9a-z]{6}$/),
+      tz: 0,
+    })
   })
 
   it("a delete tombstones the note's rows and pushes the tombstones", async () => {
@@ -308,13 +323,16 @@ describe("database mode saves", () => {
 
     expect(await noteOf(store, "note-a")).toBeNull()
     expect(files()).toEqual({})
-    // Deleted rows travel as ordinary rows carrying `deleted_at` — that is how
-    // the delete reaches another device — and they all share one stamp.
-    const diff = calls.changes[0].diff
-    expect(diff.deleteNodes).toEqual([])
-    const tombstoned = diff.nodes.filter((node) => node.deleted_at !== undefined)
-    expect(tombstoned.map((node) => node.id).sort()).toEqual(["blk_a000000000", "note-a"])
-    expect(new Set(tombstoned.map((node) => node.deleted_at)).size).toBe(1)
+    expect(calls.changes).toHaveLength(1)
+    // A delete is an event per block — that is how it reaches another device
+    // — and the whole gesture shares one clock, so one stamp.
+    const deletes = ofEntity(await store.unpushedEvents(), "block").filter(
+      (event) => event.action === "delete",
+    )
+    expect(deletes.map((event) => event.entity_id).sort()).toEqual(["blk_a000000000", "note-a"])
+    expect(new Set(deletes.map((event) => event.at)).size).toBe(1)
+    const rows = (await store.getAllRows()).nodes
+    expect(new Set(rows.map((node) => node.deleted_at)).size).toBe(1)
   })
 
   it("ops apply to the graph atom at once and land as rows after the coalescing window", async () => {
@@ -336,10 +354,11 @@ describe("database mode saves", () => {
     expect(walked("note-a")).toBe(edited)
     expect(calls.changes).toHaveLength(1)
     expect(calls.changes[0].noteIds).toEqual(["note-a"])
-    expect(calls.changes[0].diff.nodes.map((node) => node.id).sort()).toEqual([
-      "blk_a000000000",
-      "blk_n000000000",
-    ])
+    expect(
+      ofEntity(await store.unpushedEvents(), "block")
+        .map((event) => `${event.action}:${event.entity_id}`)
+        .sort(),
+    ).toEqual(["create:blk_n000000000", "update:blk_a000000000"])
   })
 
   it("a run of ops is one store write, and a later batch never lands ahead of it", async () => {
@@ -358,6 +377,12 @@ describe("database mode saves", () => {
     expect(walked("note-a")).toBe("- A123\n  id:: blk_a000000000\n")
     expect(calls.changes).toHaveLength(1)
     expect(calls.changes[0].noteIds.sort()).toEqual(["note-a", "note-b"])
+    // The typing run is ONE event, carrying its last text.
+    const typed = ofEntity(await store.unpushedEvents(), "block").filter(
+      (event) => event.entity_id === "blk_a000000000",
+    )
+    expect(typed).toHaveLength(1)
+    expect(typed[0]).toMatchObject({ action: "update", patch: { text: "A123" } })
   })
 
   it("a pull never clobbers ops still coalescing", async () => {
@@ -391,9 +416,10 @@ describe("database mode saves", () => {
 
     expect(await noteOf(store, "note-a")).toBe(serialize(parse("")))
     expect(files()["note-a.md"]).toBe(serialize(parse("")))
-    expect(calls.changes[0].diff.nodes.map((n) => [n.id, n.deleted_at != null])).toEqual([
-      ["blk_a000000000", true],
-    ])
+    expect(calls.changes).toHaveLength(1)
+    expect(
+      ofEntity(await store.unpushedEvents(), "block").map((e) => [e.entity_id, e.action]),
+    ).toEqual([["blk_a000000000", "delete"]])
   })
 
   it("the graph atom follows pulls too", async () => {
@@ -841,9 +867,16 @@ describe("database mode views", () => {
     await flushDatabaseMode()
 
     expect(await store.getViews()).toEqual([viewRow({ filter: "type:todo" })])
-    const diff = calls.changes.at(-1)!.diff
-    expect(diff.views).toEqual([viewRow({ filter: "type:todo" })])
-    expect(diff.nodes).toEqual([])
+    expect(calls.changes.at(-1)!.viewIds).toEqual(["note-a"])
+    // The row the atom held nothing for is a create, carrying the whole row.
+    expect(await queued(store)).toEqual([["view.create", "note-a"]])
+    expect((await store.unpushedEvents())[0].patch).toEqual({
+      root_id: "note-a",
+      filter: "type:todo",
+      sort: null,
+      pinned: true,
+      sort_key: null,
+    })
   })
 
   it("deleting a node tombstones the view rooted at it, and the tombstone travels", async () => {
@@ -859,14 +892,12 @@ describe("database mode views", () => {
     await flushDatabaseMode()
 
     expect(await store.getViews()).toEqual([])
-    const pushed = calls.changes.flatMap((change) => change.diff.views)
-    expect(pushed).toHaveLength(1)
-    expect(pushed[0].id).toBe("note-a")
-    expect(pushed[0].deleted_at).toBeGreaterThan(50)
+    expect(calls.changes.flatMap((change) => change.viewIds)).toEqual(["note-a"])
+    const gone = ofEntity(await store.unpushedEvents(), "view")
+    expect(gone.map((event) => [event.action, event.entity_id])).toEqual([["delete", "note-a"]])
+    expect(gone[0].at).toBeGreaterThan(50)
     // The store keeps the tombstone for the push, as it keeps a node's.
-    expect((await store.getAllRows()).views.map((row) => row.deleted_at)).toEqual([
-      pushed[0].deleted_at,
-    ])
+    expect((await store.getAllRows()).views.map((row) => row.deleted_at)).toEqual([gone[0].at])
   })
 
   it("a pull that changed only a view still lands, on the store and the atom", async () => {

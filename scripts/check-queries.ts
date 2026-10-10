@@ -46,6 +46,22 @@ const ROOTS: { dir: string; mode: GuardMode }[] = [
 /** The one module allowed to read the raw D1 binding. */
 const TENANCY_MODULE = "worker/tenancy-db.ts"
 
+/**
+ * The one module allowed to WRITE the projections (docs/event-sourcing.md).
+ *
+ * `nodes`, `link` and `views` are what folding the event log yields, and they
+ * stay that only while every write to them is the log's own
+ * (`planEventAppend`). A handler that upserts a row directly still works, and
+ * still replicates — and silently makes the log a lie about that row from
+ * then on. So it is refused here, in the Worker, where the log lives. (The
+ * browser's store under `src/data` holds the same table names as a CACHE of
+ * the projections, with no log; it writes them freely.)
+ */
+const EVENT_LOG_MODULE = "worker/handlers/event-log.ts"
+const PROJECTION_WRITE =
+  /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(nodes|link|views)\b/i
+const isTest = (path: string) => /\.test\.tsx?$/.test(path) || path.endsWith("test-support.ts")
+
 function* walk(dir: string): Generator<string> {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = `${dir}/${entry.name}`
@@ -64,6 +80,22 @@ for (const root of ROOTS) {
       mode: root.mode,
       allowEnvDb: path === TENANCY_MODULE,
     })
+    if (root.dir === "worker" && path !== EVENT_LOG_MODULE && !isTest(path)) {
+      const lines = readFileSync(path, "utf8").split("\n")
+      lines.forEach((text, index) => {
+        // A statement, not a sentence about one: comments are prose.
+        if (/^\s*(?:\/\/|\*|\/\*)/.test(text)) return
+        const match = PROJECTION_WRITE.exec(text)
+        if (!match) return
+        failures += 1
+        console.error(`${path}:${index + 1}  write-around-the-event-log`)
+        console.error(
+          `  \`${match[1]}\` is a projection of the event log: write it through \`writeRows\` ` +
+            `(${EVENT_LOG_MODULE}) so the change is an event too`,
+        )
+        console.error(`  ${text.trim()}`)
+      })
+    }
     for (const violation of violations) {
       failures += 1
       const why =
@@ -81,4 +113,7 @@ if (failures > 0) {
   console.error(`\ncheck:queries — ${failures} violation(s) across ${scanned} files`)
   process.exit(1)
 }
-console.log(`check:queries — ${scanned} files scanned, every corpus statement is scoped ✓`)
+console.log(
+  `check:queries — ${scanned} files scanned, every corpus statement is scoped, ` +
+    `and only the event log writes its projections ✓`,
+)

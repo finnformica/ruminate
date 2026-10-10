@@ -44,7 +44,8 @@ Markdown already in normalized form round-trips byte-identically.
 
 ```
 local SQLite runtime store (sqlite-wasm / OPFS)   ← the store the app runs on
-    │  PUT /api/replica/notes   (row-diff push, src/data/replica-sync.ts)
+    │  PUT /api/replica/events  (the device's events, src/data/replica-sync.ts)
+    │  PUT /api/replica/notes   (row push: full pushes and older clients)
     │  GET /api/replica/notes   (boot + since-cursor row pulls, src/data/d1-note-source.ts)
     ▼
 one D1 database behind the Worker                 ← the authoritative cross-device copy
@@ -522,7 +523,13 @@ shared `SqlDriver` seam.
   `nodes`/`links`; the older `deleteNodes`/`deleteLinks` channel is kept and
   turned into tombstone stamps (one timestamp for the whole push), never
   removals. Payloads are validated (`parseReplicaPayload`) and planned
-  (`planReplicaPut`) by pure, unit-tested functions.
+  (`rowsToEvents`, `planEventAppend`) by pure, unit-tested functions.
+- `PUT /api/replica/events` — the push a current client makes
+  (`{events, cursor?}`, docs/event-sourcing.md): its own events, in the order
+  made, validated whole (`parseEventsPayload`), appended and projected in one
+  transaction (`appendClientEvents`). Answers `{ ok, appended, stale, seqs,
+cursor }`: each event's `seq`, which the client stamps on its own copy, and
+  the cursor the batch committed.
 - `GET /api/replica/notes` — row pull, the read half:
   - Full: `{ nodes, links, cursor }` — every row of both tables, tombstones
     included.

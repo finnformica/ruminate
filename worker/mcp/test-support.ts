@@ -5,7 +5,7 @@
 // Nothing here hand-writes corpus DDL or corpus rows. The schema comes from
 // the real migration files via the shared ladder (`createTenantTestDriver`),
 // the control-plane tables from the real `0003` and `0007`, and a seeded note
-// goes in through `docToGraph` → `corpusPut` → `planReplicaPut` — the same
+// goes in through `docToGraph` → `corpusPut` → `writeRows` — the same
 // three steps a replica push takes. So a schema or write-path change that
 // would break the deployed database breaks these tests first, which is the
 // only way a fixture earns its keep.

@@ -1,11 +1,6 @@
 import { getDefaultStore } from "jotai"
 import {
   REPLICA_PROTOCOL_HEADERS,
-  isEmptyGraphDiff,
-  isTombstoned,
-  linkKeyOf,
-  type GraphDiff,
-  type LinkKey,
   type LinkRow,
   type NodeRow,
   type ReplicaPutPayload,
@@ -13,6 +8,8 @@ import {
   type ReplicaStatusBody,
   type ViewRow,
 } from "../../worker/handlers/replica-payload"
+import { MAX_EVENTS_PER_PUT, type EventsPutResult, type RuminateEvent } from "./events"
+import { writerHeaders } from "./writer-identity"
 import type { NoteId } from "../schema"
 import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github-session"
 import { isBrowserOffline } from "../utils/network"
@@ -24,36 +21,40 @@ import {
 } from "./storage-diagnostics"
 
 /**
- * Write-behind replication of the node/link graph into the D1 database behind
- * the Worker (`PUT /api/replica/notes`). Started by the database runtime
- * (`database-mode.ts`); the local store never waits on it — a push failure
- * can only ever produce a diagnostic and a retry, never a blocked or lost
- * local write.
+ * Write-behind replication into the D1 database behind the Worker. Started by
+ * the database runtime (`database-mode.ts`); the local store never waits on
+ * it — a push failure can only ever produce a diagnostic and a retry, never
+ * a blocked or lost local write.
  *
  * Design:
- * - **Row diffs, coalesced + debounced.** Saves hand over the exact row diff
- *   the local store produced (changed nodes + changed links + deletes, never
- *   a whole-note replace); diffs accumulate keyed by row, a push is scheduled
- *   ~2s out, and everything dirty by then coalesces into one request. The
- *   Worker applies rows with per-row last-writer-wins on `updated_at`.
+ * - **The queue is the store's log.** Every edit lands in the local store as
+ *   the events it amounts to (docs/event-sourcing.md), and the ones the
+ *   replica has not acknowledged are the queue (`getUnpushedEvents`): durable
+ *   across reloads, with nothing to merge back after a failure. A push sends
+ *   them in the order they were made (`PUT /api/replica/events`), and the
+ *   response's `seq` per event marks them pushed (`markEventsPushed`).
+ * - **Debounced.** Saves notify the loop; a push is scheduled ~2s out, and
+ *   everything unpushed by then goes in one request.
  * - **Flush on hide.** `visibilitychange → hidden` / `pagehide` push
  *   immediately with `fetch keepalive`, so closing or backgrounding the tab
  *   inside the debounce window doesn't strand the last save.
- * - **Chunking.** Full-corpus pushes send all node rows before any link rows
- *   (links reference nodes) in chunks, staying under the Worker body cap and
- *   D1 batch limits. The cursor rides only the final chunk — it means "the
- *   replica reflects local state as of this push".
+ * - **A full push is rows.** After a repair, or from the Settings action,
+ *   every row the store holds goes out through the row door
+ *   (`PUT /api/replica/notes`), all node rows before any link rows (links
+ *   reference nodes) in chunks; the replica derives whatever differs. The
+ *   cursor rides only the final chunk — it means "the replica reflects local
+ *   state as of this push".
  * - **Every tab pushes its own writes.** Last-writer-wins per row at the
  *   replica makes concurrent tab pushes safe.
  * - **Auth.** Same-origin fetch so the `gh_refresh` cookie rides along, plus
  *   the current GitHub access token as a Bearer header (`ensureFreshToken` /
  *   `withAuthRetry`; a 401 refreshes once and retries).
- * - **Resilience.** A failed push merges its rows back into the pending diff
- *   (newer queued rows win) and retries with exponential backoff (2s → 60s);
- *   the browser's `online` event short-circuits the wait. While the browser
- *   says it is offline (`navigator.onLine === false`) no push is attempted
- *   at all — the rows wait for the `online` event, and nothing is recorded
- *   as an error, because nothing failed.
+ * - **Resilience.** A failed push leaves the events where they were and
+ *   retries with exponential backoff (2s → 60s); the browser's `online` event
+ *   short-circuits the wait. While the browser says it is offline
+ *   (`navigator.onLine === false`) no push is attempted at all — the events
+ *   wait for the `online` event, and nothing is recorded as an error, because
+ *   nothing failed.
  * - **Cursor.** A monotonic ms-timestamp cursor is sent with each push and
  *   confirmed by the push's own response, which echoes the cursor the batch
  *   committed. No second request.
@@ -96,8 +97,6 @@ interface ReplicaAuth {
 }
 
 export interface ReplicaSyncOptions {
-  /** The current files map (path → content) — local corpus size for the
-   * drastically-behind check. */
   /** How many notes the local graph holds — compared against the replica's
    * note count to notice a replica left drastically behind. */
   getNoteCount: () => number
@@ -105,6 +104,10 @@ export interface ReplicaSyncOptions {
    * store). Views included: a delete only reaches other devices if its
    * tombstone travels, and a full push is how a repaired replica catches up. */
   getAllRows: () => Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }>
+  /** The store's unpushed events, oldest first — the queue. */
+  getUnpushedEvents: () => Promise<RuminateEvent[]>
+  /** Stamp pushed events with the `seq` the replica gave each. */
+  markEventsPushed: (seqs: readonly (readonly [id: string, seq: number])[]) => Promise<void>
   /** Injectable for tests; default global fetch (same-origin URLs). */
   fetchImpl?: typeof fetch
   /** Injectable for tests; default the real github-session helpers. */
@@ -116,8 +119,9 @@ export interface ReplicaSyncOptions {
 }
 
 export interface ReplicaSyncHandle {
-  /** Queue one save's row diff (with the note ids it touched) for replication. */
-  notifyGraphChange(noteIds: NoteId[], diff: GraphDiff): void
+  /** The store took a write: its events are in the queue. `noteIds` are the
+   * notes it touched and `viewIds` the views, for the pull guards below. */
+  notifyChange(noteIds: NoteId[], viewIds: string[]): void
   /**
    * Note ids with local changes/deletes not yet confirmed pushed (queued or
    * in flight). The pull side consults this before applying a pull, so a
@@ -130,6 +134,10 @@ export interface ReplicaSyncHandle {
   /** The same, for views (`src/data/views.ts`): the ids of rows queued or in
    * flight, which a pull must leave alone. */
   pendingViewIds?(): Set<string>
+  /** The ids of events in a push that has not finished: the store must not
+   * coalesce a typing run into one of these (`NoteStore.applyEvents`), or
+   * the replica would hold an event this device's log no longer does. */
+  inFlightEventIds?(): Set<string>
   /** Queue a full-corpus push (after a repair, or from the Settings action). */
   requestFullPush(): void
   /**
@@ -152,91 +160,26 @@ export function isReplicaDrasticallyBehind(localNotes: number, remoteNotes: numb
   return localNotes - remoteNotes > Math.max(3, Math.ceil(localNotes * 0.1))
 }
 
-const linkKeyString = (key: LinkKey) => key.join("\x1f")
-
-/** The pending row-diff accumulator: latest row state per key; upserts and
- * deletes cancel each other. */
-interface PendingDiff {
-  nodes: Map<string, NodeRow>
-  links: Map<string, LinkRow>
-  /** Keyed by view id. No delete channel to cancel against: a view's delete
-   * is a tombstoned row, so it is just the latest state of that key. */
-  views: Map<string, ViewRow>
-  deleteNodes: Set<string>
-  deleteLinks: Map<string, LinkKey>
-}
-
-const emptyPending = (): PendingDiff => ({
-  nodes: new Map(),
-  links: new Map(),
-  views: new Map(),
-  deleteNodes: new Set(),
-  deleteLinks: new Map(),
-})
-
-const pendingIsEmpty = (pending: PendingDiff) =>
-  pending.nodes.size === 0 &&
-  pending.links.size === 0 &&
-  pending.views.size === 0 &&
-  pending.deleteNodes.size === 0 &&
-  pending.deleteLinks.size === 0
-
-function mergeDiffInto(pending: PendingDiff, diff: GraphDiff) {
-  for (const node of diff.nodes) {
-    pending.deleteNodes.delete(node.id)
-    pending.nodes.set(node.id, node)
-  }
-  for (const link of diff.links) {
-    const key = linkKeyString(linkKeyOf(link))
-    pending.deleteLinks.delete(key)
-    pending.links.set(key, link)
-  }
-  for (const view of diff.views) pending.views.set(view.id, view)
-  for (const id of diff.deleteNodes) {
-    pending.nodes.delete(id)
-    pending.deleteNodes.add(id)
-  }
-  for (const key of diff.deleteLinks) {
-    const keyString = linkKeyString(key)
-    pending.links.delete(keyString)
-    pending.deleteLinks.set(keyString, key)
-  }
-}
-
-/** Merge a failed push's snapshot back, without clobbering rows queued since. */
-function restoreSnapshot(pending: PendingDiff, snapshot: PendingDiff) {
-  for (const [id, node] of snapshot.nodes) {
-    if (!pending.nodes.has(id) && !pending.deleteNodes.has(id)) pending.nodes.set(id, node)
-  }
-  for (const [key, link] of snapshot.links) {
-    if (!pending.links.has(key) && !pending.deleteLinks.has(key)) pending.links.set(key, link)
-  }
-  for (const [id, view] of snapshot.views) {
-    if (!pending.views.has(id)) pending.views.set(id, view)
-  }
-  for (const id of snapshot.deleteNodes) {
-    if (!pending.nodes.has(id)) pending.deleteNodes.add(id)
-  }
-  for (const [key, linkKey] of snapshot.deleteLinks) {
-    if (!pending.links.has(key)) pending.deleteLinks.set(key, linkKey)
-  }
-}
-
 /** Start the replication loop. Returns a handle the database runtime drives. */
 export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle {
   const fetchImpl = options.fetchImpl ?? fetch
   const auth: ReplicaAuth = options.auth ?? { ensureFreshToken, getAccessToken, withAuthRetry }
   const debounceMs = options.debounceMs ?? DEBOUNCE_MS
   const chunkRows = options.chunkRows ?? CHUNK_ROWS
+  const chunkEvents = Math.min(chunkRows, MAX_EVENTS_PER_PUT)
   const backoffStartMs = options.backoffStartMs ?? BACKOFF_START_MS
   const backoffMaxMs = options.backoffMaxMs ?? BACKOFF_MAX_MS
 
-  let pending = emptyPending()
+  /** Something may be unpushed: a write was notified, or nothing has been
+   * checked yet this session (a previous session's leftovers). Cleared when a
+   * push finds the queue empty. */
+  let queued = true
   const dirtyNoteIds = new Set<NoteId>()
   /** Ids snapshotted into a push that has not finished yet (see `pendingNoteIds`). */
   let inFlightNoteIds = new Set<NoteId>()
   const dirtyViewIds = new Set<string>()
   let inFlightViewIds = new Set<string>()
+  let inFlightEventIds = new Set<string>()
   let fullPushRequested = false
   let stopped = false
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -249,6 +192,8 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   let lastAutoFullPushAt = 0
   /** Has the one automatic remote-status check for this session run yet? */
   let statusCheckedThisSession = false
+  /** How many deletes the queue held when last read (diagnostics). */
+  let queuedDeletes = 0
   /** Serialize all pushes/status fetches; one task's failure never breaks it. */
   let queue: Promise<void> = Promise.resolve()
 
@@ -262,13 +207,9 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   }
 
   function reportPending() {
-    // Since soft deletes, a queued delete is a queued node row carrying
-    // `deleted_at` — `deleteNodes` is now only the purge channel a pull uses.
-    let pendingDeletes = pending.deleteNodes.size
-    for (const node of pending.nodes.values()) if (isTombstoned(node)) pendingDeletes += 1
     patchDiagnostics({
       pendingNotes: dirtyNoteIds.size,
-      pendingDeletes,
+      pendingDeletes: queuedDeletes,
       fullPushPending: fullPushRequested,
     })
   }
@@ -285,7 +226,7 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     })
   }
 
-  const hasWork = () => fullPushRequested || !pendingIsEmpty(pending)
+  const hasWork = () => fullPushRequested || queued
 
   /** Schedule the next queue tick. Schedule-once: events arriving while a tick
    * is already pending coalesce into it (never postponing it — a steady stream
@@ -331,18 +272,15 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     return response
   }
 
-  /** Push one payload; returns the cursor the replica committed, if any. */
-  async function putPayload(
-    payload: ReplicaPutPayload,
-    keepalive: boolean,
-  ): Promise<string | null> {
-    const body = JSON.stringify(payload)
-    const response = await authorizedFetch((token) =>
-      fetchImpl("/api/replica/notes", {
+  /** PUT one JSON body to a replica route, with the writer's headers. */
+  async function put(path: string, body: string, keepalive: boolean): Promise<Response> {
+    return authorizedFetch((token) =>
+      fetchImpl(path, {
         method: "PUT",
         credentials: "same-origin",
         headers: {
           ...REPLICA_PROTOCOL_HEADERS,
+          ...writerHeaders(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
@@ -350,9 +288,29 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
         ...(keepalive && body.length <= KEEPALIVE_BODY_LIMIT ? { keepalive: true } : {}),
       }),
     )
+  }
+
+  /** Push one row payload; returns the cursor the replica committed, if any. */
+  async function putRows(payload: ReplicaPutPayload, keepalive: boolean): Promise<string | null> {
+    const response = await put("/api/replica/notes", JSON.stringify(payload), keepalive)
     // The (tiny) body is drained either way so the connection can be reused.
     const result = (await response.json().catch(() => null)) as ReplicaPutResult | null
     return typeof result?.cursor === "string" ? result.cursor : null
+  }
+
+  /** Push one run of events; returns what the replica said of them. */
+  async function putEvents(
+    events: RuminateEvent[],
+    cursor: string | undefined,
+    keepalive: boolean,
+  ): Promise<EventsPutResult> {
+    const body = JSON.stringify(cursor === undefined ? { events } : { events, cursor })
+    const response = await put("/api/replica/events", body, keepalive)
+    const result = (await response.json().catch(() => null)) as EventsPutResult | null
+    if (!result || !Array.isArray(result.seqs)) {
+      throw new Error("Replica answered a push of events without saying what it held")
+    }
+    return result
   }
 
   async function fetchRemoteStatus(): Promise<void> {
@@ -399,14 +357,11 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   /** Split rows into payload chunks: every node row precedes every link row
    * (links reference nodes), views follow both (they name a node by id with
    * no key to satisfy, so they need nothing to land first — they go last only
-   * to keep the order the reader expects), deletes ride the first chunk,
-   * cursor the last. */
-  function buildPayloads(
+   * to keep the order the reader expects), cursor the last. */
+  function buildRowPayloads(
     nodes: NodeRow[],
     links: LinkRow[],
     views: ViewRow[],
-    deleteNodes: string[],
-    deleteLinks: LinkKey[],
     cursor: string,
   ): ReplicaPutPayload[] {
     const payloads: ReplicaPutPayload[] = []
@@ -426,20 +381,53 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
           : []
       viewIndex += chunkViews.length
       const payload: ReplicaPutPayload = { nodes: chunkNodes, links: chunkLinks }
-      // Optional on the wire, so absent when empty, as the delete channels are.
+      // Optional on the wire, so absent when empty.
       if (chunkViews.length > 0) payload.views = chunkViews
       payloads.push(payload)
     } while (nodeIndex < nodes.length || linkIndex < links.length || viewIndex < views.length)
-
-    if (deleteNodes.length > 0) payloads[0].deleteNodes = deleteNodes
-    if (deleteLinks.length > 0) payloads[0].deleteLinks = deleteLinks
     payloads[payloads.length - 1].cursor = cursor
     return payloads
   }
 
+  /** The full corpus, as rows, through the row door. */
+  async function pushAllRows(keepalive: boolean): Promise<{ cursor: string; committed: boolean }> {
+    const all = await options.getAllRows()
+    const cursor = nextCursor()
+    const payloads = buildRowPayloads(all.nodes, all.links, all.views, cursor)
+    // The cursor rides the final chunk, so the final response is the one
+    // that confirms it — no follow-up request.
+    let committed: string | null = null
+    for (const payload of payloads) committed = await putRows(payload, keepalive)
+    return { cursor, committed: committed === cursor }
+  }
+
+  /** The queue, through the events door, in runs of `chunkEvents`. Returns
+   * false when there was nothing to push. */
+  async function pushEvents(
+    events: RuminateEvent[],
+    keepalive: boolean,
+  ): Promise<{ cursor: string; committed: boolean } | null> {
+    if (events.length === 0) return null
+    const cursor = nextCursor()
+    const seqs: [string, number][] = []
+    let committed: string | null = null
+    for (let index = 0; index < events.length; index += chunkEvents) {
+      const run = events.slice(index, index + chunkEvents)
+      const last = index + chunkEvents >= events.length
+      const result = await putEvents(run, last ? cursor : undefined, keepalive)
+      seqs.push(...result.seqs)
+      if (last) committed = result.cursor
+    }
+    // Acknowledged: stamped in the store, so the next read of the queue no
+    // longer holds them. A failure here leaves them queued; the replica
+    // ignores a re-sent event by id, so the retry is harmless.
+    await options.markEventsPushed(seqs)
+    return { cursor, committed: committed === cursor }
+  }
+
   async function runPush(): Promise<void> {
     if (stopped || !hasWork()) return
-    // No network, no attempt. The rows stay pending (the status reads
+    // No network, no attempt. The events stay queued (the status reads
     // "Offline", not "Sync failed") and the `online` event pushes them at
     // once; the re-check is a backstop for a flag that flips without one.
     if (isBrowserOffline()) {
@@ -448,11 +436,12 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       return
     }
 
-    // Snapshot and clear the pending state; a failure merges it back.
+    // Snapshot and clear the pending state; a failure puts it back. A full
+    // push is rows, so the queue is not drained by it: `queued` stands, and
+    // the events go on the tick after.
     const wasFullPush = fullPushRequested
     fullPushRequested = false
-    const snapshot = pending
-    pending = emptyPending()
+    if (!wasFullPush) queued = false
     const snapshotNoteIds = new Set(dirtyNoteIds)
     dirtyNoteIds.clear()
     inFlightNoteIds = snapshotNoteIds
@@ -461,58 +450,48 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     inFlightViewIds = snapshotViewIds
     const keepalive = useKeepalive
     useKeepalive = false
-    reportPending()
 
     try {
-      let nodes = [...snapshot.nodes.values()]
-      let links = [...snapshot.links.values()]
-      let views = [...snapshot.views.values()]
-      if (wasFullPush) {
-        const all = await options.getAllRows()
-        nodes = all.nodes
-        links = all.links
-        views = all.views
-      }
-      const cursor = nextCursor()
-      const payloads = buildPayloads(
-        nodes,
-        links,
-        views,
-        [...snapshot.deleteNodes],
-        [...snapshot.deleteLinks.values()],
-        cursor,
-      )
-      // The cursor rides the final chunk, so the final response is the one
-      // that confirms it — no follow-up request.
-      let committedCursor: string | null = null
-      for (const payload of payloads) committedCursor = await putPayload(payload, keepalive)
+      const events = wasFullPush ? [] : await options.getUnpushedEvents()
+      queuedDeletes = events.filter((event) => event.action === "delete").length
+      inFlightEventIds = new Set(events.map((event) => event.id))
+      reportPending()
+      const pushed = wasFullPush
+        ? await pushAllRows(keepalive)
+        : await pushEvents(events, keepalive)
 
       inFlightNoteIds = new Set()
       inFlightViewIds = new Set()
-      lastSentCursor = cursor
+      inFlightEventIds = new Set()
+      queuedDeletes = 0
       backoffMs = null
-      patchDiagnostics({
-        lastPushAt: Date.now(),
-        lastPushNotes: snapshotNoteIds.size,
-        cursor,
-        cursorConfirmed: committedCursor === cursor,
-        lastError: null,
-      })
+      if (pushed !== null) {
+        lastSentCursor = pushed.cursor
+        patchDiagnostics({
+          lastPushAt: Date.now(),
+          lastPushNotes: snapshotNoteIds.size,
+          cursor: pushed.cursor,
+          cursorConfirmed: pushed.committed,
+          lastError: null,
+        })
+      }
+      reportPending()
       // Once per session, look at the remote counts: a replica that is
       // drastically behind got that way from lost pushes or a wiped database,
       // not from the save that just landed, so checking after every push buys
       // nothing and costs a scan of the corpus. (Best-effort.)
-      if (!statusCheckedThisSession) {
+      if (pushed !== null && !statusCheckedThisSession) {
         statusCheckedThisSession = true
         await fetchRemoteStatus().catch(recordError)
       }
     } catch (error) {
-      // Merge the snapshot back and retry with backoff. Never touches the
-      // local store.
+      // The events are still in the store's queue; put the guards back and
+      // retry with backoff. Never touches the local rows.
       inFlightNoteIds = new Set()
       inFlightViewIds = new Set()
+      inFlightEventIds = new Set()
       if (wasFullPush) fullPushRequested = true
-      restoreSnapshot(pending, snapshot)
+      else queued = true
       for (const id of snapshotNoteIds) dirtyNoteIds.add(id)
       for (const id of snapshotViewIds) dirtyViewIds.add(id)
       reportPending()
@@ -547,14 +526,15 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   }
 
   patchDiagnostics({ ...INITIAL_REPLICA_DIAGNOSTICS })
+  // Whatever a previous session left unpushed goes first.
+  schedule(debounceMs)
 
   return {
-    notifyGraphChange(noteIds, diff) {
-      if (stopped || isEmptyGraphDiff(diff)) return
-      mergeDiffInto(pending, diff)
+    notifyChange(noteIds, viewIds) {
+      if (stopped) return
+      queued = true
       for (const id of noteIds) dirtyNoteIds.add(id)
-      // A view names itself: no note scoping to expand, its id is the guard.
-      for (const view of diff.views) dirtyViewIds.add(view.id)
+      for (const id of viewIds) dirtyViewIds.add(id)
       reportPending()
       schedule(debounceMs)
     },
@@ -569,6 +549,9 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     },
     pendingViewIds() {
       return new Set([...dirtyViewIds, ...inFlightViewIds])
+    },
+    inFlightEventIds() {
+      return new Set(inFlightEventIds)
     },
     refreshRemoteStatus() {
       if (stopped) return

@@ -217,7 +217,7 @@ an agent is told and what the server enforces cannot drift apart.
 ## 3. How a write reaches the browser
 
 An agent's edit goes out through the **same planner a replica push does**
-(`planReplicaPut`): per-row last-writer-wins, one atomic batch, and a fresh server `seq`
+(`writeRows`, docs/event-sourcing.md): per-row last-writer-wins, one atomic batch, and a fresh server `seq`
 on every row. So the browser's next `?since=` pull reads it like any other change. There
 is no second sync path, and nothing in the client had to change.
 
