@@ -204,7 +204,7 @@ export const notesAtom = atom((get) => buildNotes(get(graphSnapshotAtom)))
 /**
  * Date (or week) id → the notes that reference it via date-valued
  * properties (e.g. a birthday or due date). Powers the calendar dots and the
- * date/week hover cards.
+ * day page's list of notes with the date (`DateMentions`).
  */
 export const dateMentionsAtom = atom((get) => {
   const notes = get(notesAtom)
@@ -653,6 +653,13 @@ export const touchRecentAtom = atom(
 )
 
 export const calendarLayoutAtom = atomWithStorage<"week" | "month">("calendar-layout", "week")
+
+/** How a day's changes are listed on the calendar (`DayChanges`): by the
+ * note they were made in, or in the order they were made. */
+export const calendarChangesViewAtom = atomWithStorage<"notes" | "timeline">(
+  "calendar-changes-view",
+  "notes",
+)
 
 /**
  * The markdown a new block starts with when Enter creates one in the block

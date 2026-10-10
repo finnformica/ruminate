@@ -247,14 +247,28 @@ curl -s "$ORIGIN/api/replica/events?entity=block&entity_id=blk_…" \
 
 ## A day on the calendar
 
-A day (or a week) that is not the current one shows what was written on it
-(`src/data/day-changes.ts`, `src/components/day-changes.tsx`): every note
-changed on it, as the lines its outline gained and lost, read as a diff is.
+A day (or a week) of the calendar is a page of its own (`/calendar/<day>`,
+`/calendar/<week>`; `src/routes/_appRoot.calendar.$.tsx`) that shows what was
+written on it (`src/data/day-changes.ts`, `src/components/day-changes.tsx`):
+every note changed on it, drawn by the block editor in its read-only mode
+with what the day did to each row marked (`BlockEditor.diff`,
+`block-item.tsx`) — a row added or removed sits on its tint with a `+` or `−`
+at the editor's edge, a reworded row shows the words that went and came, and
+a run of unchanged rows folds behind one row that says how many, a row of
+context kept on either side (`FOLD_CONTEXT`), the shape of a pull request.
 "Before" is the fold of everything placed ahead of the day's first event;
 "after" is that fold with the day's events — and only the day's — applied on
 top, so what shows is what the day's edits did, whatever landed around them
-from another device or another day. Such a day is read-only: the day as it
-happened. Today's note, and this week's, are written as before.
+from another device or another day. Two readings, kept as a display setting
+(`calendarChangesViewAtom`): **by note**, each note once with the whole
+period's changes, and **in order**, sitting by sitting — a sitting being one
+device's run of edits with no pause over half an hour (`sittingsIn`), labelled
+with the writer's clock and, where it is not the reader's, the writer's zone.
+
+There are no daily or weekly notes: a day is not a note and nothing is written
+on the calendar page itself. A note that was kept under a date-shaped id
+before is an ordinary note now, still at `/views/<id>`; such an id with no
+note behind it goes on to `/calendar/<id>`.
 
 **Whose day.** An edit belongs to the day it was for the person making it,
 read from `at` in the writer's own `tz`; a line typed at 23:30 in London is

@@ -1,3 +1,7 @@
 ### Changed
 
-- A past day on the calendar shows what you wrote that day. Open any day or week but the current one and, beneath its note, every note you changed on it is listed with the lines added and removed, the way a diff reads — green for added, red for removed. Those days are read-only now; today's note and this week's are written as before. A line typed late at night belongs to the day it was for you, wherever you read it later. The record starts with this update, so earlier days have nothing to show.
+- The calendar shows what you wrote on each day. A day or a week is a page of its own now, not a note: open one and every note you changed on it is drawn with its changes marked — added rows in green with a `+`, removed rows in red with a `−`, a reworded row with the words that went and came, and the unchanged stretches folded. Switch between **By note** and **In order**, which lists the day sitting by sitting. The record starts with this update, so earlier days have nothing to show.
+
+### Removed
+
+- Daily and weekly notes, and the `g d` shortcut to today's. Nothing is written on a calendar day any more; notes you kept under a date open as ordinary notes, and an old link to a date with no note behind it goes to that day on the calendar.

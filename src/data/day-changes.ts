@@ -1,14 +1,15 @@
 import { parseISO } from "date-fns"
-import { serialize } from "../blocks/serialize"
+import type { Block, BlockDoc } from "../blocks/types"
 import { isValidDateString, isValidWeekString, toDateStringUtc, toWeekString } from "../utils/date"
 import { fold, projectRows, type LoggedEvent, type LogState } from "./events"
 import { buildGraphSnapshot, isNoteType, noteDoc, type GraphSnapshot } from "./graph"
 import { emittedNoteTitle } from "./note-identity"
 
 /**
- * What a day (or a week) on the calendar shows: the notes written on it, as
- * the difference between how each stood before the day's first change and
- * after its last (docs/event-sourcing.md). Pure: the log in, the changes out.
+ * What a day (or a week) on the calendar shows: the notes written on it, each
+ * as its outline with what the day did to it marked block by block
+ * (docs/event-sourcing.md). Pure: the log in, the changes out; the block
+ * editor draws the result in its read-only mode (`BlockEditor.diff`).
  *
  * ## Whose day
  *
@@ -26,44 +27,80 @@ import { emittedNoteTitle } from "./note-identity"
  * in another zone, or a late push, can place another day's event between two
  * of this one's. So "before" is the fold of everything placed ahead of the
  * day's first event, and "after" is that fold with the day's events — and
- * only the day's — applied on top. What the diff shows is what the day's
- * edits did, whatever else landed around them.
+ * only the day's — applied on top. What shows is what the day's edits did,
+ * whatever else landed around them.
  *
- * ## The lines
+ * ## The marks
  *
- * A note is compared as its outline, the lines its markdown rollup has (the
- * same bytes a copy produces) less the `id::` line under each block, which is
- * plumbing rather than content. The diff is by line, as a reader expects of
- * one: a changed line is the old line removed and the new one added.
+ * A note is compared as two outlines, block by block: a block only the
+ * after-outline holds was **added**, one only the before-outline holds was
+ * **removed** — and is spliced back where it stood, so it draws as a row —
+ * and one in both whose text or type differs was **changed**, carrying the
+ * words that went and the words that came (`diffWords`). Everything else is
+ * unchanged, and a run of unchanged rows is **folded** behind one row that
+ * says how many it stands for, a row of context kept on either side of a
+ * change (`FOLD_CONTEXT`), the shape a reader knows from a pull request.
  */
 
-export interface DiffLine {
-  kind: "same" | "added" | "removed" | "skipped"
+/** A word diff's piece: a run of text that both have, or only one of them. */
+export interface WordSegment {
+  kind: "same" | "added" | "removed"
   text: string
-  /** `skipped` only: how many unchanged lines the row stands for. */
-  count?: number
 }
+
+/** What the period did to one block of a note's outline. */
+export type DiffMark =
+  | { kind: "added" }
+  | { kind: "removed" }
+  | { kind: "changed"; words: WordSegment[] }
+  /** A synthetic row standing for a run of unchanged rows, `count` of them
+   * (descendants included), with the ids it hides. */
+  | { kind: "fold"; count: number; hidden: string[] }
 
 export interface NoteChange {
   id: string
-  /** The note's title after the day's changes (before them, for a deleted
-   * note): what the row is headed by. Date notes carry their id. */
+  /** The note's title after the period's changes (before them, for a
+   * deleted note). */
   title: string
   kind: "created" | "edited" | "deleted"
   added: number
   removed: number
-  /** The whole outline's diff, unchanged lines included. */
-  lines: DiffLine[]
+  changed: number
+  /** The outline to draw: the after-outline with the removed blocks spliced
+   * back where they stood and unchanged runs folded. */
+  doc: BlockDoc
+  marks: Map<string, DiffMark>
 }
 
 export interface PeriodChanges {
-  /** The day's (or week's) events, in the writer's zones. */
+  /** The period's events, in the writers' zones. */
   events: number
   notes: NoteChange[]
   /** The first day the log knows anything about, in the viewer's zone, or
    * null while it is empty: a day before it is one history cannot answer. */
   earliest: string | null
 }
+
+/** One sitting: a run of edits from one device with no long pause in it. */
+export interface Sitting {
+  /** The writer's clock at the first and last edit, and its zone. */
+  at: number
+  until: number
+  tz: number | null
+  device: string
+  events: number
+  notes: NoteChange[]
+}
+
+export interface ChangeOptions {
+  /** Fold rows the reader has opened: left unfolded. */
+  expanded?: ReadonlySet<string>
+}
+
+/** Rows of context kept on either side of a change before a run folds. */
+const FOLD_CONTEXT = 1
+/** A pause longer than this ends a sitting (`sittingsIn`). */
+const SITTING_GAP_MS = 30 * 60_000
 
 /** The day an event fell on for its writer — in its own zone when it says
  * one, else the viewer's. `YYYY-MM-DD`. */
@@ -82,11 +119,20 @@ export function periodMatcher(periodId: string): ((day: string) => boolean) | nu
 
 const bySeq = (a: LoggedEvent, b: LoggedEvent) => a.seq - b.seq
 
+/** Every day (in the viewer's zone, or the writer's where it said) something
+ * was written on — what the calendar dots. A view's row is not writing. */
+export function daysWithChanges(log: readonly LoggedEvent[], viewerTz: number): Set<string> {
+  const days = new Set<string>()
+  for (const event of log) if (event.entity !== "view") days.add(localDayOf(event, viewerTz))
+  return days
+}
+
 /** The changes a period's events made (see the module header). */
 export function changesIn(
   log: readonly LoggedEvent[],
   periodId: string,
   viewerTz: number,
+  options: ChangeOptions = {},
 ): PeriodChanges {
   const inPeriod = periodMatcher(periodId)
   const sorted = [...log].sort(bySeq)
@@ -95,16 +141,67 @@ export function changesIn(
   if (inPeriod === null) return { events: 0, notes: [], earliest }
   const periodEvents = sorted.filter((event) => inPeriod(localDayOf(event, viewerTz)))
   if (periodEvents.length === 0) return { events: 0, notes: [], earliest }
+  const notes = changesOf(sorted, periodEvents, options)
+  return { events: periodEvents.length, notes, earliest }
+}
 
-  const firstSeq = periodEvents[0].seq
+/**
+ * The period's edits as sittings, in order: consecutive events from one
+ * device with no pause over `gapMs` between them, each sitting diffed on its
+ * own — what it found, against what it left. The day as it happened.
+ */
+export function sittingsIn(
+  log: readonly LoggedEvent[],
+  periodId: string,
+  viewerTz: number,
+  options: ChangeOptions & { gapMs?: number } = {},
+): Sitting[] {
+  const inPeriod = periodMatcher(periodId)
+  if (inPeriod === null) return []
+  const gapMs = options.gapMs ?? SITTING_GAP_MS
+  const sorted = [...log].sort(bySeq)
+  const periodEvents = sorted.filter((event) => inPeriod(localDayOf(event, viewerTz)))
+  const runs: LoggedEvent[][] = []
+  for (const event of periodEvents) {
+    const run = runs.at(-1)
+    const last = run?.at(-1)
+    if (run && last && deviceOf(last) === deviceOf(event) && event.at - last.at <= gapMs) {
+      run.push(event)
+    } else {
+      runs.push([event])
+    }
+  }
+  return runs.map((run) => ({
+    at: run[0].at,
+    until: (run.at(-1) as LoggedEvent).at,
+    tz: run[0].tz ?? null,
+    device: deviceOf(run[0]),
+    events: run.length,
+    notes: changesOf(sorted, run, options),
+  }))
+}
+
+/** The device half of `<device>.<tab>`: two tabs of one browser are one
+ * writer for the purposes of a sitting. */
+const deviceOf = (event: LoggedEvent) => event.device.split(".")[0]
+
+/**
+ * The notes a run of events changed, each as the difference between the
+ * fold of everything placed ahead of the run's first event and that fold
+ * with the run — and only the run — applied on top.
+ */
+function changesOf(
+  sorted: readonly LoggedEvent[],
+  run: readonly LoggedEvent[],
+  options: ChangeOptions,
+): NoteChange[] {
+  const firstSeq = run[0].seq
   const before = sorted.filter((event) => event.seq < firstSeq)
-  const stateBefore = fold(before)
-  const stateAfter = fold([...before, ...periodEvents])
-  const graphBefore = graphOf(stateBefore)
-  const graphAfter = graphOf(stateAfter)
+  const graphBefore = graphOf(fold(before))
+  const graphAfter = graphOf(fold([...before, ...run]))
 
   const touched = new Set<string>()
-  for (const event of periodEvents) {
+  for (const event of run) {
     if (event.entity === "view") continue
     const blocks =
       event.entity === "block" ? [event.entity_id] : event.entity_id.split("|").slice(0, 2)
@@ -116,25 +213,11 @@ export function changesIn(
 
   const notes: NoteChange[] = []
   for (const id of touched) {
-    const was = outlineLines(graphBefore, id)
-    const now = outlineLines(graphAfter, id)
-    if (was === null && now === null) continue
-    const lines = diffLines(was ?? [], now ?? [])
-    const added = lines.filter((line) => line.kind === "added").length
-    const removed = lines.filter((line) => line.kind === "removed").length
-    if (added === 0 && removed === 0 && was !== null && now !== null) continue
-    const node = graphAfter.nodes.get(id) ?? graphBefore.nodes.get(id)
-    notes.push({
-      id,
-      title: node ? (emittedNoteTitle(id, node.text) ?? id) : id,
-      kind: was === null ? "created" : now === null ? "deleted" : "edited",
-      added,
-      removed,
-      lines,
-    })
+    const change = noteChange(graphBefore, graphAfter, id, options)
+    if (change !== null) notes.push(change)
   }
   notes.sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0))
-  return { events: periodEvents.length, notes, earliest }
+  return notes
 }
 
 /** The live graph a state describes. */
@@ -171,105 +254,260 @@ function notesHolding(graph: GraphSnapshot, blockId: string): string[] {
   return [...notes]
 }
 
-/** A note's outline as lines — its rollup less the `id::` lines — or null
- * when the graph does not hold the note. */
-function outlineLines(graph: GraphSnapshot, noteId: string): string[] | null {
-  const doc = noteDoc(noteId, graph)
-  if (doc === null) return null
-  const lines = serialize(doc)
-    .split("\n")
-    .filter((line) => !/^\s*id:: \S+$/.test(line))
-  if (lines.at(-1) === "") lines.pop()
-  return lines
+// -----------------------------------------------------------------------------
+// One note: two outlines → one marked outline
+// -----------------------------------------------------------------------------
+
+/**
+ * A note's change between two graphs: null when neither holds it, or both
+ * hold it unchanged. The doc returned is the after-outline with the removed
+ * blocks spliced back where they stood (`spliceRemoved`) and unchanged runs
+ * folded (`foldUnchanged`); `marks` says what each row is.
+ */
+function noteChange(
+  before: GraphSnapshot,
+  after: GraphSnapshot,
+  noteId: string,
+  options: ChangeOptions = {},
+): NoteChange | null {
+  const docBefore = noteDoc(noteId, before)
+  const docAfter = noteDoc(noteId, after)
+  if (docBefore === null && docAfter === null) return null
+
+  const marks = new Map<string, DiffMark>()
+  const base: BlockDoc = docAfter ?? { props: docBefore!.props, rootBlockIds: [], blocks: {} }
+  for (const [id, block] of Object.entries(base.blocks)) {
+    const was = docBefore?.blocks[id]
+    if (!was) marks.set(id, { kind: "added" })
+    else if (was.text !== block.text || was.type !== block.type) {
+      marks.set(id, { kind: "changed", words: diffWords(was.text, block.text) })
+    }
+  }
+  const doc = docBefore ? spliceRemoved(base, docBefore, marks) : base
+  const added = countMarks(marks, "added")
+  const removed = countMarks(marks, "removed")
+  const changed = countMarks(marks, "changed")
+  if (added + removed + changed === 0 && docBefore !== null && docAfter !== null) return null
+
+  const folded = foldUnchanged(doc, marks, options.expanded ?? new Set())
+  const node = after.nodes.get(noteId) ?? before.nodes.get(noteId)
+  return {
+    id: noteId,
+    title: node ? (emittedNoteTitle(noteId, node.text) ?? "") : "",
+    kind: docBefore === null ? "created" : docAfter === null ? "deleted" : "edited",
+    added,
+    removed,
+    changed,
+    doc: folded,
+    marks,
+  }
+}
+
+const countMarks = (marks: ReadonlyMap<string, DiffMark>, kind: DiffMark["kind"]) =>
+  [...marks.values()].filter((mark) => mark.kind === kind).length
+
+/**
+ * The after-outline with every block only the before-outline holds put back
+ * where it stood: after the nearest earlier sibling that is still there, else
+ * first under its parent (the root list, or a block the after-outline holds
+ * — or one spliced back itself, so a removed subtree comes whole). Each is
+ * marked `removed`.
+ */
+function spliceRemoved(after: BlockDoc, before: BlockDoc, marks: Map<string, DiffMark>): BlockDoc {
+  const blocks: Record<string, Block> = { ...after.blocks }
+  const lists = new Map<string | null, string[]>()
+  lists.set(null, [...after.rootBlockIds])
+  const listOf = (parent: string | null): string[] => {
+    let list = lists.get(parent)
+    if (!list) {
+      list = [...(blocks[parent as string]?.children ?? [])]
+      lists.set(parent, list)
+    }
+    return list
+  }
+  const place = (parent: string | null, siblingsBefore: readonly string[]) => {
+    const list = listOf(parent)
+    siblingsBefore.forEach((id, index) => {
+      if (blocks[id] && list.includes(id)) return
+      if (!blocks[id]) {
+        const gone = before.blocks[id]
+        if (!gone) return
+        blocks[id] = { ...gone, children: [] }
+        marks.set(id, { kind: "removed" })
+      }
+      if (list.includes(id)) return
+      // After the nearest earlier sibling still in the list, else first.
+      let at = 0
+      for (let k = index - 1; k >= 0; k -= 1) {
+        const found = list.indexOf(siblingsBefore[k])
+        if (found !== -1) {
+          at = found + 1
+          break
+        }
+      }
+      list.splice(at, 0, id)
+    })
+  }
+  place(null, before.rootBlockIds)
+  for (const [id, block] of Object.entries(before.blocks)) {
+    if (block.children.length === 0) continue
+    // A parent the after-outline holds keeps its own children, with the
+    // removed ones spliced in; a removed parent takes its old children whole.
+    if (!blocks[id]) continue
+    place(id, block.children)
+  }
+  for (const [parent, list] of lists) {
+    if (parent === null) continue
+    blocks[parent] = { ...blocks[parent], children: list }
+  }
+  return { ...after, blocks, rootBlockIds: lists.get(null) as string[] }
 }
 
 /**
- * A line diff: the longest common subsequence of the two, with what is only
- * in `before` removed and what is only in `after` added, in order. The
- * unchanged head and tail are peeled off first, so a one-line edit to a long
- * note costs its length, not its square.
+ * Fold the unchanged runs of every children list: a block is touched when it
+ * or anything beneath it is marked; a run of untouched rows longer than two
+ * folds, keeping `FOLD_CONTEXT` rows beside each touched one, into one
+ * synthetic row (`fold:<parent>:<index>`) that says how many rows — the run's
+ * blocks and their descendants — it stands for. A fold the reader opened
+ * (`expanded`) stays open.
  */
-export function diffLines(before: readonly string[], after: readonly string[]): DiffLine[] {
+function foldUnchanged(
+  doc: BlockDoc,
+  marks: Map<string, DiffMark>,
+  expanded: ReadonlySet<string>,
+): BlockDoc {
+  const touched = new Map<string, boolean>()
+  const isTouched = (id: string, path = new Set<string>()): boolean => {
+    const known = touched.get(id)
+    if (known !== undefined) return known
+    if (path.has(id)) return false
+    path.add(id)
+    const own = marks.has(id)
+    const below = (doc.blocks[id]?.children ?? []).some((child) => isTouched(child, path))
+    touched.set(id, own || below)
+    return own || below
+  }
+  const rows = (id: string, path = new Set<string>()): number => {
+    if (path.has(id)) return 0
+    path.add(id)
+    return 1 + (doc.blocks[id]?.children ?? []).reduce((n, child) => n + rows(child, path), 0)
+  }
+  const blocks: Record<string, Block> = { ...doc.blocks }
+
+  const foldList = (parent: string | null, list: readonly string[]): string[] => {
+    if (list.length === 0) return [...list]
+    const keep = list.map((id) => isTouched(id))
+    if (!keep.some(Boolean)) return [...list]
+    for (let i = 0; i < list.length; i += 1) {
+      if (!isTouched(list[i])) continue
+      for (
+        let k = Math.max(0, i - FOLD_CONTEXT);
+        k <= Math.min(list.length - 1, i + FOLD_CONTEXT);
+        k += 1
+      )
+        keep[k] = true
+    }
+    const out: string[] = []
+    let run: string[] = []
+    const flush = () => {
+      if (run.length === 0) return
+      const foldId = `fold:${parent ?? "root"}:${run[0]}`
+      if (run.length < 2 || expanded.has(foldId)) {
+        out.push(...run)
+      } else {
+        blocks[foldId] = { id: foldId, type: "text", text: "", children: [] }
+        marks.set(foldId, {
+          kind: "fold",
+          count: run.reduce((n, id) => n + rows(id), 0),
+          hidden: [...run],
+        })
+        out.push(foldId)
+      }
+      run = []
+    }
+    list.forEach((id, index) => {
+      if (keep[index]) {
+        flush()
+        out.push(id)
+      } else {
+        run.push(id)
+      }
+    })
+    flush()
+    return out
+  }
+
+  const rootBlockIds = foldList(null, doc.rootBlockIds)
+  for (const [id, block] of Object.entries(doc.blocks)) {
+    if (block.children.length === 0 || !isTouched(id)) continue
+    blocks[id] = { ...blocks[id], children: foldList(id, block.children) }
+  }
+  return { ...doc, blocks, rootBlockIds }
+}
+
+// -----------------------------------------------------------------------------
+// Words
+// -----------------------------------------------------------------------------
+
+/**
+ * A text split into words, each carrying the space after it, with the
+ * punctuation beside a word a token of its own — so "more" still matches
+ * "more," and a rewording is marked word by word, not as one long run.
+ */
+const tokens = (text: string): string[] =>
+  text.match(/[\p{L}\p{N}]+\s*|[^\p{L}\p{N}\s]+\s*|\s+/gu) ?? []
+
+/**
+ * A word diff of two texts: the longest common subsequence of their tokens,
+ * with what is only in `before` removed and what is only in `after` added,
+ * adjacent pieces of one kind run together. The unchanged head and tail are
+ * peeled off first, so a one-word edit to a long line costs its length.
+ */
+export function diffWords(before: string, after: string): WordSegment[] {
+  const a = tokens(before)
+  const b = tokens(after)
   let head = 0
-  while (head < before.length && head < after.length && before[head] === after[head]) head += 1
+  while (head < a.length && head < b.length && a[head] === b[head]) head += 1
   let tail = 0
   while (
-    tail < before.length - head &&
-    tail < after.length - head &&
-    before[before.length - 1 - tail] === after[after.length - 1 - tail]
+    tail < a.length - head &&
+    tail < b.length - head &&
+    a[a.length - 1 - tail] === b[b.length - 1 - tail]
   ) {
     tail += 1
   }
-  const a = before.slice(head, before.length - tail)
-  const b = after.slice(head, after.length - tail)
-
-  // LCS lengths, bottom-up: `table[i][j]` is the LCS of a[i..] and b[j..].
+  const mid = a.slice(head, a.length - tail)
+  const nid = b.slice(head, b.length - tail)
   const table: Uint32Array[] = []
-  for (let i = 0; i <= a.length; i += 1) table.push(new Uint32Array(b.length + 1))
-  for (let i = a.length - 1; i >= 0; i -= 1) {
-    for (let j = b.length - 1; j >= 0; j -= 1) {
+  for (let i = 0; i <= mid.length; i += 1) table.push(new Uint32Array(nid.length + 1))
+  for (let i = mid.length - 1; i >= 0; i -= 1) {
+    for (let j = nid.length - 1; j >= 0; j -= 1) {
       table[i][j] =
-        a[i] === b[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1])
+        mid[i] === nid[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1])
     }
   }
-  const middle: DiffLine[] = []
+  const out: WordSegment[] = []
+  const push = (kind: WordSegment["kind"], text: string) => {
+    const last = out.at(-1)
+    if (last && last.kind === kind) last.text += text
+    else out.push({ kind, text })
+  }
+  for (const t of a.slice(0, head)) push("same", t)
   let i = 0
   let j = 0
-  while (i < a.length && j < b.length) {
-    if (a[i] === b[j]) {
-      middle.push({ kind: "same", text: a[i] })
+  while (i < mid.length && j < nid.length) {
+    if (mid[i] === nid[j]) {
+      push("same", mid[i])
       i += 1
       j += 1
     } else if (table[i + 1][j] >= table[i][j + 1]) {
-      middle.push({ kind: "removed", text: a[i] })
-      i += 1
+      push("removed", mid[i++])
     } else {
-      middle.push({ kind: "added", text: b[j] })
-      j += 1
+      push("added", nid[j++])
     }
   }
-  while (i < a.length) middle.push({ kind: "removed", text: a[i++] })
-  while (j < b.length) middle.push({ kind: "added", text: b[j++] })
-
-  return [
-    ...before.slice(0, head).map((text): DiffLine => ({ kind: "same", text })),
-    ...middle,
-    ...before.slice(before.length - tail).map((text): DiffLine => ({ kind: "same", text })),
-  ]
-}
-
-/**
- * A diff with its unchanged stretches folded: `context` lines are kept on
- * either side of a change, and a longer run of unchanged lines becomes one
- * `skipped` row saying how many it stands for — the shape a reader knows
- * from a pull request.
- */
-export function withContext(lines: readonly DiffLine[], context = 2): DiffLine[] {
-  const keep = new Array<boolean>(lines.length).fill(false)
-  lines.forEach((line, index) => {
-    if (line.kind === "same") return
-    for (
-      let k = Math.max(0, index - context);
-      k <= Math.min(lines.length - 1, index + context);
-      k += 1
-    ) {
-      keep[k] = true
-    }
-  })
-  const out: DiffLine[] = []
-  let skipped = 0
-  const flush = () => {
-    if (skipped > 0) out.push({ kind: "skipped", text: "", count: skipped })
-    skipped = 0
-  }
-  lines.forEach((line, index) => {
-    if (keep[index]) {
-      flush()
-      out.push(line)
-    } else {
-      skipped += 1
-    }
-  })
-  flush()
+  while (i < mid.length) push("removed", mid[i++])
+  while (j < nid.length) push("added", nid[j++])
+  for (const t of a.slice(a.length - tail)) push("same", t)
   return out
 }

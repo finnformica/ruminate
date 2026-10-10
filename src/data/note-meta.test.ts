@@ -68,15 +68,12 @@ describe("noteFromNode", () => {
     expect(boardOf("blk_c", "").displayName).toBe("Empty board")
     // A `board` prop that is not `true` has never made a board.
     expect(note("blk_d", "- x\n", { board: "yes" }).type).toBe("note")
-    // A daily note is a daily note whatever its row says.
-    expect(boardOf("2026-03-04", "- x\n").type).toBe("daily")
   })
 
   it("reads a board in the shape it had before migrations/0020 (removed with isLegacyBoard)", () => {
     const board = note("blk_b", "- x\n", { board: true })
     expect(board.type).toBe("board")
     expect(board.displayName).toBe("x")
-    expect(note("2026-03-04", "- x\n", { board: true }).type).toBe("daily")
   })
 
   it("falls back to the first heading for the title", () => {
@@ -84,15 +81,15 @@ describe("noteFromNode", () => {
     expect(n.title).toBe("Google")
   })
 
-  it("names an untitled note by its first words, and a daily note by its date", () => {
+  it("names an untitled note by its first words, and a note with a human-written id by it", () => {
     const n = note("blk_p", "- the quick brown fox jumps over the lazy dog again\n")
     expect(n.displayName).toBe("the quick brown fox jumps over the lazy…")
     expect(note("blk_p", "").displayName).toBe("Empty note")
-    const daily = note("2026-03-04", "- x\n")
-    expect(daily.type).toBe("daily")
-    expect(daily.dates).toContain("2026-03-04")
-    expect(daily.displayName).not.toBe("")
-    expect(note("2026-W10", "").type).toBe("weekly")
+    // A note that kept a date for its id, from when the calendar made such
+    // notes, is a note like any other now: its id is its name.
+    const dated = note("2026-03-04", "- x\n")
+    expect(dated.type).toBe("note")
+    expect(dated.displayName).toBe("2026-03-04")
   })
 
   it("is null for a block id", () => {

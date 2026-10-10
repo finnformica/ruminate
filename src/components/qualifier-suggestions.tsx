@@ -15,7 +15,7 @@ import {
   type QualifierOption,
   type QualifierTrigger,
 } from "../utils/qualifier-suggestions"
-import { BoardIcon16, CalendarIcon16, ImageIcon16, LinkIcon16, NoteIcon16 } from "./icons"
+import { BoardIcon16, ImageIcon16, LinkIcon16, NoteIcon16 } from "./icons"
 import { NoteFavicon } from "./note-favicon"
 
 /**
@@ -78,8 +78,8 @@ export function useQualifierSuggestions({
       case "in": {
         // Notes by name, most recent first (the sorted order), the open note
         // leading — with nothing typed and among whatever the typing keeps.
-        // A note open before it exists (today's daily note, say) is not in
-        // the corpus yet, so it gets a row of its own, named by its id.
+        // A note open before it exists (a fresh `/views/<id>`) is not in the
+        // corpus yet, so it gets a row of its own, named by its id.
         const options: SuggestionItem[] = notes.map((note) => ({
           value: note.id,
           label: note.displayName,
@@ -205,8 +205,6 @@ const TYPE_VALUE_ICONS: Record<string, React.ReactNode> = {
   note: <NoteIcon16 />,
   template: <NoteIcon16 />,
   board: <BoardIcon16 />,
-  daily: <CalendarIcon16 />,
-  weekly: <CalendarIcon16 />,
   image: <ImageIcon16 />,
   link: <LinkIcon16 />,
 }

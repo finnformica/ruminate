@@ -176,7 +176,7 @@ table. Consequences, accepted and mitigated:
 
 The tables hold current state; history is the event log beside them
 (docs/event-sourcing.md): every change to a block, link or view, appended on
-the replica and held by each device. The calendar reads it — a past day shows
+the replica and held by each device. The calendar reads it — a day shows
 what was written on it — and a note's version history and a restore from a
 past day will read the same log. History begins where the log did: nothing
 before it was recorded, and the calendar says so for those days.
@@ -260,9 +260,9 @@ node survives as the position a restore would put it back into.
 
 One row per node. `id` is a minted TEXT id — `blk_…` for blocks **and** pages
 alike, since a page is just a node whose `type` is `note`
-(docs/graph-storage.md); daily and weekly pages are the one exception
-and keep their date key (`2026-08-31`, `2026-W35`), where the date is the
-identity. A page's _name_ is not its id but its `text`: the title, which
+(docs/graph-storage.md). (Notes made under a date key — `2026-08-31`,
+`2026-W35` — when the calendar had daily and weekly notes keep it; the id is
+only an id now, docs/event-sourcing.md.) A page's _name_ is not its id but its `text`: the title, which
 rides the page's doc as `props.title` between the walk and the write
 (`note-identity.ts`). `type` is stored, not derived — the registry in the
 schema doc (`note`, `text`, `h1`–`h3`, `todo`, `done`, `ul`, `ol`, `quote`,

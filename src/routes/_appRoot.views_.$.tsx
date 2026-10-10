@@ -3,19 +3,7 @@ import { useAtomValue, useStore } from "jotai"
 import React, { useEffect, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import useResizeObserver from "use-resize-observer"
-import { Calendar } from "../components/calendar"
-import { CalendarHeader } from "../components/calendar-header"
-import { DayChanges } from "../components/day-changes"
-import { DaysOfWeek } from "../components/days-of-week"
-import { Details } from "../components/ui/details"
-import {
-  CalendarDateIcon16,
-  CalendarIcon16,
-  LoadingIcon16,
-  NoteIcon16,
-  OfflineIcon16,
-  ShareIcon16,
-} from "../components/icons"
+import { LoadingIcon16, NoteIcon16, OfflineIcon16, ShareIcon16 } from "../components/icons"
 import { Notice } from "../components/notice"
 import { parse } from "../blocks/parse"
 import type { BlockDoc, ChangeHint } from "../blocks/types"
@@ -50,7 +38,7 @@ import { shareOwnerName } from "../data/shares"
 import { Width, fontSchema, widthSchema } from "../schema"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
-import { isValidDateString, isValidWeekString, toDateString, toWeekString } from "../utils/date"
+import { isValidDateString, isValidWeekString } from "../utils/date"
 
 /** What a note or block saved as its default view (docs/metadata.md), and
  * whether this session may write one. */
@@ -137,20 +125,15 @@ function NotePage() {
   const sort = resolveNarrowing(sortParam, savedView.sort)
 
   const readOnlyShare = share !== null && !share.canWrite
-  const isDailyNote = isValidDateString(noteId ?? "")
-  const isWeeklyNote = isValidWeekString(noteId ?? "")
-  // A day on the calendar is written only while it is today, and a week only
-  // while it is this week: every other one is the day as it happened — its
-  // note, if there is one, read-only, and beneath it what was written on it
-  // (`DayChanges`, docs/event-sourcing.md). "Today" is resolved in the
-  // current timezone, to match the floating YYYY-MM-DD note naming.
-  const now = new Date()
-  const isPastOrFuturePeriod =
-    (isDailyNote && noteId !== toDateString(now)) || (isWeeklyNote && noteId !== toWeekString(now))
-  const readOnlyPeriod = isPastOrFuturePeriod
   // An id no live note claims falls through to the new-note editor below —
   // renames never leave a dead id behind, since the id never changes.
-  const showsTitle = !isDailyNote && !isWeeklyNote && !focusBlockId
+  const showsTitle = !focusBlockId
+  // A day or a week is a place on the calendar, not a note (`/calendar/<id>`,
+  // docs/event-sourcing.md). Notes once kept under a date-shaped id are
+  // ordinary notes now, and still open here; an old link to a day that has
+  // no note of its own goes on to the calendar.
+  const calendarId =
+    noteId !== undefined && (isValidDateString(noteId) || isValidWeekString(noteId))
 
   // Show "Saving…" the instant a change is dispatched, rather than waiting for
   // the debounced sync to actually start. Cleared when the sync finishes (or a
@@ -170,7 +153,7 @@ function NotePage() {
   const narrowed = filter !== "" || sort !== ""
   // Whether a click beneath the note may add a block to its end (the page's
   // foot, below): an editable note, shown whole.
-  const canAppend = !readOnlyPeriod && !readOnlyShare && !narrowed
+  const canAppend = !readOnlyShare && !narrowed
   const directions = useAtomValue(linkDirectionsAtom)
   // The block being edited, which a filter keeps whatever it says of it:
   // a row is judged when the editing leaves it, not on every keystroke
@@ -221,10 +204,11 @@ function NotePage() {
   // is one (naming it is the first thing to do, and naming it creates it —
   // `renameTo`), else the first block. Never while the notes are still
   // loading, or under a shared note's id (see `notesLoaded`).
-  const isNewNote = !noteExists && notesLoaded && share === null && !readOnlyPeriod
-  // A day that is not today shows its note only when there is one: nothing
-  // is started for a day that has passed, or has not come.
-  const useBlockEditor = !readOnlyPeriod || noteExists
+  const isNewNote = !noteExists && notesLoaded && share === null
+  React.useEffect(() => {
+    if (!calendarId || !notesLoaded || noteExists || share !== null) return
+    navigate({ to: "/calendar/$", params: { _splat: noteId }, search: {}, replace: true })
+  }, [calendarId, notesLoaded, noteExists, share, noteId, navigate])
   // What is open — the focused block, or else the note — is TOUCHED, for
   // the Recent lists, exactly when it is opened (focusing on a block opens
   // it: `focusBlockId` changes), edited (an edit lands through
@@ -397,19 +381,8 @@ function NotePage() {
     preventDefault: true,
   })
 
-  // A day or a week is a place on the calendar rather than a note of its
-  // own: the header says so, with the day's number on the icon, and the
-  // note's own name (the date) is the calendar header's to show.
-  const favicon = isDailyNote ? (
-    <CalendarDateIcon16 date={Number(noteId?.slice(-2))} />
-  ) : isWeeklyNote ? (
-    <CalendarIcon16 />
-  ) : note ? (
-    <NoteFavicon note={note} />
-  ) : (
-    <NoteIcon16 />
-  )
-  const pageTitle = isDailyNote || isWeeklyNote ? "Calendar" : note?.displayName || "Untitled"
+  const favicon = note ? <NoteFavicon note={note} /> : <NoteIcon16 />
+  const pageTitle = note?.displayName || "Untitled"
 
   return (
     <PageLayout
@@ -491,13 +464,6 @@ function NotePage() {
               resolvedWidth === "fixed" && "mx-auto max-w-[700px]",
             )}
           >
-            {isDailyNote || isWeeklyNote ? (
-              <div className="print-hidden flex flex-col gap-8">
-                <Calendar className="-m-2" activeNoteId={noteId ?? ""} />
-                <CalendarHeader activeNoteId={noteId ?? ""} />
-              </div>
-            ) : null}
-
             {share !== null ? (
               // -mx-0.5: the notice's edges sit where the rows' surfaces
               // reach (2px past the text column), as the title's do.
@@ -511,77 +477,66 @@ function NotePage() {
               </Notice>
             ) : null}
 
-            {useBlockEditor ? (
-              <div className="flex flex-col gap-3">
-                {/* While focused, the breadcrumb (inside the editor) carries the
+            <div className="flex flex-col gap-3">
+              {/* While focused, the breadcrumb (inside the editor) carries the
                     note title as its first crumb — hide the standalone title to
                     avoid doubling it. */}
-                {showsTitle ? (
-                  <NoteTitle
-                    title={note?.title ?? ""}
-                    onRename={renameTo}
-                    readOnly={readOnlyShare}
-                    startEditing={isNewNote}
-                    onArrowDown={(mode) => {
-                      setFocusFirstMode(mode)
-                      setFocusFirstSignal((n) => n + 1)
-                    }}
-                    onCreateBelow={() => setNewRootSignal((n) => n + 1)}
-                    focusSignal={titleFocusSignal}
-                  />
-                ) : null}
-                <BlockNoteEditor
-                  key={noteId}
-                  noteId={noteId}
-                  doc={editorDoc}
-                  onChange={setEditorDoc}
-                  folds={{
-                    collapsed,
-                    toggle: (key) => setFold(key, collapsed.has(key)),
-                    setOpen: (key) => setFold(key, true),
+              {showsTitle ? (
+                <NoteTitle
+                  title={note?.title ?? ""}
+                  onRename={renameTo}
+                  readOnly={readOnlyShare}
+                  startEditing={isNewNote}
+                  onArrowDown={(mode) => {
+                    setFocusFirstMode(mode)
+                    setFocusFirstSignal((n) => n + 1)
                   }}
-                  onToggleCollapse={touch}
-                  startEditing={isNewNote && !showsTitle}
-                  readOnly={readOnlyShare || readOnlyPeriod}
-                  browse={readOnlyShare || readOnlyPeriod}
-                  // Only where there IS a title above the editor to take the
-                  // keyboard: a daily note has none, and a focused one carries
-                  // its name in the breadcrumb instead (the focused heading's
-                  // own title is the editor's to hand focus to, not ours).
-                  onExitTop={showsTitle ? () => setTitleFocusSignal((n) => n + 1) : undefined}
-                  focusFirstSignal={focusFirstSignal}
-                  focusFirstMode={focusFirstMode}
-                  newRootSignal={newRootSignal}
-                  appendRootSignal={appendRootSignal}
-                  refocusSignal={refocusSignal}
-                  focusBlockId={focusBlockId ?? null}
-                  onFocusNavigate={(id) => {
-                    revealOnLeaveFocus(id)
-                    // A plain push, so the back button undoes focus naturally.
-                    navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) })
-                  }}
-                  noteTitle={note?.displayName ?? ""}
-                  context={context}
-                  onOpenBoard={(id) => void openNote(id)}
-                  onEditingChange={setEditingBlockId}
-                  // Narrowed, there is no starter row to type into. A new
-                  // row lands in the note as it does anywhere (Enter on a
-                  // row, `useNoteDoc`), but a blank one is a plain text row
-                  // the filter hides the moment it is typed into.
-                  starter={!narrowed}
+                  onCreateBelow={() => setNewRootSignal((n) => n + 1)}
+                  focusSignal={titleFocusSignal}
                 />
-                {noteId && noteExists && share === null && !readOnlyPeriod ? (
-                  <UnassignedBasket noteId={noteId} />
-                ) : null}
-              </div>
-            ) : null}
-            {(isDailyNote || isWeeklyNote) && noteId ? <DayChanges periodId={noteId} /> : null}
-            {isWeeklyNote ? (
-              <Details className="print:hidden">
-                <Details.Summary>Days</Details.Summary>
-                <DaysOfWeek week={noteId ?? ""} />
-              </Details>
-            ) : null}
+              ) : null}
+              <BlockNoteEditor
+                key={noteId}
+                noteId={noteId}
+                doc={editorDoc}
+                onChange={setEditorDoc}
+                folds={{
+                  collapsed,
+                  toggle: (key) => setFold(key, collapsed.has(key)),
+                  setOpen: (key) => setFold(key, true),
+                }}
+                onToggleCollapse={touch}
+                startEditing={isNewNote && !showsTitle}
+                readOnly={readOnlyShare}
+                browse={readOnlyShare}
+                // Only where there IS a title above the editor to take the
+                // keyboard: a focused block carries its name in the
+                // breadcrumb instead (the focused heading's own title is
+                // the editor's to hand focus to, not ours).
+                onExitTop={showsTitle ? () => setTitleFocusSignal((n) => n + 1) : undefined}
+                focusFirstSignal={focusFirstSignal}
+                focusFirstMode={focusFirstMode}
+                newRootSignal={newRootSignal}
+                appendRootSignal={appendRootSignal}
+                refocusSignal={refocusSignal}
+                focusBlockId={focusBlockId ?? null}
+                onFocusNavigate={(id) => {
+                  revealOnLeaveFocus(id)
+                  // A plain push, so the back button undoes focus naturally.
+                  navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) })
+                }}
+                noteTitle={note?.displayName ?? ""}
+                context={context}
+                onOpenBoard={(id) => void openNote(id)}
+                onEditingChange={setEditingBlockId}
+                // Narrowed, there is no starter row to type into. A new
+                // row lands in the note as it does anywhere (Enter on a
+                // row, `useNoteDoc`), but a blank one is a plain text row
+                // the filter hides the moment it is typed into.
+                starter={!narrowed}
+              />
+              {noteId && noteExists && share === null ? <UnassignedBasket noteId={noteId} /> : null}
+            </div>
             {/* The page's foot: half a screen of room beneath the note, so
                 its last block is never pinned to the bottom edge — and, where
                 the note can be written, the place to click for a block at its

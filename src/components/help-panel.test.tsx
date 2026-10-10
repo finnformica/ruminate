@@ -35,7 +35,7 @@ describe("shortcut reference (? / help panel)", () => {
       screen.getByText("Grow the selection one structural rung (block → subtree → parent → page)"),
     ).toBeTruthy()
     // Navigation vocabulary
-    expect(screen.getByText("Go to today's daily note (press g, then d)")).toBeTruthy()
+    expect(screen.getByText("Go to the Views list (press g, then v)")).toBeTruthy()
   })
 
   it("the filter narrows the list", () => {
