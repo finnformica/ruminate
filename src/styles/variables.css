@@ -139,6 +139,12 @@
      Both are computed-solid — the ring is mixed over the faint wash it sits
      on — so a multi-select run's overlapping side edges never double up. */
   --color-bg-selected-faint: color-mix(in srgb, var(--accent-9) 7%, var(--color-bg));
+  /* A day's changes on the calendar (src/components/day-changes.tsx): the
+     tints a line added and a line removed sit on, the two ramps every other
+     reading of green and red here comes from (`--color-text-success`,
+     `--color-text-danger`), mixed into the page as the selected surface is. */
+  --color-bg-added: color-mix(in srgb, var(--green-9) 14%, var(--color-bg));
+  --color-bg-removed: color-mix(in srgb, var(--red-9) 14%, var(--color-bg));
   --color-border-selected: color-mix(in srgb, var(--accent-9) 45%, var(--color-bg-selected-faint));
 
   /* Border colors */

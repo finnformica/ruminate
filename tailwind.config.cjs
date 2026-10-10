@@ -89,6 +89,8 @@ module.exports = {
         "selected-hover": "var(--color-bg-selected-hover)",
         "selected-active": "var(--color-bg-selected-active)",
         "selected-faint": "var(--color-bg-selected-faint)",
+        added: "var(--color-bg-added)",
+        removed: "var(--color-bg-removed)",
       },
       border: {
         DEFAULT: "var(--color-border)",

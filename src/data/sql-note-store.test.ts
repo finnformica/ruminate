@@ -629,6 +629,51 @@ describe("the device's log", () => {
     ])
   })
 
+  it("takes in the pulled log, places an own event the pull brings back, and reads the whole in order", async () => {
+    const { driver, store } = await makeStoreWithDriver()
+    const own = await seed(store, "a", "- one\n  id:: blk_aaaaaaaaaa\n")
+    // The replica took the push but the answer was lost: the pull brings
+    // this device's own events back, placed, among another device's.
+    const pulled = [
+      {
+        id: "evt_other_1",
+        seq: 1,
+        entity: "block",
+        entity_id: "b",
+        action: "create",
+        patch: { type: "note", text: "B", props: null, notes_id: null },
+        batch: "bat_other",
+        device: "other.tab",
+        at: 500,
+        tz: -300,
+        v: 1,
+        origin: "replica",
+        actor: 222,
+        received_at: 600,
+      },
+      ...own.map((event, i) => ({ ...event, seq: 2 + i, origin: "replica", actor: 111 })),
+    ] as Parameters<typeof store.applyPulledEvents>[0]
+    await store.applyPulledEvents(pulled)
+    // Nothing left to push: the pull placed them.
+    expect(await store.unpushedEvents()).toEqual([])
+    // The rows are untouched by the log: `b` arrives by the pull of rows.
+    expect(await driver.exec("SELECT COUNT(*) AS n FROM nodes WHERE id = 'b'")).toEqual([{ n: 0 }])
+
+    // A new edit, not yet pushed, reads after everything placed.
+    const typed = await applyOpsToStore(
+      store,
+      [{ op: "setText", id: "blk_aaaaaaaaaa", text: "one!" }],
+      ctx(9_000),
+    )
+    const log = await store.eventLog()
+    expect(log.map((event) => [event.id, event.seq, event.pending ?? false])).toEqual([
+      ["evt_other_1", 1, false],
+      ...own.map((event, i) => [event.id, 2 + i, false]),
+      [typed[0].id, 2 + own.length, true],
+    ])
+    expect(log[0]).toMatchObject({ origin: "replica", actor: 222, received_at: 600, tz: -300 })
+  })
+
   it("projects a view's events onto its row: create, update, delete, revival", async () => {
     const { driver, store } = await makeStoreWithDriver()
     const view: ViewRow = {

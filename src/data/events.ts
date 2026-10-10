@@ -145,6 +145,21 @@ type LinkEvent = EventsFor<"link">
 export type ViewEvent = EventsFor<"view">
 export type RuminateEvent = BlockEvent | LinkEvent | ViewEvent
 
+/**
+ * An event as a device's log holds it once the replica has placed it: with
+ * its `seq`, and — for one pulled from the replica rather than made here —
+ * who wrote it and through which door. `pending` marks one of this device's
+ * own that the replica has not yet answered; its `seq` is then provisional,
+ * above everything placed, so a fold still puts it last.
+ */
+export type LoggedEvent = RuminateEvent & {
+  seq: number
+  pending?: boolean
+  origin?: string
+  actor?: number
+  received_at?: number
+}
+
 /** A link's entity id: its primary key, readable in the D1 console. Block ids
  * are `blk_[0-9a-z]+` or `corpus_root` and kinds are words, so `|` is free. */
 export const linkEntityId = (source: string, destination: string, kind = "child") =>
