@@ -162,6 +162,7 @@ import {
   type MenuEntry,
 } from "./block-context-menu"
 import {
+  type BlockDiff,
   BlockItem,
   type BlockDebugOptions,
   type BlockEditorApi,
@@ -411,6 +412,7 @@ export function BlockEditor({
   fixedRoots = false,
   emptyable = false,
   context,
+  diff,
   onEditingChange,
 }: {
   doc: BlockDoc
@@ -531,6 +533,8 @@ export function BlockEditor({
    * navigates exactly as the note does.
    */
   context?: ReadonlySet<string>
+  /** The outline is a diff (`BlockEditorApi.diff`): the calendar's day. */
+  diff?: BlockDiff
   /**
    * Told which block is being edited — its id, or null once none is — as
    * it changes, before the change paints. A filtered view keeps the row
@@ -1380,8 +1384,8 @@ export function BlockEditor({
   // editor (the note title).
   const exitTop = () => {
     // Nothing above the rows to hand the keyboard to — a focus whose root is
-    // its first row, on a page with no note title of its own (a daily note,
-    // or a focused one, where the breadcrumb carries the name instead). The
+    // its first row, on a page with no note title of its own (a focused one,
+    // where the breadcrumb carries the name instead). The
     // top row keeps it rather than the highlight falling away.
     if (!focusTitled && !onExitTop) return
     setFocus(null)
@@ -2301,6 +2305,7 @@ export function BlockEditor({
     coarsePointer: coarse,
     fixedRoots,
     context,
+    diff,
     // Browsing: a click opens the row (BlockItem routes a read-only row's
     // click here).
     activate: readOnly && onActivate ? (key) => onActivate(idOfKey(key)) : undefined,
@@ -2906,6 +2911,9 @@ export function BlockEditor({
           <div
             className={cx(
               "outline-none",
+              // A diff keeps a gutter at its left edge for the rows' signs
+              // (`BlockItem`, `data-testid="diff-sign"`).
+              diff !== undefined && "pl-6",
               // Under a finger a press-and-hold opens the block's menu, so
               // nothing in the rows may start a selection: not a card's
               // title, a caption, a badge or the gap beside a row. The
@@ -2972,6 +2980,9 @@ export function BlockEditor({
           <div
             className={cx(
               "outline-none",
+              // A diff keeps a gutter at its left edge for the rows' signs
+              // (`BlockItem`, `data-testid="diff-sign"`).
+              diff !== undefined && "pl-6",
               // Under a finger a press-and-hold opens the block's menu, so
               // nothing in the rows may start a selection: not a card's
               // title, a caption, a badge or the gap beside a row. The

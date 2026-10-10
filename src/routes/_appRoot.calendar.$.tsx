@@ -1,14 +1,16 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
 import { Calendar } from "../components/calendar"
 import { CalendarHeader } from "../components/calendar-header"
-import { DateMentions, useCalendarMarks } from "../components/date-mentions"
+import { DateMentions } from "../components/date-mentions"
+import { DayChanges, useCalendarMarks, useEventLog } from "../components/day-changes"
 import { CalendarDateIcon16, CalendarIcon16 } from "../components/icons"
 import { PageLayout } from "../components/page-layout"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
 
 /**
- * A day, or a week, of the calendar: a page of its own, not a note. The
- * address names the day (`/calendar/2026-10-08`) or the ISO week
+ * A day, or a week, of the calendar (docs/event-sourcing.md, "A day on the
+ * calendar"): what was written on it, read off the event log. The address
+ * names the day (`/calendar/2026-10-08`) or the ISO week
  * (`/calendar/2026-W41`); anything else is today.
  */
 export const Route = createFileRoute("/_appRoot/calendar/$")({
@@ -29,7 +31,8 @@ export const Route = createFileRoute("/_appRoot/calendar/$")({
 function CalendarPage() {
   const { _splat } = Route.useParams()
   const id = _splat ?? ""
-  const marked = useCalendarMarks()
+  const log = useEventLog()
+  const marked = useCalendarMarks(log)
   const isDay = isValidDateString(id)
   return (
     <PageLayout
@@ -43,6 +46,7 @@ function CalendarPage() {
               <Calendar className="-m-2" activeId={id} marked={marked} />
               <CalendarHeader activeId={id} />
             </div>
+            <DayChanges periodId={id} log={log} />
             <DateMentions periodId={id} />
           </div>
         </div>

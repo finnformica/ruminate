@@ -24,6 +24,7 @@ import { imageFilesOf } from "../../data/images"
 import { blurLeavesWindow } from "../../utils/window-blur"
 import { IconButton } from "../ui/icon-button"
 import { BlockContent } from "./block-content"
+import type { DiffMark } from "../../data/day-changes"
 import { LISTED_HEADING_DEPTH, headingScale, kindOf, type RowContext, slotOf } from "./block-kinds"
 import { caretCoordinates, caretLineFlags, caretOffsetAtPoint } from "./caret"
 import { BlockKey } from "./block-key"
@@ -49,6 +50,11 @@ export interface FocusRequest {
   atStart?: boolean
   /** Explicit caret offset; overrides `atStart` when set. */
   caret?: number
+}
+
+export interface BlockDiff {
+  marks: ReadonlyMap<string, DiffMark>
+  expandFold?: (foldId: string) => void
 }
 
 export interface BlockEditorApi {
@@ -87,6 +93,15 @@ export interface BlockEditorApi {
    * nothing is filtered.
    */
   context?: ReadonlySet<string>
+  /**
+   * The outline is a DIFF (`src/data/day-changes.ts`, the calendar): what a
+   * period did to each row, drawn as a coloured sign in a gutter of the
+   * editor's own at its left edge — the one column that never indents — a
+   * tint on an added or removed row, the words that went and came inside a
+   * changed one, and a quiet row standing for a run of unchanged rows folded
+   * away, which `expandFold` opens.
+   */
+  diff?: BlockDiff
   /**
    * Whether the editor owns the keyboard: focus is inside its container and
    * the user's last act was not a click on blank space (a key press hands it
@@ -324,6 +339,8 @@ export function BlockItem({
   const slot = slotOf(kind, listed)
   // Kept as context by a filter, not found by it (`BlockEditorApi.context`).
   const dimmed = api.context?.has(block.id) ?? false
+  // What a period did to this row, when the outline is a diff (`BlockDiff`).
+  const mark = api.diff?.marks.get(block.id)
 
   // Focus and place the caret when editing starts — and again when the
   // block's TYPE changes mid-edit: a type whose chrome wraps the line (a
@@ -1049,7 +1066,15 @@ export function BlockItem({
       )}
     >
       <LinkActionsContext.Provider value={linkActions}>
-        {kind.body ? kind.body(block) : <BlockContent content={body} />}
+        {mark?.kind === "changed" ? (
+          <WordDiff segments={mark.words} />
+        ) : mark?.kind === "fold" ? (
+          <FoldRow count={mark.count} onExpand={() => api.diff?.expandFold?.(block.id)} />
+        ) : kind.body ? (
+          kind.body(block)
+        ) : (
+          <BlockContent content={body} />
+        )}
       </LinkActionsContext.Provider>
     </div>
   )
@@ -1146,6 +1171,33 @@ export function BlockItem({
       style={{ paddingLeft: depth * indent, marginTop }}
       {...rowTap}
     >
+      {api.diff ? (
+        // The diff's sign, in the gutter at the editor's edge: `left` is
+        // measured from this row's own edge, which the indent pads inside of,
+        // so every sign sits in the one column whatever the row's depth.
+        <span
+          aria-hidden
+          data-testid="diff-sign"
+          data-diff={mark?.kind ?? "same"}
+          className={cx(
+            "absolute -left-6 top-0.5 flex h-[1lh] w-[15px] select-none items-center justify-center font-mono text-sm leading-relaxed",
+            mark?.kind === "added" && "text-text-success",
+            mark?.kind === "removed" && "text-text-danger",
+            mark?.kind === "changed" && "text-text-changed",
+            mark?.kind === "fold" && "text-text-tertiary",
+          )}
+        >
+          {mark?.kind === "added"
+            ? "+"
+            : mark?.kind === "removed"
+              ? "−"
+              : mark?.kind === "changed"
+                ? "~"
+                : mark?.kind === "fold"
+                  ? "⋯"
+                  : ""}
+        </span>
+      ) : null}
       {occurrence.guideKeys.map((guideKey, level) => (
         <span
           key={guideKey}
@@ -1225,6 +1277,10 @@ export function BlockItem({
             // edited or selected, so working on it is never done through a
             // veil.
             dimmed && !editing && !selected && "opacity-55",
+            // A diff's rows: the whole row added or removed sits on its
+            // tint; a changed row says so in its words alone.
+            mark?.kind === "added" && "bg-bg-added",
+            mark?.kind === "removed" && "bg-bg-removed text-text-secondary",
           )}
         >
           {chevronColumn}
@@ -1305,5 +1361,44 @@ function BlockDebugMeta({
         </span>
       ) : null}
     </div>
+  )
+}
+
+// ── A diff's rows ─────────────────────────────────────────────────────────
+
+/** A changed row's text: the words both versions have, the words that went
+ * (struck, on the removed tint) and the words that came (on the added one). */
+function WordDiff({ segments }: { segments: readonly { kind: string; text: string }[] }) {
+  return (
+    <>
+      {segments.map((segment, index) =>
+        segment.kind === "added" ? (
+          <ins key={index} className="rounded-sm bg-bg-added-strong px-px no-underline">
+            {segment.text}
+          </ins>
+        ) : segment.kind === "removed" ? (
+          <del key={index} className="rounded-sm bg-bg-removed-strong px-px text-text-secondary">
+            {segment.text}
+          </del>
+        ) : (
+          <span key={index}>{segment.text}</span>
+        ),
+      )}
+    </>
+  )
+}
+
+/** A run of unchanged rows, folded: one quiet row saying how many, which
+ * opens them. */
+function FoldRow({ count, onExpand }: { count: number; onExpand: () => void }) {
+  return (
+    <button
+      type="button"
+      data-testid="diff-fold"
+      className="focus-ring -mx-1 rounded px-1 text-left text-sm text-text-tertiary hover:text-text-secondary"
+      onClick={onExpand}
+    >
+      {count === 1 ? "1 unchanged row" : `${count} unchanged rows`}
+    </button>
   )
 }

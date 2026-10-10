@@ -77,6 +77,22 @@ describe("createD1NoteSource", () => {
     expect(fetchImpl.mock.calls[1][0]).toBe("/api/replica/notes?since=0")
   })
 
+  it("pullEvents asks for the log past a seq, bounded", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ events: [{ id: "evt_1", seq: 7 }], cursor: 7 }),
+    )
+    const { auth } = fakeAuth(["tok-1"])
+    const source = createD1NoteSource({ fetchImpl: fetchImpl as unknown as typeof fetch, auth })
+    const body = await source.pullEvents(6, 500)
+    expect(fetchImpl).toHaveBeenCalledWith("/api/replica/events?since=6&limit=500", {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { ...REPLICA_PROTOCOL_HEADERS, Authorization: "Bearer tok-1" },
+    })
+    expect(body.cursor).toBe(7)
+    expect(body.events).toHaveLength(1)
+  })
+
   it("a 401 refreshes the token once and retries", async () => {
     const body = { nodes: [], links: [], cursor: null }
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {

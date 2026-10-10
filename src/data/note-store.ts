@@ -1,5 +1,5 @@
 import type { GraphDiff, LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
-import type { RuminateEvent } from "./events"
+import type { LoggedEvent, RuminateEvent } from "./events"
 import type { GraphSnapshot } from "./graph"
 
 /**
@@ -46,6 +46,19 @@ export interface NoteStore {
   /** Stamp events with the `seq` the replica gave them, and the rows they
    * changed with the same (a row's `seq` is its last event's). */
   markEventsPushed(seqs: readonly (readonly [id: string, seq: number])[]): Promise<void>
+  /**
+   * Take in events pulled from the replica — everything the tenant's log
+   * holds past the device's events cursor, this device's own among them, now
+   * placed. Only the log is written: the rows these events project to arrive
+   * by the pull of rows, as before. An event already held (one of this
+   * device's own, pushed but never answered) takes the `seq` it is pulled
+   * with.
+   */
+  applyPulledEvents(events: readonly LoggedEvent[]): Promise<void>
+  /** The tenant's log as this device holds it, in order: every placed event,
+   * then this device's unpushed ones, provisionally sequenced after them
+   * (`LoggedEvent.pending`). What a day on the calendar is folded from. */
+  eventLog(): Promise<LoggedEvent[]>
   /** Every row of every corpus table, **tombstones included** — the replica
    * full-push source, and a delete only reaches other devices if it travels. */
   getAllRows(): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }>

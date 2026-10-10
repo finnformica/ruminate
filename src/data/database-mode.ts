@@ -17,6 +17,7 @@ import {
   opsToEvents,
   viewChangeToEvent,
   type EventContext,
+  type LoggedEvent,
   type RuminateEvent,
 } from "./events"
 import { buildGraphSnapshot, isNoteType, type GraphSnapshot } from "./graph"
@@ -85,6 +86,15 @@ import {
  */
 
 const PULL_CURSOR_KEY = "d1_pull_cursor"
+/** The last `seq` of the tenant's log this device has pulled into its own
+ * (`NoteStore.eventLog`, docs/event-sourcing.md). Reset wherever the pull
+ * cursor is: the log goes with the rows it describes. */
+const EVENTS_CURSOR_KEY = "events_pull_cursor"
+/** How many events one page of the events pull asks for, and how many pages
+ * one pull reads before leaving the rest to the next: a bound on a first
+ * pull of a long log, never a limit on what arrives eventually. */
+const EVENTS_PAGE = 2_000
+const EVENTS_PAGES_PER_PULL = 10
 /** The identity (GitHub id, or login for pre-id sessions) whose notes the
  * local database holds. The server is owner-locked, but the OPFS cache
  * follows the browser profile — on a shared machine a different signed-in
@@ -205,6 +215,14 @@ export const EMPTY_GRAPH: GraphSnapshot = buildGraphSnapshot([], [])
  */
 export const databaseGraphAtom = atom<GraphSnapshot>(EMPTY_GRAPH)
 
+/**
+ * Bumped whenever the device's log changed — a flush of its own events, a
+ * pull of everyone's — so a reader of `databaseEventLog` (the calendar's day
+ * view) knows to read again. The log itself is not held in an atom: it is
+ * read from the store when a page needs it, which is rarely.
+ */
+export const eventLogVersionAtom = atom(0)
+
 export interface DatabaseModeStatus {
   status: "off" | "opening" | "ready" | "error"
   pull: "idle" | "pulling" | "error"
@@ -312,6 +330,12 @@ function recordWriteError(error: unknown) {
   })
 }
 
+/** A wiped cache pulls everything again: the rows, and the log. */
+async function resetCursors(store: NoteStore) {
+  await store.setMeta(PULL_CURSOR_KEY, "")
+  await store.setMeta(EVENTS_CURSOR_KEY, "")
+}
+
 /** Is the database runtime up (or starting)? Writes through the `store.ts`
  * seam are no-ops (sample-notes mode) when this is false. */
 export function isDatabaseModeActive(): boolean {
@@ -406,7 +430,7 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
       // that has never held anything loses nothing by it.
       if ((await opened.store.getMeta(CACHE_GENERATION_KEY)) !== CACHE_GENERATION) {
         await opened.store.clear()
-        await opened.store.setMeta(PULL_CURSOR_KEY, "")
+        await resetCursors(opened.store)
         await opened.store.setMeta(CACHE_GENERATION_KEY, CACHE_GENERATION)
       }
       if (runtime !== activation) return
@@ -420,7 +444,7 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
         if (previous !== options.owner) {
           if (previous !== null) {
             await opened.store.clear()
-            await opened.store.setMeta(PULL_CURSOR_KEY, "")
+            await resetCursors(opened.store)
           }
           await opened.store.setMeta(OWNER_KEY, options.owner)
         }
@@ -635,6 +659,26 @@ export function requestDatabaseFlush(): Promise<void> {
   return enqueue(() => flushOps(activation))
 }
 
+const bumpEventLog = () => jotai().set(eventLogVersionAtom, (n) => n + 1)
+
+/**
+ * The tenant's log as this device holds it (`NoteStore.eventLog`), once the
+ * events still coalescing have landed — what the calendar folds a day from
+ * (`src/data/day-changes.ts`). Null while the runtime is down or still
+ * opening its store.
+ */
+export async function databaseEventLog(): Promise<LoggedEvent[] | null> {
+  const activation = runtime
+  if (!activation) return null
+  let log: LoggedEvent[] | null = null
+  await enqueue(async () => {
+    if (runtime !== activation || !activation.store) return
+    await flushOps(activation)
+    log = await activation.store.eventLog()
+  })
+  return log
+}
+
 /**
  * Every row the local store holds, tombstones included, once the ops still
  * coalescing have landed — what Settings' Recently deleted reads
@@ -687,6 +731,7 @@ async function flushOps(activation: DatabaseModeRuntime) {
         notes,
         views.map((row) => row.id),
       )
+      bumpEventLog()
     }
     patchDiagnostics({ notes: noteCount(jotai().get(databaseGraphAtom)) })
   } catch (error) {
@@ -860,7 +905,7 @@ function runPull(activation: DatabaseModeRuntime) {
       // cache generation, then the full corpus of the new one.
       if (replicaIdentityChanged(await store.getMeta(REPLICA_ID_KEY), body.replica_id)) {
         await store.clear()
-        await store.setMeta(PULL_CURSOR_KEY, "")
+        await resetCursors(store)
         if (useSince) body = await activation.source.pullFull()
         if (runtime !== activation) return
       }
@@ -897,6 +942,7 @@ function runPull(activation: DatabaseModeRuntime) {
         await refreshGraph(activation)
       }
       if (body.cursor !== null) await store.setMeta(PULL_CURSOR_KEY, body.cursor)
+      await pullEventLog(activation, store)
 
       patchStatus({
         pull: "idle",
@@ -929,6 +975,32 @@ function runPull(activation: DatabaseModeRuntime) {
       }, retryMs)
     }
   })
+}
+
+/**
+ * Bring the device's log up to the replica's: every event past the events
+ * cursor, in pages, into the store (`applyPulledEvents`) — this device's own
+ * among them, placed. Only the log is written; the rows came with the pull of
+ * rows just before. A long log (a first pull) is read a bounded number of
+ * pages at a time; the next pull carries on from the cursor.
+ */
+async function pullEventLog(activation: DatabaseModeRuntime, store: NoteStore) {
+  const held = await store.getMeta(EVENTS_CURSOR_KEY)
+  let since = held !== null && /^\d+$/.test(held) ? Number(held) : 0
+  let changed = false
+  for (let page = 0; page < EVENTS_PAGES_PER_PULL; page += 1) {
+    const { events, cursor } = await activation.source.pullEvents(since, EVENTS_PAGE)
+    if (runtime !== activation) return
+    if (events.length > 0) {
+      await store.applyPulledEvents(events)
+      changed = true
+    }
+    if (cursor === null || cursor <= since) break
+    since = cursor
+    await store.setMeta(EVENTS_CURSOR_KEY, String(since))
+    if (events.length < EVENTS_PAGE) break
+  }
+  if (changed) bumpEventLog()
 }
 
 /** Flush coalescing ops and wait for all queued work — tests only. */

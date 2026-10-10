@@ -9,7 +9,13 @@ import {
   type ViewRow,
 } from "../../worker/handlers/replica-payload"
 import { ensureCorpusSchema } from "./corpus-schema"
-import { coalesceTyping, netChanges, type NetChange, type RuminateEvent } from "./events"
+import {
+  coalesceTyping,
+  netChanges,
+  type LoggedEvent,
+  type NetChange,
+  type RuminateEvent,
+} from "./events"
 import { buildGraphSnapshot } from "./graph"
 import type { NoteStore } from "./note-store"
 import type { SqlDriver, SqlStatement, SqlValue } from "./sql-driver"
@@ -119,6 +125,13 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<NoteStore> {
       }
       await driver.batch(statements)
     },
+
+    applyPulledEvents: async (events) => {
+      if (events.length === 0) return
+      await driver.batch(events.map(insertPulledEventStatement))
+    },
+
+    eventLog: () => loadLog(driver),
 
     getAllRows: () => loadAllRows(driver),
 
@@ -256,6 +269,32 @@ async function loadUnpushed(driver: SqlDriver): Promise<RuminateEvent[]> {
   return rows.map(toEvent)
 }
 
+/** The whole log, placed events first in `seq` order, then this device's
+ * unpushed ones in the order made, each given a provisional `seq` above the
+ * last placed one so a fold keeps them last. */
+async function loadLog(driver: SqlDriver): Promise<LoggedEvent[]> {
+  const rows = await driver.exec(
+    "SELECT id, seq, entity, entity_id, action, patch, v, batch, device, cause, base_seq, " +
+      "ref_seq, at, tz, origin, actor, received_at FROM events " +
+      "ORDER BY seq IS NULL, seq, position",
+  )
+  let last = 0
+  return rows.map((row) => {
+    const event = toEvent(row) as LoggedEvent
+    if (row.seq !== null) {
+      event.seq = Number(row.seq)
+      last = event.seq
+    } else {
+      event.seq = last += 1
+      event.pending = true
+    }
+    if (row.origin !== null) event.origin = String(row.origin)
+    if (row.actor !== null) event.actor = Number(row.actor)
+    if (row.received_at !== null) event.received_at = Number(row.received_at)
+    return event
+  })
+}
+
 async function nextPosition(driver: SqlDriver): Promise<number> {
   const [row] = await driver.exec("SELECT COALESCE(MAX(position), 0) AS position FROM events")
   return Number(row?.position ?? 0)
@@ -277,6 +316,37 @@ const toEvent = (row: Record<string, SqlValue>): RuminateEvent =>
     at: Number(row.at),
     tz: row.tz === null ? null : Number(row.tz),
   }) as RuminateEvent
+
+/** A pulled event, placed: its `seq` is its position. One of this device's
+ * own that the replica took but never answered is placed by this. */
+const insertPulledEventStatement = (event: LoggedEvent): SqlStatement => ({
+  sql:
+    "INSERT INTO events (id, seq, entity, entity_id, action, patch, v, batch, device, cause, " +
+    "base_seq, ref_seq, at, tz, origin, actor, received_at, position) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+    "ON CONFLICT (id) DO UPDATE SET seq = excluded.seq, origin = excluded.origin, " +
+    "actor = excluded.actor, received_at = excluded.received_at",
+  params: [
+    event.id,
+    event.seq,
+    event.entity,
+    event.entity_id,
+    event.action,
+    JSON.stringify(event.patch),
+    event.v,
+    event.batch,
+    event.device,
+    event.cause ?? null,
+    event.base_seq ?? null,
+    event.ref_seq ?? null,
+    event.at,
+    event.tz ?? null,
+    event.origin ?? null,
+    event.actor ?? null,
+    event.received_at ?? null,
+    event.seq,
+  ],
+})
 
 const insertEventStatement = (event: RuminateEvent, position: number): SqlStatement => ({
   sql:
