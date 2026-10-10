@@ -6,12 +6,12 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { emptyBlock } from "../../blocks/ops"
 import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
-import type { BlockDoc, ChangeHint } from "../../blocks/types"
+import type { Block, BlockDoc, ChangeHint } from "../../blocks/types"
 import { richClipboardFormats } from "../../utils/rich-clipboard"
 import { ImageUploadError, type UploadedImage } from "../../data/images"
 import type { LinkPreview } from "../../blocks/link"
 import { LinkPreviewError } from "../../data/link-previews"
-import { BlockEditor, type BlockDebugOptions } from "./block-editor"
+import { BlockEditor, type BlockDebugOptions, type BoardRequest } from "./block-editor"
 import { getDefaultStore } from "jotai"
 import { viewRootIdsAtom, viewsAtom } from "../../data/views"
 
@@ -63,6 +63,8 @@ function Harness({
   knownBlock,
   noteId,
   onEditingChange,
+  onRequestBoard,
+  onOpenBoard,
 }: {
   initial?: string
   /** A doc built by hand — for shapes markdown cannot express (a shared block). */
@@ -83,6 +85,8 @@ function Harness({
   /** The note behind the doc (what Pin and Copy link need). */
   noteId?: string
   onEditingChange?: (id: string | null) => void
+  onRequestBoard?: (request: BoardRequest) => void
+  onOpenBoard?: (id: string) => void
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? withStarter(parse(initial)))
   return (
@@ -106,6 +110,8 @@ function Harness({
         onImageUpload={onImageUpload}
         onLinkPreview={onLinkPreview}
         onEditingChange={onEditingChange}
+        onRequestBoard={onRequestBoard}
+        onOpenBoard={onOpenBoard}
       />
       <pre data-testid="serialized">{serialize(doc)}</pre>
       {/* Markdown carries no layout, so image props are shown as themselves. */}
@@ -4902,5 +4908,139 @@ describe("onEditingChange", () => {
       (el) => el.dataset.blockId,
     )
     expect(ids).toEqual([a, fresh, b])
+  })
+})
+
+describe('a board at a row (docs/boards.md, "A board in a note")', () => {
+  function typeInto(textarea: HTMLTextAreaElement, value: string) {
+    fireEvent.change(textarea, { target: { value } })
+    textarea.setSelectionRange(value.length, value.length)
+  }
+  const slashRows = (menu: Element) =>
+    Array.from(menu.querySelectorAll("[role=option]")).map((row) =>
+      row.getAttribute("data-slash-item"),
+    )
+  const board = (id: string, text: string, children: string[] = []): Block => ({
+    id,
+    type: "board",
+    text,
+    children,
+  })
+
+  it("Board is offered only where the host takes a board request", () => {
+    const without = render(<Harness initial="" startEditing noteId="n" />)
+    typeInto(without.container.querySelector("textarea")!, "/board")
+    expect(without.queryByTestId("slash-menu")).toBeNull()
+    cleanup()
+    const { container, getByTestId } = render(
+      <Harness initial="" startEditing noteId="n" onRequestBoard={vi.fn()} />,
+    )
+    typeInto(container.querySelector("textarea")!, "/board")
+    expect(slashRows(getByTestId("slash-menu"))).toEqual(["action:board"])
+  })
+
+  it("Board asks for a board after the row, hung off its line, and place puts its card in as one undo step", () => {
+    const onRequestBoard = vi.fn()
+    const { container, getByTestId, queryByTestId } = render(
+      <Harness initial="- plan" startEditing noteId="n" onRequestBoard={onRequestBoard} />,
+    )
+    const [planId] = idsOf(container)
+    typeInto(container.querySelector("textarea")!, "plan /boa")
+    fireEvent.keyDown(container.querySelector("textarea")!, { key: "Enter" })
+    // The /phrase is gone, as a type pick drops it; the row is kept.
+    expect(serializedLines(getByTestId)).toEqual(["- plan "])
+    expect(onRequestBoard).toHaveBeenCalledTimes(1)
+    const request: BoardRequest = onRequestBoard.mock.calls[0][0]
+    expect(request).toMatchObject({ parentId: "n", placement: { after: planId } })
+    expect(request.anchor).toBe(
+      container.querySelector(`[data-occurrence="${planId}"] [data-block-line]`),
+    )
+    // The host made and linked the board; its row goes in, selected, not edited.
+    act(() => request.place(board("blk_kitchen000", "Kitchen", ["blk_feature000"])))
+    expect(idsOf(container)).toEqual([planId, "blk_kitchen000"])
+    expect(getByTestId("board-card").textContent).toContain("Kitchen")
+    expect(highlightedText(container)).toBe("Kitchen")
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(serializedLines(getByTestId)).toEqual(["- plan ", "Kitchen"])
+    // One ⌘Z takes the row out again; one ⇧⌘Z puts it back.
+    fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true })
+    expect(idsOf(container)).toEqual([planId])
+    expect(queryByTestId("board-card")).toBeNull()
+    fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true, shiftKey: true })
+    expect(idsOf(container)).toEqual([planId, "blk_kitchen000"])
+  })
+
+  it("/link board is the same entry; on a blank row the board takes the row's place", () => {
+    const onRequestBoard = vi.fn()
+    const { container, getByTestId } = render(
+      <Harness initial="" startEditing noteId="n" onRequestBoard={onRequestBoard} />,
+    )
+    const [blankId] = idsOf(container)
+    typeInto(container.querySelector("textarea")!, "/link b")
+    fireEvent.keyDown(container.querySelector("textarea")!, { key: "Enter" })
+    const request: BoardRequest = onRequestBoard.mock.calls[0][0]
+    expect(request).toMatchObject({ parentId: "n", placement: { replace: blankId } })
+    act(() => request.place(board("blk_kitchen000", "Kitchen")))
+    expect(idsOf(container)).toEqual(["blk_kitchen000"])
+    expect(getByTestId("board-card")).not.toBeNull()
+  })
+
+  it("under a block, the board goes under that block", () => {
+    const onRequestBoard = vi.fn()
+    const { container } = render(
+      <Harness initial={"- a\n  - b"} noteId="n" onRequestBoard={onRequestBoard} />,
+    )
+    const [, bId] = idsOf(container)
+    const row = container.querySelector(`[data-block-row="${bId}"] [data-testid="block-body"]`)!
+    fireEvent.doubleClick(row)
+    typeInto(container.querySelector("textarea")!, "b /board")
+    fireEvent.keyDown(container.querySelector("textarea")!, { key: "Enter" })
+    const [aId] = idsOf(container)
+    expect(onRequestBoard.mock.calls[0][0]).toMatchObject({
+      parentId: aId,
+      placement: { after: bId },
+    })
+  })
+
+  it("a board's card is never a textarea: editing it selects it, and the arrows pass through", () => {
+    const initialDoc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["blk_a", "blk_kitchen000", "blk_c"],
+      blocks: {
+        blk_a: { id: "blk_a", type: "text", text: "A", children: [] },
+        blk_kitchen000: board("blk_kitchen000", "Kitchen", ["blk_feature000"]),
+        blk_c: { id: "blk_c", type: "text", text: "C", children: [] },
+      },
+    }
+    const { container, getByTestId } = render(<Harness initialDoc={initialDoc} noteId="n" />)
+    fireEvent.doubleClick(getByTestId("board-card"))
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(highlightedText(container)).toBe("Kitchen")
+    // Walking down from A in edit mode lands on the card as a selection,
+    // and on down to C as an edit.
+    fireEvent.doubleClick(
+      container.querySelector('[data-block-row="blk_a"] [data-testid="block-body"]')!,
+    )
+    expect(container.querySelector("textarea")!.value).toBe("A")
+    fireEvent.keyDown(container.querySelector("textarea")!, { key: "ArrowDown" })
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(highlightedText(container)).toBe("Kitchen")
+    fireEvent.keyDown(editorRoot(container), { key: "ArrowDown" })
+    expect(highlightedText(container)).toBe("C")
+  })
+
+  it("Open board on the card opens the board", () => {
+    const onOpenBoard = vi.fn()
+    const initialDoc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["blk_kitchen000"],
+      blocks: { blk_kitchen000: board("blk_kitchen000", "Kitchen") },
+    }
+    const { getByLabelText, getByTestId } = render(
+      <Harness initialDoc={initialDoc} noteId="n" onOpenBoard={onOpenBoard} />,
+    )
+    expect(getByTestId("board-figure")).not.toBeNull()
+    fireEvent.click(getByLabelText("Open board"))
+    expect(onOpenBoard).toHaveBeenCalledWith("blk_kitchen000")
   })
 })

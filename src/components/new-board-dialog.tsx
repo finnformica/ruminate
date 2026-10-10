@@ -13,10 +13,12 @@ export const newBoardDialogAtom = atom(false)
 
 /**
  * **New board** (docs/boards.md): a name, then a board. A board is a note
- * whose page carries the `board` property, so making one is making a note
- * with that property — and the default features written onto its page
- * (`useMakeBoard`) — and opening it on its board page rather than its
+ * whose root is of type `board`, so making one is making that node — with
+ * the default features written onto its page (`useMakeBoard`) and the row
+ * that lists it — and opening it on its board page rather than its
  * outline. The name is the note's title and can be blank, as a note's can.
+ * A board made inside a note takes another road: the board picker at the
+ * row (`board-picker.tsx`).
  */
 export function NewBoardDialog() {
   const [open, setOpen] = useAtom(newBoardDialogAtom)

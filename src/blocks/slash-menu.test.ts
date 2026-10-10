@@ -3,6 +3,7 @@ import {
   applySlashItem,
   findSlashTrigger,
   parseDateShortcut,
+  slashGroupOf,
   slashMenuItems,
   toInsertedDate,
   type SlashItem,
@@ -212,5 +213,38 @@ describe("image option", () => {
     expect(labels(slashMenuItems("ima", NOW))).toEqual([])
     expect(labels(slashMenuItems("ima", NOW, { images: true }))).toEqual(["Image"])
     expect(labels(slashMenuItems("photo", NOW, { images: true }))).toEqual(["Image"])
+  })
+})
+
+describe("the board action", () => {
+  const labels = (items: SlashItem[]) => items.map((item) => item.label)
+
+  test("is offered only where the editor has a note of the reader's own behind it", () => {
+    expect(labels(slashMenuItems("board", NOW))).toEqual([])
+    expect(labels(slashMenuItems("board", NOW, { boards: true }))).toEqual(["Board"])
+  })
+
+  test("sits under Insert, after the block types, as the one row", () => {
+    const items = slashMenuItems("", NOW, { boards: true })
+    expect(slashGroupOf(items[items.length - 1])).toBe("Insert")
+    expect(items.slice(-1)).toEqual([
+      { kind: "action", id: "action:board", label: "Board", action: "board" },
+    ])
+  })
+
+  test("answers to new, link and existing board alike: one entry, the picker decides", () => {
+    const on = { boards: true }
+    for (const q of ["new b", "link b", "existing", "boa"]) {
+      expect(labels(slashMenuItems(q, NOW, on))).toEqual(["Board"])
+    }
+  })
+
+  test("a pick drops the /phrase and names the action", () => {
+    const board: SlashItem = { kind: "action", id: "action:board", label: "Board", action: "board" }
+    expect(applySlashItem("plan /boa", { start: 5, query: "boa" }, board)).toEqual({
+      text: "plan ",
+      action: "board",
+      caret: 5,
+    })
   })
 })

@@ -60,9 +60,12 @@ export interface Occurrence {
  * below the walk's root, open? A note's roots are level 1; a focused block is
  * level 0 and its children level 1. The rule is the reader's explicit folds
  * over the depth setting (`src/data/view-state.ts`), and the graph walk
- * (`walkGraph`, src/data/graph.ts) only descends where it says so.
+ * (`walkGraph`, src/data/graph.ts) only descends where it says so. The
+ * row's stored type comes too, for the one kind the rule reads by type: a
+ * board's row, which is a card standing for what is beneath it
+ * (docs/boards.md, "A board in a note"), and so starts closed.
  */
-export type ExpandedRule = (key: string, level: number) => boolean
+export type ExpandedRule = (key: string, level: number, type?: string) => boolean
 
 /** One step of `walkDoc`. */
 export interface DocWalkStep {

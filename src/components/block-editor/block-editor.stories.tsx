@@ -274,6 +274,29 @@ export const Links: Story = {
 }
 
 /**
+ * A board in a note (docs/boards.md, "A board in a note"): the board's own
+ * node linked under the note, drawn as its card — the icon, the name, and
+ * what it holds (nothing here: the story has no graph behind it, so the
+ * line reads "No pictures yet"). Hover the card for the handles and the
+ * toolbar every figure has, with **Open board** first; a double-click
+ * selects the row rather than editing it.
+ */
+export const Board: Story = {
+  args: {
+    initial: "",
+    initialDoc: {
+      props: null,
+      rootBlockIds: ["blk_t1", "blk_board1", "blk_t2"],
+      blocks: {
+        blk_t1: { id: "blk_t1", type: "text", text: "Ideas for the kitchen", children: [] },
+        blk_board1: { id: "blk_board1", type: "board", text: "Kitchen", children: [] },
+        blk_t2: { id: "blk_t2", type: "text", text: "", children: [] },
+      },
+    },
+  },
+}
+
+/**
  * The three framed blocks (`block-frame.tsx`) — a picture, a link card, a
  * code panel — each with rows under it, and each again nested under a row:
  * the frame's inset holds at every depth, and a framed block's chevron

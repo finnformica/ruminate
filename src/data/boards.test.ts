@@ -19,7 +19,9 @@ import {
   imageUploadedOps,
   imageValues,
   inverseOps,
+  linkBoardOps,
   linkPreviewOps,
+  newBoardOps,
   notesFeaturesOf,
   notesSuggestionOps,
   removeFeatureOps,
@@ -35,6 +37,7 @@ import {
   BOARD_TYPE,
   buildGraphSnapshot,
   childIdsOf,
+  docFromGraph,
   docToGraph,
   noteDoc,
   parentIdsOf,
@@ -1278,5 +1281,114 @@ describe("a feature block in the outline", () => {
     ])
     // And the walk back carries it, so the next edit starts from it.
     expect(noteDoc("b", next)?.blocks[OBJECT].props).toEqual(JSON.parse(featureProps(OBJECT_SPEC)))
+  })
+})
+
+describe("a board in a note", () => {
+  /** A note `n` with two rows, and the board `b`. */
+  const noteOf = () => {
+    const n = docToGraph("n", "- one\n  id:: blk_one0000000\n- two\n  id:: blk_two0000000\n", 1)
+    const b = boardOf()
+    return buildGraphSnapshot(
+      [...n.nodes, ...b.nodes.values()],
+      [...n.links, ...[...b.childLinks.values()].flat()],
+    )
+  }
+
+  it("newBoardOps makes the board and its default features, listed by nobody", () => {
+    const snapshot = noteOf()
+    const ops = newBoardOps(snapshot, "blk_newboard00", "  Kitchen  ")
+    expect(ops[0]).toMatchObject({
+      op: "create",
+      id: "blk_newboard00",
+      type: BOARD_TYPE,
+      text: "Kitchen",
+    })
+    expect((ops[0] as { notesId?: string }).notesId).toBeUndefined()
+    const next = applyOps(snapshot, ops, NOW)
+    expect(boardFeatures(next, "blk_newboard00").map((s) => s.feature.label)).toEqual(
+      DEFAULT_FEATURES.map((entry) => entry.label),
+    )
+    // Untitled: the id stands in, as for a note. Taken: nothing.
+    expect(newBoardOps(snapshot, "blk_newboard01", " ")[0]).toMatchObject({
+      text: "blk_newboard01",
+    })
+    expect(newBoardOps(snapshot, "b", "x")).toEqual([])
+  })
+
+  it("linkBoardOps links the board after a row, in place of a blank one, or last", () => {
+    const snapshot = noteOf()
+    const after = linkBoardOps(snapshot, "n", "b", { after: "blk_one0000000" })
+    expect(kinds(after)).toEqual(["link"])
+    expect(childIdsOf(applyOps(snapshot, after, NOW), "n")).toEqual([
+      "blk_one0000000",
+      "b",
+      "blk_two0000000",
+    ])
+    const last = linkBoardOps(snapshot, "n", "b")
+    expect(childIdsOf(applyOps(snapshot, last, NOW), "n")).toEqual([
+      "blk_one0000000",
+      "blk_two0000000",
+      "b",
+    ])
+    // The row the slash was typed in goes with its link, when only this
+    // note held it, and the board takes its place.
+    const blank = applyOps(
+      snapshot,
+      [
+        { op: "create", id: "blk_blank00000", type: "text", text: "", props: null, notesId: "n" },
+        { op: "link", source: "n", destination: "blk_blank00000", sortKey: "a1" },
+      ],
+      NOW,
+    )
+    const replaced = linkBoardOps(blank, "n", "b", { replace: "blk_blank00000" })
+    expect(kinds(replaced)).toEqual(["unlink", "delete", "link"])
+    expect(childIdsOf(blank, "n")).toEqual(["blk_one0000000", "blk_blank00000", "blk_two0000000"])
+    const next = applyOps(blank, replaced, NOW)
+    expect(next.nodes.has("blk_blank00000")).toBe(false)
+    expect(childIdsOf(next, "n")).toEqual(["blk_one0000000", "b", "blk_two0000000"])
+    // Held elsewhere too: unlinked here, kept there.
+    const shared = applyOps(
+      blank,
+      [{ op: "link", source: "blk_one0000000", destination: "blk_blank00000", sortKey: "a0" }],
+      NOW,
+    )
+    expect(kinds(linkBoardOps(shared, "n", "b", { replace: "blk_blank00000" }))).toEqual([
+      "unlink",
+      "link",
+    ])
+  })
+
+  it("linkBoardOps refuses a loop onto itself, a second row under one parent, and a block", () => {
+    const snapshot = noteOf()
+    expect(linkBoardOps(snapshot, "b", "b")).toEqual([])
+    expect(linkBoardOps(snapshot, "n", "blk_one0000000")).toEqual([])
+    expect(linkBoardOps(snapshot, "n", "nope")).toEqual([])
+    expect(linkBoardOps(snapshot, "nope", "b")).toEqual([])
+    const once = applyOps(snapshot, linkBoardOps(snapshot, "n", "b"), NOW)
+    expect(linkBoardOps(once, "n", "b", { after: "blk_one0000000" })).toEqual([])
+  })
+
+  it("a board linked under a block of its own outline is named there and never descended", () => {
+    // Through the graph, not the picker (which never offers it): the walk
+    // closes the loop at the row, the board's features and pictures read as
+    // before, and the outline ends where the loop closes.
+    const snapshot = applyOps(boardOf(), linkBoardOps(boardOf(), OBJECT, "b"), NOW)
+    expect(childIdsOf(snapshot, OBJECT)).toEqual(["b"])
+    expect(boardFeatures(snapshot, "b").map((s) => s.feature.label)).toEqual(["Location", "Object"])
+    expect(boardImageIds(snapshot, "b")).toEqual(["blk_pic1000000", "blk_pic2000000"])
+    const doc = noteDoc("b", snapshot)
+    expect(doc?.blocks[OBJECT].children).toEqual(["b"])
+    expect(doc?.blocks.b).toBeUndefined()
+    // Walked from the block, the board is a row with its outline beneath it,
+    // and the block is named once more where the loop closes.
+    const fromBlock = docFromGraph([OBJECT], snapshot)
+    expect(fromBlock.blocks.b.type).toBe("board")
+    expect(fromBlock.blocks.b.children).toEqual([
+      LOCATION,
+      OBJECT,
+      "blk_pic1000000",
+      "blk_pic2000000",
+    ])
   })
 })

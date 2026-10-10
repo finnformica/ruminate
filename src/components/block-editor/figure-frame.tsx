@@ -25,9 +25,6 @@ const ALIGN_SELF: Record<FigureAlign, string> = {
   right: "self-end",
 }
 
-/** The toolbar's name, by what the figure is. */
-const NOUN_LABELS = { image: "Image", link: "Link", code: "Code block" } as const
-
 const ALIGN_LABELS: Record<FigureAlign, string> = {
   left: "Align left",
   center: "Align centre",
@@ -61,11 +58,23 @@ export interface FrameState {
   boxed: boolean
 }
 
+/** The toolbar's name, by what the figure is. */
+const NOUN_LABELS: Record<FigureNoun, string> = {
+  image: "Image",
+  link: "Link",
+  code: "Code block",
+  board: "Board",
+}
+
+/** The figures the frame knows by name: for the controls' labels and test
+ * ids (`image-resize-left`, `link-toolbar`, `code-figure`, `board-figure`). */
+export type FigureNoun = "image" | "link" | "code" | "board"
+
 /**
  * The frame every figure block sits in — a picture (`image-figure.tsx`),
  * a link block's card (`link-card.tsx`), a code block's panel
- * (`block-kinds.tsx`): the layout the figure types share
- * (`src/blocks/figure.ts`), drawn once.
+ * (`code-panel.tsx`), a board's card (`board-card.tsx`): the layout the
+ * figure types share (`src/blocks/figure.ts`), drawn once.
  *
  * No chrome of its own: the block frame's inset (`block-frame.tsx`) is the
  * figure's spacing. The block's `align` keeps the figure to one side of the
@@ -108,7 +117,7 @@ export function FigureFrame({
   api: BlockEditorApi
   /** What the figure is, for the controls' labels and test ids
    * (`image-resize-left`, `link-toolbar`, `code-figure`). */
-  noun: "image" | "link" | "code"
+  noun: FigureNoun
   /** The frame's width when the block sets no size: a CSS width, or
    * undefined to shrink to the figure. */
   naturalWidth?: string
