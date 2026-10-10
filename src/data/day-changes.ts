@@ -45,18 +45,14 @@ import { emittedNoteTitle } from "./note-identity"
  *
  * The log was seeded from the rows that predate it: one snapshot `create`
  * per row (`batch: "snapshot"`, docs/event-sourcing.md), stamped with the
- * row's last save and no zone. A snapshot says the row was saved then, not
- * what changed in it, so on its day it marks the row **touched** — last
- * saved — rather than added, and a period holding any is **approximate**.
- * A tombstone's snapshot is skipped: a row that was already gone is not a
- * row the day wrote.
- *
- * A snapshot's `seq` is the row's old one, which says nothing about when the
- * row was saved — a note's row, re-stamped on every save, keeps the seq it
- * was made with. So the log is read in the order snapshots first, by the day
- * they were saved, then every edit by `seq` (`byPlace`): the seeded rows are
- * the beginning of history, whatever seq they hold, and a day's "before" is
- * everything placed ahead of its first event in that order.
+ * row's last save. A snapshot says the row existed, not what any day did
+ * to it, so it is never a day's event: no day is dotted for it, and history
+ * begins on the first day with a real edit (`earliest`). The seeded rows
+ * are the beginning of history whatever `seq` they hold (a note's row,
+ * re-stamped on every save, keeps the seq it was made with), so the log is
+ * read as the snapshots first, then every edit by `seq` (`byPlace`), and a
+ * day's "before" — everything placed ahead of its first event — always
+ * holds them. Every edit after the seed is exact against it.
  */
 
 /** A word diff's piece: a run of text that both have, or only one of them. */
@@ -69,8 +65,6 @@ export interface WordSegment {
 export type DiffMark =
   | { kind: "added" }
   | { kind: "removed" }
-  /** Last saved on the day, before history was recorded (a snapshot). */
-  | { kind: "touched" }
   | { kind: "changed"; words: WordSegment[] }
   /** A synthetic row standing for a run of unchanged rows, `count` of them
    * (descendants included), with the ids it hides. */
@@ -81,12 +75,10 @@ export interface NoteChange {
   /** The note's title after the period's changes (before them, for a
    * deleted note). */
   title: string
-  /** `saved`: nothing but rows last saved on the day, before history began. */
-  kind: "created" | "edited" | "deleted" | "saved"
+  kind: "created" | "edited" | "deleted"
   added: number
   removed: number
   changed: number
-  touched: number
   /** The outline to draw: the after-outline with the removed blocks spliced
    * back where they stood and unchanged runs folded. */
   doc: BlockDoc
@@ -96,9 +88,6 @@ export interface NoteChange {
 export interface PeriodChanges {
   /** The period's events, in the writers' zones. */
   events: number
-  /** Whether any of them is a snapshot: the period is before history
-   * began, and its rows are shown on the day they were last saved. */
-  approximate: boolean
   notes: NoteChange[]
   /** The first day the log knows anything about, in the viewer's zone, or
    * null while it is empty: a day before it is one history cannot answer. */
@@ -111,7 +100,6 @@ export interface Sitting {
   at: number
   until: number
   tz: number | null
-  /** The device, or `snapshot` for the rows last saved before history began. */
   device: string
   events: number
   notes: NoteChange[]
@@ -122,30 +110,12 @@ export interface ChangeOptions {
   expanded?: ReadonlySet<string>
 }
 
-interface NoteChangeOptions extends ChangeOptions {
-  /** When the period holds snapshots: the blocks its own edits reached. A
-   * row added that none reached was brought in by a snapshot — last saved
-   * on the day, not written on it. */
-  written?: ReadonlySet<string>
-}
-
 /** The batch the replica seeds the log with (`planReconcile`). */
 const SNAPSHOT_BATCH = "snapshot"
 const isSnapshot = (event: LoggedEvent) => event.batch === SNAPSHOT_BATCH
-/** A snapshot of a row that was already deleted: not a row the day wrote. */
-const isTombstoneSnapshot = (event: LoggedEvent) =>
-  isSnapshot(event) && typeof (event.patch as { deleted_at?: unknown }).deleted_at === "number"
-/** The snapshot of a note's own row. Its stamp is the note's last save, not
- * a day anything was written: the note is placed at the very beginning of
- * history, so its rows are found on their own days. */
-const isNoteSnapshot = (event: LoggedEvent) =>
-  isSnapshot(event) &&
-  event.entity === "block" &&
-  isNoteType(String((event.patch as { type?: unknown }).type))
-/** An event the calendar reads as something written: not a view's row, and
- * not a snapshot that stands for no day's writing. */
-const isWriting = (event: LoggedEvent) =>
-  event.entity !== "view" && !isTombstoneSnapshot(event) && !isNoteSnapshot(event)
+/** An event the calendar reads as something written on its day: an edit —
+ * never a snapshot — and not a view's row. */
+const isWriting = (event: LoggedEvent) => !isSnapshot(event) && event.entity !== "view"
 
 /** Rows of context kept on either side of a change before a run folds. */
 const FOLD_CONTEXT = 1
@@ -168,22 +138,14 @@ export function periodMatcher(periodId: string): ((day: string) => boolean) | nu
 }
 
 /** The order the calendar reads the log in (see the module header): the
- * notes' own snapshots first, then the other snapshots by the day they were
- * saved on, then the edits by seq — seq within each. Snapshots always hold
- * lower seqs than edits, so the fold — which applies by seq — agrees. */
-const byPlace =
-  (viewerTz: number) =>
-  (a: LoggedEvent, b: LoggedEvent): number => {
-    const tierA = isNoteSnapshot(a) ? 0 : isSnapshot(a) ? 1 : 2
-    const tierB = isNoteSnapshot(b) ? 0 : isSnapshot(b) ? 1 : 2
-    if (tierA !== tierB) return tierA - tierB
-    if (tierA === 1) {
-      const dayA = localDayOf(a, viewerTz)
-      const dayB = localDayOf(b, viewerTz)
-      if (dayA !== dayB) return dayA < dayB ? -1 : 1
-    }
-    return a.seq - b.seq
-  }
+ * snapshots first, then the edits, by seq within each. Snapshots always
+ * hold lower seqs than edits, so the fold — which applies by seq — agrees. */
+const byPlace = (a: LoggedEvent, b: LoggedEvent): number => {
+  const snapA = isSnapshot(a)
+  const snapB = isSnapshot(b)
+  if (snapA !== snapB) return snapA ? -1 : 1
+  return a.seq - b.seq
+}
 
 /** Every day (in the viewer's zone, or the writer's where it said) something
  * was written on — what the calendar dots. A view's row is not writing. */
@@ -201,21 +163,15 @@ export function changesIn(
   options: ChangeOptions = {},
 ): PeriodChanges {
   const inPeriod = periodMatcher(periodId)
-  const sorted = [...log].sort(byPlace(viewerTz))
+  const sorted = [...log].sort(byPlace)
+  const edits = sorted.filter((event) => !isSnapshot(event))
   const earliest =
-    sorted.length === 0 ? null : sorted.map((event) => localDayOf(event, viewerTz)).sort()[0]
-  if (inPeriod === null) return { events: 0, approximate: false, notes: [], earliest }
-  const periodEvents = sorted.filter(
-    (event) => (!isSnapshot(event) || isWriting(event)) && inPeriod(localDayOf(event, viewerTz)),
-  )
-  if (periodEvents.length === 0) return { events: 0, approximate: false, notes: [], earliest }
-  const notes = changesOf(sorted, periodEvents, byPlace(viewerTz), options)
-  return {
-    events: periodEvents.length,
-    approximate: periodEvents.some(isSnapshot),
-    notes,
-    earliest,
-  }
+    edits.length === 0 ? null : edits.map((event) => localDayOf(event, viewerTz)).sort()[0]
+  if (inPeriod === null) return { events: 0, notes: [], earliest }
+  const periodEvents = edits.filter((event) => inPeriod(localDayOf(event, viewerTz)))
+  if (periodEvents.length === 0) return { events: 0, notes: [], earliest }
+  const notes = changesOf(sorted, periodEvents, options)
+  return { events: periodEvents.length, notes, earliest }
 }
 
 /**
@@ -232,16 +188,12 @@ export function sittingsIn(
   const inPeriod = periodMatcher(periodId)
   if (inPeriod === null) return []
   const gapMs = options.gapMs ?? SITTING_GAP_MS
-  const sorted = [...log].sort(byPlace(viewerTz))
+  const sorted = [...log].sort(byPlace)
   const periodEvents = sorted.filter(
-    (event) => (!isSnapshot(event) || isWriting(event)) && inPeriod(localDayOf(event, viewerTz)),
+    (event) => !isSnapshot(event) && inPeriod(localDayOf(event, viewerTz)),
   )
-  // The rows last saved on the day before history began are one sitting,
-  // ahead of the day's edits: the replica's, not a device's.
-  const snapshots = periodEvents.filter(isSnapshot)
-  const runs: LoggedEvent[][] = snapshots.length > 0 ? [snapshots] : []
+  const runs: LoggedEvent[][] = []
   for (const event of periodEvents) {
-    if (isSnapshot(event)) continue
     const run = runs.at(-1)
     const last = run?.at(-1)
     if (run && last && deviceOf(last) === deviceOf(event) && event.at - last.at <= gapMs) {
@@ -254,9 +206,9 @@ export function sittingsIn(
     at: run[0].at,
     until: (run.at(-1) as LoggedEvent).at,
     tz: run[0].tz ?? null,
-    device: isSnapshot(run[0]) ? SNAPSHOT_BATCH : deviceOf(run[0]),
+    device: deviceOf(run[0]),
     events: run.length,
-    notes: changesOf(sorted, run, byPlace(viewerTz), options),
+    notes: changesOf(sorted, run, options),
   }))
 }
 
@@ -272,33 +224,27 @@ const deviceOf = (event: LoggedEvent) => event.device.split(".")[0]
 function changesOf(
   sorted: readonly LoggedEvent[],
   run: readonly LoggedEvent[],
-  place: (a: LoggedEvent, b: LoggedEvent) => number,
   options: ChangeOptions,
 ): NoteChange[] {
   const first = run[0]
-  const before = sorted.filter((event) => place(event, first) < 0)
+  const before = sorted.filter((event) => byPlace(event, first) < 0)
   const graphBefore = graphOf(fold(before))
   const graphAfter = graphOf(fold([...before, ...run]))
 
   const touched = new Set<string>()
-  // The blocks the run's own edits reached — against which a row a snapshot
-  // alone brought in is only "last saved", not added.
-  const written = new Set<string>()
   for (const event of run) {
     if (event.entity === "view") continue
     const blocks =
       event.entity === "block" ? [event.entity_id] : event.entity_id.split("|").slice(0, 2)
     for (const id of blocks) {
-      if (!isSnapshot(event)) written.add(id)
       for (const note of notesHolding(graphBefore, id)) touched.add(note)
       for (const note of notesHolding(graphAfter, id)) touched.add(note)
     }
   }
-  const noteOptions = run.some(isSnapshot) ? { ...options, written } : options
 
   const notes: NoteChange[] = []
   for (const id of touched) {
-    const change = noteChange(graphBefore, graphAfter, id, noteOptions)
+    const change = noteChange(graphBefore, graphAfter, id, options)
     if (change !== null) notes.push(change)
   }
   notes.sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0))
@@ -353,7 +299,7 @@ function noteChange(
   before: GraphSnapshot,
   after: GraphSnapshot,
   noteId: string,
-  options: NoteChangeOptions = {},
+  options: ChangeOptions = {},
 ): NoteChange | null {
   const docBefore = noteDoc(noteId, before)
   const docAfter = noteDoc(noteId, after)
@@ -369,35 +315,20 @@ function noteChange(
     }
   }
   const doc = docBefore ? spliceRemoved(base, docBefore, marks) : base
-  if (options.written) {
-    for (const [id, mark] of marks) {
-      if (mark.kind === "added" && !options.written.has(id)) marks.set(id, { kind: "touched" })
-    }
-  }
   const added = countMarks(marks, "added")
   const removed = countMarks(marks, "removed")
   const changed = countMarks(marks, "changed")
-  const touched = countMarks(marks, "touched")
-  const edits = added + removed + changed
-  if (edits + touched === 0 && docBefore !== null && docAfter !== null) return null
+  if (added + removed + changed === 0 && docBefore !== null && docAfter !== null) return null
 
   const folded = foldUnchanged(doc, marks, options.expanded ?? new Set())
   const node = after.nodes.get(noteId) ?? before.nodes.get(noteId)
   return {
     id: noteId,
     title: node ? (emittedNoteTitle(noteId, node.text) ?? "") : "",
-    kind:
-      edits === 0 && touched > 0
-        ? "saved"
-        : docBefore === null
-          ? "created"
-          : docAfter === null
-            ? "deleted"
-            : "edited",
+    kind: docBefore === null ? "created" : docAfter === null ? "deleted" : "edited",
     added,
     removed,
     changed,
-    touched,
     doc: folded,
     marks,
   }

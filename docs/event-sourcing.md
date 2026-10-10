@@ -267,18 +267,14 @@ with the writer's clock and, where it is not the reader's, the writer's zone.
 
 **Before history began.** The log was seeded from the rows the replica held
 (the reconcile above): one snapshot `create` per row, stamped with the row's
-last save and no zone. A snapshot says the row was saved then, not what
-changed in it, so on its day the row draws as **last saved** — a grey `·` in
-the gutter, no tint — rather than added, a note of nothing but such rows is
-**Last saved** rather than **New**, and the page says the period is
-approximate. In the ordered reading the seeded rows are one sitting of their
-own, ahead of the day's edits. A tombstone's snapshot is skipped, and so is
-a note's own (its stamp is the note's last save, not a day anything was
-written; the note is placed at the very beginning of history so its rows are
-found on their own days). A snapshot's `seq` is the row's old one and says
-nothing about when it was saved, so the calendar reads the log as the
-snapshots first, by the day they were saved, then the edits by `seq`
-(`byPlace`). Every edit after the seed is exact against it.
+last save. A snapshot says the row existed, not what any day did to it, so
+the calendar never reads one as a day's writing: no day is dotted for it, and
+a day before the first real edit says where history begins. A snapshot's
+`seq` is the row's old one and says nothing about when it was saved (a note's
+row, re-stamped on every save, keeps the seq it was made with), so the
+calendar reads the log as the snapshots first, then the edits by `seq`
+(`byPlace`): the seeded rows are always in a day's "before", and every edit
+after the seed is exact against them.
 
 There are no daily or weekly notes: a day is not a note and nothing is written
 on the calendar page itself. A note that was kept under a date-shaped id
