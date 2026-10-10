@@ -31,7 +31,7 @@ describe("FILTER_TYPE_OPTIONS", () => {
     const values = FILTER_TYPE_OPTIONS.map((option) => option.value)
     expect(values[0]).toBe("text")
     expect(values).toContain("todo")
-    expect(values).toContain("daily")
+    expect(values).toContain("board")
   })
 })
 

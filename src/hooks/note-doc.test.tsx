@@ -86,7 +86,7 @@ function renderNote(wrapper: Wrapper, filter = "", sort = "", keep?: ReadonlySet
 describe("useNoteDoc, a note not in the graph yet", () => {
   it("a first edit creates the note and the row that lists it, in one write", async () => {
     const { store, wrapper, unsubscribe } = await signedOutStore(NOTE)
-    // Nothing of the note: a daily note nobody has typed into yet.
+    // Nothing of the note: a fresh address nobody has typed into yet.
     store.set(sampleGraphAtom, buildGraphSnapshot([], []))
     const { result } = renderHook(
       () => useNoteDoc({ noteId: NOTE_ID, defaultDoc: EMPTY_DOC, filter: "", sort: "" }),

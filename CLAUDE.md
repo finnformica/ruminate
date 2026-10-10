@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Ruminate is a note-taking web application built with React and TypeScript. Notes are outlines of typed blocks (a Logseq-style block editor) held in a graph: nodes plus child links, stored in SQLite in the browser and replicated to Cloudflare D1 behind a Worker. GitHub is used for identity only. Features include block search with a query language, daily and weekly notes, maths, links (inline, and as cards with a page preview), and (behind a switch) images.
+Ruminate is a note-taking web application built with React and TypeScript. Notes are outlines of typed blocks (a Logseq-style block editor) held in a graph: nodes plus child links, stored in SQLite in the browser and replicated to Cloudflare D1 behind a Worker. GitHub is used for identity only. Features include block search with a query language, a calendar, maths, links (inline, and as cards with a page preview), and (behind a switch) images.
 
 ## Development Commands
 

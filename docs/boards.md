@@ -36,8 +36,7 @@ else about the note changes either way — the same rows, the same outline,
 the same id and URL; nothing beneath the root is touched — and no structure
 is required first: a note with no pictures makes an empty board, and the
 outline of a board is one click away (**Open note** in the board's ⋯ menu,
-**Open board** in the outline's). A daily or weekly note is what its id says
-it is and cannot be made a board. The editor never retypes a root either
+**Open board** in the outline's). The editor never retypes a root either
 way: a doc carries a note's text and props, never its kind, so an edit to a
 board's outline leaves it a board (`partsToOps`, `src/data/ops.ts`).
 

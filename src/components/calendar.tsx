@@ -15,45 +15,41 @@ import { useAtom } from "jotai"
 import React from "react"
 import { Link } from "@tanstack/react-router"
 import { calendarLayoutAtom } from "../global-state"
-import { useDateMentions, useNoteById } from "../hooks/note"
-import { Note } from "../schema"
 import { cx } from "../utils/cx"
-import {
-  DAY_NAMES,
-  MONTH_NAMES,
-  formatDate,
-  formatWeek,
-  toDateString,
-  toWeekString,
-} from "../utils/date"
+import { DAY_NAMES, MONTH_NAMES, formatWeek, toDateString, toWeekString } from "../utils/date"
 import { DropdownMenu } from "./ui/dropdown-menu"
 import { IconButton } from "./ui/icon-button"
 import { ChevronDownIcon16, ChevronUpIcon16, MoreIcon16, UndoIcon16 } from "./icons"
-import { NoteHoverCard } from "./note-hover-card"
 import { surface } from "./ui/surface"
 
-const CalendarContainerContext = React.createContext<React.RefObject<HTMLDivElement | null> | null>(
-  null,
-)
-
+/**
+ * The calendar's strip (a week) or grid (a month): a way to the day pages
+ * (`/calendar/<day>`) and the week pages (`/calendar/<week>`). A day is
+ * dotted when a note names the date (`marked`, docs/metadata.md); a week
+ * when any of its days is.
+ */
 export function Calendar({
-  activeNoteId,
+  activeId,
+  marked,
   className,
 }: {
-  activeNoteId: string
+  /** The day or week on the page. */
+  activeId: string
+  /** The days and weeks with something to show. */
+  marked: ReadonlySet<string>
   className?: string
 }) {
-  const date = parseISO(activeNoteId)
+  const date = parseISO(activeId)
   const [layout, setLayout] = useAtom(calendarLayoutAtom)
 
-  // Local state for the displayed date anchor (independent of activeNoteId)
+  // Local state for the displayed date anchor (independent of activeId)
   const [displayedDate, setDisplayedDate] = React.useState(() => date)
 
-  // Sync displayed date when activeNoteId changes (adjust state during render)
+  // Sync displayed date when activeId changes (adjust state during render)
   // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
-  const [prevActiveNoteId, setPrevActiveNoteId] = React.useState(activeNoteId)
-  if (activeNoteId !== prevActiveNoteId) {
-    setPrevActiveNoteId(activeNoteId)
+  const [prevActiveId, setPrevActiveId] = React.useState(activeId)
+  if (activeId !== prevActiveId) {
+    setPrevActiveId(activeId)
     setDisplayedDate(date)
   }
 
@@ -76,7 +72,7 @@ export function Calendar({
     setDisplayedDate((prev) => addMonths(prev, increment))
   }, [])
 
-  // Check if displayed week differs from active note's week
+  // Check if displayed week differs from the active week
   const activeWeekStart = React.useMemo(() => startOfISOWeek(date), [date])
   const activeMonthStart = React.useMemo(() => startOfMonth(date), [date])
 
@@ -105,205 +101,133 @@ export function Calendar({
   const navigate = layout === "week" ? navigateByWeek : navigateByMonth
   const periodLabel = layout === "week" ? "week" : "month"
 
-  const containerRef = React.useRef<HTMLDivElement>(null)
-
   return (
-    <CalendarContainerContext.Provider value={containerRef}>
-      <div
-        ref={containerRef}
-        className={cx(surface({ tier: "card" }), "overflow-hidden rounded-xl!", className)}
-      >
-        <div className="flex flex-col gap-2 overflow-hidden">
-          <div className="flex items-center justify-between pt-2 px-2">
-            <span className="font-content px-2">
-              <span className="font-bold">{MONTH_NAMES[displayDate.getMonth()]}</span>{" "}
-              {displayDate.getFullYear()}
-            </span>
-            <div className="flex">
-              {canReset ? (
-                <IconButton aria-label={`Back to selected ${periodLabel}`} onClick={resetToActive}>
-                  <UndoIcon16 />
-                </IconButton>
-              ) : null}
+    <div className={cx(surface({ tier: "card" }), "overflow-hidden rounded-xl!", className)}>
+      <div className="flex flex-col gap-2 overflow-hidden">
+        <div className="flex items-center justify-between pt-2 px-2">
+          <span className="font-content px-2">
+            <span className="font-bold">{MONTH_NAMES[displayDate.getMonth()]}</span>{" "}
+            {displayDate.getFullYear()}
+          </span>
+          <div className="flex">
+            {canReset ? (
+              <IconButton aria-label={`Back to selected ${periodLabel}`} onClick={resetToActive}>
+                <UndoIcon16 />
+              </IconButton>
+            ) : null}
 
-              <IconButton
-                aria-label={`Previous ${periodLabel}`}
-                onClick={() => navigate("previous")}
-              >
-                <ChevronUpIcon16 />
-              </IconButton>
-              <IconButton aria-label={`Next ${periodLabel}`} onClick={() => navigate("next")}>
-                <ChevronDownIcon16 />
-              </IconButton>
-              <DropdownMenu>
-                <DropdownMenu.Trigger
-                  render={
-                    <IconButton aria-label="Calendar options" disableTooltip>
-                      <MoreIcon16 />
-                    </IconButton>
-                  }
+            <IconButton aria-label={`Previous ${periodLabel}`} onClick={() => navigate("previous")}>
+              <ChevronUpIcon16 />
+            </IconButton>
+            <IconButton aria-label={`Next ${periodLabel}`} onClick={() => navigate("next")}>
+              <ChevronDownIcon16 />
+            </IconButton>
+            <DropdownMenu>
+              <DropdownMenu.Trigger
+                render={
+                  <IconButton aria-label="Calendar options" disableTooltip>
+                    <MoreIcon16 />
+                  </IconButton>
+                }
+              />
+              <DropdownMenu.Content align="end" width={160}>
+                <DropdownMenu.Group>
+                  <DropdownMenu.GroupLabel>Layout</DropdownMenu.GroupLabel>
+                  <DropdownMenu.Item onClick={() => setLayout("week")} selected={layout === "week"}>
+                    Week
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    onClick={() => setLayout("month")}
+                    selected={layout === "month"}
+                  >
+                    Month
+                  </DropdownMenu.Item>
+                </DropdownMenu.Group>
+              </DropdownMenu.Content>
+            </DropdownMenu>
+          </div>
+        </div>
+        {layout === "week" ? (
+          <div className="grid pb-2 px-2">
+            <div className="flex gap-1.5 items-center">
+              <CalendarWeek
+                startOfWeek={displayedWeekStart}
+                isActive={toWeekString(displayedWeekStart) === activeId}
+                marked={marked}
+              />
+              <div role="separator" className="h-8 w-px shrink-0 bg-border-secondary" />
+              {daysOfWeek.map((day) => (
+                <CalendarDate
+                  key={day.toISOString()}
+                  date={day}
+                  isActive={toDateString(day) === activeId}
+                  marked={marked}
                 />
-                <DropdownMenu.Content align="end" width={160}>
-                  <DropdownMenu.Group>
-                    <DropdownMenu.GroupLabel>Layout</DropdownMenu.GroupLabel>
-                    <DropdownMenu.Item
-                      onClick={() => setLayout("week")}
-                      selected={layout === "week"}
-                    >
-                      Week
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item
-                      onClick={() => setLayout("month")}
-                      selected={layout === "month"}
-                    >
-                      Month
-                    </DropdownMenu.Item>
-                  </DropdownMenu.Group>
-                </DropdownMenu.Content>
-              </DropdownMenu>
+              ))}
             </div>
           </div>
-          {layout === "week" ? (
-            <div className="grid pb-2 px-2">
-              <div className="flex gap-1.5 items-center">
-                <CalendarWeek
-                  startOfWeek={displayedWeekStart}
-                  isActive={toWeekString(displayedWeekStart) === activeNoteId}
-                />
-                <div role="separator" className="h-8 w-px shrink-0 bg-border-secondary" />
-                {daysOfWeek.map((day) => (
-                  <CalendarDate
-                    key={day.toISOString()}
-                    date={day}
-                    isActive={toDateString(day) === activeNoteId}
-                  />
-                ))}
-              </div>
-            </div>
-          ) : (
-            <MonthGrid
-              weeksInMonth={weeksInMonth}
-              displayedMonth={displayedMonthStart.getMonth()}
-              activeNoteId={activeNoteId}
-            />
-          )}
-        </div>
+        ) : (
+          <MonthGrid
+            weeksInMonth={weeksInMonth}
+            displayedMonth={displayedMonthStart.getMonth()}
+            activeId={activeId}
+            marked={marked}
+          />
+        )}
       </div>
-    </CalendarContainerContext.Provider>
+    </div>
   )
 }
 
 function CalendarWeek({
   startOfWeek,
   isActive = false,
+  marked,
 }: {
   startOfWeek: Date
   isActive?: boolean
+  marked: ReadonlySet<string>
 }) {
   const weekString = toWeekString(startOfWeek)
-  const weekNumber = getISOWeek(startOfWeek)
-  const label = formatWeek(weekString)
-  const existingNote = useNoteById(weekString)
-  const mentions = useDateMentions(weekString)
-  const hasNotes = Boolean(existingNote) || mentions.length > 0
-  const anchorRef = React.useContext(CalendarContainerContext)
-
-  // Create note object for hover card (fallback if note doesn't exist)
-  const note: Note = React.useMemo(() => {
-    if (existingNote) return existingNote
-    return {
-      id: weekString,
-      type: "weekly",
-      displayName: formatWeek(weekString),
-      props: {},
-      title: "",
-      url: null,
-      alias: null,
-      updatedAt: null,
-      dates: [],
-      tasks: [],
-      headings: [],
-      text: "",
-    }
-  }, [existingNote, weekString])
-
   return (
     <CalendarItem
-      key={weekString}
       id={weekString}
-      aria-label={label}
+      aria-label={formatWeek(weekString)}
       name="Week"
       shortName="W"
-      number={weekNumber}
+      number={getISOWeek(startOfWeek)}
       isActive={isActive}
-      hasNotes={hasNotes}
-      note={note}
-      anchor={anchorRef?.current}
-      sideOffset={8}
+      hasChanges={marked.has(weekString)}
     />
   )
 }
 
-function CalendarDate({ date, isActive = false }: { date: Date; isActive?: boolean }) {
+const dayLabel = (date: Date) =>
+  `${DAY_NAMES[date.getDay()]}, ${MONTH_NAMES[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`
+
+function CalendarDate({
+  date,
+  isActive = false,
+  marked,
+}: {
+  date: Date
+  isActive?: boolean
+  marked: ReadonlySet<string>
+}) {
   const dateString = toDateString(date)
-  const existingNote = useNoteById(dateString)
-  const mentions = useDateMentions(dateString)
-  const hasNotes = Boolean(existingNote) || mentions.length > 0
   const dayName = DAY_NAMES[date.getDay()]
-  const monthName = MONTH_NAMES[date.getMonth()]
-  const day = date.getDate()
-  const year = date.getFullYear()
-  const label = `${dayName}, ${monthName} ${day}, ${year}`
-  const isToday = dateString === toDateString(new Date())
-
-  // Create note object for hover card (fallback if note doesn't exist)
-  const note: Note = React.useMemo(() => {
-    if (existingNote) return existingNote
-    return {
-      id: dateString,
-      type: "daily",
-      displayName: formatDate(dateString),
-      props: {},
-      title: "",
-      url: null,
-      alias: null,
-      updatedAt: null,
-      dates: [],
-      tasks: [],
-      headings: [],
-      text: "",
-    }
-  }, [existingNote, dateString])
-
   return (
     <CalendarItem
-      key={date.toISOString()}
       id={dateString}
-      aria-label={label}
+      aria-label={dayLabel(date)}
       name={dayName.slice(0, 3)}
       shortName={dayName.slice(0, 2)}
       number={date.getDate()}
       isActive={isActive}
-      isToday={isToday}
-      hasNotes={hasNotes}
-      note={note}
-      sideOffset={16}
+      isToday={dateString === toDateString(new Date())}
+      hasChanges={marked.has(dateString)}
     />
   )
-}
-
-type CalendarItemProps = {
-  "aria-label": string
-  name: string
-  shortName: string
-  number: number
-  id: string
-  isActive?: boolean
-  isToday?: boolean
-  hasNotes?: boolean
-  note: Note
-  anchor?: Element | null
-  sideOffset?: number
 }
 
 function CalendarItem({
@@ -314,71 +238,52 @@ function CalendarItem({
   id,
   isActive = false,
   isToday = false,
-  hasNotes = false,
-  note,
-  anchor,
-  sideOffset = 8,
-}: CalendarItemProps) {
-  const link = (
+  hasChanges = false,
+}: {
+  "aria-label": string
+  name: string
+  shortName: string
+  number: number
+  id: string
+  isActive?: boolean
+  isToday?: boolean
+  hasChanges?: boolean
+}) {
+  return (
     <Link
-      to="/views/$"
+      to="/calendar/$"
       params={{ _splat: id }}
-      search={{
-        query: undefined,
-      }}
+      search={{}}
       aria-label={ariaLabel}
       className={cx(
         "focus-ring relative flex w-full cursor-pointer justify-center rounded p-4 leading-4 text-text @container",
         !isActive && "hover:bg-bg-hover active:bg-bg-active",
         // The day you are looking at is a place, like the sidebar's current
-        // note, so it takes the app-wide selected surface and ink. It used to
-        // take `bg-bg-secondary`, the very value a cell hovers to, so the
-        // current day and a hovered day were the same colour.
+        // note, so it takes the app-wide selected surface and ink.
         isActive &&
           "font-bold bg-bg-selected text-text-selected hover:bg-bg-selected-hover active:bg-bg-selected-active",
-        // Show a dot if the date has notes
-        hasNotes &&
+        // A dot under a day something was written on.
+        hasChanges &&
           "after:pointer-events-none after:absolute after:bottom-1 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:content-['']",
-        hasNotes && isActive && "after:bg-text-secondary",
-        hasNotes && !isActive && "after:bg-border",
+        hasChanges && isActive && "after:bg-text-secondary",
+        hasChanges && !isActive && "after:bg-border",
       )}
-    />
-  )
-
-  const content = (
-    <div className="flex flex-col items-center gap-1 @[3rem]:flex-row @[3rem]:gap-2 coarse:gap-2">
-      <span className="@[3rem]:hidden">{shortName}</span>
-      {/* Show full name when there's enough space */}
-      <span className="hidden @[3rem]:inline">{name}</span>
-      <span
-        className={cx(
-          isToday && "-mx-1 -my-[0.125rem] rounded-sm px-1 py-[0.125rem] leading-[1.2]",
-          isToday && !isActive && "shadow-[inset_0_0_0_1px_var(--color-text-secondary)]",
-          isToday && isActive && "bg-text text-bg",
-        )}
-      >
-        {number}
-      </span>
-    </div>
-  )
-
-  // Don't show hover card for active item since we're already viewing it
-  if (isActive) {
-    return React.cloneElement(link, {}, content)
-  }
-
-  return (
-    <NoteHoverCard
-      render={link}
-      note={note}
-      anchor={anchor}
-      side="bottom"
-      sideOffset={sideOffset}
-      align="start"
-      transformOrigin={anchor ? "top left" : undefined}
     >
-      {content}
-    </NoteHoverCard>
+      <div className="flex flex-col items-center gap-1 @[3rem]:flex-row @[3rem]:gap-2 coarse:gap-2">
+        <span className="@[3rem]:hidden">{shortName}</span>
+        {/* Show full name when there's enough space */}
+        <span className="hidden @[3rem]:inline">{name}</span>
+        <span
+          className={cx(
+            isToday && "-mx-1 -my-[0.125rem] rounded-sm px-1 py-[0.125rem] leading-[1.2]",
+            isToday && !isActive && "shadow-[inset_0_0_0_1px_var(--color-text-secondary)]",
+            isToday && isActive && "bg-text text-bg",
+          )}
+        >
+          {number}
+        </span>
+      </div>
+    </Link>
   )
 }
 
@@ -388,11 +293,13 @@ const SHORT_DAY_LABELS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
 function MonthGrid({
   weeksInMonth,
   displayedMonth,
-  activeNoteId,
+  activeId,
+  marked,
 }: {
   weeksInMonth: Date[]
   displayedMonth: number
-  activeNoteId: string
+  activeId: string
+  marked: ReadonlySet<string>
 }) {
   return (
     <div className="@container">
@@ -412,7 +319,8 @@ function MonthGrid({
             key={weekStart.toISOString()}
             weekStart={weekStart}
             displayedMonth={displayedMonth}
-            activeNoteId={activeNoteId}
+            activeId={activeId}
+            marked={marked}
             isLastRow={index === weeksInMonth.length - 1}
           />
         ))}
@@ -424,88 +332,28 @@ function MonthGrid({
 function MonthWeekRow({
   weekStart,
   displayedMonth,
-  activeNoteId,
+  activeId,
+  marked,
   isLastRow,
 }: {
   weekStart: Date
   displayedMonth: number
-  activeNoteId: string
+  activeId: string
+  marked: ReadonlySet<string>
   isLastRow: boolean
 }) {
   // Get the Monday of this week (weekStart should already be Monday from eachWeekOfInterval)
   const mondayOfWeek = startOfISOWeek(weekStart)
   const weekString = toWeekString(mondayOfWeek)
   const weekNumber = getISOWeek(mondayOfWeek)
-  const label = formatWeek(weekString)
-
-  const existingNote = useNoteById(weekString)
-  const mentions = useDateMentions(weekString)
-  const hasWeekNotes = Boolean(existingNote) || mentions.length > 0
+  const hasWeekChanges = marked.has(weekString)
 
   const daysOfWeek = React.useMemo(() => {
     const endOfWeek = addDays(mondayOfWeek, 6)
     return eachDayOfInterval({ start: mondayOfWeek, end: endOfWeek })
   }, [mondayOfWeek])
 
-  const isWeekActive = weekString === activeNoteId
-  const anchorRef = React.useContext(CalendarContainerContext)
-
-  // Create note object for hover card (fallback if note doesn't exist)
-  const note: Note = React.useMemo(() => {
-    if (existingNote) return existingNote
-    return {
-      id: weekString,
-      type: "weekly",
-      displayName: formatWeek(weekString),
-      props: {},
-      title: "",
-      url: null,
-      alias: null,
-      updatedAt: null,
-      dates: [],
-      tasks: [],
-      headings: [],
-      text: "",
-    }
-  }, [existingNote, weekString])
-
-  const weekLink = (
-    <Link
-      to="/views/$"
-      params={{ _splat: weekString }}
-      search={{
-        query: undefined,
-      }}
-      aria-label={label}
-      className={cx(
-        "focus-ring relative flex h-12 items-center justify-center text-text-secondary -m-px",
-        !isWeekActive && "hover:bg-bg-hover active:bg-bg-active",
-        isWeekActive &&
-          "font-bold bg-bg-selected text-text-selected hover:bg-bg-selected-hover active:bg-bg-selected-active",
-        hasWeekNotes &&
-          "after:pointer-events-none after:absolute after:bottom-2 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:content-['']",
-        hasWeekNotes && isWeekActive && "after:bg-text-secondary",
-        hasWeekNotes && !isWeekActive && "after:bg-border",
-      )}
-    />
-  )
-
-  // Week number link - conditionally wrap in hover card if not active
-  const weekNumberElement = isWeekActive ? (
-    React.cloneElement(weekLink, {}, weekNumber)
-  ) : (
-    <NoteHoverCard
-      render={weekLink}
-      note={note}
-      anchor={anchorRef?.current}
-      side="bottom"
-      sideOffset={8}
-      align="start"
-      transformOrigin="top left"
-    >
-      {weekNumber}
-    </NoteHoverCard>
-  )
+  const isWeekActive = weekString === activeId
 
   return (
     <div
@@ -515,14 +363,34 @@ function MonthWeekRow({
       )}
     >
       {/* Week number link */}
-      <div>{weekNumberElement}</div>
+      <div>
+        <Link
+          to="/calendar/$"
+          params={{ _splat: weekString }}
+          search={{}}
+          aria-label={formatWeek(weekString)}
+          className={cx(
+            "focus-ring relative flex h-12 items-center justify-center text-text-secondary -m-px",
+            !isWeekActive && "hover:bg-bg-hover active:bg-bg-active",
+            isWeekActive &&
+              "font-bold bg-bg-selected text-text-selected hover:bg-bg-selected-hover active:bg-bg-selected-active",
+            hasWeekChanges &&
+              "after:pointer-events-none after:absolute after:bottom-2 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:content-['']",
+            hasWeekChanges && isWeekActive && "after:bg-text-secondary",
+            hasWeekChanges && !isWeekActive && "after:bg-border",
+          )}
+        >
+          {weekNumber}
+        </Link>
+      </div>
       {/* Date cells */}
-      {daysOfWeek.map((day, index) => (
+      {daysOfWeek.map((day) => (
         <MonthDateCell
           key={day.toISOString()}
           date={day}
           isOutsideMonth={day.getMonth() !== displayedMonth}
-          isActive={toDateString(day) === activeNoteId}
+          isActive={toDateString(day) === activeId}
+          hasChanges={marked.has(toDateString(day))}
         />
       ))}
     </div>
@@ -533,96 +401,48 @@ function MonthDateCell({
   date,
   isOutsideMonth = false,
   isActive = false,
+  hasChanges = false,
 }: {
   date: Date
   isOutsideMonth?: boolean
   isActive?: boolean
+  hasChanges?: boolean
 }) {
   const dateString = toDateString(date)
-  const existingNote = useNoteById(dateString)
-  const mentions = useDateMentions(dateString)
-  const hasNotes = Boolean(existingNote) || mentions.length > 0
-  const dayName = DAY_NAMES[date.getDay()]
-  const monthName = MONTH_NAMES[date.getMonth()]
   const day = date.getDate()
-  const year = date.getFullYear()
-  const label = `${dayName}, ${monthName} ${day}, ${year}`
   const isToday = dateString === toDateString(new Date())
-  const anchorRef = React.useContext(CalendarContainerContext)
-
-  // Create note object for hover card (fallback if note doesn't exist)
-  const note: Note = React.useMemo(() => {
-    if (existingNote) return existingNote
-    return {
-      id: dateString,
-      type: "daily",
-      displayName: formatDate(dateString),
-      props: {},
-      title: "",
-      url: null,
-      alias: null,
-      updatedAt: null,
-      dates: [],
-      tasks: [],
-      headings: [],
-      text: "",
-    }
-  }, [existingNote, dateString])
-
-  const link = (
-    <Link
-      to="/views/$"
-      params={{ _splat: dateString }}
-      search={{
-        query: undefined,
-      }}
-      aria-label={label}
-      className={cx(
-        "focus-ring relative flex h-12 items-center justify-center -m-px",
-        isOutsideMonth && !isActive ? "text-text-tertiary" : "text-text",
-        !isActive && "hover:bg-bg-hover active:bg-bg-active",
-        isActive &&
-          "font-bold bg-bg-selected text-text-selected hover:bg-bg-selected-hover active:bg-bg-selected-active",
-        hasNotes &&
-          "after:pointer-events-none after:absolute after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:content-['']",
-        hasNotes && isToday && "after:bottom-[6px]",
-        hasNotes && !isToday && "after:bottom-2",
-        hasNotes && isActive && "after:bg-text-secondary",
-        hasNotes && !isActive && "after:bg-border",
-      )}
-    />
-  )
-
-  const content = (
-    <span
-      className={cx(
-        isToday && "-mx-1 -my-[0.125rem] rounded-sm px-1 py-[0.125rem] leading-[1.2]",
-        isToday && !isActive && "shadow-[inset_0_0_0_1px_var(--color-text-secondary)]",
-        isToday && isActive && "bg-text text-bg",
-      )}
-    >
-      {day}
-    </span>
-  )
-
-  // Don't show hover card for active item since we're already viewing it
-  if (isActive) {
-    return <div>{React.cloneElement(link, {}, content)}</div>
-  }
 
   return (
     <div>
-      <NoteHoverCard
-        render={link}
-        note={note}
-        anchor={anchorRef?.current}
-        side="bottom"
-        sideOffset={8}
-        align="start"
-        transformOrigin="top left"
+      <Link
+        to="/calendar/$"
+        params={{ _splat: dateString }}
+        search={{}}
+        aria-label={dayLabel(date)}
+        className={cx(
+          "focus-ring relative flex h-12 items-center justify-center -m-px",
+          isOutsideMonth && !isActive ? "text-text-tertiary" : "text-text",
+          !isActive && "hover:bg-bg-hover active:bg-bg-active",
+          isActive &&
+            "font-bold bg-bg-selected text-text-selected hover:bg-bg-selected-hover active:bg-bg-selected-active",
+          hasChanges &&
+            "after:pointer-events-none after:absolute after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:content-['']",
+          hasChanges && isToday && "after:bottom-[6px]",
+          hasChanges && !isToday && "after:bottom-2",
+          hasChanges && isActive && "after:bg-text-secondary",
+          hasChanges && !isActive && "after:bg-border",
+        )}
       >
-        {content}
-      </NoteHoverCard>
+        <span
+          className={cx(
+            isToday && "-mx-1 -my-[0.125rem] rounded-sm px-1 py-[0.125rem] leading-[1.2]",
+            isToday && !isActive && "shadow-[inset_0_0_0_1px_var(--color-text-secondary)]",
+            isToday && isActive && "bg-text text-bg",
+          )}
+        >
+          {day}
+        </span>
+      </Link>
     </div>
   )
 }

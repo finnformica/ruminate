@@ -55,7 +55,6 @@ export const APP_SHORTCUTS = {
   focusSearch: "/",
   /** The `g` chords, which `GChordMachine` binds and the sidebar labels its
    * rows with — so a destination's key is written once, here. */
-  goCalendar: "g d",
   goViews: "g v",
   goSettings: "g s",
   goAdmin: "g a",
@@ -353,12 +352,6 @@ const GLOBAL_ENTRIES: Shortcut[] = [
 ]
 
 const NAVIGATION_ENTRIES: Shortcut[] = [
-  {
-    combos: [APP_SHORTCUTS.goCalendar],
-    scope: "global",
-    description: "Go to today's daily note (press g, then d)",
-    group: "Navigation",
-  },
   {
     combos: [APP_SHORTCUTS.goViews],
     scope: "global",
