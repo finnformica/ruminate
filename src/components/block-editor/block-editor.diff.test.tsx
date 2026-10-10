@@ -22,19 +22,17 @@ const block = (id: string, text: string, children: string[] = []): Block => ({
 })
 
 /** The outline a past day leaves (`src/data/day-changes.ts`): one row kept,
- * one reworded, one removed, one added with a row beneath it, a closed row
- * hiding a change, and a fold at the end. */
+ * one reworded, one removed, one added with a row beneath it, and a fold at
+ * the end. */
 const doc: BlockDoc = {
   props: null,
-  rootBlockIds: ["keep", "changed", "gone", "new", "closed", "fold:root:x"],
+  rootBlockIds: ["keep", "changed", "gone", "new", "fold:root:x"],
   blocks: {
     keep: block("keep", "Call the bank"),
     changed: block("changed", "Buy sourdough"),
     gone: block("gone", "Call mum"),
     new: block("new", "Walk along the canal", ["deep"]),
     deep: block("deep", "Take the camera"),
-    closed: block("closed", "Later", ["inside"]),
-    inside: block("inside", "Ring the plumber"),
     "fold:root:x": block("fold:root:x", ""),
   },
 }
@@ -53,7 +51,6 @@ const marks = new Map<string, DiffMark>([
   ["gone", { kind: "removed" }],
   ["new", { kind: "added" }],
   ["deep", { kind: "added" }],
-  ["closed", { kind: "hidden", count: 1 }],
   ["fold:root:x", { kind: "fold", count: 4, position: "below" }],
 ])
 
@@ -68,14 +65,7 @@ const rowOf = (container: HTMLElement, id: string) =>
 describe("the block editor drawing a diff", () => {
   it("puts a sign at the edge of every row, in the one column whatever the depth", () => {
     const { container } = render(
-      <BlockEditor
-        doc={doc}
-        onChange={() => {}}
-        readOnly
-        browse
-        diff={{ marks }}
-        collapsed={new Set(["closed"])}
-      />,
+      <BlockEditor doc={doc} onChange={() => {}} readOnly browse diff={{ marks }} />,
     )
     expect(signsOf(container)).toEqual([
       "same ",
@@ -83,7 +73,6 @@ describe("the block editor drawing a diff", () => {
       "removed −",
       "added +",
       "added +",
-      "hidden ⋯",
       "fold ⋯",
     ])
     // The sign hangs in the gutter of its own row, which indents inside of
@@ -95,14 +84,7 @@ describe("the block editor drawing a diff", () => {
 
   it("tints a whole row added or removed, and says a changed row in its words", () => {
     const { container } = render(
-      <BlockEditor
-        doc={doc}
-        onChange={() => {}}
-        readOnly
-        browse
-        diff={{ marks }}
-        collapsed={new Set(["closed"])}
-      />,
+      <BlockEditor doc={doc} onChange={() => {}} readOnly browse diff={{ marks }} />,
     )
     expect(rowOf(container, "new").innerHTML).toContain("bg-bg-added")
     expect(rowOf(container, "gone").innerHTML).toContain("bg-bg-removed")
@@ -124,7 +106,6 @@ describe("the block editor drawing a diff", () => {
         browse
         initialSelection="none"
         diff={{ marks, expandFold }}
-        collapsed={new Set(["closed"])}
       />,
     )
     const fold = container.querySelector<HTMLElement>("[data-testid=diff-fold]")!

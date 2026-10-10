@@ -5,6 +5,7 @@ import React from "react"
 import { collapsedKeysOf } from "../blocks/default-collapsed"
 import {
   FOLD_REVEAL,
+  changedBeneath,
   changesIn,
   daysWithChanges,
   foldContext,
@@ -110,8 +111,11 @@ export function DayChanges({ periodId, log }: { periodId: string; log: LoggedEve
       <div className="flex items-center gap-2">
         <h2 className="flex items-baseline gap-2 font-bold text-text">
           Changes
+          {/* Not on a phone, where it would be squeezed against the buttons. */}
           {changes !== null && changes.notes.length > 0 ? (
-            <span className="font-normal text-text-secondary">{summaryOf(changes)}</span>
+            <span className="hidden font-normal text-text-secondary @[480px]:inline">
+              {summaryOf(changes)}
+            </span>
           ) : null}
         </h2>
         {changes !== null && changes.notes.length > 0 ? (
@@ -285,18 +289,23 @@ function NoteList({ notes }: { notes: NoteChange[] }) {
  * the top while its outline scrolls under it, then the outline in the block
  * editor's read-only mode with every row marked (`BlockEditor.diff`,
  * `block-item.tsx`). The outline folds as the note's own view folds — the
- * reader's folds over the depth setting (`useFoldRule`), a closed row with
- * changes beneath it marked so — and is cut down to the changes and a row
- * of context each side, the rows between folded behind "n rows above" /
- * "n rows below" that open a few at a time (`foldContext`).
+ * reader's folds over the depth setting (`useFoldRule`) — except that a row
+ * with a change beneath it is held open, so everything the day did shows;
+ * then it is cut down to the changes and a row of context each side, the
+ * rows between folded behind "n rows above" / "n rows below" that open a
+ * few at a time (`foldContext`).
  */
 function NoteSection({ change }: { change: NoteChange }) {
   const title = change.title || (isMintedNoteId(change.id) ? "Untitled" : change.id)
   const { expanded, setFold } = useFoldRule(change.id)
-  const collapsed = React.useMemo(
-    () => new Set(collapsedKeysOf(change.doc, expanded)),
-    [change.doc, expanded],
-  )
+  const collapsed = React.useMemo(() => {
+    const open = changedBeneath(change.doc, change.marks)
+    return new Set(
+      collapsedKeysOf(change.doc, expanded).filter(
+        (key) => !open.has(key.slice(key.lastIndexOf("/") + 1)),
+      ),
+    )
+  }, [change.doc, change.marks, expanded])
   const [revealed, setRevealed] = React.useState<ReadonlyMap<string, number>>(() => new Map())
   const expandFold = React.useCallback(
     (foldId: string) =>

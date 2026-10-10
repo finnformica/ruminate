@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { Block, BlockDoc } from "../blocks/types"
 import {
+  changedBeneath,
   changesIn,
   daysWithChanges,
   diffWords,
@@ -461,18 +462,15 @@ describe("foldContext", () => {
     expect(shape(opened)).toEqual(["r1", "r2", "r3", "r4", "⋯3 between", "r7", "r8", "r9"])
   })
 
-  it("marks a closed row that hides a change, and folds inside an open one", () => {
+  it("keeps a row with a change beneath it, and folds inside it", () => {
     const deep = new Map<string, DiffMark>([["c2", { kind: "added" }]])
-    const closed = foldContext(doc, deep, { collapsed: new Set(["r2"]), revealed: new Map() })
+    expect(changedBeneath(doc, deep)).toEqual(new Set(["r2"]))
+    const out = foldContext(doc, deep, { collapsed: none, revealed: new Map() })
     // r4..r9, with r6's child: seven rows.
-    expect(shape(closed)).toEqual(["r1", "r2", "r3", "⋯7 below"])
-    expect(closed.marks.get("r2")).toEqual({ kind: "hidden", count: 1 })
-    expect(closed.doc.blocks.r2.children).toEqual(["c1", "c2"])
-
-    const open = foldContext(doc, deep, { collapsed: none, revealed: new Map() })
-    expect(open.marks.get("r2")).toBeUndefined()
+    expect(shape(out)).toEqual(["r1", "r2", "r3", "⋯7 below"])
+    expect(out.marks.get("r2")).toBeUndefined()
     // c1 is c2's context, so nothing folds inside r2.
-    expect(open.doc.blocks.r2.children).toEqual(["c1", "c2"])
+    expect(out.doc.blocks.r2.children).toEqual(["c1", "c2"])
   })
 
   it("leaves a list with nothing beneath it whole", () => {

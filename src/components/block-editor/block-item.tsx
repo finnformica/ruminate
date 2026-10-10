@@ -1188,7 +1188,7 @@ export function BlockItem({
             "absolute -left-6 top-0.5 flex h-[1lh] w-[15px] select-none items-center justify-center font-mono text-sm leading-relaxed",
             mark?.kind === "added" && "text-text-success",
             mark?.kind === "removed" && "text-text-danger",
-            (mark?.kind === "changed" || mark?.kind === "hidden") && "text-text-changed",
+            mark?.kind === "changed" && "text-text-changed",
             mark?.kind === "fold" && "text-text-tertiary",
           )}
         >
@@ -1198,7 +1198,7 @@ export function BlockItem({
               ? "−"
               : mark?.kind === "changed"
                 ? "~"
-                : mark?.kind === "hidden" || mark?.kind === "fold"
+                : mark?.kind === "fold"
                   ? "⋯"
                   : ""}
         </span>

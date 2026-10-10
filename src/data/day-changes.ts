@@ -73,8 +73,6 @@ export type DiffMark =
   | { kind: "added" }
   | { kind: "removed" }
   | { kind: "changed"; words: WordSegment[] }
-  /** A folded row with changes somewhere beneath it, `count` of them. */
-  | { kind: "hidden"; count: number }
   /** A synthetic row standing for `count` unchanged rows above the next
    * change, below the last, or between two (`foldContext`). */
   | { kind: "fold"; count: number; position: FoldPosition }
@@ -426,12 +424,37 @@ const FOLD_CONTEXT = 1
 export const FOLD_REVEAL = 3
 
 export interface FoldOptions {
-  /** The occurrence keys the reader's folds close (`collapsedKeysOf`): their
-   * children are not shown, so a change beneath one is `hidden`. */
+  /** The occurrence keys the reader's folds close (`collapsedKeysOf`): what
+   * is beneath one is not shown, so a run that holds one counts it as a row.
+   * A row with a change beneath it is never closed (`changedBeneath`). */
   collapsed: ReadonlySet<string>
   /** How many rows each fold has been opened by, by fold id. */
   revealed: ReadonlyMap<string, number>
   context?: number
+}
+
+/**
+ * The blocks with a change somewhere beneath them — the rows a day's reading
+ * holds open whatever the reader's folds say, so nothing the day did is
+ * hidden (`components/day-changes.tsx`).
+ */
+export function changedBeneath(doc: BlockDoc, marks: ReadonlyMap<string, DiffMark>): Set<string> {
+  const holds = new Map<string, boolean>()
+  const walk = (id: string, path: Set<string>): boolean => {
+    const known = holds.get(id)
+    if (known !== undefined) return known
+    if (path.has(id)) return false
+    path.add(id)
+    let below = false
+    for (const child of doc.blocks[id]?.children ?? []) {
+      if (walk(child, path) || marks.has(child)) below = true
+    }
+    path.delete(id)
+    holds.set(id, below)
+    return below
+  }
+  for (const id of doc.rootBlockIds) walk(id, new Set())
+  return new Set([...holds].filter(([, below]) => below).map(([id]) => id))
 }
 
 /**
@@ -440,10 +463,9 @@ export interface FoldOptions {
  * unchanged rows between folded behind one synthetic row (`fold:<parent
  * key|root>:<first id>`) that says how many it stands for — and, once
  * clicked, gives back `revealed` rows from the end nearest the change (both
- * ends, between two). A row whose fold is closed but holds a change is kept
- * and marked `hidden`, so the reader knows to open it. Pure: the doc and
- * marks in, a doc and marks to draw out. The real rows keep their ids and
- * keys, so the reader's folds still apply to them.
+ * ends, between two). Pure: the doc and marks in, a doc and marks to draw
+ * out. The real rows keep their ids and keys, so the reader's folds still
+ * apply to them.
  */
 export function foldContext(
   doc: BlockDoc,
@@ -453,22 +475,7 @@ export function foldContext(
   const context = options.context ?? FOLD_CONTEXT
   const out = new Map(marks)
   const blocks: Record<string, Block> = { ...doc.blocks }
-
-  // The changes beneath a block, through open and closed folds alike.
-  const beneath = new Map<string, number>()
-  const countBeneath = (id: string, path: Set<string>): number => {
-    const known = beneath.get(id)
-    if (known !== undefined) return known
-    if (path.has(id)) return 0
-    path.add(id)
-    let n = 0
-    for (const child of doc.blocks[id]?.children ?? []) {
-      n += (marks.has(child) ? 1 : 0) + countBeneath(child, path)
-    }
-    path.delete(id)
-    beneath.set(id, n)
-    return n
-  }
+  const changed = changedBeneath(doc, marks)
   // The rows a hidden run stands for: the run's blocks and what shows
   // beneath each, folds closed where the reader closed them.
   const visibleRows = (id: string, key: string, path: Set<string>): number => {
@@ -485,15 +492,7 @@ export function foldContext(
   }
 
   const foldList = (list: readonly string[], parentKey: string | null, path: Set<string>) => {
-    const interesting = list.map((id) => {
-      const key = keyOf(parentKey, id)
-      if (marks.has(id)) return true
-      const below = countBeneath(id, path)
-      if (below > 0 && options.collapsed.has(key) && !out.has(id)) {
-        out.set(id, { kind: "hidden", count: below })
-      }
-      return below > 0
-    })
+    const interesting = list.map((id) => marks.has(id) || changed.has(id))
     if (!interesting.some(Boolean)) return [...list]
     const keep = interesting.map((_, i) => {
       for (let k = Math.max(0, i - context); k <= Math.min(list.length - 1, i + context); k += 1) {
@@ -551,7 +550,7 @@ export function foldContext(
       const block = doc.blocks[id]
       if (!block || path.has(id) || block.children.length === 0) continue
       const key = keyOf(parentKey, id)
-      if (options.collapsed.has(key) || countBeneath(id, path) === 0) continue
+      if (options.collapsed.has(key) || !changed.has(id)) continue
       path.add(id)
       walk(block.children, key, path)
       blocks[id] = { ...blocks[id], children: foldList(block.children, key, path) }
