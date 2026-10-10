@@ -383,7 +383,16 @@ function NoteCard({
         </span>
       </header>
       <div className="px-3 py-2">
-        <BlockEditor doc={change.doc} onChange={noop} readOnly browse diff={diff} />
+        {/* Nothing highlighted: a page of cards is read, not arrowed through,
+            and a highlight would scroll its row into view on mount. */}
+        <BlockEditor
+          doc={change.doc}
+          onChange={noop}
+          readOnly
+          browse
+          initialSelection="none"
+          diff={diff}
+        />
       </div>
     </article>
   )

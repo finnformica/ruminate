@@ -50,6 +50,13 @@ import { emittedNoteTitle } from "./note-identity"
  * saved — rather than added, and a period holding any is **approximate**.
  * A tombstone's snapshot is skipped: a row that was already gone is not a
  * row the day wrote.
+ *
+ * A snapshot's `seq` is the row's old one, which says nothing about when the
+ * row was saved — a note's row, re-stamped on every save, keeps the seq it
+ * was made with. So the log is read in the order snapshots first, by the day
+ * they were saved, then every edit by `seq` (`byPlace`): the seeded rows are
+ * the beginning of history, whatever seq they hold, and a day's "before" is
+ * everything placed ahead of its first event in that order.
  */
 
 /** A word diff's piece: a run of text that both have, or only one of them. */
@@ -128,9 +135,17 @@ const isSnapshot = (event: LoggedEvent) => event.batch === SNAPSHOT_BATCH
 /** A snapshot of a row that was already deleted: not a row the day wrote. */
 const isTombstoneSnapshot = (event: LoggedEvent) =>
   isSnapshot(event) && typeof (event.patch as { deleted_at?: unknown }).deleted_at === "number"
+/** The snapshot of a note's own row. Its stamp is the note's last save, not
+ * a day anything was written: the note is placed at the very beginning of
+ * history, so its rows are found on their own days. */
+const isNoteSnapshot = (event: LoggedEvent) =>
+  isSnapshot(event) &&
+  event.entity === "block" &&
+  isNoteType(String((event.patch as { type?: unknown }).type))
 /** An event the calendar reads as something written: not a view's row, and
- * not the snapshot of a row that was already gone. */
-const isWriting = (event: LoggedEvent) => event.entity !== "view" && !isTombstoneSnapshot(event)
+ * not a snapshot that stands for no day's writing. */
+const isWriting = (event: LoggedEvent) =>
+  event.entity !== "view" && !isTombstoneSnapshot(event) && !isNoteSnapshot(event)
 
 /** Rows of context kept on either side of a change before a run folds. */
 const FOLD_CONTEXT = 1
@@ -152,7 +167,23 @@ export function periodMatcher(periodId: string): ((day: string) => boolean) | nu
   return null
 }
 
-const bySeq = (a: LoggedEvent, b: LoggedEvent) => a.seq - b.seq
+/** The order the calendar reads the log in (see the module header): the
+ * notes' own snapshots first, then the other snapshots by the day they were
+ * saved on, then the edits by seq — seq within each. Snapshots always hold
+ * lower seqs than edits, so the fold — which applies by seq — agrees. */
+const byPlace =
+  (viewerTz: number) =>
+  (a: LoggedEvent, b: LoggedEvent): number => {
+    const tierA = isNoteSnapshot(a) ? 0 : isSnapshot(a) ? 1 : 2
+    const tierB = isNoteSnapshot(b) ? 0 : isSnapshot(b) ? 1 : 2
+    if (tierA !== tierB) return tierA - tierB
+    if (tierA === 1) {
+      const dayA = localDayOf(a, viewerTz)
+      const dayB = localDayOf(b, viewerTz)
+      if (dayA !== dayB) return dayA < dayB ? -1 : 1
+    }
+    return a.seq - b.seq
+  }
 
 /** Every day (in the viewer's zone, or the writer's where it said) something
  * was written on — what the calendar dots. A view's row is not writing. */
@@ -170,15 +201,15 @@ export function changesIn(
   options: ChangeOptions = {},
 ): PeriodChanges {
   const inPeriod = periodMatcher(periodId)
-  const sorted = [...log].sort(bySeq)
+  const sorted = [...log].sort(byPlace(viewerTz))
   const earliest =
     sorted.length === 0 ? null : sorted.map((event) => localDayOf(event, viewerTz)).sort()[0]
   if (inPeriod === null) return { events: 0, approximate: false, notes: [], earliest }
   const periodEvents = sorted.filter(
-    (event) => !isTombstoneSnapshot(event) && inPeriod(localDayOf(event, viewerTz)),
+    (event) => (!isSnapshot(event) || isWriting(event)) && inPeriod(localDayOf(event, viewerTz)),
   )
   if (periodEvents.length === 0) return { events: 0, approximate: false, notes: [], earliest }
-  const notes = changesOf(sorted, periodEvents, options)
+  const notes = changesOf(sorted, periodEvents, byPlace(viewerTz), options)
   return {
     events: periodEvents.length,
     approximate: periodEvents.some(isSnapshot),
@@ -201,9 +232,9 @@ export function sittingsIn(
   const inPeriod = periodMatcher(periodId)
   if (inPeriod === null) return []
   const gapMs = options.gapMs ?? SITTING_GAP_MS
-  const sorted = [...log].sort(bySeq)
+  const sorted = [...log].sort(byPlace(viewerTz))
   const periodEvents = sorted.filter(
-    (event) => !isTombstoneSnapshot(event) && inPeriod(localDayOf(event, viewerTz)),
+    (event) => (!isSnapshot(event) || isWriting(event)) && inPeriod(localDayOf(event, viewerTz)),
   )
   // The rows last saved on the day before history began are one sitting,
   // ahead of the day's edits: the replica's, not a device's.
@@ -225,7 +256,7 @@ export function sittingsIn(
     tz: run[0].tz ?? null,
     device: isSnapshot(run[0]) ? SNAPSHOT_BATCH : deviceOf(run[0]),
     events: run.length,
-    notes: changesOf(sorted, run, options),
+    notes: changesOf(sorted, run, byPlace(viewerTz), options),
   }))
 }
 
@@ -235,16 +266,17 @@ const deviceOf = (event: LoggedEvent) => event.device.split(".")[0]
 
 /**
  * The notes a run of events changed, each as the difference between the
- * fold of everything placed ahead of the run's first event and that fold
- * with the run — and only the run — applied on top.
+ * fold of everything placed ahead of the run's first event (`byPlace`) and
+ * that fold with the run — and only the run — applied on top.
  */
 function changesOf(
   sorted: readonly LoggedEvent[],
   run: readonly LoggedEvent[],
+  place: (a: LoggedEvent, b: LoggedEvent) => number,
   options: ChangeOptions,
 ): NoteChange[] {
-  const firstSeq = run[0].seq
-  const before = sorted.filter((event) => event.seq < firstSeq)
+  const first = run[0]
+  const before = sorted.filter((event) => place(event, first) < 0)
   const graphBefore = graphOf(fold(before))
   const graphAfter = graphOf(fold([...before, ...run]))
 

@@ -313,6 +313,37 @@ describe("changesIn", () => {
       expect(rowsOf(ninth.notes[0])).toEqual(["= one", "~ two{+, edited+}"])
     })
 
+    it("reads the seeded rows as the beginning of history, whatever seq they hold", () => {
+      // The note's row was re-stamped by its last save, so its snapshot is
+      // on the 9th at the lowest seq; its rows were saved on the 7th. The
+      // 9th's real edit must still find the row it edits.
+      const w = writer()
+      const log = [
+        w.snapshot(utc("2026-10-09T09:00:00Z"), "n", "Plans", null),
+        w.snapshot(utc("2026-10-07T10:00:00Z"), "a", "one", "n"),
+        w.snapshotLink(utc("2026-10-07T10:00:00Z"), "n", "a", "a0"),
+        w.snapshot(utc("2026-10-07T10:00:00Z"), "c", "three", "n"),
+        w.snapshotLink(utc("2026-10-07T10:00:00Z"), "n", "c", "a2"),
+        w.snapshot(utc("2026-10-09T09:00:00Z"), "b", "two", "n"),
+        w.snapshotLink(utc("2026-10-09T09:00:00Z"), "n", "b", "a1"),
+        w.edit(utc("2026-10-09T12:00:00Z"), "a", "one, edited"),
+      ]
+      const seventh = changesIn(log, "2026-10-07", 0)
+      expect(seventh.notes[0]).toMatchObject({ kind: "saved", touched: 2 })
+      expect(rowsOf(seventh.notes[0])).toEqual(["· one", "· three"])
+
+      const ninth = changesIn(log, "2026-10-09", 0)
+      expect(ninth.approximate).toBe(true)
+      expect(ninth.notes[0]).toMatchObject({ kind: "edited", changed: 1, touched: 1 })
+      expect(rowsOf(ninth.notes[0])).toEqual(["~ one{+, edited+}", "· two", "= three"])
+      // The note's own re-stamp is no row written on the 9th.
+      expect(ninth.events).toBe(3)
+
+      const sittings = sittingsIn(log, "2026-10-09", 0)
+      expect(sittings.map((s) => s.device)).toEqual(["snapshot", "dev"])
+      expect(rowsOf(sittings[1].notes[0])).toEqual(["~ one{+, edited+}", "= two", "= three"])
+    })
+
     it("dots a snapshot's day, but not a tombstone's", () => {
       expect([...daysWithChanges(seeded(), 0)].sort()).toEqual([
         "2026-10-07",
