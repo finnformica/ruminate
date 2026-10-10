@@ -26,6 +26,9 @@ import {
  * the two are rows in two different people's corpora.
  * Signed out they apply to the in-memory sample graph.
  *
+ * A batch may name the command behind it (`cause`), which the event log keeps
+ * beside each change it amounts to (docs/event-sourcing.md); none does yet.
+ *
  * A batch may carry **view writes** with it (`ViewWrite`, src/data/views.ts)
  * — the row a note or board is created with (`LISTED_VIEW`), so the node
  * and the row that lists it land in the one write. A view is the viewer's
@@ -35,7 +38,12 @@ import {
 export function useApplyOps() {
   return useAtomCallback(
     React.useCallback(
-      (get, set, ops: readonly Op[], extra: { views?: readonly ViewWrite[] } = {}) => {
+      (
+        get,
+        set,
+        ops: readonly Op[],
+        extra: { views?: readonly ViewWrite[]; cause?: string } = {},
+      ) => {
         const writes = extra.views ?? []
         if (ops.length === 0 && writes.length === 0) return
         if (!get(isDatabaseModeAtom)) {
@@ -55,7 +63,7 @@ export function useApplyOps() {
         const route =
           origin.size === 0 || ops.length === 0 ? { kind: "own" as const } : routeOps(ops, origin)
         if (route.kind === "own") {
-          databaseApplyOps(ops, writes)
+          databaseApplyOps(ops, writes, extra.cause)
           return
         }
         if (route.kind === "mixed" || namesOwnNodes(ops, origin, get(databaseGraphAtom))) {

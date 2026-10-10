@@ -35,13 +35,24 @@ function deviceId(): string {
   }
 }
 
+/** A fresh id for something this writer makes — an event, or the batch one
+ * gesture's events share (`EventEnvelope.id` / `.batch`). */
+export const mintWriterId = (prefix: "evt" | "bat"): string => `${prefix}_${mint(12)}`
+
+/** This tab's name in the log: `<device>.<tab>` (`EventEnvelope.device`). */
+export const writerDevice = (): string => `${deviceId()}.${TAB}`
+
+/** The writer's UTC offset right now, in minutes EAST of UTC
+ * (`EventEnvelope.tz`): `Date#getTimezoneOffset` with its sign put right. */
+export const writerTimezone = (): number => -new Date().getTimezoneOffset()
+
 export const WRITER_DEVICE_HEADER = "X-Ruminate-Device"
 export const WRITER_BUILD_HEADER = "X-Ruminate-Build"
 
 /** Spread into the headers of every request that writes. */
 export function writerHeaders(): Record<string, string> {
   return {
-    [WRITER_DEVICE_HEADER]: `${deviceId()}.${TAB}`,
+    [WRITER_DEVICE_HEADER]: writerDevice(),
     // The changelog version is the app's build identity (vite.config.ts): it
     // changes with every change a user could see.
     [WRITER_BUILD_HEADER]:

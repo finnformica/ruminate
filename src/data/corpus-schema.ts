@@ -65,12 +65,16 @@ export interface CorpusMigrations {
    * migration, so the local ladder only bumps its version and the cache
    * re-pulls (`LOCAL_V8_SQL`). */
   noteViews?: string
+  /** migrations/0023: the event log — required in `"columns"` mode. The
+   * local store gets its own, single-tenant log (`LOCAL_V9_SQL`): the events
+   * this device made, pushed from there. */
+  events?: string
 }
 
 /** Which v3 shape the ladder should produce (see the module header). */
 export type CorpusTenancy = "single" | "columns"
 
-const CORPUS_SCHEMA_VERSION = "8"
+const CORPUS_SCHEMA_VERSION = "9"
 
 /**
  * The single-tenant v5 step: the `views` table (migrations/0015) — the
@@ -126,6 +130,46 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '8');
 `
 
 /**
+ * The single-tenant v9 step: the device's own event log, and `seq` on the
+ * cached rows (docs/event-sourcing.md).
+ *
+ * `events` holds what THIS device did — every op the editor applied, as the
+ * events it amounts to (`opsToEvents`) — and is the push queue: a row with
+ * `seq` NULL has not reached the replica yet, and survives a reload where the
+ * in-memory queue it replaces did not. `seq` is stamped from the replica's
+ * answer when the push lands. It is not the tenant's whole log: other devices'
+ * events arrive as rows, by the pull, as they always have.
+ *
+ * `seq` on `nodes`, `link` and `views` is the replica's sequence for the row
+ * as last pulled — what an edit made here believed it was changing
+ * (`base_seq`). The cache never assigns one.
+ */
+const LOCAL_V9_SQL = `
+ALTER TABLE nodes ADD COLUMN seq INTEGER;
+ALTER TABLE link ADD COLUMN seq INTEGER;
+ALTER TABLE views ADD COLUMN seq INTEGER;
+CREATE TABLE events (
+  id         TEXT PRIMARY KEY,
+  seq        INTEGER,
+  entity     TEXT NOT NULL,
+  entity_id  TEXT NOT NULL,
+  action     TEXT NOT NULL,
+  patch      TEXT NOT NULL,
+  v          INTEGER NOT NULL,
+  batch      TEXT NOT NULL,
+  device     TEXT NOT NULL,
+  cause      TEXT,
+  base_seq   INTEGER,
+  ref_seq    INTEGER,
+  at         INTEGER NOT NULL,
+  tz         INTEGER,
+  position   INTEGER NOT NULL
+);
+CREATE INDEX events_unpushed ON events (seq, position);
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '9');
+`
+
+/**
  * The single-tenant v4 step: `notes_id` on nodes (migrations/0006) and nothing
  * else — no backfill, because the local store is a cache and re-pulls the
  * note ids the replica computed (`CACHE_GENERATION`, database-mode.ts).
@@ -149,6 +193,7 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '3');
 /** Drop everything either migration creates, so an incompatible schema can be
  * rebuilt from scratch — safe because a corpus can be re-pulled/re-pushed. */
 const RESET_SQL = `
+DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS views;
 DROP TABLE IF EXISTS link;
 DROP TABLE IF EXISTS nodes;
@@ -253,6 +298,21 @@ async function applyV8(
   await driver.execScript(migrations.noteViews)
 }
 
+async function applyV9(
+  driver: SqlDriver,
+  migrations: CorpusMigrations,
+  tenancy: CorpusTenancy,
+): Promise<void> {
+  if (tenancy === "single") {
+    await driver.execScript(LOCAL_V9_SQL)
+    return
+  }
+  if (!migrations.events) {
+    throw new Error('ensureCorpusSchema: "columns" tenancy needs migrations.events (0023)')
+  }
+  await driver.execScript(migrations.events)
+}
+
 /**
  * Bring `driver`'s database to the current corpus schema: apply the full
  * migration ladder when empty, migrate a v1/v2/v3 database in place, and
@@ -281,6 +341,7 @@ export async function ensureCorpusSchema(
     await applyV6(driver, migrations, tenancy)
     await applyV7(driver, migrations, tenancy)
     await applyV8(driver, migrations, tenancy)
+    await applyV9(driver, migrations, tenancy)
   } else {
     // In "columns" mode `meta` is keyed by (user_id, key), so this can see more
     // than one row — every tenant shares one DDL version, so any of them
@@ -295,6 +356,7 @@ export async function ensureCorpusSchema(
       await applyV6(driver, migrations, tenancy)
       await applyV7(driver, migrations, tenancy)
       await applyV8(driver, migrations, tenancy)
+      await applyV9(driver, migrations, tenancy)
     } else if (version === "2") {
       await applyV3(driver, migrations, tenancy)
       await applyV4(driver, migrations, tenancy)
@@ -302,26 +364,34 @@ export async function ensureCorpusSchema(
       await applyV6(driver, migrations, tenancy)
       await applyV7(driver, migrations, tenancy)
       await applyV8(driver, migrations, tenancy)
+      await applyV9(driver, migrations, tenancy)
     } else if (version === "3") {
       await applyV4(driver, migrations, tenancy)
       await applyV5(driver, migrations, tenancy)
       await applyV6(driver, migrations, tenancy)
       await applyV7(driver, migrations, tenancy)
       await applyV8(driver, migrations, tenancy)
+      await applyV9(driver, migrations, tenancy)
     } else if (version === "4") {
       await applyV5(driver, migrations, tenancy)
       await applyV6(driver, migrations, tenancy)
       await applyV7(driver, migrations, tenancy)
       await applyV8(driver, migrations, tenancy)
+      await applyV9(driver, migrations, tenancy)
     } else if (version === "5") {
       await applyV6(driver, migrations, tenancy)
       await applyV7(driver, migrations, tenancy)
       await applyV8(driver, migrations, tenancy)
+      await applyV9(driver, migrations, tenancy)
     } else if (version === "6") {
       await applyV7(driver, migrations, tenancy)
       await applyV8(driver, migrations, tenancy)
+      await applyV9(driver, migrations, tenancy)
     } else if (version === "7") {
       await applyV8(driver, migrations, tenancy)
+      await applyV9(driver, migrations, tenancy)
+    } else if (version === "8") {
+      await applyV9(driver, migrations, tenancy)
     } else if (version !== CORPUS_SCHEMA_VERSION) {
       await driver.execScript(RESET_SQL + full)
       await applyV3(driver, migrations, tenancy)
@@ -330,6 +400,7 @@ export async function ensureCorpusSchema(
       await applyV6(driver, migrations, tenancy)
       await applyV7(driver, migrations, tenancy)
       await applyV8(driver, migrations, tenancy)
+      await applyV9(driver, migrations, tenancy)
     }
   }
 }

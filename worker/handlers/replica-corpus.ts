@@ -21,7 +21,8 @@
 // runs is the one a reader sees.
 
 import type { TenantDb } from "../tenancy-db"
-import { writeRows } from "./event-log"
+import { appendClientEvents, writeRows } from "./event-log"
+import type { EventsPutPayload, EventsPutResult } from "../../src/data/events"
 import {
   toLinkRow,
   toNodeRow,
@@ -154,22 +155,11 @@ export async function corpusPut(
   now: number = Date.now(),
   writer: { device?: string; client?: string | null } = {},
 ): Promise<ReplicaPutResult> {
-  const cursor =
-    payload.cursor === undefined
-      ? []
-      : [
-          {
-            sql:
-              "INSERT INTO meta (user_id, key, value) VALUES (:tenant, 'replica_cursor', ?1) " +
-              "ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value",
-            params: [payload.cursor],
-          },
-        ]
   await writeRows(
     tenant,
     payload,
     { actor: tenant.userId, origin: "replica", now, ...writer },
-    cursor,
+    cursorStatements(payload.cursor),
   )
   return {
     ok: true,
@@ -178,6 +168,42 @@ export async function corpusPut(
     deletes: (payload.deleteNodes?.length ?? 0) + (payload.deleteLinks?.length ?? 0),
     cursor: payload.cursor ?? null,
   }
+}
+
+/** The browser's `replica_cursor` stamp, to ride in a push's transaction. */
+const cursorStatements = (cursor: string | undefined) =>
+  cursor === undefined
+    ? []
+    : [
+        {
+          sql:
+            "INSERT INTO meta (user_id, key, value) VALUES (:tenant, 'replica_cursor', ?1) " +
+            "ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value",
+          params: [cursor],
+        },
+      ]
+
+/**
+ * Apply one validated push of EVENTS — a client of this build's own account
+ * of what it did (`opsToEvents`; docs/event-sourcing.md) — as a single atomic
+ * batch: stale events dropped, the rest appended and projected
+ * (`appendClientEvents`, event-log.ts). The payload must already have passed
+ * `parseEventsPayload`; validation stays at the HTTP boundary. The browser's
+ * `replica_cursor` stamp rides in the same transaction.
+ */
+export async function corpusPutEvents(
+  tenant: TenantDb,
+  payload: EventsPutPayload,
+  now: number = Date.now(),
+  writer: { device?: string; client?: string | null } = {},
+): Promise<EventsPutResult> {
+  const landed = await appendClientEvents(
+    tenant,
+    payload.events,
+    { actor: tenant.userId, origin: "replica", now, ...writer },
+    cursorStatements(payload.cursor),
+  )
+  return { ok: true, ...landed, cursor: payload.cursor ?? null }
 }
 
 /**

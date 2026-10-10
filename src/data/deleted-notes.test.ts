@@ -8,6 +8,7 @@ import type { NoteStore } from "./note-store"
 import { deleteBlockOps, deleteNoteOps, docToOps, type Op } from "./ops"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import { openSqlNoteStore } from "./sql-note-store"
+import { applyOpsToStore } from "./store-test-support"
 
 async function makeStore() {
   return openSqlNoteStore(createNodeSqlDriver())
@@ -15,20 +16,20 @@ async function makeStore() {
 
 /** Save a note as the app does: diff the doc against the live graph into ops. */
 async function seed(store: NoteStore, id: string, markdown: string) {
-  return store.applyOps(docToOps(id, parse(markdown), await store.getGraph()))
+  return applyOpsToStore(store, docToOps(id, parse(markdown), await store.getGraph()))
 }
 
 const noteOf = async (store: NoteStore, id: string) => rollup(id, await store.getGraph())
 
 /** Delete the note as the app does, over the store's live graph. */
 async function deleteNote(store: NoteStore, id: string) {
-  return store.applyOps(deleteNoteOps(id, await store.getGraph()))
+  return applyOpsToStore(store, deleteNoteOps(id, await store.getGraph()))
 }
 
 /** Put the note back as Settings does: plan over every row, apply the batch. */
 async function restore(store: NoteStore, id: string): Promise<Op[]> {
   const ops = restoreNoteOps(id, await store.getAllRows())
-  await store.applyOps(ops)
+  await applyOpsToStore(store, ops)
   return ops
 }
 
@@ -55,7 +56,7 @@ describe("deletedNotesOf", () => {
 
   it("names a note by its title, or by its id when it has none", async () => {
     const store = await makeStore()
-    await store.applyOps([
+    await applyOpsToStore(store, [
       { op: "create", id: "titled", type: "note", text: "A title", props: null },
       { op: "create", id: "untitled", type: "note", text: "untitled", props: null },
     ])
@@ -90,7 +91,7 @@ describe("restoreNoteOps", () => {
     const store = await makeStore()
     await seed(store, "a", "- mine\n  id:: blk_mine000000\n- shared\n  id:: blk_shared0000\n")
     await seed(store, "b", "- b\n  id:: blk_b000000000\n")
-    await store.applyOps([
+    await applyOpsToStore(store, [
       { op: "link", source: "b", destination: "blk_shared0000", sortKey: "a1" },
     ])
     const before = await noteOf(store, "b")
@@ -116,7 +117,7 @@ describe("restoreNoteOps", () => {
     const store = await makeStore()
     await seed(store, "a", A)
     // `stray` was written in a but nothing reaches it: the Unassigned basket.
-    await store.applyOps([
+    await applyOpsToStore(store, [
       {
         op: "create",
         id: "blk_stray00000",
@@ -127,7 +128,7 @@ describe("restoreNoteOps", () => {
       },
     ])
     // `deep` is deleted deliberately, in its own right, before the note is.
-    await store.applyOps(deleteBlockOps("blk_deep000000", await store.getGraph()))
+    await applyOpsToStore(store, deleteBlockOps("blk_deep000000", await store.getGraph()))
     await new Promise((resolve) => setTimeout(resolve, 2))
     await deleteNote(store, "a")
 
@@ -148,7 +149,7 @@ describe("restoreNoteOps", () => {
     const store = await makeStore()
     await seed(store, "a", A)
     // Removing `one` from the outline is an unlink; the block goes to the basket.
-    await store.applyOps([{ op: "unlink", source: "a", destination: "blk_one0000000" }])
+    await applyOpsToStore(store, [{ op: "unlink", source: "a", destination: "blk_one0000000" }])
     await deleteNote(store, "a")
     await restore(store, "a")
     expect(await noteOf(store, "a")).toBe(
@@ -164,7 +165,7 @@ describe("restoreNoteOps", () => {
     await seed(store, "b", "- b\n  id:: blk_b000000000\n")
     const graph = await store.getGraph()
     // One flush lands both deletes: one writer, one `deleted_at`.
-    await store.applyOps([...deleteNoteOps("a", graph), ...deleteNoteOps("b", graph)])
+    await applyOpsToStore(store, [...deleteNoteOps("a", graph), ...deleteNoteOps("b", graph)])
     const rows = await store.getAllRows()
     const stamps = new Set(rows.nodes.map((node) => node.deleted_at))
     expect(stamps.size).toBe(1)
@@ -179,7 +180,7 @@ describe("restoreNoteOps", () => {
     const store = await makeStore()
     await seed(store, "a", A)
     await seed(store, "b", "- b\n  id:: blk_b000000000\n")
-    await store.applyOps([
+    await applyOpsToStore(store, [
       { op: "create", id: CORPUS_ROOT_ID, type: ROOT_TYPE, text: "", props: null },
       { op: "link", source: CORPUS_ROOT_ID, destination: "a", sortKey: "a0" },
       { op: "link", source: CORPUS_ROOT_ID, destination: "b", sortKey: "a1" },

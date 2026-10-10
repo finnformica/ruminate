@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest"
 import {
+  EVENT_VERSION,
+  MAX_EVENTS_PER_PUT,
   coalesceTyping,
   fold,
   historyOf,
   linkEntityId,
   netChanges,
   opsToEvents,
+  parseEvent,
+  parseEventsPayload,
   planRestore,
   rowsToEvents,
   stateAt,
@@ -21,7 +25,14 @@ import type { ViewRow } from "./views"
 
 function context(device = "tab", at = 1_000): EventContext {
   let n = 0
-  return { batch: "b1", device, at, cause: "test", mintId: () => `evt_${device}_${at}_${(n += 1)}` }
+  return {
+    batch: "b1",
+    device,
+    at,
+    tz: 60,
+    cause: "test",
+    mintId: () => `evt_${device}_${at}_${(n += 1)}`,
+  }
 }
 
 /** Number events the way the replica would. */
@@ -209,6 +220,118 @@ describe("viewChangeToEvent", () => {
     expect(viewChangeToEvent(view, { ...view, deleted_at: 9 }, ctx)?.action).toBe("delete")
     expect(viewChangeToEvent({ ...view, deleted_at: 9 }, view, ctx)?.action).toBe("restore")
     expect(viewChangeToEvent(view, { ...view }, ctx)).toBeNull()
+  })
+
+  it("stamps the event with the row's own clock, so the projection lands the row as it was", () => {
+    const ctx = context("tab", 99_999)
+    const later = { ...view, pinned: true, updated_at: 42 }
+    expect(viewChangeToEvent(view, later, ctx)?.at).toBe(42)
+    expect(viewChangeToEvent(undefined, later, ctx)?.at).toBe(42)
+    // A tombstone stamped at its own moment says nothing more; one stamped
+    // earlier than the row carries the stamp.
+    expect(viewChangeToEvent(view, { ...view, updated_at: 9, deleted_at: 9 }, ctx)?.patch).toEqual(
+      {},
+    )
+    expect(viewChangeToEvent(view, { ...view, updated_at: 9, deleted_at: 7 }, ctx)?.patch).toEqual({
+      deleted_at: 7,
+    })
+  })
+})
+
+describe("the envelope", () => {
+  it("carries the writer's zone when the context names one, and nothing when it does not", () => {
+    const [withZone] = opsToEvents(snapshot, [{ op: "setText", id: "a", text: "A!" }], context())
+    expect(withZone.tz).toBe(60)
+    const { tz: _tz, ...bare } = context()
+    const [without] = opsToEvents(snapshot, [{ op: "setText", id: "a", text: "A!" }], bare)
+    expect("tz" in without).toBe(false)
+  })
+
+  it("drops an op on what the snapshot does not hold, as the store always dropped it", () => {
+    const events = opsToEvents(
+      snapshot,
+      [
+        { op: "setText", id: "ghost", text: "boo" },
+        { op: "delete", id: "ghost" },
+        { op: "unlink", source: "note", destination: "ghost" },
+      ],
+      context(),
+    )
+    expect(events).toEqual([])
+  })
+})
+
+describe("parseEvent", () => {
+  const good = {
+    id: "evt_1",
+    entity: "block",
+    entity_id: "a",
+    action: "update",
+    patch: { text: "A" },
+    batch: "bat_1",
+    device: "dev.tab",
+    at: 1_000,
+    tz: 60,
+    v: EVENT_VERSION,
+  }
+
+  it("takes a well-formed event field by field, and leaves `seq` and strangers behind", () => {
+    const parsed = parseEvent({ ...good, seq: 99, actor: 7, origin: "mcp", extra: true })
+    expect(parsed).toEqual(good)
+    expect(parsed && "seq" in parsed).toBe(false)
+  })
+
+  it("wants every field on a create, any on an update, none on a delete", () => {
+    const create = { ...good, action: "create", patch: { type: "text", text: "A", props: null } }
+    expect(parseEvent(create)).toBeNull() // notes_id missing
+    expect(parseEvent({ ...create, patch: { ...create.patch, notes_id: null } })).not.toBeNull()
+    expect(parseEvent({ ...good, patch: {} })).toBeNull() // an update that changes nothing
+    expect(parseEvent({ ...good, action: "delete", patch: {} })).not.toBeNull()
+    expect(parseEvent({ ...good, action: "delete", patch: { text: "A" } })).toBeNull()
+    expect(parseEvent({ ...good, action: "delete", patch: { deleted_at: 5 } })).not.toBeNull()
+    expect(parseEvent({ ...good, patch: { deleted_at: 5 } })).toBeNull() // not on an update
+  })
+
+  it("refuses a field of the wrong type, an unknown field, and a key that does not match its link", () => {
+    expect(parseEvent({ ...good, patch: { text: 5 } })).toBeNull()
+    expect(parseEvent({ ...good, patch: { colour: "red" } })).toBeNull()
+    expect(parseEvent({ ...good, entity: "view", patch: { pinned: "yes" } })).toBeNull()
+    const link = {
+      ...good,
+      entity: "link",
+      entity_id: linkEntityId("a", "b"),
+      action: "create",
+      patch: { source_id: "a", destination_id: "b", kind: "child", sort_key: "a0" },
+    }
+    expect(parseEvent(link)).not.toBeNull()
+    expect(parseEvent({ ...link, entity_id: linkEntityId("a", "c") })).toBeNull()
+  })
+
+  it("refuses an envelope it cannot store: a wrong version, a zone no clock has, a restore with no reference", () => {
+    expect(parseEvent({ ...good, v: 2 })).toBeNull()
+    expect(parseEvent({ ...good, tz: 2_000 })).toBeNull()
+    expect(parseEvent({ ...good, tz: null })).not.toBeNull()
+    expect(parseEvent({ ...good, at: "yesterday" })).toBeNull()
+    expect(parseEvent({ ...good, id: "" })).toBeNull()
+    expect(parseEvent({ ...good, action: "restore" })).toBeNull()
+    expect(parseEvent({ ...good, action: "restore", ref_seq: 4 })).toMatchObject({ ref_seq: 4 })
+    expect(parseEvent({ ...good, action: "restore", ref_seq: null })).not.toBeNull()
+    expect(parseEvent({ ...good, base_seq: 1.5 })).toBeNull()
+  })
+
+  it("a payload is all or nothing, and bounded", () => {
+    expect(parseEventsPayload({ events: [good], cursor: "c1" })).toEqual({
+      events: [good],
+      cursor: "c1",
+    })
+    expect(parseEventsPayload({ events: [good] })).toEqual({ events: [good] })
+    expect(parseEventsPayload({ events: [good, { ...good, v: 0 }] })).toBeNull()
+    expect(parseEventsPayload({ events: [good], cursor: 1 })).toBeNull()
+    expect(parseEventsPayload({ events: "many" })).toBeNull()
+    expect(parseEventsPayload(null)).toBeNull()
+    expect(
+      parseEventsPayload({ events: Array.from({ length: MAX_EVENTS_PER_PUT + 1 }, () => good) }),
+    ).toBeNull()
   })
 })
 

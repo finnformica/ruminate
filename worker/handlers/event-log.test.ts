@@ -12,6 +12,7 @@ import {
 import type { SqlDriver } from "../../src/data/sql-driver"
 import { ensureTenantMeta, forTenant, type TenantDb } from "../tenancy-db"
 import {
+  appendClientEvents,
   appendEvents,
   corpusAt,
   planEventAppend,
@@ -362,6 +363,124 @@ describe("every writer's rows become events", () => {
       "SELECT value FROM meta WHERE user_id = 111 AND key = 'replica_cursor'",
     )
     expect(meta.value).toBe("c-1")
+  })
+})
+
+describe("a client's own events", () => {
+  const client = (tenant: TenantDb, events: RuminateEvent[], now = 5_000) =>
+    appendClientEvents(tenant, events, {
+      actor: tenant.userId,
+      origin: "replica",
+      client: "2026-W41.abc",
+      now,
+    })
+
+  it("lands as it was made — cause, base, zone and all — and answers each event's seq", async () => {
+    const { alice } = await open()
+    const w = writer("dev.tab")
+    const made = [w.block("note", "note", "N", null), w.block("a", "text", "A")]
+    made[1] = { ...made[1], cause: "paste", tz: 60, base_seq: null }
+    const landed = await client(alice, made)
+    expect(landed).toEqual({
+      appended: 2,
+      stale: 0,
+      seqs: [
+        [made[0].id, 1],
+        [made[1].id, 2],
+      ],
+    })
+    const log = await readEvents(alice)
+    expect(log[1]).toMatchObject({
+      cause: "paste",
+      tz: 60,
+      device: "dev.tab",
+      client: "2026-W41.abc",
+      origin: "replica",
+      actor: 111,
+      received_at: 5_000,
+    })
+    expect(log[0].tz).toBeNull()
+    // The projection follows, as for any append; the fold agrees.
+    const pulled = await corpusPullSince(alice, 0)
+    expect(pulled.nodes.map((row) => [row.id, row.text, row.seq])).toEqual([
+      ["note", "N", 1],
+      ["a", "A", 2],
+    ])
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, events: 2 })
+  })
+
+  it("drops what is stale — behind the row the replica holds — and keeps a create whatever is held", async () => {
+    const { alice } = await open()
+    const w = writer("dev.tab")
+    await client(alice, [w.block("a", "text", "A")]) // at 1010
+    // Another device edited since: the row is at 2000.
+    await corpusPut(alice, { nodes: [node("a", "text", "A, elsewhere", 2_000)], links: [] })
+
+    const stale = { ...w.edit("a", { text: "A, offline" }), at: 1_500 }
+    const fresh = { ...w.edit("a", { text: "A, after" }), at: 2_500 }
+    const again = { ...w.block("a", "text", "A, again"), at: 1_600 } // a create: never stale
+    const landed = await client(alice, [stale, fresh, again])
+    expect(landed.stale).toBe(1)
+    expect(landed.appended).toBe(2)
+    expect(landed.seqs.map(([id]) => id)).toEqual([fresh.id, again.id])
+    const log = await readEvents(alice)
+    expect(shape(log)).toEqual([
+      "1 block.create a",
+      "2 block.update a",
+      "3 block.update a",
+      "4 block.create a",
+    ])
+    expect(await verifyLog(alice)).toMatchObject({ ok: true })
+  })
+
+  it("is idempotent: a re-sent push appends nothing, projects nothing, and answers the same seqs", async () => {
+    const { alice } = await open()
+    const w = writer("dev.tab")
+    const made = [w.block("a", "text", "A"), w.edit("a", { text: "A!" })]
+    const first = await client(alice, made)
+    // Something else landed in between; the re-send must not lay the old
+    // net change over it.
+    await corpusPut(alice, { nodes: [node("a", "text", "A, elsewhere", 9_000)], links: [] })
+    const second = await client(alice, made)
+    expect(second).toEqual({ appended: 0, stale: 0, seqs: first.seqs })
+    const pulled = await corpusPullSince(alice, 0)
+    expect(pulled.nodes[0].text).toBe("A, elsewhere")
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, events: 3 })
+  })
+
+  it("carries the browser's cursor in the same transaction, like a push of rows", async () => {
+    const { driver, alice } = await open()
+    const w = writer("dev.tab")
+    await appendClientEvents(
+      alice,
+      [w.block("a", "text", "A")],
+      { actor: 111, origin: "replica", now: 1 },
+      [
+        {
+          sql:
+            "INSERT INTO meta (user_id, key, value) VALUES (:tenant, 'replica_cursor', ?1) " +
+            "ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value",
+          params: ["c-7"],
+        },
+      ],
+    )
+    const [meta] = await driver.exec(
+      "SELECT value FROM meta WHERE user_id = 111 AND key = 'replica_cursor'",
+    )
+    expect(meta.value).toBe("c-7")
+  })
+
+  it("reconciles first, like every write: a tenant's genesis can be its first push of events", async () => {
+    const { driver, alice } = await open()
+    // A row written around the log — the old Worker, before this one.
+    await driver.exec(
+      "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at, notes_id, seq) " +
+        "VALUES (111, 'old', 'text', 'before the log', NULL, 50, NULL, NULL, 7)",
+    )
+    const w = writer("dev.tab")
+    await client(alice, [w.block("a", "text", "A")])
+    expect(shape(await readEvents(alice))).toEqual(["7 block.create old", "8 block.create a"])
+    expect(await verifyLog(alice)).toMatchObject({ ok: true })
   })
 })
 

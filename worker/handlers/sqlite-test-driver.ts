@@ -101,13 +101,10 @@ export async function createTenantTestDriver(): Promise<SqlDriver> {
       retireViewProps: migration0016,
       boardType: migration0020,
       noteViews: migration0021,
+      events: migration0023,
     },
     "columns",
   )
-  // The event log (migrations/0023) is the replica's alone — the browser's
-  // store is a cache of the projections and never holds it — so it is applied
-  // here rather than through the ladder the two share.
-  await driver.execScript(migration0023)
   return driver
 }
 

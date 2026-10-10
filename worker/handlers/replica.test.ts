@@ -924,6 +924,99 @@ describe("tenant scoping — the adversarial suite", () => {
       expect(pulled.nodes).toMatchObject([{ id: "blk_secret0001", text: "alice's secret" }])
     })
 
+    it("takes a client's own events, scoped to the tenant, with the header's device as the fallback", async () => {
+      const { env } = await seededEnv()
+      const event = (id: string, text: string, device = "dev12345.tab001") => ({
+        id,
+        entity: "block",
+        entity_id: "blk_bob0000001",
+        action: id.endsWith("1") ? "create" : "update",
+        patch: id.endsWith("1") ? { type: "text", text, props: null, notes_id: null } : { text },
+        batch: "bat_1",
+        device,
+        at: 500,
+        tz: -300,
+        v: 1,
+      })
+      const response = await replica(
+        new Request("https://example.com/api/replica/events", {
+          method: "PUT",
+          headers: { ...clientHeaders("bob-token"), "X-Ruminate-Device": "hdr00000.tab999" },
+          body: JSON.stringify({
+            events: [event("evt_1", "bob's"), event("evt_2", "bob's own", "<script>")],
+            cursor: "bob-c1",
+          }),
+        }),
+        env,
+        github,
+      )
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({
+        ok: true,
+        appended: 2,
+        stale: 0,
+        seqs: [
+          ["evt_1", 1],
+          ["evt_2", 2],
+        ],
+        cursor: "bob-c1",
+      })
+      const bobs = (await (await get(env, "bob-token", "/api/replica/events")).json()) as {
+        events: Record<string, unknown>[]
+      }
+      expect(bobs.events.map((e) => [e.id, e.device, e.tz, e.actor])).toEqual([
+        ["evt_1", "dev12345.tab001", -300, 222],
+        ["evt_2", "hdr00000.tab999", -300, 222],
+      ])
+      // Alice's log is Alice's: nothing of Bob's reached it.
+      const alices = (await (await get(env, "alice-token", "/api/replica/events")).json()) as {
+        events: { id: string }[]
+      }
+      expect(alices.events.map((e) => e.id)).not.toContain("evt_1")
+      // And the row is Bob's to pull, with the cursor he stamped.
+      const pulled = (await (await get(env, "bob-token", "/api/replica/notes")).json()) as {
+        nodes: { id: string; text: string }[]
+      }
+      expect(pulled.nodes).toMatchObject([{ id: "blk_bob0000001", text: "bob's own" }])
+      const status = (await (await get(env, "bob-token", "/api/replica/status")).json()) as {
+        replica_cursor: string
+      }
+      expect(status.replica_cursor).toBe("bob-c1")
+    })
+
+    it("refuses a push of events with one malformed event, whole", async () => {
+      const { env } = await seededEnv()
+      const bad = await replica(
+        new Request("https://example.com/api/replica/events", {
+          method: "PUT",
+          headers: clientHeaders("alice-token"),
+          body: JSON.stringify({
+            events: [
+              {
+                id: "evt_x",
+                entity: "block",
+                entity_id: "blk_secret0001",
+                action: "update",
+                patch: { text: 42 },
+                batch: "b",
+                device: "d",
+                at: 1,
+                v: 1,
+              },
+            ],
+          }),
+        }),
+        env,
+        github,
+      )
+      expect(bad.status).toBe(400)
+      expect(await bad.json()).toEqual({ error: "invalid_payload" })
+      const log = (await (await get(env, "alice-token", "/api/replica/events")).json()) as {
+        events: { id: string }[]
+      }
+      expect(log.events.map((e) => e.id)).not.toContain("evt_x")
+    })
+
     it("refuses a moment that is neither a seq nor a time, and half an entity", async () => {
       const { env } = await seededEnv()
       expect((await get(env, "alice-token", "/api/replica/at")).status).toBe(400)

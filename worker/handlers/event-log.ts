@@ -100,6 +100,8 @@ interface AppendContext {
 /** What a writer may say about itself: short, plain, and never trusted for
  * anything but the record. Anything else is dropped rather than stored. */
 const SAYABLE = /^[\w.:+-]{1,64}$/
+/** May this be stored as a writer's word about itself (a device, a build)? */
+export const sayable = (word: string): boolean => SAYABLE.test(word)
 
 /** The device and build a request names (src/data/writer-identity.ts). Header
  * names are spelled out here rather than imported: that module touches
@@ -140,7 +142,7 @@ const appendContext = (ctx: WriteContext): AppendContext => ({
 export function planReconcile(ctx: { now: number; appendId: string }): SqlStatement {
   const columns =
     "user_id, seq, id, entity, entity_id, action, patch, v, batch, origin, device, client, " +
-    "cause, actor, base_seq, ref_seq, at, received_at, append"
+    "cause, actor, base_seq, ref_seq, at, tz, received_at, append"
   const tail = "1, 'snapshot', 'system', 'replica', NULL, 'snapshot', :tenant, NULL, NULL"
   const above = "seq > (SELECT COALESCE(MAX(e.seq), 0) FROM events e WHERE e.user_id = :tenant)"
   return {
@@ -148,20 +150,20 @@ export function planReconcile(ctx: { now: number; appendId: string }): SqlStatem
       `INSERT INTO events (${columns}) ` +
       "SELECT :tenant, seq, 'snap_block_' || id || '_' || seq, 'block', id, 'create', " +
       "json_object('type', type, 'text', text, 'props', props, 'notes_id', notes_id, " +
-      `'deleted_at', deleted_at), ${tail}, updated_at, ?1, ?2 ` +
+      `'deleted_at', deleted_at), ${tail}, updated_at, NULL, ?1, ?2 ` +
       `FROM nodes WHERE user_id = :tenant AND ${above} ` +
       "UNION ALL " +
       "SELECT :tenant, seq, " +
       "'snap_link_' || source_id || '|' || destination_id || '|' || kind || '_' || seq, " +
       "'link', source_id || '|' || destination_id || '|' || kind, 'create', " +
       "json_object('source_id', source_id, 'destination_id', destination_id, 'kind', kind, " +
-      `'sort_key', sort_key, 'deleted_at', deleted_at), ${tail}, updated_at, ?1, ?2 ` +
+      `'sort_key', sort_key, 'deleted_at', deleted_at), ${tail}, updated_at, NULL, ?1, ?2 ` +
       `FROM link WHERE user_id = :tenant AND ${above} ` +
       "UNION ALL " +
       "SELECT :tenant, seq, 'snap_view_' || id || '_' || seq, 'view', id, 'create', " +
       "json_object('root_id', root_id, 'filter', filter, 'sort', sort, " +
       "'pinned', json(CASE pinned WHEN 1 THEN 'true' ELSE 'false' END), " +
-      `'sort_key', sort_key, 'deleted_at', deleted_at), ${tail}, updated_at, ?1, ?2 ` +
+      `'sort_key', sort_key, 'deleted_at', deleted_at), ${tail}, updated_at, NULL, ?1, ?2 ` +
       `FROM views WHERE user_id = :tenant AND ${above} ` +
       "ON CONFLICT DO NOTHING " +
       "/* includes-deleted: a snapshot records tombstones as it finds them */",
@@ -298,7 +300,7 @@ function planChunk(
     {
       sql:
         "INSERT INTO events (user_id, seq, id, entity, entity_id, action, patch, v, batch, " +
-        "origin, device, client, cause, actor, base_seq, ref_seq, at, received_at, append) " +
+        "origin, device, client, cause, actor, base_seq, ref_seq, at, tz, received_at, append) " +
         "SELECT :tenant, " +
         "(SELECT COALESCE(MAX(seq), 0) FROM events WHERE user_id = :tenant) + j.key + 1, " +
         "json_extract(j.value, '$.id'), json_extract(j.value, '$.entity'), " +
@@ -306,7 +308,8 @@ function planChunk(
         "json_extract(j.value, '$.patch'), json_extract(j.value, '$.v'), " +
         "json_extract(j.value, '$.batch'), ?5, json_extract(j.value, '$.device'), ?6, " +
         "json_extract(j.value, '$.cause'), ?4, json_extract(j.value, '$.base_seq'), " +
-        "json_extract(j.value, '$.ref_seq'), json_extract(j.value, '$.at'), ?2, ?3 " +
+        "json_extract(j.value, '$.ref_seq'), json_extract(j.value, '$.at'), " +
+        "json_extract(j.value, '$.tz'), ?2, ?3 " +
         "FROM json_each(?1) AS j WHERE true " +
         "ON CONFLICT (user_id, id) DO NOTHING",
       params: [JSON.stringify(events), ctx.now, ctx.appendId, ctx.actor, ctx.origin, ctx.client],
@@ -388,15 +391,113 @@ function planChunk(
   ]
 }
 
-/** Append events a caller already holds (a restore). Reconciles first, like
- * every write. */
+/** Append events a caller already holds (a restore, a client's push).
+ * Reconciles first, like every write; `extra` rides in the same transaction. */
 export async function appendEvents(
   tenant: TenantDb,
   events: readonly RuminateEvent[],
   ctx: WriteContext,
+  extra: SqlStatement[] = [],
 ): Promise<void> {
   const append = appendContext(ctx)
-  await tenant.includingDeleted().batch([planReconcile(append), ...planEventAppend(events, append)])
+  await tenant
+    .includingDeleted()
+    .batch([planReconcile(append), ...planEventAppend(events, append), ...extra])
+}
+
+// -----------------------------------------------------------------------------
+// The other door: events in, as the client made them
+// -----------------------------------------------------------------------------
+
+/**
+ * Which of a client's events a push of them lands, by the rule every row
+ * push lands by: last writer wins on the writer's clock. An `update`,
+ * `delete` or `restore` of an entity the replica holds a NEWER version of is
+ * stale — a device that was offline for a week pushing over a week of edits
+ * made elsewhere — and is dropped, exactly as its row would have written
+ * nothing. A `create` is kept whatever is held: over a tombstone it revives,
+ * over a live entity it lands as an update, and either way the fold does the
+ * same. Whatever the writer did not know about is left in the log for a
+ * history to show; nothing is rewritten to make it fit.
+ */
+function staleEvents(
+  current: CurrentRows,
+  events: readonly RuminateEvent[],
+): Set<RuminateEvent> {
+  const stale = new Set<RuminateEvent>()
+  const heldAt = (event: RuminateEvent): number | undefined =>
+    (event.entity === "block"
+      ? current.nodes.get(event.entity_id)
+      : event.entity === "link"
+        ? current.links.get(event.entity_id)
+        : current.views.get(event.entity_id)
+    )?.updated_at
+  for (const event of events) {
+    if (event.action === "create") continue
+    const held = heldAt(event)
+    if (held !== undefined && event.at < held) stale.add(event)
+  }
+  return stale
+}
+
+/**
+ * Land a push of EVENTS — the door a client of this build uses (`opsToEvents`
+ * on its side; docs/event-sourcing.md). The events are the writer's own
+ * account of what it did, so they carry a `cause`, a `base_seq` and the
+ * writer's clock and zone; the replica stamps who, through which door, and
+ * when it arrived. Stale events are dropped (`staleEvents`); the rest are
+ * appended and projected in one batch, reconcile first, and the push is
+ * idempotent: an event already in the log (by `id`) is not appended again and
+ * projects nothing, so a retry after a lost response is harmless.
+ *
+ * Returns each pushed event's `seq` so the client can stamp its own copy.
+ */
+export async function appendClientEvents(
+  tenant: TenantDb,
+  events: readonly RuminateEvent[],
+  ctx: WriteContext,
+  extra: SqlStatement[] = [],
+): Promise<{ appended: number; stale: number; seqs: [string, number][] }> {
+  const nodeIds = new Set<string>()
+  const linkKeys = new Set<string>()
+  const viewIds = new Set<string>()
+  for (const event of events) {
+    if (event.entity === "block") nodeIds.add(event.entity_id)
+    else if (event.entity === "link") linkKeys.add(event.entity_id)
+    else viewIds.add(event.entity_id)
+  }
+  const current = await readCurrent(tenant, {
+    nodes: [],
+    links: [],
+    deleteNodes: [...nodeIds],
+    deleteLinks: [...linkKeys].map((key) => key.split("|") as [string, string, string]),
+    views: [...viewIds].map((id) => ({ id }) as ViewRow),
+  })
+  // An event the log already holds (a retry after a lost answer) is neither
+  // stale nor new, whatever has happened to its row since: it is answered
+  // with the seq it has.
+  const held = await heldSeqs(tenant, events)
+  const unknown = events.filter((event) => !held.has(event.id))
+  const stale = staleEvents(current, unknown)
+  const fresh = unknown.filter((event) => !stale.has(event))
+  await appendEvents(tenant, fresh, ctx, extra)
+  const after = await heldSeqs(tenant, events)
+  return { appended: fresh.length, stale: stale.size, seqs: [...after.entries()] }
+}
+
+/** The `seq` the log holds each of these events at, by id — absent when not
+ * (yet) appended. One primary-key seek per id, driven from the JSON. */
+async function heldSeqs(
+  tenant: TenantDb,
+  events: readonly RuminateEvent[],
+): Promise<Map<string, number>> {
+  if (events.length === 0) return new Map()
+  const rows = await tenant.exec(
+    "SELECT e.id, e.seq FROM json_each(?1) AS j " +
+      "JOIN events e ON e.user_id = :tenant AND e.id = j.value",
+    [JSON.stringify(events.map((event) => event.id))],
+  )
+  return new Map(rows.map((row) => [String(row.id), Number(row.seq)]))
 }
 
 // -----------------------------------------------------------------------------
@@ -491,7 +592,7 @@ export async function writeRows(
 
 const EVENT_COLUMNS =
   "id, seq, entity, entity_id, action, patch, v, batch, origin, device, client, cause, actor, " +
-  "base_seq, ref_seq, at, received_at"
+  "base_seq, ref_seq, at, tz, received_at"
 
 /** An event as the log holds it: the envelope plus what the replica stamped. */
 export type StoredEvent = RuminateEvent & {
@@ -520,6 +621,7 @@ const toEvent = (row: Record<string, SqlValue>): StoredEvent =>
     base_seq: row.base_seq === null ? null : Number(row.base_seq),
     ref_seq: row.ref_seq === null ? null : Number(row.ref_seq),
     at: Number(row.at),
+    tz: row.tz === null ? null : Number(row.tz),
     received_at: Number(row.received_at),
   }) as StoredEvent
 

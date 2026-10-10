@@ -5,11 +5,14 @@ import migration0001 from "../../migrations/0001_init.sql?raw"
 import migration0002 from "../../migrations/0002_nodes.sql?raw"
 import { parse } from "../blocks/parse"
 import type { BlockProps } from "../blocks/types"
+import { linkEntityId, opsToEvents, viewChangeToEvent, type RuminateEvent } from "./events"
 import { rollup } from "./graph"
 import type { NoteStore } from "./note-store"
-import { deleteBlockOps, deleteNoteOps, docToOps } from "./ops"
+import { deleteBlockOps, deleteNoteOps, docToOps, type Op } from "./ops"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import { openSqlNoteStore } from "./sql-note-store"
+import { applyOpsToStore, testEventContext } from "./store-test-support"
+import type { ViewRow } from "./views"
 
 async function makeStoreWithDriver() {
   const driver = createNodeSqlDriver()
@@ -18,15 +21,23 @@ async function makeStoreWithDriver() {
 }
 
 /** Save a note as the app does: diff the doc against the live graph into ops,
- * apply them. Markdown is only the fixture's spelling. */
+ * apply them as events. Markdown is only the fixture's spelling. Returns the
+ * events the save amounted to. */
 async function seed(
   store: NoteStore,
   id: string,
   markdown: string,
   props: BlockProps | null = null,
 ) {
-  return store.applyOps(docToOps(id, { ...parse(markdown), props }, await store.getGraph()))
+  return applyOpsToStore(store, docToOps(id, { ...parse(markdown), props }, await store.getGraph()))
 }
+
+/** Ops as the runtime would hand them over. */
+const applyOps = (store: NoteStore, ops: readonly Op[]) => applyOpsToStore(store, ops)
+
+/** Events as `entity.action entity_id`, in order. */
+const named = (events: readonly RuminateEvent[]) =>
+  events.map((event) => `${event.entity}.${event.action} ${event.entity_id}`)
 
 /** A note's markdown projection off the live graph, or null when absent. */
 const noteOf = async (store: NoteStore, id: string) => rollup(id, await store.getGraph())
@@ -64,15 +75,13 @@ describe("openSqlNoteStore", () => {
     const beforeOne = await driver.exec("SELECT * FROM nodes WHERE id = 'blk_aaaaaaaaaa'")
 
     // Touch only the second block.
-    const diff = await seed(
+    const events = await seed(
       store,
       "a",
       "- one\n  id:: blk_aaaaaaaaaa\n- two edited\n  id:: blk_bbbbbbbbbb\n",
     )
-    expect(diff.nodes.map((node) => node.id)).toEqual(["blk_bbbbbbbbbb"])
-    expect(diff.links).toEqual([])
-    expect(diff.deleteNodes).toEqual([])
-    expect(diff.deleteLinks).toEqual([])
+    expect(named(events)).toEqual(["block.update blk_bbbbbbbbbb"])
+    expect(events[0].patch).toEqual({ text: "two edited" })
 
     // Link rows and the untouched node are byte-identical, updated_at included.
     expect(
@@ -86,51 +95,49 @@ describe("openSqlNoteStore", () => {
     ])
   })
 
-  it("an empty batch is a no-op (empty diff, no row churn)", async () => {
+  it("an empty batch is a no-op (no events, no row churn)", async () => {
     const { store } = await makeStoreWithDriver()
     const content = "- one\n  id:: blk_aaaaaaaaaa\n  - two\n    id:: blk_bbbbbbbbbb\n"
-    await seed(store, "a", content)
+    const first = await seed(store, "a", content)
     // An identical doc diffs to no ops at all, so nothing reaches the rows.
-    const diff = await seed(store, "a", content)
-    expect(diff).toEqual({ nodes: [], links: [], views: [], deleteNodes: [], deleteLinks: [] })
+    expect(await seed(store, "a", content)).toEqual([])
+    expect(await store.unpushedEvents()).toHaveLength(first.length)
   })
 
   it("drops a set on a node it does not hold (deleted underneath)", async () => {
-    const { store } = await makeStoreWithDriver()
-    const diff = await store.applyOps([{ op: "setText", id: "blk_ghost00000", text: "boo" }])
-    expect(diff).toEqual({ nodes: [], links: [], views: [], deleteNodes: [], deleteLinks: [] })
+    const { driver, store } = await makeStoreWithDriver()
+    expect(await applyOps(store, [{ op: "setText", id: "blk_ghost00000", text: "boo" }])).toEqual(
+      [],
+    )
+    expect(await driver.exec("SELECT COUNT(*) AS n FROM nodes")).toEqual([{ n: 0 }])
+    expect(await store.unpushedEvents()).toEqual([])
   })
 
   it("removing a block from a note tombstones its link row and keeps its node (diffed)", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "a", "- keep\n  id:: blk_aaaaaaaaaa\n- drop\n  id:: blk_bbbbbbbbbb\n")
-    const diff = await seed(store, "a", "- keep\n  id:: blk_aaaaaaaaaa\n")
+    const events = await seed(store, "a", "- keep\n  id:: blk_aaaaaaaaaa\n")
     // An unlink, not a delete: the block is out of reach (the basket's), its
-    // row live, and only the tombstoned link travels.
-    expect(diff.deleteNodes).toEqual([])
-    expect(diff.deleteLinks).toEqual([])
-    expect(diff.nodes).toEqual([])
-    expect(diff.links).toEqual([
-      expect.objectContaining({ destination_id: "blk_bbbbbbbbbb", deleted_at: expect.any(Number) }),
-    ])
+    // row live, and only the link's tombstone travels.
+    expect(named(events)).toEqual([`link.delete ${linkEntityId("a", "blk_bbbbbbbbbb")}`])
     expect(await driver.exec("SELECT deleted_at FROM nodes WHERE id = 'blk_bbbbbbbbbb'")).toEqual([
       { deleted_at: null },
     ])
+    expect(
+      await driver.exec("SELECT deleted_at FROM link WHERE destination_id = 'blk_bbbbbbbbbb'"),
+    ).toEqual([{ deleted_at: events[0].at }])
     expect(await noteOf(store, "a")).toBe("- keep\n  id:: blk_aaaaaaaaaa\n")
   })
 
   it("deleting a block tombstones its node and link rows (diffed)", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "a", "- keep\n  id:: blk_aaaaaaaaaa\n- drop\n  id:: blk_bbbbbbbbbb\n")
-    const diff = await store.applyOps(deleteBlockOps("blk_bbbbbbbbbb", await store.getGraph()))
-    // Nothing is removed: the diff carries the tombstoned rows, so the delete
-    // replicates like any other change.
-    expect(diff.deleteNodes).toEqual([])
-    expect(diff.deleteLinks).toEqual([])
-    expect(diff.nodes.map((node) => node.id)).toEqual(["blk_bbbbbbbbbb"])
-    expect(diff.nodes[0].deleted_at).toEqual(expect.any(Number))
-    expect(diff.links).toEqual([
-      expect.objectContaining({ destination_id: "blk_bbbbbbbbbb", deleted_at: expect.any(Number) }),
+    const events = await applyOps(store, deleteBlockOps("blk_bbbbbbbbbb", await store.getGraph()))
+    // Nothing is removed: a delete is an event per row, and the rows stay as
+    // tombstones, so the delete replicates like any other change.
+    expect(named(events).sort()).toEqual([
+      "block.delete blk_bbbbbbbbbb",
+      `link.delete ${linkEntityId("a", "blk_bbbbbbbbbb")}`,
     ])
     expect(await driver.exec("SELECT deleted_at FROM nodes WHERE id = 'blk_bbbbbbbbbb'")).toEqual([
       { deleted_at: expect.any(Number) },
@@ -141,13 +148,17 @@ describe("openSqlNoteStore", () => {
   it("tombstones a note's rows on delete and reports the diff", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "a", "# A note\n  id:: blk_aaaaaaaaaa\n")
-    const diff = await store.applyOps(deleteNoteOps("a", await store.getGraph()))
+    const events = await applyOps(store, deleteNoteOps("a", await store.getGraph()))
 
-    expect(diff.deleteNodes).toEqual([])
-    expect(diff.nodes.map((node) => node.id).sort()).toEqual(["a", "blk_aaaaaaaaaa"])
+    const deletes = events.filter((event) => event.entity === "block")
+    expect(deletes.map((event) => event.entity_id).sort()).toEqual(["a", "blk_aaaaaaaaaa"])
+    expect(deletes.every((event) => event.action === "delete")).toBe(true)
     // ONE stamp for the whole delete: a future restore is "revive the rows
     // stamped at T".
-    expect(new Set(diff.nodes.map((node) => node.deleted_at)).size).toBe(1)
+    expect(new Set(deletes.map((event) => event.at)).size).toBe(1)
+    expect(
+      await driver.exec("SELECT DISTINCT deleted_at FROM nodes WHERE deleted_at IS NOT NULL"),
+    ).toEqual([{ deleted_at: deletes[0].at }])
     expect(await noteOf(store, "a")).toBeNull()
     expect((await store.getGraph()).nodes.size).toBe(0)
     // The rows — and the link that positions the block under the note — are
@@ -162,14 +173,13 @@ describe("openSqlNoteStore", () => {
     await seed(store, id, "keep me\n  id:: blk_aaaaaaaaaa\n", { title: "Old Name" })
     const before = await driver.exec("SELECT id, text, updated_at FROM nodes ORDER BY id")
 
-    const diff = await seed(store, id, "keep me\n  id:: blk_aaaaaaaaaa\n", { title: "New Name" })
+    const events = await seed(store, id, "keep me\n  id:: blk_aaaaaaaaaa\n", { title: "New Name" })
 
-    // ONE node row, no link rows: a rename can no longer bump `updated_at` on
+    // ONE event, the note's: a rename can no longer bump `updated_at` on
     // blocks the user never touched, so it cannot clobber a concurrent edit
     // to one of them under per-row LWW.
-    expect(diff.nodes.map((node) => node.id)).toEqual([id])
-    expect(diff.links).toEqual([])
-    expect(diff.nodes[0].text).toBe("New Name")
+    expect(named(events)).toEqual([`block.update ${id}`])
+    expect(events[0].patch).toEqual({ text: "New Name" })
 
     // The id is untouched, so every deep link and block row still resolves.
     const after = await driver.exec("SELECT id, text, updated_at FROM nodes ORDER BY id")
@@ -194,13 +204,19 @@ describe("openSqlNoteStore", () => {
     const store = await openSqlNoteStore(driver)
     expect((await store.getGraph()).nodes.size).toBe(0)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "8" },
+      { value: "9" },
     ])
     expect(
       await driver.exec("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"),
-      // The v1 tables are gone and v5's `views` is there — the ladder ran to
-      // the top, not just to 0002.
-    ).toEqual([{ name: "link" }, { name: "meta" }, { name: "nodes" }, { name: "views" }])
+      // The v1 tables are gone and v5's `views` and v9's `events` are there —
+      // the ladder ran to the top, not just to 0002.
+    ).toEqual([
+      { name: "events" },
+      { name: "link" },
+      { name: "meta" },
+      { name: "nodes" },
+      { name: "views" },
+    ])
   })
 
   it("adds the soft-delete columns to a v2 database in place, keeping its rows", async () => {
@@ -219,7 +235,7 @@ describe("openSqlNoteStore", () => {
     // columns, it never rewrites rows.
     expect(await noteOf(store, "a")).toBe("\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "8" },
+      { value: "9" },
     ])
     // The row is live: a nullable column means NULL = never deleted.
     expect(await driver.exec("SELECT deleted_at FROM nodes WHERE id = ?", ["a"])).toEqual([
@@ -245,7 +261,7 @@ describe("openSqlNoteStore", () => {
     const store = await openSqlNoteStore(driver)
     expect(await noteOf(store, "a")).toBe("\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "8" },
+      { value: "9" },
     ])
     // No note id until a pull brings the replica's backfill down.
     expect(await driver.exec("SELECT notes_id FROM nodes WHERE id = ?", ["a"])).toEqual([
@@ -273,7 +289,7 @@ describe("openSqlNoteStore", () => {
     const reopened = await openSqlNoteStore(driver)
     expect((await reopened.getGraph()).nodes.size).toBe(0)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "8" },
+      { value: "9" },
     ])
   })
 
@@ -317,14 +333,49 @@ describe("openSqlNoteStore", () => {
     ])
   })
 
-  it("clear wipes every row and keeps meta", async () => {
+  it("clear wipes every row and the log, and keeps meta", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "old", "- gone\n  id:: blk_aaaaaaaaaa\n")
     await store.setMeta("d1_pull_cursor", "123")
     await store.clear()
     expect(await driver.exec("SELECT COUNT(*) AS n FROM nodes")).toEqual([{ n: 0 }])
     expect(await driver.exec("SELECT COUNT(*) AS n FROM link")).toEqual([{ n: 0 }])
+    expect(await driver.exec("SELECT COUNT(*) AS n FROM events")).toEqual([{ n: 0 }])
     expect(await store.getMeta("d1_pull_cursor")).toBe("123")
+  })
+
+  it("adds the log and the seq columns to a v8 database in place, keeping its rows", async () => {
+    const { driver, store } = await makeStoreWithDriver()
+    await seed(store, "a", "- kept\n  id:: blk_aaaaaaaaaa\n")
+    // Back to v8: no log, no seq. The ladder must add both without a reset.
+    await driver.execScript(
+      "DROP TABLE events;" +
+        "ALTER TABLE nodes DROP COLUMN seq; ALTER TABLE link DROP COLUMN seq;" +
+        "ALTER TABLE views DROP COLUMN seq;" +
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '8');",
+    )
+    const reopened = await openSqlNoteStore(driver)
+    expect(await noteOf(reopened, "a")).toBe("- kept\n  id:: blk_aaaaaaaaaa\n")
+    expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
+      { value: "9" },
+    ])
+    expect(await driver.exec("SELECT seq FROM nodes WHERE id = 'a'")).toEqual([{ seq: null }])
+    expect(await reopened.unpushedEvents()).toEqual([])
+  })
+
+  it("applyPull records the replica's seq on each row, and the graph carries it", async () => {
+    const { store } = await makeStoreWithDriver()
+    await store.applyPull({
+      nodes: [{ id: "a", type: "note", text: "a", props: null, updated_at: 1, seq: 7 }],
+      links: [],
+      views: [],
+      deleteNodes: [],
+      deleteLinks: [],
+    })
+    expect((await store.getGraph()).nodes.get("a")?.seq).toBe(7)
+    // An edit of that row says what it believed it was changing.
+    const [edit] = await applyOps(store, [{ op: "setText", id: "a", text: "A" }])
+    expect(edit.base_seq).toBe(7)
   })
 
   it("applyPull upserts and deletes rows verbatim (remote updated_at kept)", async () => {
@@ -362,7 +413,7 @@ describe("openSqlNoteStore", () => {
   it("getAllRows carries tombstones — a delete only replicates if it travels", async () => {
     const { store } = await makeStoreWithDriver()
     await seed(store, "a", "- x\n  id:: blk_aaaaaaaaaa\n")
-    await store.applyOps(deleteBlockOps("blk_aaaaaaaaaa", await store.getGraph()))
+    await applyOps(store, deleteBlockOps("blk_aaaaaaaaaa", await store.getGraph()))
     const { nodes } = await store.getAllRows()
     expect(nodes.find((node) => node.id === "blk_aaaaaaaaaa")?.deleted_at).toEqual(
       expect.any(Number),
@@ -391,7 +442,7 @@ describe("soft deletes", () => {
   it("stamps every row one delete retires with ONE timestamp", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "a", OUTLINE)
-    await store.applyOps(deleteNoteOps("a", await store.getGraph()))
+    await applyOps(store, deleteNoteOps("a", await store.getGraph()))
 
     const stamps = await driver.exec(
       "SELECT deleted_at FROM nodes UNION ALL SELECT deleted_at FROM link",
@@ -405,7 +456,7 @@ describe("soft deletes", () => {
   it("a tombstoned node never renders, and neither does a link into it", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "a", OUTLINE)
-    await store.applyOps(deleteBlockOps("blk_child00000", await store.getGraph()))
+    await applyOps(store, deleteBlockOps("blk_child00000", await store.getGraph()))
 
     // The child was deleted: gone from every read…
     expect(await noteOf(store, "a")).toBe("- parent\n  id:: blk_parent0000\n")
@@ -422,7 +473,7 @@ describe("soft deletes", () => {
     // Delete the note: the whole subtree is retired, but EVERY containment row
     // that describes its shape is retained, not cascaded — including the
     // note's own link to the block that was directly under it.
-    await store.applyOps(deleteNoteOps("a", await store.getGraph()))
+    await applyOps(store, deleteNoteOps("a", await store.getGraph()))
 
     expect(
       await driver.exec(
@@ -471,5 +522,145 @@ describe("soft deletes", () => {
     })
     expect(await noteOf(store, "a")).toBe("- parent\n  id:: blk_parent0000\n")
     expect(await driver.exec("SELECT COUNT(*) AS n FROM nodes")).toEqual([{ n: 3 }])
+  })
+})
+
+/**
+ * The device's log (docs/event-sourcing.md): what the store keeps of what it
+ * did, what the push loop reads from it, and how an acknowledgement lands.
+ */
+describe("the device's log", () => {
+  const ctx = (at: number) => testEventContext({ at, device: "dev.tab" })
+
+  it("queues every event unpushed, in the order made, and stamps it with the replica's seq", async () => {
+    const { driver, store } = await makeStoreWithDriver()
+    const made = await seed(store, "a", "- one\n  id:: blk_aaaaaaaaaa\n")
+    const queued = await store.unpushedEvents()
+    expect(queued.map((event) => event.id)).toEqual(made.map((event) => event.id))
+    expect(queued[0]).toMatchObject({ device: "test.tab", tz: 0, base_seq: null })
+
+    await store.markEventsPushed(queued.map((event, i) => [event.id, 100 + i] as const))
+    expect(await store.unpushedEvents()).toEqual([])
+    expect(await driver.exec("SELECT id, seq FROM events ORDER BY position")).toEqual(
+      queued.map((event, i) => ({ id: event.id, seq: 100 + i })),
+    )
+    // A row's seq is its last event's — the note's is its create, the
+    // block's its create, the link's its own.
+    const block = queued.findIndex((e) => e.entity === "block" && e.entity_id === "blk_aaaaaaaaaa")
+    expect(await driver.exec("SELECT seq FROM nodes WHERE id = 'blk_aaaaaaaaaa'")).toEqual([
+      { seq: 100 + block },
+    ])
+    const link = queued.findIndex((e) => e.entity === "link")
+    expect(await driver.exec("SELECT seq FROM link")).toEqual([{ seq: 100 + link }])
+  })
+
+  it("coalesces a typing run across writes into one unpushed event, carrying the run's first base", async () => {
+    const { driver, store } = await makeStoreWithDriver()
+    await seed(store, "a", "- x\n  id:: blk_aaaaaaaaaa\n")
+    await store.markEventsPushed((await store.unpushedEvents()).map((e, i) => [e.id, i + 1]))
+    const first = await applyOpsToStore(
+      store,
+      [{ op: "setText", id: "blk_aaaaaaaaaa", text: "xy" }],
+      ctx(10_000),
+    )
+    await applyOpsToStore(
+      store,
+      [{ op: "setText", id: "blk_aaaaaaaaaa", text: "xyz" }],
+      ctx(11_000),
+    )
+    const last = await applyOpsToStore(
+      store,
+      [{ op: "setText", id: "blk_aaaaaaaaaa", text: "xyzw" }],
+      ctx(12_000),
+    )
+
+    const queued = await store.unpushedEvents()
+    expect(queued).toHaveLength(1)
+    expect(queued[0]).toMatchObject({
+      id: last[0].id,
+      action: "update",
+      patch: { text: "xyzw" },
+      base_seq: first[0].base_seq,
+    })
+    expect(await driver.exec("SELECT text FROM nodes WHERE id = 'blk_aaaaaaaaaa'")).toEqual([
+      { text: "xyzw" },
+    ])
+    // The log holds exactly the pushed events plus the one survivor.
+    expect(await driver.exec("SELECT COUNT(*) AS n FROM events")).toEqual([{ n: 3 + 1 }])
+  })
+
+  it("never coalesces into an event a push has in flight", async () => {
+    const { store } = await makeStoreWithDriver()
+    await seed(store, "a", "- x\n  id:: blk_aaaaaaaaaa\n")
+    const flying = await applyOpsToStore(
+      store,
+      [{ op: "setText", id: "blk_aaaaaaaaaa", text: "xy" }],
+      ctx(10_000),
+    )
+    const graph = await store.getGraph()
+    const next = opsToEvents(
+      graph,
+      [{ op: "setText", id: "blk_aaaaaaaaaa", text: "xyz" }],
+      ctx(11_000),
+    )
+    await store.applyEvents(next, { frozen: new Set([flying[0].id]) })
+    const ids = (await store.unpushedEvents()).map((event) => event.id)
+    expect(ids).toContain(flying[0].id)
+    expect(ids).toContain(next[0].id)
+  })
+
+  it("a run ends at a structural change, so a history never loses a step", async () => {
+    const { store } = await makeStoreWithDriver()
+    await seed(store, "a", "- x\n  id:: blk_aaaaaaaaaa\n")
+    await applyOpsToStore(store, [{ op: "setText", id: "blk_aaaaaaaaaa", text: "xy" }], ctx(10_000))
+    await applyOpsToStore(store, [{ op: "setType", id: "blk_aaaaaaaaaa", type: "h1" }], ctx(10_100))
+    await applyOpsToStore(
+      store,
+      [{ op: "setText", id: "blk_aaaaaaaaaa", text: "xyz" }],
+      ctx(10_200),
+    )
+    const typed = (await store.unpushedEvents()).filter(
+      (event) => event.entity === "block" && event.action === "update",
+    )
+    expect(typed.map((event) => event.patch)).toEqual([
+      { text: "xy" },
+      { type: "h1" },
+      { text: "xyz" },
+    ])
+  })
+
+  it("projects a view's events onto its row: create, update, delete, revival", async () => {
+    const { driver, store } = await makeStoreWithDriver()
+    const view: ViewRow = {
+      id: "v1",
+      root_id: "a",
+      filter: null,
+      sort: null,
+      pinned: true,
+      sort_key: null,
+      updated_at: 10,
+    }
+    const apply = async (before: ViewRow | undefined, after: ViewRow | undefined, at: number) => {
+      const event = viewChangeToEvent(before, after, ctx(at))
+      if (event) await store.applyEvents([event])
+      return event
+    }
+    await apply(undefined, view, 10)
+    expect(await store.getViews()).toEqual([{ ...view, updated_at: 10 }])
+    await apply(view, { ...view, filter: "type:todo", updated_at: 20 }, 20)
+    expect((await store.getViews())[0]).toMatchObject({ filter: "type:todo", updated_at: 20 })
+    await apply(view, { ...view, deleted_at: 30, updated_at: 30 }, 30)
+    expect(await store.getViews()).toEqual([])
+    expect(await driver.exec("SELECT deleted_at FROM views WHERE id = 'v1'")).toEqual([
+      { deleted_at: 30 },
+    ])
+    await apply({ ...view, deleted_at: 30 }, { ...view, updated_at: 40 }, 40)
+    expect((await store.getViews())[0]).toMatchObject({ id: "v1", updated_at: 40 })
+    expect((await store.unpushedEvents()).map((e) => e.action)).toEqual([
+      "create",
+      "update",
+      "delete",
+      "restore",
+    ])
   })
 })

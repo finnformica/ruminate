@@ -105,6 +105,16 @@ interface EventEnvelope {
   ref_seq?: number | null
   /** Writer's clock, ms. Informational — order is `seq`, never this. */
   at: number
+  /**
+   * The writer's UTC offset at `at`, in minutes EAST of UTC (+60 is London in
+   * summer, +540 is Tokyo; the sign `Date#getTimezoneOffset` does not use).
+   * `at` says when an edit happened; this says what day it was for the person
+   * making it, which no later reader can recover from the instant alone — a
+   * diary written at 23:30 in London belongs to that day, not to the next one
+   * a reader in Tokyo would file it under. Null when the writer did not say
+   * (an event derived at the replica from pushed rows).
+   */
+  tz?: number | null
   v: number
 }
 
@@ -430,6 +440,8 @@ export interface EventContext {
   device: string
   cause?: string
   at: number
+  /** The writer's UTC offset at `at`, minutes east (`EventEnvelope.tz`). */
+  tz?: number
   /** Mints an event id (`evt_…`). Injected: this module makes no ids. */
   mintId: () => string
 }
@@ -441,6 +453,7 @@ const envelope = (ctx: EventContext, baseSeq: number | null = null): EventEnvelo
   ...(ctx.cause ? { cause: ctx.cause } : {}),
   base_seq: baseSeq,
   at: ctx.at,
+  ...(ctx.tz === undefined ? {} : { tz: ctx.tz }),
   v: EVENT_VERSION,
 })
 
@@ -538,6 +551,8 @@ export function opsToEvents(
       }
       case "unlink": {
         const existing = liveLink(op.source, op.destination)
+        // Not held (already unlinked, or never linked): nothing happened.
+        if (!existing && !linked.has(linkEntityId(op.source, op.destination))) break
         events.push({
           ...envelope(ctx, existing?.seq ?? null),
           entity: "link",
@@ -548,6 +563,9 @@ export function opsToEvents(
         break
       }
       case "delete": {
+        // A block the snapshot does not hold is deleted already: nothing to
+        // record, as the store never wrote a tombstone for it either.
+        if (!snapshot.nodes.has(op.id) && !openBlock.has(op.id)) break
         openBlock.delete(op.id)
         events.push({
           ...envelope(ctx, snapshot.nodes.get(op.id)?.seq ?? null),
@@ -563,8 +581,13 @@ export function opsToEvents(
   return events
 }
 
-/** The event a change to a view row amounts to (views are written as rows,
- * not ops — `src/data/views.ts`). Null when nothing changed. */
+/**
+ * The event a change to a view row amounts to (views are written as rows,
+ * not ops — `src/data/views.ts`). Null when nothing changed. The event's `at`
+ * is the ROW's `updated_at`, not the context's clock: the row is stamped by
+ * whoever made it, the projection writes `at` back as `updated_at`, and the
+ * two must agree for the atom and the store to hold the same row.
+ */
 export function viewChangeToEvent(
   before: ViewRow | undefined,
   after: ViewRow | undefined,
@@ -578,18 +601,22 @@ export function viewChangeToEvent(
     sort_key: row.sort_key,
   })
   const live = (row: ViewRow | undefined) => row !== undefined && row.deleted_at === undefined
+  const stamped = (row: ViewRow, baseSeq: number | null = null): EventEnvelope => ({
+    ...envelope(ctx, baseSeq),
+    at: row.updated_at,
+  })
   if (!live(before) && live(after)) {
     const row = after as ViewRow
     return before
       ? {
-          ...envelope(ctx, before.seq ?? null),
+          ...stamped(row, before.seq ?? null),
           entity: "view",
           entity_id: row.id,
           action: "restore",
           patch: fieldsOf(row),
         }
       : {
-          ...envelope(ctx),
+          ...stamped(row),
           entity: "view",
           entity_id: row.id,
           action: "create",
@@ -597,13 +624,15 @@ export function viewChangeToEvent(
         }
   }
   if (live(before) && !live(after)) {
-    const row = before as ViewRow
+    const row = after as ViewRow
+    const deletedAt = row.deleted_at as number
     return {
-      ...envelope(ctx, row.seq ?? null),
+      ...stamped(row, (before as ViewRow).seq ?? null),
       entity: "view",
       entity_id: row.id,
       action: "delete",
-      patch: {},
+      // The tombstone's stamp rides only when it is not the event's own.
+      patch: deletedAt === row.updated_at ? {} : { deleted_at: deletedAt },
     }
   }
   if (!before || !after) return null
@@ -615,7 +644,7 @@ export function viewChangeToEvent(
   }
   if (Object.keys(patch).length === 0) return null
   return {
-    ...envelope(ctx, before.seq ?? null),
+    ...stamped(after, before.seq ?? null),
     entity: "view",
     entity_id: after.id,
     action: "update",
@@ -897,4 +926,174 @@ export function planRestoreSubtree(
     }
   }
   return out
+}
+
+// -----------------------------------------------------------------------------
+// The wire: events a client pushes (`PUT /api/replica/events`)
+// -----------------------------------------------------------------------------
+
+/** Body of `PUT /api/replica/events`: the writer's own events, in the order
+ * it made them, plus the same opaque client cursor a row push carries. */
+export interface EventsPutPayload {
+  events: RuminateEvent[]
+  cursor?: string
+}
+
+/** Body of a successful `PUT /api/replica/events`. */
+export interface EventsPutResult {
+  ok: true
+  /** How many of the events the log took — a re-sent event is not counted. */
+  appended: number
+  /** How many were stale (behind what the replica held) and dropped. */
+  stale: number
+  /** Every pushed event's id with the `seq` the log holds it at, re-sent ones
+   * included; a dropped event has none. */
+  seqs: [id: string, seq: number][]
+  /** As on a row push: the cursor the batch committed, or null. */
+  cursor: string | null
+}
+
+/** The most events one push may carry: the client chunks above this. */
+export const MAX_EVENTS_PER_PUT = 1_000
+const MAX_ID_LENGTH = 64
+const MAX_LABEL_LENGTH = 128
+/** A UTC offset no clock has: ±15 hours covers every zone there is. */
+const MAX_TZ_MINUTES = 15 * 60
+
+const isString = (x: unknown): x is string => typeof x === "string"
+const isNullableString = (x: unknown): x is string | null => x === null || isString(x)
+const isShortString = (x: unknown, max: number): x is string =>
+  isString(x) && x.length > 0 && x.length <= max
+const isNullableInteger = (x: unknown): x is number | null =>
+  x === null || (typeof x === "number" && Number.isSafeInteger(x))
+
+/** The fields a patch may name per entity, with each one's check. */
+const FIELD_CHECKS: Record<Entity, Record<string, (x: unknown) => boolean>> = {
+  block: { type: isString, text: isString, props: isNullableString, notes_id: isNullableString },
+  link: { source_id: isString, destination_id: isString, kind: isString, sort_key: isString },
+  view: {
+    root_id: isString,
+    filter: isNullableString,
+    sort: isNullableString,
+    pinned: (x) => typeof x === "boolean",
+    sort_key: isNullableString,
+  },
+}
+
+/**
+ * Validate one patch: the fields the entity has, each of the type it holds,
+ * every one of them on a `create`, any subset otherwise, and `deleted_at`
+ * only where a tombstone's stamp may ride (a create or a delete). Nothing
+ * else is let through — a patch is stored as JSON forever, and the fold
+ * spreads it into the row, so an unknown key would become a column that is
+ * not there.
+ */
+function parsePatch(entity: Entity, action: Action, raw: unknown): object | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null
+  const checks = FIELD_CHECKS[entity]
+  const patch: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    if (key === "deleted_at") {
+      if (action !== "create" && action !== "delete") return null
+      if (!isNullableInteger(value)) return null
+      if (value !== null) patch.deleted_at = value
+      continue
+    }
+    const check = checks[key]
+    if (!check || !check(value)) return null
+    patch[key] = value
+  }
+  if (action === "create") {
+    for (const key of Object.keys(checks)) if (!(key in patch)) return null
+  }
+  if (action === "delete") {
+    for (const key of Object.keys(patch)) if (key !== "deleted_at") return null
+  }
+  if (action === "update" && Object.keys(patch).length === 0) return null
+  return patch
+}
+
+const ENTITIES: ReadonlySet<string> = new Set<Entity>(["block", "link", "view"])
+const ACTIONS: ReadonlySet<string> = new Set<Action>(["create", "update", "delete", "restore"])
+
+/**
+ * One event as a client may push it, or null. Built field by field from the
+ * input, never spread: `seq` is the replica's to assign and anything else a
+ * client adds is dropped. The envelope's `device` is checked for shape only;
+ * the Worker decides what it will record (`writerOf`).
+ */
+export function parseEvent(raw: unknown): RuminateEvent | null {
+  if (typeof raw !== "object" || raw === null) return null
+  const x = raw as Record<string, unknown>
+  if (
+    !isShortString(x.id, MAX_ID_LENGTH) ||
+    !isString(x.entity) ||
+    !ENTITIES.has(x.entity) ||
+    !isShortString(x.entity_id, MAX_LABEL_LENGTH * 3) ||
+    !isString(x.action) ||
+    !ACTIONS.has(x.action) ||
+    !isShortString(x.batch, MAX_ID_LENGTH) ||
+    !isShortString(x.device, MAX_ID_LENGTH) ||
+    !(x.cause === undefined || isShortString(x.cause, MAX_LABEL_LENGTH)) ||
+    !(x.base_seq === undefined || isNullableInteger(x.base_seq)) ||
+    !(x.ref_seq === undefined || isNullableInteger(x.ref_seq)) ||
+    typeof x.at !== "number" ||
+    !Number.isFinite(x.at) ||
+    !(
+      x.tz === undefined ||
+      x.tz === null ||
+      (Number.isInteger(x.tz) && Math.abs(x.tz as number) <= MAX_TZ_MINUTES)
+    ) ||
+    x.v !== EVENT_VERSION
+  ) {
+    return null
+  }
+  const entity = x.entity as Entity
+  const action = x.action as Action
+  const patch = parsePatch(entity, action, x.patch)
+  if (patch === null) return null
+  // A link is addressed by its key, and its create spells the key out: the
+  // two must agree, or the row and the log would name different links.
+  if (entity === "link" && action === "create") {
+    const { source_id, destination_id, kind } = patch as LinkFields
+    if (linkEntityId(source_id, destination_id, kind) !== x.entity_id) return null
+  }
+  if (action === "restore" && x.ref_seq === undefined) {
+    // A restore names what it returns to; a client that cannot say sends
+    // null, never nothing.
+    return null
+  }
+  const event: Record<string, unknown> = {
+    id: x.id,
+    entity,
+    entity_id: x.entity_id,
+    action,
+    patch,
+    batch: x.batch,
+    device: x.device,
+    at: x.at,
+    v: EVENT_VERSION,
+  }
+  if (x.cause !== undefined) event.cause = x.cause
+  if (x.base_seq !== undefined) event.base_seq = x.base_seq
+  if (x.ref_seq !== undefined) event.ref_seq = x.ref_seq
+  if (x.tz !== undefined) event.tz = x.tz
+  return event as unknown as RuminateEvent
+}
+
+/** The body of `PUT /api/replica/events`, or null when any part of it is not
+ * what a client of this build sends. All or nothing: one bad event refuses
+ * the push, as one bad row refuses a row push. */
+export function parseEventsPayload(body: unknown): EventsPutPayload | null {
+  if (typeof body !== "object" || body === null) return null
+  const x = body as Record<string, unknown>
+  if (!Array.isArray(x.events) || x.events.length > MAX_EVENTS_PER_PUT) return null
+  if (!(x.cursor === undefined || isString(x.cursor))) return null
+  const events: RuminateEvent[] = []
+  for (const raw of x.events) {
+    const event = parseEvent(raw)
+    if (event === null) return null
+    events.push(event)
+  }
+  return x.cursor === undefined ? { events } : { events, cursor: x.cursor }
 }

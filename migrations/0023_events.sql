@@ -33,8 +33,10 @@
 -- time and answered as a `seq` — the last event received by then — and only
 -- the replica's clock can be trusted to order that; `at`, the writer's, is
 -- kept for what it says about the writer and never used to order anything.
--- `v` is the shape the patch was written in, so a reader years on can still
--- upcast it. `actor` is who wrote it (a share's grantee writes into the
+-- `tz` is the writer's UTC offset at `at`: the instant alone cannot say what
+-- DAY an edit was for the person who made it, and a calendar of what was
+-- written on a day needs exactly that. `v` is the shape the patch was
+-- written in, so a reader years on can still upcast it. `actor` is who wrote it (a share's grantee writes into the
 -- owner's log), `origin` the door it came through (`replica`, `mcp`, `share`,
 -- `system`), `device` and `client` the tab and the build, `cause` the command
 -- when the writer names one, `base_seq` what the writer believed it was
@@ -74,6 +76,7 @@ CREATE TABLE events (
   base_seq    INTEGER,            -- the entity's seq as the writer last saw it
   ref_seq     INTEGER,            -- restore: the seq whose state this returns to
   at          INTEGER NOT NULL,   -- writer's clock, ms — informational, never ordering
+  tz          INTEGER,            -- writer's UTC offset at `at`, minutes east; NULL = unsaid
   received_at INTEGER NOT NULL,   -- replica's clock, ms — what "as of" is asked against
   append      TEXT NOT NULL,      -- the request that appended it
   PRIMARY KEY (user_id, seq)

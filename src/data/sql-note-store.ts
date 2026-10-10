@@ -1,31 +1,41 @@
 import migration0001 from "../../migrations/0001_init.sql?raw"
 import migration0002 from "../../migrations/0002_nodes.sql?raw"
 import {
-  emptyGraphDiff,
   toLinkRow,
   toNodeRow,
   toViewRow,
-  type GraphDiff,
   type LinkRow,
   type NodeRow,
   type ViewRow,
 } from "../../worker/handlers/replica-payload"
 import { ensureCorpusSchema } from "./corpus-schema"
-import { CHILD_KIND, buildGraphSnapshot } from "./graph"
+import { coalesceTyping, netChanges, type NetChange, type RuminateEvent } from "./events"
+import { buildGraphSnapshot } from "./graph"
 import type { NoteStore } from "./note-store"
-import type { Op } from "./ops"
-import type { SqlDriver, SqlStatement } from "./sql-driver"
+import type { SqlDriver, SqlStatement, SqlValue } from "./sql-driver"
 
 /**
  * The SQL implementation of `NoteStore` — the store the app runs on, over the
- * schema v3 graph (docs/graph-schema-v2.md): `nodes` + `link` + `meta`.
+ * schema v3 graph (docs/graph-schema-v2.md): `nodes` + `link` + `views` +
+ * `meta`, and since v9 the device's own `events` (docs/event-sourcing.md).
  *
  * Backed by any `SqlDriver` (sqlite-wasm/OPFS in the browser, `node:sqlite` in
  * tests) and the exact migration files that initialize the D1 replica — in the
  * **single-tenant** shape (`corpus-schema.ts`): one user per browser profile,
  * so no `user_id` column, but the same `deleted_at` soft deletes the replica
- * has. Ops land as row *diffs* — only the rows an op names are written, with
- * a fresh `updated_at` — which is what makes per-row LWW sync meaningful.
+ * has.
+ *
+ * **Events in, rows out.** A write arrives as the events the editor's ops
+ * amount to (`opsToEvents`), and lands twice in one transaction: appended to
+ * `events`, the device's log and its push queue, and applied to the rows the
+ * way the replica applies the same events to its own (`planEventAppend`,
+ * worker/handlers/event-log.ts) — a `create` inserts or revives, an `update`
+ * sets what its patch names, a `delete` tombstones, a `restore` revives. Only
+ * the rows an event names are written, each with the event's `at` as its
+ * `updated_at`, which is what makes per-row LWW sync meaningful. The rows are
+ * a cache of the replica's, refreshed by the pull; the log is this device's
+ * account of what it did, pushed from here and stamped with the replica's
+ * `seq` when the push lands.
  *
  * **Soft deletes.** Nothing here hard-deletes a corpus row. A delete stamps
  * `deleted_at` (and bumps `updated_at`, so the tombstone replicates like any
@@ -50,15 +60,64 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<NoteStore> {
   return {
     getGraph: async () => {
       const mem = await loadMemGraph(driver)
-      return buildGraphSnapshot([...mem.nodes.values()], [...mem.links.values()])
+      return buildGraphSnapshot(mem.nodes, mem.links)
     },
 
-    applyOps: async (ops) => {
-      const writer = createGraphWriter(await loadMemGraph(driver))
-      for (const op of ops) planOp(writer, op)
-      const { statements, diff } = emitWrite(writer)
+    applyEvents: async (events, options = {}) => {
+      if (events.length === 0) return
+      const frozen = options.frozen ?? new Set<string>()
+      const unpushed = await loadUnpushed(driver)
+      // The tail a new typing run may still coalesce into: unpushed, and not
+      // in a push that has already picked it up.
+      const open = unpushed.filter((event) => !frozen.has(event.id))
+      const held = new Set(open.map((event) => event.id))
+      const coalesced = coalesceTyping([...open, ...events])
+      const kept = new Set(coalesced.map((event) => event.id))
+      const statements: SqlStatement[] = []
+      for (const event of open) {
+        // tenant-exempt: the local store is one user per browser profile; and
+        // this is the queue coalescing, not a delete of anything that happened.
+        if (!kept.has(event.id))
+          statements.push({ sql: "DELETE FROM events WHERE id = ?", params: [event.id] })
+      }
+      let position = await nextPosition(driver)
+      const appended: RuminateEvent[] = []
+      for (const event of coalesced) {
+        if (held.has(event.id)) continue
+        statements.push(insertEventStatement(event, (position += 1)))
+        appended.push(event)
+      }
+      // Events a run coalesced away never reached the rows either — the one
+      // that replaced them carries their final text — so the rows take the
+      // net of what is appended, exactly as the replica's will.
+      statements.push(...projectionStatements(netChanges(appended)))
       if (statements.length > 0) await driver.batch(statements)
-      return diff
+    },
+
+    unpushedEvents: () => loadUnpushed(driver),
+
+    markEventsPushed: async (seqs) => {
+      if (seqs.length === 0) return
+      const statements: SqlStatement[] = []
+      for (const [id, seq] of seqs) {
+        statements.push({ sql: "UPDATE events SET seq = ? WHERE id = ?", params: [seq, id] })
+      }
+      // A row's `seq` is its last event's: stamp the rows these events changed,
+      // never backwards.
+      for (const [id, seq] of seqs) {
+        for (const table of ["nodes", "link", "views"] as const) {
+          statements.push({
+            sql:
+              `UPDATE ${table} SET seq = ?1 WHERE (seq IS NULL OR seq < ?1) AND ` +
+              (table === "link"
+                ? "source_id || '|' || destination_id || '|' || kind = "
+                : "id = ") +
+              `(SELECT entity_id FROM events WHERE id = ?2 AND entity = '${ENTITY_OF[table]}')`,
+            params: [seq, id],
+          })
+        }
+      }
+      await driver.batch(statements)
     },
 
     getAllRows: () => loadAllRows(driver),
@@ -91,11 +150,6 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<NoteStore> {
 
     getViews: () => loadViews(driver),
 
-    applyViews: async (views) => {
-      if (views.length === 0) return
-      await driver.batch(views.map(upsertViewStatement))
-    },
-
     clear: async () => {
       await driver.batch([
         // tenant-exempt: a cache reset discards the local database wholesale —
@@ -106,6 +160,9 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<NoteStore> {
         { sql: "DELETE FROM nodes" },
         // tenant-exempt: as above.
         { sql: "DELETE FROM views" },
+        // tenant-exempt: as above — the device's log of a corpus it no longer
+        // holds, unpushed events included (see `NoteStore.clear`).
+        { sql: "DELETE FROM events" },
       ])
     },
 
@@ -130,37 +187,22 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<NoteStore> {
 }
 
 // -----------------------------------------------------------------------------
-// In-memory working copy + write planning
+// Reads
 // -----------------------------------------------------------------------------
 
-interface MemGraph {
-  nodes: Map<string, NodeRow>
-  /** All LIVE link rows keyed by `${source}\x1f${dest}\x1f${kind}`. */
-  links: Map<string, LinkRow>
-}
-
-const linkMapKey = (source: string, destination: string, kind: string) =>
-  `${source}\x1f${destination}\x1f${kind}`
-
-/** The LIVE graph — the working copy every read and write plans against. */
-async function loadMemGraph(driver: SqlDriver): Promise<MemGraph> {
+/** The LIVE graph — what the snapshot is built from. `seq` rides along: it is
+ * what an edit of the row says it believed it was changing (`base_seq`). */
+async function loadMemGraph(driver: SqlDriver): Promise<{ nodes: NodeRow[]; links: LinkRow[] }> {
   const [nodeRows, linkRows] = await Promise.all([
     driver.exec(
-      "SELECT id, type, text, props, updated_at, notes_id FROM nodes WHERE deleted_at IS NULL",
+      "SELECT id, type, text, props, updated_at, notes_id, seq FROM nodes WHERE deleted_at IS NULL",
     ),
     driver.exec(
-      "SELECT source_id, destination_id, kind, sort_key, updated_at FROM link " +
+      "SELECT source_id, destination_id, kind, sort_key, updated_at, seq FROM link " +
         "WHERE deleted_at IS NULL",
     ),
   ])
-  const nodes = new Map<string, NodeRow>()
-  for (const row of nodeRows) nodes.set(String(row.id), toNodeRow(row))
-  const links = new Map<string, LinkRow>()
-  for (const row of linkRows) {
-    const link = toLinkRow(row)
-    links.set(linkMapKey(link.source_id, link.destination_id, link.kind), link)
-  }
-  return { nodes, links }
+  return { nodes: nodeRows.map(toNodeRow), links: linkRows.map(toLinkRow) }
 }
 
 /** Every row, tombstones included — what replication has to carry. */
@@ -169,16 +211,16 @@ async function loadAllRows(
 ): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }> {
   const [nodeRows, linkRows, viewRows] = await Promise.all([
     driver.exec(
-      "SELECT id, type, text, props, updated_at, deleted_at, notes_id FROM nodes " +
+      "SELECT id, type, text, props, updated_at, deleted_at, notes_id, seq FROM nodes " +
         "/* includes-deleted: the full-push source; a delete only reaches other " +
         "devices if its tombstone travels */",
     ),
     driver.exec(
-      "SELECT source_id, destination_id, kind, sort_key, updated_at, deleted_at FROM link " +
+      "SELECT source_id, destination_id, kind, sort_key, updated_at, deleted_at, seq FROM link " +
         "/* includes-deleted: as above */",
     ),
     driver.exec(
-      "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at FROM views " +
+      "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at, seq FROM views " +
         "/* includes-deleted: as above */",
     ),
   ])
@@ -193,11 +235,167 @@ async function loadAllRows(
  * (migrations/0015). Tombstones are for replication, not for reading. */
 async function loadViews(driver: SqlDriver): Promise<ViewRow[]> {
   const rows = await driver.exec(
-    "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at FROM views " +
+    "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, seq FROM views " +
       "WHERE deleted_at IS NULL",
   )
   return rows.map(toViewRow)
 }
+
+// -----------------------------------------------------------------------------
+// The device's log
+// -----------------------------------------------------------------------------
+
+const ENTITY_OF = { nodes: "block", link: "link", views: "view" } as const
+
+/** The queue: events the replica has not acknowledged, in the order made. */
+async function loadUnpushed(driver: SqlDriver): Promise<RuminateEvent[]> {
+  const rows = await driver.exec(
+    "SELECT id, entity, entity_id, action, patch, v, batch, device, cause, base_seq, ref_seq, " +
+      "at, tz FROM events WHERE seq IS NULL ORDER BY position",
+  )
+  return rows.map(toEvent)
+}
+
+async function nextPosition(driver: SqlDriver): Promise<number> {
+  const [row] = await driver.exec("SELECT COALESCE(MAX(position), 0) AS position FROM events")
+  return Number(row?.position ?? 0)
+}
+
+const toEvent = (row: Record<string, SqlValue>): RuminateEvent =>
+  ({
+    id: row.id,
+    entity: row.entity,
+    entity_id: row.entity_id,
+    action: row.action,
+    patch: JSON.parse(String(row.patch)),
+    v: Number(row.v),
+    batch: row.batch,
+    device: row.device,
+    ...(row.cause === null ? {} : { cause: row.cause }),
+    base_seq: row.base_seq === null ? null : Number(row.base_seq),
+    ...(row.ref_seq === null ? {} : { ref_seq: Number(row.ref_seq) }),
+    at: Number(row.at),
+    tz: row.tz === null ? null : Number(row.tz),
+  }) as RuminateEvent
+
+const insertEventStatement = (event: RuminateEvent, position: number): SqlStatement => ({
+  sql:
+    "INSERT INTO events (id, seq, entity, entity_id, action, patch, v, batch, device, cause, " +
+    "base_seq, ref_seq, at, tz, position) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  params: [
+    event.id,
+    event.entity,
+    event.entity_id,
+    event.action,
+    JSON.stringify(event.patch),
+    event.v,
+    event.batch,
+    event.device,
+    event.cause ?? null,
+    event.base_seq ?? null,
+    event.ref_seq ?? null,
+    event.at,
+    event.tz ?? null,
+    position,
+  ],
+})
+
+// -----------------------------------------------------------------------------
+// The projection: events → rows, as the replica does it
+// -----------------------------------------------------------------------------
+
+/** The columns a net change may set, per table — the fields of the entity.
+ * A key outside this list never reaches SQL. */
+const COLUMNS = {
+  nodes: ["type", "text", "props", "notes_id"],
+  link: ["sort_key"],
+  views: ["root_id", "filter", "sort", "pinned", "sort_key"],
+} as const
+
+type Table = keyof typeof COLUMNS
+
+const tableOf = (change: NetChange): Table =>
+  change.entity === "block" ? "nodes" : change.entity === "link" ? "link" : "views"
+
+const toSql = (value: unknown): SqlValue =>
+  value === undefined || value === null
+    ? null
+    : typeof value === "boolean"
+      ? value
+        ? 1
+        : 0
+      : (value as SqlValue)
+
+/** The tombstone a change leaves: stamped, cleared, or (null) as it was. */
+const tombstoneOf = (change: NetChange): SqlValue | undefined =>
+  change.deleted === null ? undefined : change.deleted ? (change.deleted_at ?? change.at) : null
+
+/**
+ * The statements that lay a batch's net changes onto the rows: one per
+ * entity, the same two shapes the replica's projection has — an INSERT that
+ * revives or overwrites for a change that creates, an UPDATE of the named
+ * fields for one that does not. Patches are absolute, so the net of a run is
+ * the last value of each field (`netChanges`) and the order within the batch
+ * no longer matters.
+ */
+function projectionStatements(changes: readonly NetChange[]): SqlStatement[] {
+  const statements: SqlStatement[] = []
+  for (const change of changes) {
+    const table = tableOf(change)
+    const key = keyOf(change)
+    const tombstone = tombstoneOf(change)
+    if (change.created !== null) {
+      const columns = COLUMNS[table].filter((column) => column in change.created!)
+      const names = [...key.columns, ...columns, "updated_at", "deleted_at"]
+      const values: SqlValue[] = [
+        ...key.values,
+        ...columns.map((column) => toSql(change.created![column])),
+        change.at,
+        tombstone ?? null,
+      ]
+      // tenant-exempt: the local store is one user per browser profile
+      // (src/data/corpus-schema.ts). A create over a row that is there — a
+      // revived tombstone, a retry — lands as the fold lands it: every field.
+      statements.push({
+        sql:
+          `INSERT INTO ${table} (${names.join(", ")}) VALUES (${names.map(() => "?").join(", ")}) ` +
+          `ON CONFLICT (${key.columns.join(", ")}) DO UPDATE SET ` +
+          [...columns, "updated_at", "deleted_at"]
+            .map((column) => `${column} = excluded.${column}`)
+            .join(", "),
+        params: values,
+      })
+      continue
+    }
+    const columns = COLUMNS[table].filter((column) => column in change.set)
+    const sets = [...columns.map((column) => `${column} = ?`), "updated_at = ?"]
+    const params: SqlValue[] = [...columns.map((column) => toSql(change.set[column])), change.at]
+    if (tombstone !== undefined) {
+      sets.push("deleted_at = ?")
+      params.push(tombstone)
+    }
+    // tenant-exempt: as above.
+    statements.push({
+      sql:
+        `UPDATE ${table} SET ${sets.join(", ")} WHERE ` +
+        key.columns.map((column) => `${column} = ?`).join(" AND "),
+      params: [...params, ...key.values],
+    })
+  }
+  return statements
+}
+
+/** A change's primary key, as columns and values. A link is addressed by its
+ * entity id, `source|destination|kind` (`linkEntityId`). */
+function keyOf(change: NetChange): { columns: string[]; values: SqlValue[] } {
+  if (change.entity !== "link") return { columns: ["id"], values: [change.entity_id] }
+  const [source, destination, kind] = change.entity_id.split("|")
+  return { columns: ["source_id", "destination_id", "kind"], values: [source, destination, kind] }
+}
+
+// -----------------------------------------------------------------------------
+// The pull: the replica's rows, verbatim
+// -----------------------------------------------------------------------------
 
 /** Upsert one view row, last-writer-wins, as the replica does. A delete is a
  * row carrying `deleted_at`, so it goes through here too. */
@@ -206,11 +404,11 @@ function upsertViewStatement(view: ViewRow): SqlStatement {
     // tenant-exempt: the local store is one user per browser profile; there is
     // no second tenant in an OPFS database (src/data/corpus-schema.ts).
     sql:
-      "INSERT INTO views (id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at) " +
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
+      "INSERT INTO views (id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at, seq) " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
       "ON CONFLICT (id) DO UPDATE SET root_id = excluded.root_id, filter = excluded.filter, " +
       "sort = excluded.sort, pinned = excluded.pinned, sort_key = excluded.sort_key, " +
-      "updated_at = excluded.updated_at, deleted_at = excluded.deleted_at " +
+      "updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, seq = excluded.seq " +
       "WHERE excluded.updated_at >= views.updated_at",
     params: [
       view.id,
@@ -221,79 +419,19 @@ function upsertViewStatement(view: ViewRow): SqlStatement {
       view.sort_key,
       view.updated_at,
       view.deleted_at ?? null,
+      view.seq ?? null,
     ],
   }
 }
 
-/**
- * Accumulates row changes for one transaction: mutates the in-memory (live)
- * graph immediately, so later ops in the same batch see earlier changes, and
- * records the final row state per key. Every change — including a
- * tombstone — is an upsert of a whole row, so the emitted statements and the
- * emitted diff are the same thing said twice.
- *
- * `now` is captured once per writer: **all rows one write retires share one
- * `deleted_at`**, which is what makes "revive the rows stamped at T" a
- * well-defined restore.
- */
-interface GraphWriter {
-  mem: MemGraph
-  now: number
-  nodeWrites: Map<string, NodeRow>
-  linkWrites: Map<string, LinkRow>
-  upsertNode(node: NodeRow): void
-  tombstoneNode(id: string): void
-  upsertLink(link: LinkRow): void
-  tombstoneLink(source: string, destination: string, kind: string): void
-}
-
-function createGraphWriter(mem: MemGraph): GraphWriter {
-  const writer: GraphWriter = {
-    mem,
-    now: Date.now(),
-    nodeWrites: new Map(),
-    linkWrites: new Map(),
-    upsertNode(node) {
-      const live = { ...node }
-      delete live.deleted_at
-      mem.nodes.set(live.id, live)
-      writer.nodeWrites.set(live.id, live)
-    },
-    tombstoneNode(id) {
-      const node = mem.nodes.get(id)
-      if (!node) return
-      // Deliberately NOT cascading to link rows: a link pointing at a deleted
-      // node is retained (it is where a restore would put the node back), and
-      // the walk drops it at read time.
-      mem.nodes.delete(id)
-      writer.nodeWrites.set(id, { ...node, updated_at: writer.now, deleted_at: writer.now })
-    },
-    upsertLink(link) {
-      const key = linkMapKey(link.source_id, link.destination_id, link.kind)
-      const live = { ...link }
-      delete live.deleted_at
-      mem.links.set(key, live)
-      writer.linkWrites.set(key, live)
-    },
-    tombstoneLink(source, destination, kind) {
-      const key = linkMapKey(source, destination, kind)
-      const link = mem.links.get(key)
-      if (!link) return
-      mem.links.delete(key)
-      writer.linkWrites.set(key, { ...link, updated_at: writer.now, deleted_at: writer.now })
-    },
-  }
-  return writer
-}
-
 const upsertNodeStatement = (node: NodeRow): SqlStatement => ({
   sql:
-    "INSERT INTO nodes (id, type, text, props, updated_at, deleted_at, notes_id) " +
-    "VALUES (?, ?, ?, ?, ?, ?, ?) " +
+    "INSERT INTO nodes (id, type, text, props, updated_at, deleted_at, notes_id, seq) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
     "ON CONFLICT (id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
     "props = excluded.props, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, " +
     // A note id is set once and never cleared by a row that carries none.
-    "notes_id = COALESCE(excluded.notes_id, nodes.notes_id)",
+    "notes_id = COALESCE(excluded.notes_id, nodes.notes_id), seq = excluded.seq",
   params: [
     node.id,
     node.type,
@@ -302,16 +440,17 @@ const upsertNodeStatement = (node: NodeRow): SqlStatement => ({
     node.updated_at,
     node.deleted_at ?? null,
     node.notes_id ?? null,
+    node.seq ?? null,
   ],
 })
 
 const upsertLinkStatement = (link: LinkRow): SqlStatement => ({
   sql:
-    "INSERT INTO link (source_id, destination_id, kind, sort_key, updated_at, deleted_at) " +
-    "VALUES (?, ?, ?, ?, ?, ?) " +
+    "INSERT INTO link (source_id, destination_id, kind, sort_key, updated_at, deleted_at, seq) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?) " +
     "ON CONFLICT (source_id, destination_id, kind) DO UPDATE SET " +
     "sort_key = excluded.sort_key, updated_at = excluded.updated_at, " +
-    "deleted_at = excluded.deleted_at",
+    "deleted_at = excluded.deleted_at, seq = excluded.seq",
   params: [
     link.source_id,
     link.destination_id,
@@ -319,63 +458,6 @@ const upsertLinkStatement = (link: LinkRow): SqlStatement => ({
     link.sort_key,
     link.updated_at,
     link.deleted_at ?? null,
+    link.seq ?? null,
   ],
 })
-
-/** Turn the writer's net change into SQL (nodes before links) and the
- * `GraphDiff` handed to the replica queue. Tombstones ride in `nodes` /
- * `links` like any other row — that is what makes a delete replicate. */
-function emitWrite(writer: GraphWriter): { statements: SqlStatement[]; diff: GraphDiff } {
-  const nodes = [...writer.nodeWrites.values()]
-  const links = [...writer.linkWrites.values()]
-  const statements: SqlStatement[] = [
-    ...nodes.map(upsertNodeStatement),
-    ...links.map(upsertLinkStatement),
-  ]
-  return { statements, diff: { ...emptyGraphDiff(), nodes, links } }
-}
-
-/** One op as row writes. A `set*` on a node the store does not hold is
- * dropped (it was deleted underneath); everything else is verbatim. */
-function planOp(writer: GraphWriter, op: Op) {
-  const { mem, now } = writer
-  switch (op.op) {
-    case "create":
-      writer.upsertNode({
-        id: op.id,
-        type: op.type,
-        text: op.text,
-        props: op.props,
-        updated_at: now,
-        ...(op.notesId ? { notes_id: op.notesId } : {}),
-      })
-      return
-    case "setText":
-    case "setType":
-    case "setProps": {
-      const node = mem.nodes.get(op.id)
-      if (!node) return
-      const next: NodeRow = { ...node, updated_at: now }
-      if (op.op === "setText") next.text = op.text
-      else if (op.op === "setType") next.type = op.type
-      else next.props = op.props
-      writer.upsertNode(next)
-      return
-    }
-    case "link":
-      writer.upsertLink({
-        source_id: op.source,
-        destination_id: op.destination,
-        kind: CHILD_KIND,
-        sort_key: op.sortKey,
-        updated_at: now,
-      })
-      return
-    case "unlink":
-      writer.tombstoneLink(op.source, op.destination, CHILD_KIND)
-      return
-    case "delete":
-      writer.tombstoneNode(op.id)
-      return
-  }
-}

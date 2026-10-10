@@ -15,6 +15,7 @@
 //
 // Routes (wired in worker/index.ts under /api/replica/*):
 //   PUT /api/replica/notes  — batch row upserts + deletes, one atomic batch
+//   PUT /api/replica/events — a client's own events, appended (docs/event-sourcing.md)
 //   GET /api/replica/notes  — row pull (full, or ?since=<cursor> incremental)
 //   GET /api/replica/status — row counts + schema_version + replica_cursor
 //   GET /api/replica/events — the event log, or one entity's history
@@ -64,10 +65,18 @@ import {
   readEvents,
   reconcileLog,
   restoreSubtree,
+  sayable,
   verifyLog,
   writerOf,
 } from "./event-log"
-import { corpusPullFull, corpusPullSince, corpusPut, corpusStatus } from "./replica-corpus"
+import { parseEventsPayload } from "../../src/data/events"
+import {
+  corpusPullFull,
+  corpusPullSince,
+  corpusPut,
+  corpusPutEvents,
+  corpusStatus,
+} from "./replica-corpus"
 import {
   LEGACY_TIMESTAMP_CURSOR_FLOOR,
   REPLICA_PROTOCOL_HEADER,
@@ -203,7 +212,7 @@ export async function replica(
   const known =
     (pathname === "/api/replica/notes" && (method === "PUT" || method === "GET")) ||
     (pathname === "/api/replica/status" && method === "GET") ||
-    (pathname === "/api/replica/events" && method === "GET") ||
+    (pathname === "/api/replica/events" && (method === "GET" || method === "PUT")) ||
     (pathname === "/api/replica/at" && method === "GET") ||
     (pathname === "/api/replica/verify" && method === "GET") ||
     (pathname === "/api/replica/restore" && method === "POST")
@@ -216,6 +225,9 @@ export async function replica(
 
   if (pathname === "/api/replica/notes" && method === "PUT") return replicaPut(request, tenant)
   if (pathname === "/api/replica/notes") return replicaPull(request, tenant, env)
+  if (pathname === "/api/replica/events" && method === "PUT") {
+    return replicaPutEvents(request, tenant)
+  }
   if (pathname === "/api/replica/events") return replicaEvents(request, tenant)
   if (pathname === "/api/replica/at") return replicaAt(request, tenant)
   if (pathname === "/api/replica/verify") return jsonResponse(await verifyLog(tenant))
@@ -373,6 +385,34 @@ export function retypeLegacyBoards(payload: ReplicaPutPayload): ReplicaPutPayloa
     return { ...node, type: BOARD_TYPE, props: propsJson(props) }
   })
   return { ...payload, nodes }
+}
+
+/**
+ * The events door: `PUT /api/replica/events`, a client's own events in the
+ * order it made them (docs/event-sourcing.md). Validated whole
+ * (`parseEventsPayload`): one malformed event refuses the push, as one
+ * malformed row refuses a row push. Each event names its device; one that
+ * says something unsayable is recorded under what the request's header says.
+ */
+async function replicaPutEvents(request: Request, tenant: TenantDb): Promise<Response> {
+  const contentLength = Number(request.headers.get("Content-Length") ?? "0")
+  if (contentLength > MAX_BODY_BYTES) {
+    return jsonResponse({ error: "payload_too_large" }, 413)
+  }
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    return jsonResponse({ error: "invalid_json" }, 400)
+  }
+  const payload = parseEventsPayload(body)
+  if (!payload) return jsonResponse({ error: "invalid_payload" }, 400)
+  const writer = writerOf(request)
+  const fallback = writer.device ?? "unknown"
+  const events = payload.events.map((event) =>
+    sayable(event.device) ? event : { ...event, device: fallback },
+  )
+  return jsonResponse(await corpusPutEvents(tenant, { ...payload, events }, Date.now(), writer))
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

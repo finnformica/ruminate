@@ -81,24 +81,32 @@ describe("denial plumbing through the real fetch paths", () => {
     expect(store.get(replicaAccessDeniedAtom)).toBeNull()
   })
 
-  it("a refused push sets the status and the queue keeps the rows for retry", async () => {
+  it("a refused push sets the status and the queue keeps the events for retry", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ error: "blocked" }, 403))
     const handle = startReplicaSync({
       getNoteCount: () => 0,
       getAllRows: async () => ({ nodes: [], links: [], views: [] }),
+      getUnpushedEvents: async () => [
+        {
+          id: "evt_1",
+          entity: "block",
+          entity_id: "a",
+          action: "create",
+          patch: { type: "note", text: "a", props: null, notes_id: null },
+          batch: "bat_1",
+          device: "test.tab",
+          at: 1,
+          v: 1,
+        },
+      ],
+      markEventsPushed: async () => {},
       fetchImpl: fetchImpl as unknown as typeof fetch,
       auth: stubAuth,
       debounceMs: 0,
       backoffStartMs: 60_000,
     })
     try {
-      handle.notifyGraphChange(["a"], {
-        nodes: [{ id: "a", type: "note", text: "a", props: null, updated_at: 1 }],
-        links: [],
-        views: [],
-        deleteNodes: [],
-        deleteLinks: [],
-      })
+      handle.notifyChange(["a"], [])
       await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalled())
       await handle.flush()
       expect(store.get(replicaAccessDeniedAtom)).toBe("blocked")

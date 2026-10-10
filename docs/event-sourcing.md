@@ -3,9 +3,13 @@
 Every change to a block, a link or a view is stored as an **event**, in one
 append-only log per tenant. The log is the truth; `nodes`, `link` and `views`
 are what folding it yields, kept current in the same transaction as every
-append. Code: `src/data/events.ts` (the vocabulary and the fold),
+append. The browser makes the events itself — each batch of the editor's ops
+becomes the events it amounts to, kept in a log of the device's own and pushed
+from there — and the replica takes them in as made. Code: `src/data/events.ts`
+(the vocabulary, the fold, ops → events, the wire's validation),
 `worker/handlers/event-log.ts` (append, reconcile, reading the past),
-`migrations/0023_events.sql`.
+`src/data/sql-note-store.ts` (the device's log and its projection),
+`src/data/replica-sync.ts` (the push), `migrations/0023_events.sql`.
 
 ## Why
 
@@ -62,21 +66,22 @@ history, and can itself be undone. One action covers "undelete" and "revert".
 
 ### What is stored beside the change
 
-| column        | why                                                                                                 |
-| ------------- | --------------------------------------------------------------------------------------------------- |
-| `seq`         | The tenant's total order. Assigned in SQL at append. The only thing that orders events.             |
-| `received_at` | The **replica's** clock. "As of 11:06" is answered as the last event received by then. Indexed.     |
-| `at`          | The writer's clock (the row's `updated_at`). Informational, and written back to the projection.     |
-| `v`           | The shape the patch was written in, so a reader years on can upcast it. Events are never rewritten. |
-| `actor`       | The verified user who wrote it — a share's grantee writes into the _owner's_ log.                   |
-| `origin`      | The door: `replica`, `mcp`, `share`, `system`.                                                      |
-| `device`      | `<device>.<tab>` from `X-Ruminate-Device` (`src/data/writer-identity.ts`). Two tabs differ.         |
-| `client`      | The build, from `X-Ruminate-Build` (the changelog version).                                         |
-| `batch`       | One push. Groups the events that arrived together.                                                  |
-| `cause`       | The command, when a writer names one (`snapshot`, `restore`, `share:ensure-view` today).            |
-| `base_seq`    | The entity's `seq` as the writer last saw it — what it believed it was changing.                    |
-| `ref_seq`     | On a restore: the moment being returned to.                                                         |
-| `append`      | The request that appended it (idempotency of the projections).                                      |
+| column        | why                                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `seq`         | The tenant's total order. Assigned in SQL at append. The only thing that orders events.                                         |
+| `received_at` | The **replica's** clock. "As of 11:06" is answered as the last event received by then. Indexed.                                 |
+| `at`          | The writer's clock (the row's `updated_at`). Informational, and written back to the projection.                                 |
+| `tz`          | The writer's UTC offset at `at`, minutes east. What **day** an edit was for the writer; null = unsaid.                          |
+| `v`           | The shape the patch was written in, so a reader years on can upcast it. Events are never rewritten.                             |
+| `actor`       | The verified user who wrote it — a share's grantee writes into the _owner's_ log.                                               |
+| `origin`      | The door: `replica`, `mcp`, `share`, `system`.                                                                                  |
+| `device`      | `<device>.<tab>` from `X-Ruminate-Device` (`src/data/writer-identity.ts`). Two tabs differ.                                     |
+| `client`      | The build, from `X-Ruminate-Build` (the changelog version).                                                                     |
+| `batch`       | One push. Groups the events that arrived together.                                                                              |
+| `cause`       | The command, when a writer names one (`snapshot`, `restore`, `share:ensure-view`; a client may pass one through `useApplyOps`). |
+| `base_seq`    | The entity's `seq` as the writer last saw it — what it believed it was changing (the cached row's `seq`, from its last pull).   |
+| `ref_seq`     | On a restore: the moment being returned to.                                                                                     |
+| `append`      | The request that appended it (idempotency of the projections).                                                                  |
 
 Nothing else needs storing for a past moment to be viewable. Block content is
 entirely in `type`/`text`/`props`; images live in R2 under ids held in
@@ -85,15 +90,55 @@ resolves. Two things a past view does _not_ contain, by design: another
 tenant's nodes reached through a share (their past is theirs), and link-card
 previews (`/api/unfurl` is a cache of the live web).
 
-## One door: rows in, events appended
+## Two doors, one log
 
-Every writer hands over **rows** — the browser's push, a share's grantee, an
-MCP tool, and every cached bundle of the app still in the wild. They all land
+A current browser pushes **events** — its own account of what it did
+(`PUT /api/replica/events`, `appendClientEvents`). Everything else hands over
+**rows** — a share's grantee, an MCP tool, every cached bundle of the app
+still in the wild, and the browser's own full push after a repair — and lands
 in `writeRows`:
 
 1. read the rows the write names (three primary-key lookups),
 2. derive the events the difference amounts to (`rowsToEvents`),
 3. reconcile + append + project, in one atomic batch.
+
+### The client speaks events
+
+The browser is the one writer that knows what it did, so it says so. In the
+database runtime (`src/data/database-mode.ts`) each batch of the editor's ops
+is applied to the graph atom and, against the graph it was planned on,
+translated to events (`opsToEvents`; a view row becomes its one event with
+`viewChangeToEvent`). The batch's events share a `batch` id, the tab's
+`device` (`src/data/writer-identity.ts`), the writer's clock and `tz`, a
+`cause` when the caller names one, and each carries the cached row's `seq` as
+its `base_seq`. A typing run coalesces to its last event before it lands
+(`coalesceTyping`): once in the runtime, over the ops still coalescing, and
+again in the store against the unpushed tail of its log — never into an event
+a push already holds (`inFlightEventIds`).
+
+The store (`src/data/sql-note-store.ts`) then lands the events twice in one
+transaction: appended to its own `events` table — the **device's log**, and
+the push queue — and applied to its rows exactly as the replica applies the
+same events to its (`planEventAppend`): a create inserts or revives, an update
+sets what its patch names, a delete tombstones, a restore revives, each row
+taking the event's `at` as its `updated_at`. The device's log is not the
+tenant's: it holds what this device did. Other devices' changes still arrive
+as rows, by the pull, as they always have.
+
+The push loop (`src/data/replica-sync.ts`) reads the log's unpushed tail
+(`seq IS NULL`), sends it in the order made, and stamps each event — and the
+row it changed — with the `seq` the replica answers. The queue is therefore
+durable: a reload no longer loses what had not pushed, and a previous
+session's leftovers go first. The replica (`appendClientEvents`) answers a
+re-sent event with the seq it already has, drops an `update`/`delete`/
+`restore` behind the row it holds — the same last-writer-wins on the writer's
+clock a row push lands by — and appends the rest, reconcile first. A `create`
+is never stale: over a tombstone it revives, over a live entity it lands as
+an update, as the fold has it.
+
+The row door stays for the writers that cannot speak events, and because the
+full push is the repair path: after a SQL failure the store is rebuilt from
+the atom and every row goes out through it.
 
 The rule a row lands by is the one the row planner always applied — per-row
 last-writer-wins on the writer's `updated_at`:
@@ -107,16 +152,14 @@ last-writer-wins on the writer's `updated_at`:
 | dead    | live   | `restore`, setting what differs                     |
 | dead    | dead   | `update` of what differs, under the tombstone       |
 
-Deriving events **at the replica** is deliberate. It makes "every change is an
-event" a property of the one place all writers pass, rather than a promise
-each writer keeps — so there was no protocol bump, no client that must update
-before its edits are recorded, and no way to write around the log: nothing
-else in the Worker holds an `INSERT` or `UPDATE` against those tables. The
-price is granularity: an event is "what one push changed in one row" (the
-client flushes ~2s after a change), not "what one keystroke or command did".
-A client that speaks events itself (`opsToEvents`, already written) can be
-let in beside this later to carry a `cause` per command; the log does not
-change when it is.
+Deriving events **at the replica** for the row door is deliberate. It makes
+"every change is an event" a property of the one place those writers pass,
+rather than a promise each keeps — so there was no protocol bump, no client
+that had to update before its edits were recorded, and no way to write around
+the log: nothing else in the Worker holds an `INSERT` or `UPDATE` against
+those tables. Its price is granularity: an event is "what one push changed in
+one row", not "what one command did" — which is why the browser now speaks
+events itself, and why the two doors write the same log.
 
 One difference from the row planner, inside one window: rows are read _before_
 the batch (D1 has no interactive transactions), so two writers racing on one
@@ -207,8 +250,15 @@ first write after this Worker returns reconciles it. Nothing needs undoing.
 
 ## Open
 
-- **A history / restore UI**, and `cause` per command (the client speaking
-  events) — the user-facing point of all this.
+- **A history / restore UI** — the user-facing point of all this. A
+  **calendar** that shows each day as what was written and removed on it
+  (a diff of the corpus between the day's edges, red and green) is the first
+  one planned: it needs the device to hold the tenant's whole log, not just
+  its own, so the next step is a pull of events since a `seq` beside the pull
+  of rows, folded locally; and it needs `tz`, which every event now carries,
+  to put an edit on the writer's day rather than the reader's.
+- **`cause` per command.** The wire carries it; no caller of `useApplyOps`
+  names one yet.
 - **Schema evolution.** Events are forever and this repo migrates weekly.
   Rule: never rewrite an event; add an `upcast` case per shape change.
 - **Per-block erasure.** Tenant purge exists. "Delete this block for good"
