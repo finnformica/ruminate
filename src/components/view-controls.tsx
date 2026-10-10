@@ -89,13 +89,17 @@ export interface SavedViewActions {
 }
 
 function DefaultFooter({ onUpdateDefault, onResetDefault }: SavedViewActions) {
-  // Stacked on a phone, where the menu is narrow (see `MENU_WIDTH`).
+  // Stacked on a phone, where the menu is narrow (see `MENU_WIDTH`), each
+  // the footer's full width. A finger's side padding (`coarse:px-4`) is
+  // for a button standing on its own; here it only made the label wider
+  // than the column, and the menu cut the buttons off at its edge.
+  const button = "whitespace-nowrap coarse:px-1 sm:w-0 sm:grow"
   return (
     <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
-      <Button size="small" className="whitespace-nowrap sm:w-0 sm:grow" onClick={onUpdateDefault}>
+      <Button size="small" className={button} onClick={onUpdateDefault}>
         Update to default
       </Button>
-      <Button size="small" className="whitespace-nowrap sm:w-0 sm:grow" onClick={onResetDefault}>
+      <Button size="small" className={button} onClick={onResetDefault}>
         Reset to default
       </Button>
     </div>
@@ -107,7 +111,8 @@ function DefaultFooter({ onUpdateDefault, onResetDefault }: SavedViewActions) {
  * (`DropdownMenu.Content`, nested), and on a phone the two have the
  * screen's width to share: the menu keeps to a narrow column at the right
  * edge, where its button is, so its branch has the room to the left. With
- * a footer (the saved-view buttons) it widens where there is room.
+ * a footer (the saved-view buttons) it widens where there is room; on a
+ * phone the buttons fit the column instead (`DefaultFooter`).
  */
 const MENU_WIDTH = "max-sm:w-44"
 const MENU_WIDTH_WITH_FOOTER = "max-sm:w-44 sm:w-80"
