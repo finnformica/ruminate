@@ -41,12 +41,17 @@ import { keyOf } from "../blocks/view"
  * changed (a task ticked, a line made a heading) is drawn as a line diff
  * draws it: the row as it was goes out, with its old key, and the row as it
  * is comes in — a ghost row (`was:<id>`) marked removed just above the block
- * marked added — since a key has no words to diff. Everything else is
- * unchanged, and drawn as the note's own view draws it — folded where the
- * reader's folds and the depth setting fold it — then cut down to the
- * changes and a row of context on either side (`foldContext`): the rows
- * between fold behind one row that says how many, as a pull request's do,
- * and open a few at a time.
+ * marked added — since a key has no words to diff. A block is compared by
+ * **occurrence** — where it is held, not only that it is — so a block the
+ * day moved (a picture given another value on a board, a row dragged under
+ * a different heading) is a ghost marked removed where it stood and the
+ * block marked added where it landed; a block still held where it was and
+ * held somewhere new as well keeps its own row and gets a ghost (`now:<id>`)
+ * marked added in the new place. Everything else is unchanged, and drawn as
+ * the note's own view draws it — folded where the reader's folds and the
+ * depth setting fold it — then cut down to the changes and a row of context
+ * on either side (`foldContext`): the rows between fold behind one row that
+ * says how many, as a pull request's do, and open a few at a time.
  *
  * ## Before history began
  *
@@ -332,20 +337,40 @@ function noteChange(
 
   const marks = new Map<string, DiffMark>()
   const base: BlockDoc = docAfter ?? { props: docBefore!.props, rootBlockIds: [], blocks: {} }
+  const parentsBefore = docBefore ? parentsOf(docBefore) : new Map<string, Set<string | null>>()
+  const parentsAfter = parentsOf(base)
   // Blocks whose type changed, with the row as it was.
   const retyped = new Map<string, Block>()
+  // Blocks held somewhere new while still held where they were, with the
+  // parents that are new (`ghostArrived`).
+  const arrived = new Map<string, Set<string | null>>()
   for (const [id, block] of Object.entries(base.blocks)) {
     const was = docBefore?.blocks[id]
-    if (!was) marks.set(id, { kind: "added" })
-    else if (was.type !== block.type) {
+    if (!was) {
+      marks.set(id, { kind: "added" })
+      continue
+    }
+    const before = parentsBefore.get(id) ?? new Set<string | null>()
+    const after = parentsAfter.get(id) ?? new Set<string | null>()
+    const kept = [...after].some((parent) => before.has(parent))
+    const newParents = new Set([...after].filter((parent) => !before.has(parent)))
+    if (newParents.size > 0 && !kept) {
+      // Moved whole: the row it was is the ghost where it stood
+      // (`spliceRemoved`), so the row it is comes in as a line diff's does.
+      marks.set(id, { kind: "added" })
+      continue
+    }
+    if (was.type !== block.type) {
       marks.set(id, { kind: "added" })
       retyped.set(id, was)
     } else if (was.text !== block.text) {
       marks.set(id, { kind: "changed", words: diffWords(was.text, block.text) })
     }
+    if (newParents.size > 0) arrived.set(id, newParents)
   }
   const spliced = docBefore ? spliceRemoved(base, docBefore, marks) : base
-  const doc = retyped.size > 0 ? ghostRetyped(spliced, retyped, marks) : spliced
+  const withArrivals = arrived.size > 0 ? ghostArrived(spliced, arrived, marks) : spliced
+  const doc = retyped.size > 0 ? ghostRetyped(withArrivals, retyped, marks) : withArrivals
   const added = countMarks(marks, "added")
   const removed = countMarks(marks, "removed")
   const changed = countMarks(marks, "changed")
@@ -366,6 +391,51 @@ function noteChange(
 
 const countMarks = (marks: ReadonlyMap<string, DiffMark>, kind: DiffMark["kind"]) =>
   [...marks.values()].filter((mark) => mark.kind === kind).length
+
+/** Every block's parents in an outline — the blocks whose children name it,
+ * and null for a root. Where a block is held, which is what a move changes. */
+function parentsOf(doc: BlockDoc): Map<string, Set<string | null>> {
+  const parents = new Map<string, Set<string | null>>()
+  const add = (id: string, parent: string | null) => {
+    const set = parents.get(id)
+    if (set) set.add(parent)
+    else parents.set(id, new Set([parent]))
+  }
+  for (const id of doc.rootBlockIds) add(id, null)
+  for (const [id, block] of Object.entries(doc.blocks)) {
+    for (const child of block.children) add(child, id)
+  }
+  return parents
+}
+
+/**
+ * For every block held somewhere new while still held where it was, a ghost
+ * (`now:<id>`) in its place under each new parent — the row as it is, its
+ * children with it — marked added, so the new occurrence shows as added
+ * while the one that stayed keeps its own mark. The block's id names only
+ * the rows that were already there.
+ */
+function ghostArrived(
+  doc: BlockDoc,
+  arrived: ReadonlyMap<string, Set<string | null>>,
+  marks: Map<string, DiffMark>,
+): BlockDoc {
+  const blocks: Record<string, Block> = { ...doc.blocks }
+  const inPlace = (list: readonly string[], parent: string | null): string[] =>
+    list.map((id) => {
+      if (!arrived.get(id)?.has(parent)) return id
+      const ghostId = `now:${id}`
+      blocks[ghostId] = { ...doc.blocks[id], id: ghostId }
+      marks.set(ghostId, { kind: "added" })
+      return ghostId
+    })
+  for (const [id, block] of Object.entries(doc.blocks)) {
+    if (block.children.some((child) => arrived.get(child)?.has(id))) {
+      blocks[id] = { ...blocks[id], children: inPlace(block.children, id) }
+    }
+  }
+  return { ...doc, blocks, rootBlockIds: inPlace(doc.rootBlockIds, null) }
+}
 
 /**
  * For every block whose type changed, the row as it was — its old type and
@@ -397,11 +467,14 @@ function ghostRetyped(
 }
 
 /**
- * The after-outline with every block only the before-outline holds put back
- * where it stood: after the nearest earlier sibling that is still there, else
- * first under its parent (the root list, or a block the after-outline holds
- * — or one spliced back itself, so a removed subtree comes whole). Each is
- * marked `removed`.
+ * The after-outline with every occurrence only the before-outline holds put
+ * back where it stood: after the nearest earlier sibling that is still
+ * there, else first under its parent (the root list, or a block the
+ * after-outline holds — or one spliced back itself, so a removed subtree
+ * comes whole). A block the after-outline no longer holds at all comes back
+ * as itself; one it still holds elsewhere (a block the day moved) leaves a
+ * ghost (`was:<id>`) — the row as it was, no children — since its own id
+ * names the row where it is now. Each is marked `removed`.
  */
 function spliceRemoved(after: BlockDoc, before: BlockDoc, marks: Map<string, DiffMark>): BlockDoc {
   const blocks: Record<string, Block> = { ...after.blocks }
@@ -415,27 +488,36 @@ function spliceRemoved(after: BlockDoc, before: BlockDoc, marks: Map<string, Dif
     }
     return list
   }
+  // The row standing for a before-sibling in a list: itself, or its ghost.
+  const indexIn = (list: readonly string[], id: string) => {
+    const own = list.indexOf(id)
+    return own !== -1 ? own : list.indexOf(`was:${id}`)
+  }
   const place = (parent: string | null, siblingsBefore: readonly string[]) => {
     const list = listOf(parent)
     siblingsBefore.forEach((id, index) => {
-      if (blocks[id] && list.includes(id)) return
-      if (!blocks[id]) {
-        const gone = before.blocks[id]
-        if (!gone) return
+      if (indexIn(list, id) !== -1) return
+      const gone = before.blocks[id]
+      if (!gone) return
+      let rowId = id
+      if (after.blocks[id]) {
+        rowId = `was:${id}`
+        blocks[rowId] = { ...gone, id: rowId, children: [] }
+        marks.set(rowId, { kind: "removed" })
+      } else if (!blocks[id]) {
         blocks[id] = { ...gone, children: [] }
         marks.set(id, { kind: "removed" })
       }
-      if (list.includes(id)) return
       // After the nearest earlier sibling still in the list, else first.
       let at = 0
       for (let k = index - 1; k >= 0; k -= 1) {
-        const found = list.indexOf(siblingsBefore[k])
+        const found = indexIn(list, siblingsBefore[k])
         if (found !== -1) {
           at = found + 1
           break
         }
       }
-      list.splice(at, 0, id)
+      list.splice(at, 0, rowId)
     })
   }
   place(null, before.rootBlockIds)
@@ -474,8 +556,9 @@ export interface FoldOptions {
 
 /**
  * The blocks with a change somewhere beneath them — the rows a day's reading
- * holds open whatever the reader's folds say, so nothing the day did is
- * hidden (`components/day-changes.tsx`).
+ * starts open whatever the depth setting says, so nothing the day did is
+ * hidden; the reader's own folds still close them (`useFoldRule`,
+ * `components/day-changes.tsx`).
  */
 export function changedBeneath(doc: BlockDoc, marks: ReadonlyMap<string, DiffMark>): Set<string> {
   const holds = new Map<string, boolean>()
