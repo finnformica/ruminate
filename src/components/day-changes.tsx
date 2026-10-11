@@ -357,13 +357,13 @@ function NoteSection({ change }: { change: NoteChange }) {
           {change.changed > 0 ? <span className="text-text-changed">~{change.changed}</span> : null}
         </span>
       </header>
-      {/* Nothing highlighted: a page of notes is read, not arrowed through,
-          and a highlight would scroll its row into view on mount. */}
+      {/* Read, not browsed: a page of notes is not arrowed through, so its
+          rows take no highlight on hover or click (`navigable`), and nothing
+          is highlighted on mount, which would scroll its row into view. */}
       <BlockEditor
         doc={shown.doc}
         onChange={noop}
         readOnly
-        browse
         initialSelection="none"
         diff={diff}
         collapsed={collapsed}
