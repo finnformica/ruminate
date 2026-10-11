@@ -21,7 +21,7 @@ import { TrashIcon16 } from "../icons"
  * commits when it is left or Enter is pressed and renames the block, and a
  * delete beside it, which asks first: the value comes off every picture
  * that carries it, and a tombstone has no way back. Reached from a
- * picker's **Edit values…** in the picture's window and from the Values
+ * picker's **Edit values** in the picture's window and from the Values
  * column of the Features editor, so a link feature, which has no picker,
  * can be tidied too. Nothing here is a new kind of write: a rename is the
  * block's text, a delete is the outline's Delete.

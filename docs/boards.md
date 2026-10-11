@@ -108,7 +108,7 @@ several values (`multi`), and notes on what the feature is (`notes`, as
 the model is told them):
 
 - `text` — a value is a name: a bullet under the feature block, typed into
-  **New…** in the picker or chosen from the values there.
+  **New** in the picker or chosen from the values there.
 - `place` — a name too, in every way but one: when a picture carries where
   it was taken (below, "Tagging with Claude"), the hint is offered to the
   board's place feature, by its label. A board with no place feature sends
@@ -200,7 +200,7 @@ editor holds a feature's name, that commits when it is left or Enter is
 pressed and sets the value block's text — a link value's title, kept once
 given, with the page's host beneath it so two pages with one title can be
 told apart — and a delete beside it. It is reached two ways: **Edit
-values…** in a picker's menu, beneath **New…**, once the feature has any
+values** in a picker's menu, beneath **New**, once the feature has any
 values (the picture's window, below); and the **Values** column of the
 Features editor, where each row counts its values and the count opens
 them — the way to a link feature's, which has no picker.
@@ -400,10 +400,10 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
   `src/components/ui/layer.ts`), or it would open behind the window.
 - **A picker** (`value-picker.tsx`): a menu of the feature's values —
   single-select closes on a pick, multi-select stays open with each row a
-  toggle — **New…**, which asks for a name in a dialog of its own
+  toggle — **New**, which asks for a name in a dialog of its own
   (`new-value-dialog.tsx`); the same dialog asks a link feature's **Add
   link** for an address (required, a web address) and a title (optional);
-  and, once the feature has values, **Edit values…**, the Values editor
+  and, once the feature has values, **Edit values**, the Values editor
   (above, under "Features") to rename or delete them.
 
 ## A board in a note

@@ -6,8 +6,8 @@ import { ChevronDownIcon16, EditIcon16, PlusIcon16 } from "../icons"
 
 /**
  * One feature's picker: a button naming what is set, and a menu of the
- * feature's values to pick from — plus **New…**, which asks for a name and
- * makes the value on the way, and **Edit values…**, there once the feature
+ * feature's values to pick from — plus **New**, which asks for a name and
+ * makes the value on the way, and **Edit values**, there once the feature
  * has any, which opens the Values editor to rename or delete them
  * (docs/boards.md, "Values"). A single-select feature closes on a pick; a
  * multi-select one stays open, each row a toggle.
@@ -60,11 +60,11 @@ export function ValuePicker({
         ))}
         {values.length > 0 ? <DropdownMenu.Separator /> : null}
         <DropdownMenu.Item icon={<PlusIcon16 />} onClick={onNew}>
-          New {feature.label.trim().toLowerCase() || "value"}…
+          New {feature.label.trim().toLowerCase() || "value"}
         </DropdownMenu.Item>
         {values.length > 0 ? (
           <DropdownMenu.Item icon={<EditIcon16 />} onClick={onEdit}>
-            Edit values…
+            Edit values
           </DropdownMenu.Item>
         ) : null}
       </DropdownMenu.Content>
