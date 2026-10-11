@@ -2,6 +2,7 @@ import { useAtomValue } from "jotai"
 import React from "react"
 import { childIdsOf } from "../data/graph"
 import { blockIndexAtom, graphSnapshotAtom } from "../global-state"
+import { useNarrowScreen } from "../hooks/narrow-screen"
 import { cx } from "../utils/cx"
 import { composeQuery } from "../utils/search"
 import {
@@ -89,17 +90,20 @@ export interface SavedViewActions {
 }
 
 function DefaultFooter({ onUpdateDefault, onResetDefault }: SavedViewActions) {
-  // Stacked on a phone, where the menu is narrow (see `MENU_WIDTH`), each
-  // the footer's full width. A finger's side padding (`coarse:px-4`) is
-  // for a button standing on its own; here it only made the label wider
-  // than the column, and the menu cut the buttons off at its edge.
+  // Update is the primary — it keeps what is on screen — and Reset the
+  // ghost beside it, so the pair reads as a choice with a weight to it,
+  // and the primary comes first as a dialog's confirm does. Stacked on a
+  // phone, where the menu is narrow (see `MENU_WIDTH`), each the footer's
+  // full width. A finger's side padding (`coarse:px-4`) is for a button
+  // standing on its own; here it only made the label wider than the
+  // column, and the menu cut the buttons off at its edge.
   const button = "whitespace-nowrap coarse:px-1 sm:w-0 sm:grow"
   return (
     <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
-      <Button size="small" className={button} onClick={onUpdateDefault}>
+      <Button variant="primary" size="small" className={button} onClick={onUpdateDefault}>
         Update to default
       </Button>
-      <Button size="small" className={button} onClick={onResetDefault}>
+      <Button variant="ghost" size="small" className={button} onClick={onResetDefault}>
         Reset to default
       </Button>
     </div>
@@ -109,13 +113,33 @@ function DefaultFooter({ onUpdateDefault, onResetDefault }: SavedViewActions) {
 /**
  * How wide the Filter and Sort menus are. Their branches open beside them
  * (`DropdownMenu.Content`, nested), and on a phone the two have the
- * screen's width to share: the menu keeps to a narrow column at the right
- * edge, where its button is, so its branch has the room to the left. With
- * a footer (the saved-view buttons) it widens where there is room; on a
+ * screen's width to share: the menu keeps to a narrow column at the
+ * screen's right edge, so its branch has the room to the left. With a
+ * footer (the saved-view buttons) it widens where there is room; on a
  * phone the buttons fit the column instead (`DefaultFooter`).
  */
-const MENU_WIDTH = "max-sm:w-44"
-const MENU_WIDTH_WITH_FOOTER = "max-sm:w-44 sm:w-80"
+const MENU_WIDTH = "max-sm:w-48"
+const MENU_WIDTH_WITH_FOOTER = "max-sm:w-48 sm:w-80"
+
+/**
+ * Where the menu sits. On a wide screen its right edge is its button's.
+ * On a phone it hugs the screen's right edge instead, whichever button
+ * opened it — Sort's button is one or two buttons in from the edge, and a
+ * menu hung from it left its branch too little room ("Asc…"). Anchored at
+ * the button's left edge and shifted, not flipped, back into the screen,
+ * it lands against the edge for either button.
+ */
+function useMenuPlacement() {
+  const narrow = useNarrowScreen()
+  return narrow
+    ? { align: "start" as const, collisionAvoidance: PHONE_COLLISION }
+    : { align: "end" as const, collisionAvoidance: undefined }
+}
+
+const PHONE_COLLISION: React.ComponentProps<typeof DropdownMenu.Content>["collisionAvoidance"] = {
+  side: "flip",
+  align: "shift",
+}
 
 /** The ancestor branches as the menu names them. */
 const ANCESTOR_LABELS: Record<AncestorFilterKey, string> = { parent: "Parent", under: "Under" }
@@ -159,6 +183,7 @@ export function FilterMenu({
   const index = useAtomValue(blockIndexAtom)
   const graph = useAtomValue(graphSnapshotAtom)
   const openPicker = usePalettePicker()
+  const placement = useMenuPlacement()
   // A block picked by id reads as its text.
   const blockText = React.useCallback((id: string) => index.getBlock(id)?.text, [index])
   const summary = describeFilter(filter, blockText)
@@ -216,7 +241,7 @@ export function FilterMenu({
         }
       />
       <DropdownMenu.Content
-        align="end"
+        {...placement}
         className={saved?.dirty ? MENU_WIDTH_WITH_FOOTER : MENU_WIDTH}
         footer={saved?.dirty ? <DefaultFooter {...saved} /> : undefined}
       >
@@ -400,6 +425,7 @@ export function SortMenu({
 }) {
   const summary = describeSort(sort)
   const active = summary !== ""
+  const placement = useMenuPlacement()
   const [key, direction] = sort
     .trim()
     .replace(/^sort:/, "")
@@ -421,7 +447,7 @@ export function SortMenu({
         }
       />
       <DropdownMenu.Content
-        align="end"
+        {...placement}
         className={saved?.dirty ? MENU_WIDTH_WITH_FOOTER : MENU_WIDTH}
         footer={saved?.dirty ? <DefaultFooter {...saved} /> : undefined}
       >

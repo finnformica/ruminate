@@ -60,8 +60,16 @@ type ContentProps = {
   align?: "start" | "center" | "end"
   alignOffset?: number
   /** A fixed width, inline. Left out, the menu is `w-64`, and a class on
-   * `className` (`max-sm:w-44`) may size it by the screen. */
+   * `className` (`max-sm:w-48`) may size it by the screen. */
   width?: number | string
+  /**
+   * How a menu avoids the edge of the screen. Left out, Base UI's own:
+   * flipping to the other side, and the other alignment, when its own has
+   * no room. A menu that would rather slide along its trigger than flip
+   * says so (the note header's menus on a phone). A submenu's is its own
+   * (`SUBMENU_COLLISION`) and ignores this.
+   */
+  collisionAvoidance?: Menu.Positioner.Props["collisionAvoidance"]
   children?: React.ReactNode
   className?: string
   /**
@@ -94,6 +102,7 @@ function Content({
   align = "start",
   alignOffset,
   width,
+  collisionAvoidance,
   children,
   className,
   footer,
@@ -128,7 +137,7 @@ function Content({
         sideOffset={sideOffset ?? (nested ? POPUP_PADDING : 4)}
         align={align}
         alignOffset={alignOffset ?? (nested ? -POPUP_PADDING : undefined)}
-        collisionAvoidance={nested ? SUBMENU_COLLISION : undefined}
+        collisionAvoidance={nested ? SUBMENU_COLLISION : collisionAvoidance}
       >
         <Menu.Popup
           render={

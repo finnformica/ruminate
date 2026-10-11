@@ -25,6 +25,15 @@ export const Secondary = {
   },
 }
 
+/** The quieter of a pair: no fill until the pointer, beside a primary. */
+export const Ghost = {
+  args: {
+    children: "Reset to default",
+    variant: "ghost",
+    size: "medium",
+  },
+}
+
 /** The confirm of a destructive dialog — the only place this variant goes. */
 export const Danger = {
   args: {

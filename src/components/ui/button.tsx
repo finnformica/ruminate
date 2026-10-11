@@ -23,6 +23,11 @@ const button = cva(
         // A dialog's confirm (`ConfirmDialog`), never a button among others.
         danger:
           "bg-bg-danger font-bold text-text-on-danger [&_*]:text-text-on-danger enabled:hover:bg-bg-danger-hover enabled:active:bg-bg-danger-active",
+        // No fill at rest, the pointer's fill under the pointer — an
+        // IconButton's answers, with a label. The quieter of a pair beside
+        // a primary (the Filter menu's Reset to default), where a second
+        // filled button would read as a second choice of equal weight.
+        ghost: "enabled:hover:bg-bg-hover enabled:active:bg-bg-active",
       },
       size: {
         small: "h-6 px-2",
