@@ -1,0 +1,374 @@
+import { Link } from "@tanstack/react-router"
+import { addDays, parseISO, startOfISOWeek } from "date-fns"
+import { useAtom, useAtomValue } from "jotai"
+import React from "react"
+import { collapsedKeysOf } from "../blocks/default-collapsed"
+import {
+  FOLD_REVEAL,
+  changedBeneath,
+  changesIn,
+  daysWithChanges,
+  foldContext,
+  sittingsIn,
+  type NoteChange,
+  type PeriodChanges,
+  type Sitting,
+} from "../data/day-changes"
+import {
+  databaseEventLog,
+  databaseModeStatusAtom,
+  eventLogVersionAtom,
+} from "../data/database-mode"
+import type { LoggedEvent } from "../data/events"
+import { isMintedNoteId } from "../data/note-identity"
+import { useStuck } from "../hooks/in-view"
+import { useFoldRule } from "../data/view-state"
+import { writerTimezone } from "../data/writer-identity"
+import { calendarChangesViewAtom, isDatabaseModeAtom } from "../global-state"
+import { cx } from "../utils/cx"
+import { formatDate, isValidWeekString, toDateString, toWeekString } from "../utils/date"
+import { BlockEditor } from "./block-editor/block-editor"
+import { useDateMarks } from "./date-mentions"
+import { NoteIcon16 } from "./icons"
+import { Button } from "./ui/button"
+import { Skeleton } from "./ui/skeleton"
+
+const noop = () => {}
+
+/**
+ * The tenant's event log as this device holds it, re-read whenever it moves
+ * (`eventLogVersionAtom`): what the calendar folds its days from
+ * (docs/event-sourcing.md). Null signed out, and while the store is opening.
+ */
+export function useEventLog(): LoggedEvent[] | null {
+  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
+  const { status } = useAtomValue(databaseModeStatusAtom)
+  const version = useAtomValue(eventLogVersionAtom)
+  const ready = isDatabaseMode && status === "ready"
+  const [log, setLog] = React.useState<LoggedEvent[] | null>(null)
+  React.useEffect(() => {
+    if (!ready) return
+    let cancelled = false
+    void databaseEventLog().then((read) => {
+      if (!cancelled) setLog(read)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [ready, version])
+  return ready ? log : null
+}
+
+/** The days something was written on, or a note names in a date-valued
+ * property (`useDateMarks`), and the weeks holding them — what the calendar
+ * dots. */
+export function useCalendarMarks(log: LoggedEvent[] | null): ReadonlySet<string> {
+  const dates = useDateMarks()
+  return React.useMemo(() => {
+    const marked = new Set(dates)
+    if (log === null) return marked
+    for (const day of daysWithChanges(log, writerTimezone())) {
+      marked.add(day)
+      marked.add(toWeekString(parseISO(day)))
+    }
+    return marked
+  }, [log, dates])
+}
+
+/**
+ * What was written on a day — or in a week — of the calendar
+ * (docs/event-sourcing.md, "A day on the calendar"): every note changed on
+ * it, each drawn as its own page draws it — the name, then the outline in
+ * the block editor's read-only mode — with what the day did to each row
+ * marked (`BlockEditor.diff`). Two ways to read it, kept as a display
+ * setting: **by note**, each note once with the whole period's changes, or
+ * **in order**, sitting by sitting as the day happened (`sittingsIn`).
+ * Folded from the device's copy of the event log, so it is read-only by
+ * nature.
+ */
+export function DayChanges({ periodId, log }: { periodId: string; log: LoggedEvent[] | null }) {
+  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
+  const [view, setView] = useAtom(calendarChangesViewAtom)
+  const isWeek = isValidWeekString(periodId)
+  const viewerTz = writerTimezone()
+
+  const changes = React.useMemo(
+    () => (log === null ? null : changesIn(log, periodId, viewerTz)),
+    [log, periodId, viewerTz],
+  )
+
+  if (!isDatabaseMode) {
+    return (
+      <section aria-label="Changes" className="flex flex-col gap-4">
+        <h2 className="font-bold text-text">Changes</h2>
+        <p className="text-text-secondary">Sign in to see what was written on each day.</p>
+      </section>
+    )
+  }
+
+  return (
+    <section aria-label="Changes" className="flex flex-col gap-6">
+      <div className="flex items-center gap-2">
+        <h2 className="flex items-baseline gap-2 font-bold text-text">
+          Changes
+          {/* Not on a phone, where it would be squeezed against the buttons. */}
+          {changes !== null && changes.notes.length > 0 ? (
+            <span className="hidden font-normal text-text-secondary @[480px]:inline">
+              {summaryOf(changes)}
+            </span>
+          ) : null}
+        </h2>
+        {changes !== null && changes.notes.length > 0 ? (
+          <div role="group" aria-label="Show changes" className="ml-auto flex gap-1">
+            <Button size="small" selected={view === "notes"} onClick={() => setView("notes")}>
+              By note
+            </Button>
+            <Button size="small" selected={view === "timeline"} onClick={() => setView("timeline")}>
+              In order
+            </Button>
+          </div>
+        ) : null}
+      </div>
+      {changes === null ? (
+        <Skeleton className="h-24" />
+      ) : changes.notes.length === 0 ? (
+        <p className="text-text-secondary">{emptyLine(changes, periodId, isWeek)}</p>
+      ) : view === "timeline" ? (
+        <Timeline log={log as LoggedEvent[]} periodId={periodId} />
+      ) : isWeek ? (
+        <WeekByNote log={log as LoggedEvent[]} weekId={periodId} />
+      ) : (
+        <NoteList notes={changes.notes} />
+      )}
+    </section>
+  )
+}
+
+/** "2 notes · 4 edits" */
+function summaryOf(changes: PeriodChanges): string {
+  const notes = changes.notes.length === 1 ? "1 note" : `${changes.notes.length} notes`
+  const edits = changes.events === 1 ? "1 edit" : `${changes.events} edits`
+  return `${notes} · ${edits}`
+}
+
+/**
+ * Why there is nothing to show. A day before the log began is not an empty
+ * day, it is one history cannot answer; a day that has not come is not one
+ * nothing was written on.
+ */
+function emptyLine(changes: PeriodChanges, periodId: string, isWeek: boolean): string {
+  const today = new Date()
+  const thisPeriod = isWeek ? toWeekString(today) : toDateString(today)
+  if (periodId > thisPeriod) {
+    return isWeek ? "This week has not come yet." : "This day has not come yet."
+  }
+  if (changes.earliest !== null) {
+    const earliestPeriod = isWeek ? toWeekString(parseISO(changes.earliest)) : changes.earliest
+    if (periodId < earliestPeriod) {
+      return `History begins on ${formatDate(changes.earliest, { alwaysIncludeYear: true })}.`
+    }
+  }
+  return isWeek ? "Nothing was written this week." : "Nothing was written on this day."
+}
+
+/** A week by note: each day with changes under its own heading, and one line
+ * for the days without. */
+function WeekByNote({ log, weekId }: { log: LoggedEvent[]; weekId: string }) {
+  const viewerTz = writerTimezone()
+  const days = React.useMemo(() => {
+    const start = startOfISOWeek(parseISO(weekId))
+    return Array.from({ length: 7 }, (_, index) => {
+      const day = toDateString(addDays(start, index))
+      return { day, changes: changesIn(log, day, viewerTz) }
+    })
+  }, [log, weekId, viewerTz])
+  const quiet = days.filter(({ changes }) => changes.notes.length === 0).map(({ day }) => day)
+
+  return (
+    <div className="flex flex-col gap-10">
+      {days
+        .filter(({ changes }) => changes.notes.length > 0)
+        .map(({ day, changes }) => (
+          <section key={day} aria-label={formatDate(day)} className="flex flex-col gap-6">
+            <h3 className="flex items-baseline gap-2 text-text">
+              <Link
+                to="/calendar/$"
+                params={{ _splat: day }}
+                search={{}}
+                className="focus-ring rounded font-bold hover:underline"
+              >
+                {formatDate(day)}
+              </Link>
+              <span className="text-text-secondary">{summaryOf(changes)}</span>
+            </h3>
+            <NoteList notes={changes.notes} />
+          </section>
+        ))}
+      {quiet.length > 0 ? (
+        <p className="text-text-secondary">
+          Nothing was written on {listDays(quiet.map((day) => formatDate(day).split(",")[0]))}.
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+/** "Tue, Sat and Sun" */
+function listDays(names: string[]): string {
+  if (names.length <= 1) return names.join("")
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
+}
+
+/** The period in order: one group per sitting, headed by when it was —
+ * on the writer's clock, with the zone where it is not the reader's. */
+function Timeline({ log, periodId }: { log: LoggedEvent[]; periodId: string }) {
+  const viewerTz = writerTimezone()
+  const isWeek = isValidWeekString(periodId)
+  const sittings = React.useMemo(
+    () => sittingsIn(log, periodId, viewerTz),
+    [log, periodId, viewerTz],
+  )
+  return (
+    <ol className="flex flex-col gap-10">
+      {sittings.map((sitting, index) => (
+        <li key={`${sitting.device}:${sitting.at}:${index}`} className="flex flex-col gap-6">
+          <h3 className="flex items-baseline gap-2 text-text">
+            <span className="font-bold">{sittingLabel(sitting, viewerTz, isWeek)}</span>
+            <span className="text-text-secondary">
+              {sitting.notes.length === 1 ? "1 note" : `${sitting.notes.length} notes`}
+              {sitting.tz !== null && sitting.tz !== viewerTz ? ` · ${utcOffset(sitting.tz)}` : ""}
+            </span>
+          </h3>
+          <NoteList notes={sitting.notes} />
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+/** "14:05–14:32", with the day in front of it on a week's page. */
+function sittingLabel(sitting: Sitting, viewerTz: number, withDay: boolean): string {
+  const tz = sitting.tz ?? viewerTz
+  const from = clockOf(sitting.at, tz)
+  const until = clockOf(sitting.until, tz)
+  const range = from === until ? from : `${from}–${until}`
+  if (!withDay) return range
+  const day = formatDate(toDateString(new Date(sitting.at + tz * 60_000)))
+  return `${day}, ${range}`
+}
+
+/** The wall clock an instant read as, in a zone given as minutes east of UTC. */
+function clockOf(at: number, tz: number): string {
+  const date = new Date(at + tz * 60_000)
+  const hours = String(date.getUTCHours()).padStart(2, "0")
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0")
+  return `${hours}:${minutes}`
+}
+
+/** "UTC+9", "UTC−4", "UTC+5:30" */
+function utcOffset(tz: number): string {
+  if (tz === 0) return "UTC"
+  const sign = tz < 0 ? "−" : "+"
+  const hours = Math.floor(Math.abs(tz) / 60)
+  const minutes = Math.abs(tz) % 60
+  return `UTC${sign}${hours}${minutes ? `:${String(minutes).padStart(2, "0")}` : ""}`
+}
+
+function NoteList({ notes }: { notes: NoteChange[] }) {
+  return (
+    <div className="flex flex-col gap-10">
+      {notes.map((note) => (
+        <NoteSection key={note.id} change={note} />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * One note's change, laid out as its own page is: the name, which stays at
+ * the top while its outline scrolls under it, then the outline in the block
+ * editor's read-only mode with every row marked (`BlockEditor.diff`,
+ * `block-item.tsx`). The outline folds as the note's own view folds — the
+ * reader's folds over the depth setting (`useFoldRule`) — except that a row
+ * with a change beneath it is held open, so everything the day did shows;
+ * then it is cut down to the changes and a row of context each side, the
+ * rows between folded behind "n rows above" / "n rows below" that open a
+ * few at a time (`foldContext`).
+ */
+function NoteSection({ change }: { change: NoteChange }) {
+  const title = change.title || (isMintedNoteId(change.id) ? "Untitled" : change.id)
+  const { expanded, setFold } = useFoldRule(change.id)
+  const collapsed = React.useMemo(() => {
+    const open = changedBeneath(change.doc, change.marks)
+    return new Set(
+      collapsedKeysOf(change.doc, expanded).filter(
+        (key) => !open.has(key.slice(key.lastIndexOf("/") + 1)),
+      ),
+    )
+  }, [change.doc, change.marks, expanded])
+  const [revealed, setRevealed] = React.useState<ReadonlyMap<string, number>>(() => new Map())
+  const expandFold = React.useCallback(
+    (foldId: string) =>
+      setRevealed((prev) => new Map(prev).set(foldId, (prev.get(foldId) ?? 0) + FOLD_REVEAL)),
+    [],
+  )
+  const shown = React.useMemo(
+    () => foldContext(change.doc, change.marks, { collapsed, revealed }),
+    [change.doc, change.marks, collapsed, revealed],
+  )
+  const diff = React.useMemo(() => ({ marks: shown.marks, expandFold }), [shown.marks, expandFold])
+  // While the name is stuck at the top, the rows fade under it the way the
+  // page's content fades under its edge (`.scroll-fade`, index.css).
+  const { ref: sentinel, stuck } = useStuck<HTMLDivElement>()
+  return (
+    <section aria-label={title} className="flex flex-col gap-2">
+      <div ref={sentinel} aria-hidden className="h-0" />
+      {/* -mx-2 / px-2: the name's surface reaches the rows' edges, so the
+          rows pass under it whole. */}
+      <header
+        data-stuck={stuck || undefined}
+        className="sticky top-0 z-10 -mx-2 flex items-center gap-2 bg-bg px-2 py-2"
+      >
+        {stuck ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-full h-8 bg-linear-to-b from-bg to-transparent"
+          />
+        ) : null}
+        <Link
+          to="/views/$"
+          params={{ _splat: change.id }}
+          search={{ query: undefined }}
+          className="focus-ring flex min-w-0 items-center gap-2 rounded text-lg font-bold text-text hover:underline"
+        >
+          <span className="flex size-icon shrink-0 text-text-secondary">
+            <NoteIcon16 />
+          </span>
+          <span className="truncate">{title}</span>
+        </Link>
+        {change.kind !== "edited" ? (
+          <span className="rounded bg-bg-secondary px-1.5 text-sm text-text-secondary">
+            {change.kind === "created" ? "New" : "Deleted"}
+          </span>
+        ) : null}
+        <span className={cx("ml-auto flex shrink-0 gap-2 font-mono text-sm")}>
+          {change.added > 0 ? <span className="text-text-success">+{change.added}</span> : null}
+          {change.removed > 0 ? <span className="text-text-danger">−{change.removed}</span> : null}
+          {change.changed > 0 ? <span className="text-text-changed">~{change.changed}</span> : null}
+        </span>
+      </header>
+      {/* Nothing highlighted: a page of notes is read, not arrowed through,
+          and a highlight would scroll its row into view on mount. */}
+      <BlockEditor
+        doc={shown.doc}
+        onChange={noop}
+        readOnly
+        browse
+        initialSelection="none"
+        diff={diff}
+        collapsed={collapsed}
+        onToggleCollapse={(key) => setFold(key, collapsed.has(key))}
+      />
+    </section>
+  )
+}

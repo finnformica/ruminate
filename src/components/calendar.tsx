@@ -25,8 +25,8 @@ import { surface } from "./ui/surface"
 /**
  * The calendar's strip (a week) or grid (a month): a way to the day pages
  * (`/calendar/<day>`) and the week pages (`/calendar/<week>`). A day is
- * dotted when a note names the date (`marked`, docs/metadata.md); a week
- * when any of its days is.
+ * dotted when something was written on it, or a note names the date
+ * (`marked`, docs/event-sourcing.md); a week when any of its days is.
  */
 export function Calendar({
   activeId,

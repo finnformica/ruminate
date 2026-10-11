@@ -125,6 +125,14 @@ taking the event's `at` as its `updated_at`. The device's log is not the
 tenant's: it holds what this device did. Other devices' changes still arrive
 as rows, by the pull, as they always have.
 
+The device's log also holds **everyone's** events, by the events pull: after
+each pull of rows the runtime asks for the log past its events cursor
+(`GET /api/replica/events?since=`, in pages) and files what comes back as
+placed (`applyPulledEvents`) — this device's own among them, which is also how
+an event whose push was taken but never answered is placed. Only the log is
+written by it; the rows still arrive by the pull of rows. The log is for
+history: the calendar folds a day from it (below).
+
 The push loop (`src/data/replica-sync.ts`) reads the log's unpushed tail
 (`seq IS NULL`), sends it in the order made, and stamps each event — and the
 row it changed — with the `seq` the replica answers. The queue is therefore
@@ -237,6 +245,59 @@ curl -s "$ORIGIN/api/replica/events?entity=block&entity_id=blk_…" \
   -H "Authorization: Bearer $TOKEN" -H "Cookie: gh_refresh=…" -H "X-Replica-Protocol: 2"
 ```
 
+## A day on the calendar
+
+A day (or a week) of the calendar is a page of its own (`/calendar/<day>`,
+`/calendar/<week>`; `src/routes/_appRoot.calendar.$.tsx`) that shows what was
+written on it (`src/data/day-changes.ts`, `src/components/day-changes.tsx`):
+every note changed on it, laid out as its own page is — the name, which
+stays at the top while the outline scrolls under it, then the outline in the
+block editor's read-only mode — with what the day did to each row marked
+(`BlockEditor.diff`, `block-item.tsx`): a row added or removed sits on its
+tint with a `+` or `−` at the editor's edge, and a reworded row shows the
+words that went and came. The outline folds as the note's own view folds (the
+reader's folds over the depth setting, `useFoldRule`), except that a row with
+a change beneath it is held open so everything the day did shows. Then it is
+cut down the way a pull request shows a file (`foldContext`): a changed row,
+a row of context on either side, and the unchanged rows between folded behind
+"n rows above" / "n rows below", each click giving back a few more.
+"Before" is the fold of everything placed ahead of the day's first event;
+"after" is that fold with the day's events — and only the day's — applied on
+top, so what shows is what the day's edits did, whatever landed around them
+from another device or another day. Two readings, kept as a display setting
+(`calendarChangesViewAtom`): **by note**, each note once with the whole
+period's changes, and **in order**, sitting by sitting — a sitting being one
+device's run of edits with no pause over half an hour (`sittingsIn`), labelled
+with the writer's clock and, where it is not the reader's, the writer's zone.
+
+**Before history began.** The log was seeded from the rows the replica held
+(the reconcile above): one snapshot `create` per row, stamped with the row's
+last save. The calendar reads a snapshot as the row written on that day —
+the last save before the log is the nearest thing to a date it has — so a
+note's rows show as added on the days they were last saved, and history
+begins on the earliest. A tombstone's snapshot is skipped, and so is a
+note's own row (its stamp is the note's last save, not a day anything was
+written; the note is placed at the very beginning of history so its rows are
+found on their own days). A snapshot's `seq` is the row's old one and says
+nothing about when it was saved, so the calendar reads the log as the notes'
+snapshots first, then the other snapshots by the day they were saved, then
+the edits by `seq` (`byPlace`); every edit after the seed is exact against
+the rows it found.
+
+There are no daily or weekly notes: a day is not a note and nothing is written
+on the calendar page itself. A note that was kept under a date-shaped id
+before is an ordinary note now, still at `/views/<id>`; such an id with no
+note behind it goes on to `/calendar/<id>`.
+
+**Whose day.** An edit belongs to the day it was for the person making it,
+read from `at` in the writer's own `tz`; a line typed at 23:30 in London is
+Friday's wherever it is read from later. An event without a zone (one the
+replica derived from pushed rows) is read in the viewer's. The calendar itself
+is drawn in the viewer's zone: today is today where the reader is.
+
+A day before the log began is not an empty day but one history cannot answer,
+and the page says so (`earliest`).
+
 ## Append-only, structurally
 
 Triggers refuse `UPDATE` on `events`, and refuse `DELETE` unless the tenant is
@@ -250,13 +311,12 @@ first write after this Worker returns reconciles it. Nothing needs undoing.
 
 ## Open
 
-- **A history / restore UI** — the user-facing point of all this. A
-  **calendar** that shows each day as what was written and removed on it
-  (a diff of the corpus between the day's edges, red and green) is the first
-  one planned: it needs the device to hold the tenant's whole log, not just
-  its own, so the next step is a pull of events since a `seq` beside the pull
-  of rows, folded locally; and it needs `tz`, which every event now carries,
-  to put an edit on the writer's day rather than the reader's.
+- **A restore UI**, and a note's own history. The calendar is the first
+  reader of the log; a block's version history and "put this back" from a
+  past day are the next, on the same fold (`planRestoreSubtree` is written).
+- **Two pulls.** The rows and the log are pulled separately; once every
+  device holds the log, the rows can be folded from it and the pull of rows
+  retired.
 - **`cause` per command.** The wire carries it; no caller of `useApplyOps`
   names one yet.
 - **Schema evolution.** Events are forever and this repo migrates weekly.

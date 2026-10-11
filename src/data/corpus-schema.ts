@@ -133,12 +133,16 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '8');
  * The single-tenant v9 step: the device's own event log, and `seq` on the
  * cached rows (docs/event-sourcing.md).
  *
- * `events` holds what THIS device did — every op the editor applied, as the
- * events it amounts to (`opsToEvents`) — and is the push queue: a row with
- * `seq` NULL has not reached the replica yet, and survives a reload where the
- * in-memory queue it replaces did not. `seq` is stamped from the replica's
- * answer when the push lands. It is not the tenant's whole log: other devices'
- * events arrive as rows, by the pull, as they always have.
+ * `events` holds the tenant's log as this device knows it. What THIS device
+ * did — every op the editor applied, as the events it amounts to
+ * (`opsToEvents`) — goes in as made, and is the push queue: a row with `seq`
+ * NULL has not reached the replica yet, and survives a reload where the
+ * in-memory queue it replaces did not; `seq` is stamped from the replica's
+ * answer when the push lands. What every other writer did arrives by the
+ * events pull (`GET /api/replica/events?since=`), placed, with who wrote it
+ * (`origin`, `actor`) and when the replica took it (`received_at`). The rows
+ * are still refreshed by the pull of rows; the log is for history — a day on
+ * the calendar is a fold of it.
  *
  * `seq` on `nodes`, `link` and `views` is the replica's sequence for the row
  * as last pulled — what an edit made here believed it was changing
@@ -163,6 +167,9 @@ CREATE TABLE events (
   ref_seq    INTEGER,
   at         INTEGER NOT NULL,
   tz         INTEGER,
+  origin     TEXT,
+  actor      INTEGER,
+  received_at INTEGER,
   position   INTEGER NOT NULL
 );
 CREATE INDEX events_unpushed ON events (seq, position);

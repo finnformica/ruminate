@@ -11,8 +11,9 @@ import { NoteFavicon } from "./note-favicon"
 import { listRow } from "./ui/list"
 
 /** The days a note names in a date-valued property (`dateMentionsAtom`,
- * docs/metadata.md), and the weeks holding them — what the calendar dots. */
-export function useCalendarMarks(): ReadonlySet<string> {
+ * docs/metadata.md), and the weeks holding them — half of what the calendar
+ * dots (`useCalendarMarks`, `day-changes.tsx`). */
+export function useDateMarks(): ReadonlySet<string> {
   const mentions = useAtomValue(dateMentionsAtom)
   return React.useMemo(() => {
     const marked = new Set<string>(mentions.keys())

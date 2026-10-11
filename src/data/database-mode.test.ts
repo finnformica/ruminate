@@ -13,6 +13,8 @@ import {
   databaseModeStatusAtom,
   databaseApplyOps,
   databaseApplyViews,
+  databaseEventLog,
+  eventLogVersionAtom,
   flushDatabaseMode,
   isDatabaseModeActive,
   requestAmbientDatabasePull,
@@ -28,7 +30,7 @@ import type { NoteStore } from "./note-store"
 import { openSqlNoteStore } from "./sql-note-store"
 import { applyOpsToStore } from "./store-test-support"
 import { viewRootIdsAtom, viewsAtom, type ViewRow } from "./views"
-import type { RuminateEvent } from "./events"
+import type { LoggedEvent, RuminateEvent } from "./events"
 
 /**
  * Boot-flow tests for database-authoritative mode, at the highest level the
@@ -56,9 +58,11 @@ function stubReplica(pending: NoteId[] = [], pendingViews: string[] = []) {
 function stubSource(responses: {
   full?: ReplicaCorpusBody | (() => ReplicaCorpusBody)
   since?: (cursor: string) => ReplicaChangesBody
+  /** The tenant's log the replica serves: everything past `since`, paged. */
+  events?: LoggedEvent[]
   fail?: boolean
 }) {
-  const calls = { full: 0, since: [] as string[] }
+  const calls = { full: 0, since: [] as string[], events: [] as [number, number][] }
   const source: D1NoteSource = {
     pullFull: async () => {
       calls.full += 1
@@ -72,9 +76,33 @@ function stubSource(responses: {
       if (!responses.since) throw new Error("unexpected since-pull")
       return responses.since(cursor)
     },
+    pullEvents: async (since, limit) => {
+      calls.events.push([since, limit])
+      if (responses.fail) throw new Error("offline")
+      const events = (responses.events ?? []).filter((e) => e.seq > since).slice(0, limit)
+      return { events, cursor: events.at(-1)?.seq ?? null }
+    },
   }
   return { source, calls }
 }
+
+/** A placed event of the replica's log, as the events pull serves it. */
+const placed = (seq: number, id: string, text: string, at = seq * 1_000): LoggedEvent => ({
+  id: `evt_remote_${seq}`,
+  seq,
+  entity: "block",
+  entity_id: id,
+  action: "create",
+  patch: { type: "note", text, props: null, notes_id: null },
+  batch: `bat_remote_${seq}`,
+  device: "other.tab",
+  at,
+  tz: 0,
+  v: 1,
+  origin: "replica",
+  actor: 111,
+  received_at: at,
+})
 
 /** Remote row corpus built from note markdown — what a real replica holds. */
 function remoteCorpus(notes: Record<string, string>, updatedAt = 1, cursor: string | null = null) {
@@ -515,6 +543,69 @@ describe("database mode since-pulls", () => {
     // The pull neither reverted the local edit nor deleted the unpushed note.
     expect(await noteOf(store, "note-a")).toBe(LOCAL_EDIT)
     expect(await noteOf(store, "created")).toBe(CREATED)
+  })
+})
+
+/**
+ * The device's copy of the tenant's log (docs/event-sourcing.md): brought
+ * down by the pull, page by page, beside the rows — and read back whole, with
+ * this device's own unpushed events placed after everything else.
+ */
+describe("database mode event log", () => {
+  it("a pull brings the log down after the rows, stores its cursor, and pulls only past it next time", async () => {
+    const { source, calls } = stubSource({
+      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
+      since: () => remoteChanges({}, 200, "200"),
+      events: [placed(1, "note-a", "A"), placed(2, "note-b", "B")],
+    })
+    const store = await boot({ source, replica: stubReplica().handle })
+    expect(calls.events).toEqual([[0, 2_000]])
+    expect(await store.getMeta("events_pull_cursor")).toBe("2")
+    expect((await store.eventLog()).map((event) => [event.seq, event.origin, event.actor])).toEqual(
+      [
+        [1, "replica", 111],
+        [2, "replica", 111],
+      ],
+    )
+    // Only the rows the pull brings are written: the log is history, not
+    // the cache.
+    expect(await noteOf(store, "note-b")).toBeNull()
+
+    requestDatabasePull()
+    await flushDatabaseMode()
+    expect(calls.events.at(-1)).toEqual([2, 2_000])
+    expect(jotai.get(eventLogVersionAtom)).toBeGreaterThan(0)
+  })
+
+  it("places this device's own event when the pull brings it back, and reads the log whole", async () => {
+    const { source } = stubSource({
+      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
+      events: [placed(1, "note-a", "A")],
+    })
+    const store = await boot({ source, replica: stubReplica().handle })
+    writeNote("note-c", "- C\n  id:: blk_c000000000\n")
+    await flushDatabaseMode()
+    const own = await store.unpushedEvents()
+    expect(own.length).toBeGreaterThan(0)
+    const log = (await databaseEventLog()) as LoggedEvent[]
+    // Placed first, then the unpushed, provisionally after them.
+    expect(log[0]).toMatchObject({ seq: 1, id: "evt_remote_1" })
+    expect(log.slice(1).map((event) => event.pending)).toEqual(own.map(() => true))
+    expect(log.slice(1).map((event) => event.seq)).toEqual(own.map((_, i) => 2 + i))
+  })
+
+  it("a wiped cache pulls the log again from the start", async () => {
+    const { source, calls } = stubSource({
+      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
+      events: [placed(1, "note-a", "A")],
+    })
+    const store = await seededStore({ "note-a": NOTE_A }, "500", "0")
+    await store.setMeta("events_pull_cursor", "9")
+    await boot({ store, source, replica: stubReplica().handle })
+    // The stale generation wiped the cache, cursors included, so the log
+    // was pulled from zero and holds what the replica serves.
+    expect(calls.events[0]).toEqual([0, 2_000])
+    expect((await store.eventLog()).map((event) => event.id)).toEqual(["evt_remote_1"])
   })
 })
 
