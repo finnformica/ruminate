@@ -55,7 +55,7 @@ export interface SyncStatusState {
  *   a re-sign-in cannot happen offline either.
  * - `signed-out`: the GitHub session is dead — what the user must act on
  *   first, whatever the sync is doing.
- * - `syncing`: a pull in flight or pushes pending — read "Saving…", the one
+ * - `syncing`: a pull in flight or pushes pending — read "Saving", the one
  *   word for a save in flight wherever it shows (the note header says the
  *   same). Hides a stale error, which either clears or comes back.
  * - `expiring`: the sign-in is about to expire.
@@ -104,7 +104,7 @@ export interface SaveTraceInputs {
  * The trace a note's header shows about its save, read through
  * `syncStatusKind` so it never disagrees with the sidebar:
  *
- * - `saving`: a push in flight (the sidebar reads "Saving…" too), or a save
+ * - `saving`: a push in flight (the sidebar reads "Saving" too), or a save
  *   just dispatched and not yet landed — online or offline, the moment of
  *   writing looks the same.
  * - `saved-offline`: offline, with the edit on this device and its push
@@ -143,8 +143,8 @@ export const SAVE_TRACE_HOLD_MS = 2000
  * starts, and what follows it — "Saved offline", or nothing — only once the
  * trace has read that way for `SAVE_TRACE_HOLD_MS`. Typing is a save per
  * keystroke, and each one lands on the device within a moment, so the raw
- * trace flaps between "Saving…" and what comes after at typing speed;
- * held, it reads "Saving…" for the whole burst and settles once the typing
+ * trace flaps between "Saving" and what comes after at typing speed;
+ * held, it reads "Saving" for the whole burst and settles once the typing
  * has.
  */
 export function useSteadySaveTrace(trace: SaveTrace): SaveTrace {
@@ -183,7 +183,7 @@ export function useAttentionTone(): "danger" | "pending" | null {
 
 /**
  * Bottom-left status. Labels stay short (like "Synced"), and the in-flight
- * one is "Saving…", the same word as the note header's trace; the fuller
+ * one is "Saving", the same word as the note header's trace; the fuller
  * explanation is in the tooltip (see `useSyncStatusMeta`).
  */
 export function useSyncStatusText() {
@@ -195,7 +195,7 @@ export function useSyncStatusText() {
     case "signed-out":
       return <span className="text-text-danger">Signed out</span>
     case "syncing":
-      return "Saving…"
+      return "Saving"
     case "expiring":
       return <span className="text-text-pending">Sign in soon</span>
     case "failed":

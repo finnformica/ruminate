@@ -108,7 +108,7 @@ several values (`multi`), and notes on what the feature is (`notes`, as
 the model is told them):
 
 - `text` — a value is a name: a bullet under the feature block, typed into
-  **New…** in the picker or chosen from the values there.
+  **New** in the picker or chosen from the values there.
 - `place` — a name too, in every way but one: when a picture carries where
   it was taken (below, "Tagging with Claude"), the hint is offered to the
   board's place feature, by its label. A board with no place feature sends
@@ -191,6 +191,34 @@ where the notes are empty (`notesSuggestionOps`) — a note a person wrote
 is never overwritten — as one batch with one toast, **Notes updated**,
 whose **Undo** takes them all back. Nothing to write is **Nothing to
 add.**; a refusal is the failure toast with its **Copy**.
+
+**Values** are the feature block's children, and the board can tidy them
+without the outline. **The Values editor** (`board-values-dialog.tsx`) is
+one feature's values as a list in the app's dialog, titled by the feature
+("Location values"): each value's name in a flush box, as the Features
+editor holds a feature's name, that commits when it is left or Enter is
+pressed and sets the value block's text — a link value's title, kept once
+given, with the page's host beneath it so two pages with one title can be
+told apart — and a delete beside it. It is reached two ways: **Edit
+values** in a picker's menu, beneath **New**, once the feature has any
+values (the picture's window, below); and the **Values** column of the
+Features editor, where each row counts its values and the count opens
+them — the way to a link feature's, which has no picker.
+
+- **A rename** (`renameValueOps`) is the block's text, trimmed; the
+  pictures under it are untouched, since the block is the value's
+  identity. It is refused — the box shows the name it has again — when the
+  name is blank, or when a name feature already has a value so named,
+  trimmed and whatever its case: the picker reuses a value by that match,
+  so two so named would be one value in two blocks. A link's title may
+  repeat.
+- **A delete** (`deleteValueOps`) is the outline's own Delete
+  (`deleteBlockOps`) on the value block: it goes from the feature and off
+  every picture that carried it, as one batch; a picture with other values
+  keeps them, and one nothing else holds is back in the Unassigned basket,
+  as a clear leaves it. A tombstone has no way back, so it asks first — the
+  app's confirmation (docs/design-principles.md, Confirmation), naming the
+  value and how many pictures it comes off, with a red **Delete**.
 
 **Removing a feature deletes nothing.** The remove takes the `feature` key
 off the block's props and keeps the rest (a block named as a feature of
@@ -287,6 +315,10 @@ each):
   through, and the card keeps its address alone.
 - **Clearing a value** (`clearValueOps`) unlinks. The value stays for the
   others; a picture left with no parent is back in the basket.
+- **Renaming a value** (`renameValueOps`) sets its block's text, and
+  **deleting one** (`deleteValueOps`) is the block's delete, off every
+  picture that carried it — both from the Values editor (above, under
+  "Features").
 - **The caption** is the image block's text (`setCaptionOps`) — what search
   matches, as in the editor.
 - **Reset** (`resetImageOps`) clears the caption and takes every value off
@@ -368,9 +400,11 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
   `src/components/ui/layer.ts`), or it would open behind the window.
 - **A picker** (`value-picker.tsx`): a menu of the feature's values —
   single-select closes on a pick, multi-select stays open with each row a
-  toggle — and **New…**, which asks for a name in a dialog of its own
+  toggle — **New**, which asks for a name in a dialog of its own
   (`new-value-dialog.tsx`); the same dialog asks a link feature's **Add
-  link** for an address (required, a web address) and a title (optional).
+  link** for an address (required, a web address) and a title (optional);
+  and, once the feature has values, **Edit values**, the Values editor
+  (above, under "Features") to rename or delete them.
 
 ## A board in a note
 

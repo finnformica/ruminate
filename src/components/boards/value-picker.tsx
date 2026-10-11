@@ -2,13 +2,15 @@ import type { BoardFeatureState, BoardValue } from "../../data/boards"
 import { cx } from "../../utils/cx"
 import { Button } from "../ui/button"
 import { DropdownMenu } from "../ui/dropdown-menu"
-import { ChevronDownIcon16, PlusIcon16 } from "../icons"
+import { ChevronDownIcon16, EditIcon16, PlusIcon16 } from "../icons"
 
 /**
  * One feature's picker: a button naming what is set, and a menu of the
- * feature's values to pick from — plus **New…**, which asks for a name and
- * makes the value on the way (docs/boards.md). A single-select feature
- * closes on a pick; a multi-select one stays open, each row a toggle.
+ * feature's values to pick from — plus **New**, which asks for a name and
+ * makes the value on the way, and **Edit values**, there once the feature
+ * has any, which opens the Values editor to rename or delete them
+ * (docs/boards.md, "Values"). A single-select feature closes on a pick; a
+ * multi-select one stays open, each row a toggle.
  */
 export function ValuePicker({
   state,
@@ -16,6 +18,7 @@ export function ValuePicker({
   onPick,
   onClear,
   onNew,
+  onEdit,
   className,
 }: {
   state: BoardFeatureState
@@ -25,6 +28,8 @@ export function ValuePicker({
   onClear: (value: BoardValue) => void
   /** Asks for a new value's name. */
   onNew: () => void
+  /** Opens the Values editor on this feature. */
+  onEdit: () => void
   className?: string
 }) {
   const { feature, values } = state
@@ -55,8 +60,13 @@ export function ValuePicker({
         ))}
         {values.length > 0 ? <DropdownMenu.Separator /> : null}
         <DropdownMenu.Item icon={<PlusIcon16 />} onClick={onNew}>
-          New {feature.label.trim().toLowerCase() || "value"}…
+          New {feature.label.trim().toLowerCase() || "value"}
         </DropdownMenu.Item>
+        {values.length > 0 ? (
+          <DropdownMenu.Item icon={<EditIcon16 />} onClick={onEdit}>
+            Edit values
+          </DropdownMenu.Item>
+        ) : null}
       </DropdownMenu.Content>
     </DropdownMenu>
   )

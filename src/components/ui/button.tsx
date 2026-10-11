@@ -7,7 +7,14 @@ import { Keys } from "./keys"
 const button = cva(
   // A busy button is disabled but not dimmed: it is working, not unavailable,
   // and its spinner says so (docs/design-principles.md, "Busy controls").
-  "focus-ring inline-flex cursor-pointer select-none items-center justify-center gap-2 whitespace-nowrap rounded leading-4 disabled:cursor-not-allowed disabled:opacity-50 disabled:data-loading:cursor-progress disabled:data-loading:opacity-100 coarse:h-10 coarse:px-4",
+  // The label's line box is 24px (`leading-6`): taller than the face's own
+  // box (iA Writer Quattro is 1.3em, 18px at 14px), so a label that
+  // truncates — overflow hidden — keeps its descenders, where a 16px box
+  // cut the g of "typography" flat on a picker's trigger; and a whole
+  // number of pixels inside every button height (24, 32, 40), so the text
+  // snaps where it always did. A centred single line sits at the same
+  // baseline whatever its leading, so nothing moves.
+  "focus-ring inline-flex cursor-pointer select-none items-center justify-center gap-2 whitespace-nowrap rounded leading-6 disabled:cursor-not-allowed disabled:opacity-50 disabled:data-loading:cursor-progress disabled:data-loading:opacity-100 coarse:h-10 coarse:px-4",
   {
     variants: {
       variant: {

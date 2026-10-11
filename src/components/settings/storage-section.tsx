@@ -37,7 +37,7 @@ export function StorageSection() {
 
 const STORAGE_STATUS_LABELS: Record<StorageDiagnostics["status"], string> = {
   off: "Off",
-  opening: "Starting…",
+  opening: "Starting",
   ready: "Ready",
   error: "Error",
 }
@@ -70,7 +70,7 @@ function StorageDiagnosticsPanel({
         <dt>Last pull</dt>
         <dd className={modeStatus.pull === "error" ? "!text-text-danger" : ""}>
           {modeStatus.pull === "pulling"
-            ? "Pulling…"
+            ? "Pulling"
             : modeStatus.pull === "error"
               ? "Failed"
               : modeStatus.lastPullAt

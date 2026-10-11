@@ -46,7 +46,7 @@ export function FeaturesSection() {
       {error ? <p className="text-text-danger">{error}</p> : null}
 
       {audiences === null ? (
-        <span className="text-text-secondary">Loading…</span>
+        <span className="text-text-secondary">Loading</span>
       ) : (
         FEATURES.map((feature) => (
           <div key={feature.key} className="flex items-center justify-between gap-4">

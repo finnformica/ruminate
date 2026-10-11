@@ -11,6 +11,7 @@ import {
   boardLinkUrl,
   clearValueOps,
   defaultFeatureOps,
+  deleteValueOps,
   newBoardOps,
   imageLocationOf,
   imageLocationOps,
@@ -23,6 +24,7 @@ import {
   notesSuggestionOps,
   outlineImageIds,
   removeFeatureOps,
+  renameValueOps,
   resetImageOps,
   setCaptionOps,
   suggestionOps,
@@ -239,6 +241,12 @@ export interface BoardWrites {
    * the picker shows the result, and nothing else is said. */
   setValue: (featureId: string, imageId: string, ref: ValueRef) => void
   clearValue: (value: BoardValue, imageId: string) => void
+  /** The Values editor's writes (docs/boards.md, "Values"): a value of a
+   * feature renamed — false when the name was refused, so the box can
+   * show the name it has — and a value deleted, off every picture that
+   * carried it; the editor asks first, since a tombstone has no undo. */
+  renameValue: (featureId: string, valueId: string, text: string) => boolean
+  deleteValue: (featureId: string, valueId: string) => void
   /** The Features editor's writes (docs/boards.md, "Features"): a new text
    * feature, handed back by its block's id so the editor can focus it; a
    * feature's label, type, several-values and notes; and a feature
@@ -361,6 +369,24 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       write(clearValueOps(store.get(graphSnapshotAtom), value.id, imageId))
     },
     [store, write],
+  )
+
+  // The Values editor's writes: a rename shows in the row, and a delete
+  // takes the row out — and the value off its pictures — once confirmed.
+  const renameValue = React.useCallback(
+    (featureId: string, valueId: string, text: string): boolean => {
+      const ops = renameValueOps(store.get(graphSnapshotAtom), boardId, featureId, valueId, text)
+      write(ops)
+      return ops.length > 0
+    },
+    [store, boardId, write],
+  )
+
+  const deleteValue = React.useCallback(
+    (featureId: string, valueId: string) => {
+      write(deleteValueOps(store.get(graphSnapshotAtom), boardId, featureId, valueId))
+    },
+    [store, boardId, write],
   )
 
   // The Features editor's writes: each applied at once, the row showing
@@ -578,6 +604,8 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       addImages,
       setValue,
       clearValue,
+      renameValue,
+      deleteValue,
       addFeature,
       updateFeature,
       removeFeature,
@@ -593,6 +621,8 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       addImages,
       setValue,
       clearValue,
+      renameValue,
+      deleteValue,
       addFeature,
       updateFeature,
       removeFeature,

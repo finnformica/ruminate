@@ -26,7 +26,7 @@ import {
 import { unassignedIds } from "./basket"
 import type { NotesFeature, NotesSuggestion } from "./auto-notes"
 import type { TagFeature, TagSuggestion } from "./auto-tag"
-import { applyOps, type Op } from "./ops"
+import { applyOps, deleteBlockOps, type Op } from "./ops"
 
 /**
  * **Boards** (docs/boards.md): a note read as a wall of pictures, with a
@@ -928,6 +928,60 @@ export function resetImageOps(snapshot: GraphSnapshot, boardId: NoteId, imageId:
     }
   }
   return ops
+}
+
+/** The pictures a value holds: the image blocks linked beneath it, in
+ * order — what deleting the value takes it off. */
+export function valueImageIds(snapshot: GraphSnapshot, valueId: string): string[] {
+  return childIdsOf(snapshot, valueId).filter((id) => snapshot.nodes.get(id)?.type === IMAGE_TYPE)
+}
+
+/**
+ * A value renamed from the Values editor (docs/boards.md, "Values"): the
+ * block's text set — a name, or a link's title, which is kept once given
+ * (`linkPreviewOps` leaves a named card alone). Refused, as nothing: a
+ * blank name, the name it has, a value that is not the feature's, and — for
+ * a name feature — a name another of its values already has, trimmed and
+ * whatever its case, since the picker reuses a value by that match and two
+ * so named would be one value in two blocks. A link's title may repeat:
+ * two pages can be called the same thing.
+ */
+export function renameValueOps(
+  snapshot: GraphSnapshot,
+  boardId: NoteId,
+  featureId: string,
+  valueId: string,
+  text: string,
+): Op[] {
+  const state = boardFeature(snapshot, boardId, featureId)
+  const node = snapshot.nodes.get(valueId)
+  if (!state || !node || !state.values.some((value) => value.id === valueId)) return []
+  const name = text.trim()
+  if (name === "" || name === node.text) return []
+  const taken =
+    !isLinkType(state.feature.type) &&
+    state.values.some((value) => value.id !== valueId && sameLabel(value.text, name))
+  if (taken) return []
+  return [{ op: "setText", id: valueId, text: name }]
+}
+
+/**
+ * A value deleted from the Values editor: the block's own delete
+ * (`deleteBlockOps`, the outline's Delete), so the value goes from the
+ * feature and off every picture that carried it, as one batch — a picture
+ * left with no parent is back in the basket, as a clear leaves it; one
+ * with other values keeps them. A tombstone has no way back, so the editor
+ * asks first. Nothing for a value that is not the feature's.
+ */
+export function deleteValueOps(
+  snapshot: GraphSnapshot,
+  boardId: NoteId,
+  featureId: string,
+  valueId: string,
+): Op[] {
+  const state = boardFeature(snapshot, boardId, featureId)
+  if (!state || !state.values.some((value) => value.id === valueId)) return []
+  return deleteBlockOps(valueId, snapshot)
 }
 
 /** Take a value back off a picture. The value stays for the others; a

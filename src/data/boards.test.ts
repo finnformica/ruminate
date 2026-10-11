@@ -13,6 +13,7 @@ import {
   boardLinkUrl,
   clearValueOps,
   defaultFeatureOps,
+  deleteValueOps,
   featureSpecOf,
   imageLocationOf,
   imageLocationOps,
@@ -25,6 +26,7 @@ import {
   notesFeaturesOf,
   notesSuggestionOps,
   removeFeatureOps,
+  renameValueOps,
   resetImageOps,
   setCaptionOps,
   setValueOps,
@@ -32,6 +34,7 @@ import {
   tagFeaturesOf,
   unassignedImageIds,
   updateFeatureOps,
+  valueImageIds,
 } from "./boards"
 import {
   BOARD_TYPE,
@@ -1207,6 +1210,95 @@ describe("the Features editor", () => {
       "create",
       "link",
     ])
+  })
+})
+
+describe("the Values editor", () => {
+  it("renames a value by its block's text, and refuses a blank, the same, or a name taken", () => {
+    const snapshot = boardOf()
+    const ops = renameValueOps(snapshot, "b", LOCATION, "blk_mauritius0", "  Port Louis ")
+    expect(ops).toEqual([{ op: "setText", id: "blk_mauritius0", text: "Port Louis" }])
+    const next = applyOps(snapshot, ops, NOW)
+    expect(stateOf(next, LOCATION).values.map((v) => v.text)).toEqual(["Port Louis", "Lisbon"])
+    // The picture is still under it: the block is the value's identity.
+    expect(parentIdsOf(next, "blk_pic1000000")).toContain("blk_mauritius0")
+    expect(renameValueOps(snapshot, "b", LOCATION, "blk_mauritius0", "  ")).toEqual([])
+    expect(renameValueOps(snapshot, "b", LOCATION, "blk_mauritius0", "Mauritius")).toEqual([])
+    // Lisbon is there, whatever its case: two so named would be one value.
+    expect(renameValueOps(snapshot, "b", LOCATION, "blk_mauritius0", "lisbon")).toEqual([])
+    // Not this feature's value, or no such value.
+    expect(renameValueOps(snapshot, "b", OBJECT, "blk_mauritius0", "Lamp")).toEqual([])
+    expect(renameValueOps(snapshot, "b", LOCATION, "blk_nowhere000", "Lamp")).toEqual([])
+    // A rename has an inverse, so it could be undone.
+    expect(inverseOps(ops, snapshot)).toEqual([
+      { op: "setText", id: "blk_mauritius0", text: "Mauritius" },
+    ])
+  })
+
+  it("lets a link's title repeat, and keeps the title once given", () => {
+    const snapshot = applyOps(
+      boardOf(),
+      [
+        { op: "setText", id: LOCATION, text: "Source" },
+        { op: "setProps", id: LOCATION, props: featureProps({ type: "link", multi: true }) },
+        { op: "setType", id: "blk_mauritius0", type: "link" },
+        { op: "setProps", id: "blk_mauritius0", props: JSON.stringify({ url: "https://a.com/" }) },
+        { op: "setType", id: "blk_lisbon0000", type: "link" },
+        { op: "setProps", id: "blk_lisbon0000", props: JSON.stringify({ url: "https://b.com/" }) },
+      ],
+      NOW,
+    )
+    const ops = renameValueOps(snapshot, "b", LOCATION, "blk_lisbon0000", "Mauritius")
+    expect(ops).toEqual([{ op: "setText", id: "blk_lisbon0000", text: "Mauritius" }])
+    const next = applyOps(snapshot, ops, NOW)
+    // A named card keeps its name when the page's title lands.
+    const preview = { url: "https://b.com/", title: "B", description: "The B page." }
+    const landed = linkPreviewOps(next, "blk_lisbon0000", "https://b.com/", preview)
+    expect(kinds(landed)).toEqual(["setProps"])
+    expect(stateOf(applyOps(next, landed, NOW), LOCATION).values.map((v) => v.text)).toEqual([
+      "Mauritius",
+      "Mauritius",
+    ])
+  })
+
+  it("deletes a value off every picture that carried it, one batch, the pictures kept", () => {
+    const snapshot = boardOf()
+    // The first picture is in Mauritius and a lamp; the second only in Mauritius.
+    const tagged = applyOps(
+      snapshot,
+      [
+        ...setValueOps(snapshot, "b", OBJECT, "blk_pic1000000", { text: "Lamp" }),
+        { op: "link", source: "blk_mauritius0", destination: "blk_pic2000000", sortKey: "a1" },
+      ],
+      NOW,
+    )
+    expect(valueImageIds(tagged, "blk_mauritius0")).toEqual(["blk_pic1000000", "blk_pic2000000"])
+    expect(valueImageIds(tagged, "blk_lisbon0000")).toEqual([])
+    const ops = deleteValueOps(tagged, "b", LOCATION, "blk_mauritius0")
+    expect(kinds(ops)).toEqual(["unlink", "delete"])
+    const next = applyOps(tagged, ops, NOW)
+    expect(stateOf(next, LOCATION).values.map((v) => v.text)).toEqual(["Lisbon"])
+    expect(next.nodes.has("blk_mauritius0")).toBe(false)
+    // Both pictures stay: the first under its lamp and the page, the second
+    // under the page still (the fixture's pictures are the page's rows).
+    expect(next.nodes.has("blk_pic1000000")).toBe(true)
+    expect(next.nodes.has("blk_pic2000000")).toBe(true)
+    expect(parentIdsOf(next, "blk_pic1000000")).not.toContain("blk_mauritius0")
+    expect(parentIdsOf(next, "blk_pic2000000")).not.toContain("blk_mauritius0")
+    expect(stateOf(next, OBJECT).values).toHaveLength(1)
+    // A picture the value alone held is back in the basket.
+    const basketed = applyOps(
+      tagged,
+      [{ op: "unlink", source: "b", destination: "blk_pic2000000" }],
+      NOW,
+    )
+    const after = applyOps(basketed, deleteValueOps(basketed, "b", LOCATION, "blk_mauritius0"), NOW)
+    expect([...unassignedIds(after)]).toEqual(["blk_pic2000000"])
+    // Not this feature's value, or no such value: nothing.
+    expect(deleteValueOps(tagged, "b", OBJECT, "blk_mauritius0")).toEqual([])
+    expect(deleteValueOps(tagged, "b", LOCATION, "blk_nowhere000")).toEqual([])
+    // A delete has no inverse: the editor asks first.
+    expect(inverseOps(ops, tagged)).toBeNull()
   })
 })
 

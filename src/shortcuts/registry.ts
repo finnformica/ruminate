@@ -259,7 +259,7 @@ const SLASH_MENU_ENTRIES: Shortcut[] = [
     combos: ["/"],
     scope: "edit",
     description:
-      "Open the slash menu at the start of a word: insert a date (today, tomorrow, “friday next week”…) or turn the block into another type",
+      "Open the slash menu at the start of a word: insert a date (today, tomorrow, “friday next week”) or turn the block into another type",
     group: "Edit mode",
   },
 ]

@@ -24,7 +24,7 @@ describe("useSteadySaveTrace", () => {
     expect(result.current).toBe("saving")
   })
 
-  it("holds Saving… through a burst of typing, offline and on", () => {
+  it("holds Saving through a burst of typing, offline and on", () => {
     const { result, rerender } = trace("saving")
     // Each keystroke's write lands on the device within a moment…
     rerender({ trace: "saved-offline" })

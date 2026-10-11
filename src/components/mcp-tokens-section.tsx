@@ -220,7 +220,7 @@ function TokenList({
 }) {
   const notes = useAtomValue(notesAtom)
 
-  if (tokens === null) return <span className="text-text-secondary">Loading…</span>
+  if (tokens === null) return <span className="text-text-secondary">Loading</span>
   if (tokens.length === 0) {
     return <span className="text-text-secondary">No tokens yet.</span>
   }
@@ -243,7 +243,7 @@ function TokenList({
             )}
           >
             <div className="flex w-0 grow flex-col gap-1">
-              <span className="truncate leading-4">
+              <span className="truncate">
                 {token.name}
                 {state !== "live" ? (
                   <span className="ml-2 text-sm text-text-secondary">({state})</span>
