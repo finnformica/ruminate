@@ -13,6 +13,7 @@ import {
   useFoldRule,
   withFold,
   writeFolds,
+  type Narrowing,
 } from "./view-state"
 
 /** Keys of a four-deep outline: `a`, `a/b`, `a/b/c`, `a/b/c/d`. Levels 1–4. */
@@ -28,16 +29,18 @@ function renderWithLevels(
   levels: number,
   noteId: string | undefined,
   narrowing: { filter?: string; sort?: string } = {},
+  held?: ReadonlySet<string>,
 ) {
   const store = createStore()
   store.set(expandedLevelsAtom, levels)
   const wrapper = ({ children }: { children: ReactNode }) => (
     <Provider store={store}>{children}</Provider>
   )
-  const rendered = renderHook(({ id, narrowing }) => useFoldRule(id, narrowing), {
-    initialProps: { id: noteId, narrowing },
-    wrapper,
-  })
+  type Props = { id: string | undefined; narrowing: Narrowing; held?: ReadonlySet<string> }
+  const rendered = renderHook(
+    ({ id, narrowing, held }: Props) => useFoldRule(id, narrowing, held),
+    { initialProps: { id: noteId, narrowing, held } as Props, wrapper },
+  )
   return { ...rendered, store }
 }
 
@@ -221,6 +224,23 @@ describe("useFoldRule", () => {
     act(() => result.current.setFold("a/b", true))
     expect(result.current.expanded("a/b", 2)).toBe(true)
     expect(Object.keys(localStorage).filter((key) => key.startsWith("collapse:"))).toEqual([])
+  })
+})
+
+describe("useFoldRule, with rows held open", () => {
+  it("opens a held block's rows over the depth setting, and still folds on the reader's say", () => {
+    const { result } = renderWithLevels(1, "n1", {}, new Set(["b", "c"]))
+    // Level 2 would be closed under the depth setting; held, it is open —
+    // every occurrence of the block, by its id.
+    expect(result.current.expanded("a/b", 2)).toBe(true)
+    expect(result.current.expanded("x/c", 2)).toBe(true)
+    expect(result.current.expanded("a/d", 2)).toBe(false)
+    // The reader's own fold closes a held row like any other.
+    act(() => result.current.setFold("a/b", false))
+    expect(result.current.expanded("a/b", 2)).toBe(false)
+    expect(result.current.expanded("x/c", 2)).toBe(true)
+    act(() => result.current.setFold("a/b", true))
+    expect(result.current.expanded("a/b", 2)).toBe(true)
   })
 })
 

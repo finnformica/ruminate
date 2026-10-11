@@ -229,9 +229,16 @@ const EVERYTHING_OPEN: ExpandedRule = () => true
  *
  * The standing rule beneath the reader's folds is the depth setting for a
  * note and everything open for a narrowed view (see the top of this file):
- * the one place that says what a view starts as.
+ * the one place that says what a view starts as. `held` names blocks the
+ * rule holds open over the depth setting — the calendar's rows with a
+ * change beneath them (`components/day-changes.tsx`) — as a default only:
+ * the reader's own fold on one of them still closes it.
  */
-export function useFoldRule(noteId: string | undefined, narrowing: Narrowing = {}) {
+export function useFoldRule(
+  noteId: string | undefined,
+  narrowing: Narrowing = {},
+  held?: ReadonlySet<string>,
+) {
   const levels = useAtomValue(expandedLevelsAtom)
   const { filter = "", sort = "" } = narrowing
   const viewKey = noteId === undefined ? undefined : foldKeyOf(noteId, { filter, sort })
@@ -244,10 +251,13 @@ export function useFoldRule(noteId: string | undefined, narrowing: Narrowing = {
   // with the old one's folds. Settles in one extra render.
   if (state.viewKey !== viewKey) setState({ viewKey, folds: readFolds(viewKey) ?? NO_FOLDS })
 
-  const expanded = React.useMemo(
-    () => foldRule(state.folds, narrowed ? EVERYTHING_OPEN : expandedByDepth(levels)),
-    [state.folds, narrowed, levels],
-  )
+  const expanded = React.useMemo(() => {
+    const byDepth = narrowed ? EVERYTHING_OPEN : expandedByDepth(levels)
+    const standing: ExpandedRule = held
+      ? (key, level, type) => held.has(idOfKey(key)) || byDepth(key, level, type)
+      : byDepth
+    return foldRule(state.folds, standing)
+  }, [state.folds, narrowed, levels, held])
 
   const setFold = React.useCallback((key: string, open: boolean) => {
     setState((prev) => {
