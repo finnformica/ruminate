@@ -74,7 +74,7 @@ export interface CorpusMigrations {
 /** Which v3 shape the ladder should produce (see the module header). */
 export type CorpusTenancy = "single" | "columns"
 
-const CORPUS_SCHEMA_VERSION = "9"
+const CORPUS_SCHEMA_VERSION = 10
 
 /**
  * The single-tenant v5 step: the `views` table (migrations/0015) — the
@@ -138,15 +138,18 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '8');
  * (`opsToEvents`) — goes in as made, and is the push queue: a row with `seq`
  * NULL has not reached the replica yet, and survives a reload where the
  * in-memory queue it replaces did not; `seq` is stamped from the replica's
- * answer when the push lands. What every other writer did arrives by the
- * events pull (`GET /api/replica/events?since=`), placed, with who wrote it
- * (`origin`, `actor`) and when the replica took it (`received_at`). The rows
- * are still refreshed by the pull of rows; the log is for history — a day on
- * the calendar is a fold of it.
+ * answer when the push lands.
  *
  * `seq` on `nodes`, `link` and `views` is the replica's sequence for the row
  * as last pulled — what an edit made here believed it was changing
  * (`base_seq`). The cache never assigns one.
+ *
+ * This is the table exactly as the step first shipped. A step that has
+ * reached a device is never edited: the ladder runs each step once, keyed by
+ * the version it leaves behind, so a column added to this text afterwards
+ * would exist on fresh databases and be missing from every device that ran
+ * the step before the edit — which is what happened the day v9 shipped, and
+ * is what v10 repairs.
  */
 const LOCAL_V9_SQL = `
 ALTER TABLE nodes ADD COLUMN seq INTEGER;
@@ -167,13 +170,30 @@ CREATE TABLE events (
   ref_seq    INTEGER,
   at         INTEGER NOT NULL,
   tz         INTEGER,
-  origin     TEXT,
-  actor      INTEGER,
-  received_at INTEGER,
   position   INTEGER NOT NULL
 );
 CREATE INDEX events_unpushed ON events (seq, position);
 INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '9');
+`
+
+/**
+ * The single-tenant v10 step: what every other writer did, in the device's
+ * log. Those events arrive by the events pull (`GET /api/replica/events?since=`),
+ * placed, with who wrote them (`origin`, `actor`) and when the replica took
+ * them (`received_at`). The rows are still refreshed by the pull of rows; the
+ * log is for history — a day on the calendar is a fold of it.
+ *
+ * Three nullable columns, so the device's unpushed events survive the step
+ * untouched. The columns were first added by editing the v9 text in place,
+ * the day after it shipped; a device that opened the app between the two
+ * deploys was left at v9 without them, and every pull since failed on the
+ * first event it tried to place. This step brings those devices level.
+ */
+const LOCAL_V10_SQL = `
+ALTER TABLE events ADD COLUMN origin TEXT;
+ALTER TABLE events ADD COLUMN actor INTEGER;
+ALTER TABLE events ADD COLUMN received_at INTEGER;
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '10');
 `
 
 /**
@@ -320,6 +340,48 @@ async function applyV9(
   await driver.execScript(migrations.events)
 }
 
+async function applyV10(driver: SqlDriver, tenancy: CorpusTenancy): Promise<void> {
+  // The D1 shape has carried the three columns since 0023: nothing to do there.
+  if (tenancy === "single") await driver.execScript(LOCAL_V10_SQL)
+}
+
+/**
+ * Every local step that has shipped, by the version it leaves behind — for
+ * `corpus-schema.test.ts`, which pins a hash of each. A step that has reached
+ * a device cannot be edited without that test failing; the next change to
+ * the schema is the next step.
+ */
+export const SHIPPED_LOCAL_STEPS: Readonly<Record<number, string>> = {
+  3: LOCAL_V3_SQL,
+  4: LOCAL_V4_SQL,
+  5: LOCAL_V5_SQL,
+  6: LOCAL_V6_SQL,
+  7: LOCAL_V7_SQL,
+  8: LOCAL_V8_SQL,
+  9: LOCAL_V9_SQL,
+  10: LOCAL_V10_SQL,
+}
+
+type Step = (
+  driver: SqlDriver,
+  migrations: CorpusMigrations,
+  tenancy: CorpusTenancy,
+) => Promise<void>
+
+/** Each step, keyed by the version it leaves the database at. A step runs
+ * once per database and is never edited once it has shipped: the next change
+ * to the schema is the next step, however small (see `LOCAL_V10_SQL`). */
+const STEPS: readonly [number, Step][] = [
+  [3, applyV3],
+  [4, applyV4],
+  [5, applyV5],
+  [6, applyV6],
+  [7, applyV7],
+  [8, applyV8],
+  [9, applyV9],
+  [10, (driver, _migrations, tenancy) => applyV10(driver, tenancy)],
+]
+
 /**
  * Bring `driver`'s database to the current corpus schema: apply the full
  * migration ladder when empty, migrate a v1/v2/v3 database in place, and
@@ -340,74 +402,26 @@ export async function ensureCorpusSchema(
   const tables = await driver.exec(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'meta'",
   )
+  const climb = async (from: number) => {
+    for (const [version, step] of STEPS) if (version > from) await step(driver, migrations, tenancy)
+  }
   if (tables.length === 0) {
     await driver.execScript(full)
-    await applyV3(driver, migrations, tenancy)
-    await applyV4(driver, migrations, tenancy)
-    await applyV5(driver, migrations, tenancy)
-    await applyV6(driver, migrations, tenancy)
-    await applyV7(driver, migrations, tenancy)
-    await applyV8(driver, migrations, tenancy)
-    await applyV9(driver, migrations, tenancy)
+    await climb(2)
+    return
+  }
+  // In "columns" mode `meta` is keyed by (user_id, key), so this can see more
+  // than one row — every tenant shares one DDL version, so any of them
+  // answers the ladder's question.
+  const rows = await driver.exec("SELECT value FROM meta WHERE key = 'schema_version' LIMIT 1")
+  const version = Number(rows[0]?.value)
+  if (version === 1) {
+    await driver.execScript(migrations.nodes)
+    await climb(2)
+  } else if (Number.isInteger(version) && version >= 2 && version <= CORPUS_SCHEMA_VERSION) {
+    await climb(version)
   } else {
-    // In "columns" mode `meta` is keyed by (user_id, key), so this can see more
-    // than one row — every tenant shares one DDL version, so any of them
-    // answers the ladder's question.
-    const rows = await driver.exec("SELECT value FROM meta WHERE key = 'schema_version' LIMIT 1")
-    const version = rows[0]?.value
-    if (version === "1") {
-      await driver.execScript(migrations.nodes)
-      await applyV3(driver, migrations, tenancy)
-      await applyV4(driver, migrations, tenancy)
-      await applyV5(driver, migrations, tenancy)
-      await applyV6(driver, migrations, tenancy)
-      await applyV7(driver, migrations, tenancy)
-      await applyV8(driver, migrations, tenancy)
-      await applyV9(driver, migrations, tenancy)
-    } else if (version === "2") {
-      await applyV3(driver, migrations, tenancy)
-      await applyV4(driver, migrations, tenancy)
-      await applyV5(driver, migrations, tenancy)
-      await applyV6(driver, migrations, tenancy)
-      await applyV7(driver, migrations, tenancy)
-      await applyV8(driver, migrations, tenancy)
-      await applyV9(driver, migrations, tenancy)
-    } else if (version === "3") {
-      await applyV4(driver, migrations, tenancy)
-      await applyV5(driver, migrations, tenancy)
-      await applyV6(driver, migrations, tenancy)
-      await applyV7(driver, migrations, tenancy)
-      await applyV8(driver, migrations, tenancy)
-      await applyV9(driver, migrations, tenancy)
-    } else if (version === "4") {
-      await applyV5(driver, migrations, tenancy)
-      await applyV6(driver, migrations, tenancy)
-      await applyV7(driver, migrations, tenancy)
-      await applyV8(driver, migrations, tenancy)
-      await applyV9(driver, migrations, tenancy)
-    } else if (version === "5") {
-      await applyV6(driver, migrations, tenancy)
-      await applyV7(driver, migrations, tenancy)
-      await applyV8(driver, migrations, tenancy)
-      await applyV9(driver, migrations, tenancy)
-    } else if (version === "6") {
-      await applyV7(driver, migrations, tenancy)
-      await applyV8(driver, migrations, tenancy)
-      await applyV9(driver, migrations, tenancy)
-    } else if (version === "7") {
-      await applyV8(driver, migrations, tenancy)
-      await applyV9(driver, migrations, tenancy)
-    } else if (version === "8") {
-      await applyV9(driver, migrations, tenancy)
-    } else if (version !== CORPUS_SCHEMA_VERSION) {
-      await driver.execScript(RESET_SQL + full)
-      await applyV3(driver, migrations, tenancy)
-      await applyV4(driver, migrations, tenancy)
-      await applyV5(driver, migrations, tenancy)
-      await applyV6(driver, migrations, tenancy)
-      await applyV7(driver, migrations, tenancy)
-      await applyV8(driver, migrations, tenancy)
-      await applyV9(driver, migrations, tenancy)
-    }
+    await driver.execScript(RESET_SQL + full)
+    await climb(2)
   }
 }

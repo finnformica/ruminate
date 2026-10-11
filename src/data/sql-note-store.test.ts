@@ -204,7 +204,7 @@ describe("openSqlNoteStore", () => {
     const store = await openSqlNoteStore(driver)
     expect((await store.getGraph()).nodes.size).toBe(0)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "9" },
+      { value: "10" },
     ])
     expect(
       await driver.exec("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"),
@@ -235,7 +235,7 @@ describe("openSqlNoteStore", () => {
     // columns, it never rewrites rows.
     expect(await noteOf(store, "a")).toBe("\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "9" },
+      { value: "10" },
     ])
     // The row is live: a nullable column means NULL = never deleted.
     expect(await driver.exec("SELECT deleted_at FROM nodes WHERE id = ?", ["a"])).toEqual([
@@ -261,7 +261,7 @@ describe("openSqlNoteStore", () => {
     const store = await openSqlNoteStore(driver)
     expect(await noteOf(store, "a")).toBe("\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "9" },
+      { value: "10" },
     ])
     // No note id until a pull brings the replica's backfill down.
     expect(await driver.exec("SELECT notes_id FROM nodes WHERE id = ?", ["a"])).toEqual([
@@ -281,6 +281,73 @@ describe("openSqlNoteStore", () => {
     expect(one.notes_id).toBe("a")
   })
 
+  it("adds the pull's columns to a v9 events table that shipped without them, keeping its queue", async () => {
+    const driver = createNodeSqlDriver()
+    // A v9 store as the step first shipped: the ladder stopped one short, so
+    // `events` has no `origin`, `actor` or `received_at` — the shape every
+    // device that opened the app between the two deploys of 2026-10-10 holds.
+    await openSqlNoteStore(driver)
+    await driver.execScript(
+      "DROP TABLE events;" +
+        "CREATE TABLE events (id TEXT PRIMARY KEY, seq INTEGER, entity TEXT NOT NULL, " +
+        "entity_id TEXT NOT NULL, action TEXT NOT NULL, patch TEXT NOT NULL, v INTEGER NOT NULL, " +
+        "batch TEXT NOT NULL, device TEXT NOT NULL, cause TEXT, base_seq INTEGER, ref_seq INTEGER, " +
+        "at INTEGER NOT NULL, tz INTEGER, position INTEGER NOT NULL);" +
+        "CREATE INDEX events_unpushed ON events (seq, position);" +
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '9');",
+    )
+    await driver.batch([
+      {
+        sql:
+          "INSERT INTO events (id, seq, entity, entity_id, action, patch, v, batch, device, " +
+          "at, position) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        params: [
+          "evt_1",
+          "block",
+          "blk_aaaaaaaaaa",
+          "create",
+          '{"text":"queued"}',
+          1,
+          "b1",
+          "d1",
+          100,
+          1,
+        ],
+      },
+    ])
+
+    const store = await openSqlNoteStore(driver)
+    expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
+      { value: "10" },
+    ])
+    // The unpushed event is still queued, and a pulled event can now be placed.
+    expect(await driver.exec("SELECT id, seq, origin FROM events")).toEqual([
+      { id: "evt_1", seq: null, origin: null },
+    ])
+    await store.applyPulledEvents([
+      {
+        id: "evt_2",
+        seq: 7,
+        entity: "block",
+        entity_id: "blk_bbbbbbbbbb",
+        action: "create",
+        patch: { type: "paragraph", text: "pulled", props: null, notes_id: "a" },
+        v: 1,
+        batch: "b2",
+        device: "d2",
+        base_seq: null,
+        at: 200,
+        tz: null,
+        origin: "replica",
+        actor: 1,
+        received_at: 201,
+      },
+    ])
+    expect(await driver.exec("SELECT id, origin FROM events WHERE seq = 7")).toEqual([
+      { id: "evt_2", origin: "replica" },
+    ])
+  })
+
   it("resets and re-migrates a database with an unknown schema_version", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "a", "stale\n  id:: blk_aaaaaaaaaa\n")
@@ -289,7 +356,7 @@ describe("openSqlNoteStore", () => {
     const reopened = await openSqlNoteStore(driver)
     expect((await reopened.getGraph()).nodes.size).toBe(0)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "9" },
+      { value: "10" },
     ])
   })
 
@@ -342,7 +409,7 @@ describe("openSqlNoteStore", () => {
     const reopened = await openSqlNoteStore(driver)
     expect(await noteOf(reopened, "a")).toBe("- kept\n  id:: blk_aaaaaaaaaa\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "9" },
+      { value: "10" },
     ])
     expect(await driver.exec("SELECT seq FROM nodes WHERE id = 'a'")).toEqual([{ seq: null }])
     expect(await reopened.unpushedEvents()).toEqual([])
