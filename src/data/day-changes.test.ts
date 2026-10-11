@@ -46,6 +46,7 @@ function writer(tz: number | null = 0, device = "dev.tab") {
     block: (at: number, id: string, text: string, note: string, type = "text") =>
       make(at, "block", id, "create", { type, text, props: null, notes_id: note }),
     edit: (at: number, id: string, text: string) => make(at, "block", id, "update", { text }),
+    retype: (at: number, id: string, type: string) => make(at, "block", id, "update", { type }),
     remove: (at: number, id: string) => make(at, "block", id, "delete", {}),
     link: (at: number, source: string, destination: string, sortKey: string) =>
       make(at, "link", linkEntityId(source, destination), "create", {
@@ -207,6 +208,39 @@ describe("changesIn", () => {
       "− call mum",
       "+ walk",
     ])
+  })
+
+  it("draws a type change as the old row out and the new row in", () => {
+    const w = writer()
+    const log = [
+      w.note(day("09:00"), "n", "Plans"),
+      w.block(day("09:01"), "a", "Buy bread", "n", "todo"),
+      w.link(day("09:01"), "n", "a", "a0"),
+      w.block(day("09:01"), "b", "Plans for the week", "n"),
+      w.link(day("09:01"), "n", "b", "a1"),
+      w.block(day("09:02"), "c", "a child of the heading", "n"),
+      w.link(day("09:02"), "b", "c", "a0"),
+      // The next day: the task is ticked, the line made a heading and reworded.
+      w.retype(nextDay("08:00"), "a", "done"),
+      w.retype(nextDay("08:01"), "b", "h2"),
+      w.edit(nextDay("08:01"), "b", "The week's plans"),
+    ]
+    const changes = changesIn(log, "2026-10-10", 0)
+    const change = changes.notes[0]
+    // A key has no words to diff: each pair counts as one row out, one in.
+    expect(change).toMatchObject({ kind: "edited", added: 2, removed: 2, changed: 0 })
+    expect(rowsOf(change)).toEqual([
+      "− Buy bread",
+      "+ Buy bread",
+      "− Plans for the week",
+      "+ The week's plans",
+      "  = a child of the heading",
+    ])
+    // The ghost carries the old key; the live row keeps its children.
+    expect(change.doc.blocks["was:a"]).toMatchObject({ type: "todo", children: [] })
+    expect(change.doc.blocks.a.type).toBe("done")
+    expect(change.doc.blocks["was:b"]).toMatchObject({ type: "text", text: "Plans for the week" })
+    expect(change.doc.blocks.b).toMatchObject({ type: "h2", children: ["c"] })
   })
 
   it("applies only the day's events over what came before, whatever landed between them", () => {
