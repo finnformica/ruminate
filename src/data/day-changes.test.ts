@@ -243,6 +243,89 @@ describe("changesIn", () => {
     expect(change.doc.blocks.b).toMatchObject({ type: "h2", children: ["c"] })
   })
 
+  it("draws a block moved under another parent as a ghost where it stood and the block where it is", () => {
+    const w = writer()
+    const log = [
+      w.note(day("09:00"), "n", "Board"),
+      w.block(day("09:01"), "f", "Location", "n"),
+      w.link(day("09:01"), "n", "f", "a0"),
+      w.block(day("09:01"), "A", "Kitchen", "n"),
+      w.link(day("09:01"), "f", "A", "a0"),
+      w.block(day("09:01"), "B", "Garden", "n"),
+      w.link(day("09:01"), "f", "B", "a1"),
+      w.block(day("09:02"), "p", "pic", "n", "image"),
+      w.link(day("09:02"), "A", "p", "a0"),
+      w.block(day("09:02"), "q", "another pic", "n", "image"),
+      w.link(day("09:02"), "A", "q", "a1"),
+      // The next day: the picture is given the other value.
+      w.unlink(nextDay("08:00"), "A", "p"),
+      w.link(nextDay("08:00"), "B", "p", "a0"),
+    ]
+    const changes = changesIn(log, "2026-10-10", 0)
+    const change = changes.notes[0]
+    expect(change).toMatchObject({ kind: "edited", added: 1, removed: 1, changed: 0 })
+    expect(rowsOf(change)).toEqual([
+      "= Location",
+      "  = Kitchen",
+      "    − pic",
+      "    = another pic",
+      "  = Garden",
+      "    + pic",
+    ])
+    // The ghost stands where the row stood; the block's own id is where it is now.
+    expect(change.doc.blocks.A.children).toEqual(["was:p", "q"])
+    expect(change.doc.blocks.B.children).toEqual(["p"])
+  })
+
+  it("marks only the new place of a block that is still held where it was", () => {
+    const w = writer()
+    const log = [
+      w.note(day("09:00"), "n", "Board"),
+      w.block(day("09:01"), "A", "Kitchen", "n"),
+      w.link(day("09:01"), "n", "A", "a0"),
+      w.block(day("09:01"), "B", "Garden", "n"),
+      w.link(day("09:01"), "n", "B", "a1"),
+      w.block(day("09:02"), "p", "pic", "n", "image"),
+      w.link(day("09:02"), "A", "p", "a0"),
+      w.block(day("09:02"), "c", "a child of the picture", "n"),
+      w.link(day("09:02"), "p", "c", "a0"),
+      // The next day: tagged with a second value, and captioned.
+      w.link(nextDay("08:00"), "B", "p", "a0"),
+      w.edit(nextDay("08:01"), "p", "the pic"),
+    ]
+    const change = changesIn(log, "2026-10-10", 0).notes[0]
+    expect(change).toMatchObject({ kind: "edited", added: 1, removed: 0, changed: 1 })
+    expect(rowsOf(change)).toEqual([
+      "= Kitchen",
+      "  ~ {+the +}pic",
+      "    = a child of the picture",
+      "= Garden",
+      "  + the pic",
+      "    = a child of the picture",
+    ])
+    // The new occurrence is a ghost carrying the row as it is, children and all.
+    expect(change.doc.blocks.B.children).toEqual(["now:p"])
+    expect(change.doc.blocks["now:p"]).toMatchObject({ type: "image", children: ["c"] })
+  })
+
+  it("leaves a ghost under a removed parent for a child still held elsewhere", () => {
+    const w = writer()
+    const log = [
+      w.note(day("09:00"), "n", "Plans"),
+      w.block(day("09:01"), "h", "Heading", "n", "h2"),
+      w.link(day("09:01"), "n", "h", "a0"),
+      w.block(day("09:01"), "a", "shared", "n"),
+      w.link(day("09:01"), "h", "a", "a0"),
+      w.link(day("09:01"), "n", "a", "a1"),
+      // The next day: the heading goes; its child is still a root.
+      w.unlink(nextDay("08:00"), "n", "h"),
+      w.remove(nextDay("08:00"), "h"),
+    ]
+    const change = changesIn(log, "2026-10-10", 0).notes[0]
+    expect(change).toMatchObject({ kind: "edited", added: 0, removed: 2, changed: 0 })
+    expect(rowsOf(change)).toEqual(["− Heading", "  − shared", "= shared"])
+  })
+
   it("applies only the day's events over what came before, whatever landed between them", () => {
     const w = writer()
     const log = [
