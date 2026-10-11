@@ -16,6 +16,7 @@ import { ResetIcon16, SparklesIcon16, TrashIcon16 } from "../icons"
 import { TextInput } from "../ui/text-input"
 import { Picture } from "../picture"
 import type { BoardImage } from "./board-wall"
+import { BoardValuesDialog } from "./board-values-dialog"
 import { LinkValues } from "./link-values"
 import { NewValueDialog } from "./new-value-dialog"
 import { ValuePicker } from "./value-picker"
@@ -46,8 +47,13 @@ export function BoardInspector({
   React.useEffect(() => setCaption(image.text), [image.id, image.text])
   const commitCaption = () => writes.setCaption(image.id, caption.trim())
 
-  // The feature a new value is being named for (`NewValueDialog`), if any.
+  // The feature a new value is being named for (`NewValueDialog`), if any,
+  // and the one whose values are open in the Values editor — held by its
+  // block, and read off the live features, so a rename or a delete shows
+  // in the editor at once.
   const [naming, setNaming] = React.useState<BoardFeature | null>(null)
+  const [editingId, setEditingId] = React.useState<string | null>(null)
+  const editing = features.find((state) => state.feature.id === editingId) ?? null
 
   // Claude's caption and tags for this picture (docs/boards.md, "Tagging
   // with Claude"): **Suggest**, the sparkles in the title bar, busy from the
@@ -142,6 +148,7 @@ export function BoardInspector({
                     }
                     onClear={(value) => writes.clearValue(value, image.id)}
                     onNew={() => setNaming(state.feature)}
+                    onEdit={() => setEditingId(state.feature.id)}
                   />
                 )}
               </div>
@@ -151,6 +158,7 @@ export function BoardInspector({
               onAdd={(feature, ref) => writes.setValue(feature.id, image.id, ref)}
               onClose={() => setNaming(null)}
             />
+            <BoardValuesDialog state={editing} writes={writes} onClose={() => setEditingId(null)} />
             <div className="mt-auto flex flex-wrap items-center gap-2">
               {/* The caption and every value off the picture at once, as
                   one Undo. */}

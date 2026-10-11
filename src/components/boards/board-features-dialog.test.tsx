@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { BoardFeatureState } from "../../data/boards"
 import type { BoardWrites } from "../../hooks/board"
@@ -21,7 +21,10 @@ const FEATURES: BoardFeatureState[] = [
     feature: { id: "f1", label: "Location", type: "place", multi: false, notes: "where" },
     values: [],
   },
-  { feature: { id: "f2", label: "Link", type: "link", multi: true, notes: "" }, values: [] },
+  {
+    feature: { id: "f2", label: "Link", type: "link", multi: true, notes: "" },
+    values: [{ id: "v1", text: "made.com", link: { url: "https://made.com/lamp" } }],
+  },
 ]
 
 const writes = {
@@ -40,6 +43,7 @@ describe("BoardFeaturesDialog", () => {
     dialog()
     expect(screen.getByRole("columnheader", { name: "Name" })).toBeTruthy()
     expect(screen.getByRole("columnheader", { name: "Multiple" })).toBeTruthy()
+    expect(screen.getByRole("columnheader", { name: "Values" })).toBeTruthy()
     expect(screen.queryByRole("columnheader", { name: "Notes" })).toBeNull()
     expect(screen.queryByLabelText(/^Notes on/)).toBeNull()
     expect(screen.getAllByTestId("board-feature")).toHaveLength(2)
@@ -54,6 +58,22 @@ describe("BoardFeaturesDialog", () => {
     // Notes for every feature, the link included.
     expect(screen.getAllByLabelText(/^Notes on/)).toHaveLength(2)
     expect((screen.getByLabelText("Notes on Location") as HTMLTextAreaElement).value).toBe("where")
+  })
+
+  it("counts each feature's values, and opens the Values editor on them", () => {
+    ai.available = false
+    dialog()
+    // Nothing to open while a feature has no values.
+    const none = screen.getByRole("button", { name: "Values of Location" }) as HTMLButtonElement
+    expect(none.textContent).toBe("0")
+    expect(none.disabled).toBe(true)
+    const some = screen.getByRole("button", { name: "Values of Link" }) as HTMLButtonElement
+    expect(some.textContent).toBe("1")
+    fireEvent.click(some)
+    expect(screen.getByRole("dialog", { name: "Link values" })).toBeTruthy()
+    expect(screen.getAllByTestId("board-value")).toHaveLength(1)
+    expect((screen.getByLabelText("Name of made.com") as HTMLInputElement).value).toBe("made.com")
+    expect(screen.getByRole("button", { name: "Delete made.com" })).toBeTruthy()
   })
 
   it("is a sheet on a coarse pointer, with the same cells", () => {

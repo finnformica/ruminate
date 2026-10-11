@@ -18,6 +18,7 @@ import { IconButton } from "../ui/icon-button"
 import { Sheet } from "../ui/sheet"
 import { TextArea } from "../ui/text-area"
 import { TextInput } from "../ui/text-input"
+import { BoardValuesDialog } from "./board-values-dialog"
 import {
   AlignLeftIcon16,
   GlobeIcon16,
@@ -44,10 +45,12 @@ const heading = "text-sm font-normal text-text-secondary"
  * board's features as a table, one row each in the page's order, every
  * cell edited in place — the type's glyph, which is the type menu; the
  * name; **Multiple**, whether a picture may carry several of its values;
- * **Notes**, what the model is told, which is there only while a model
- * can be asked (`useAiAvailable`); and a remove, shown as the pointer
- * finds the row. Every change is written as it is made, through the
- * board's own writes, and the page shows it. **Add feature** in the last
+ * **Values**, how many the feature has, which opens the Values editor on
+ * them (`BoardValuesDialog`: rename or delete each); **Notes**, what the
+ * model is told, which is there only while a model can be asked
+ * (`useAiAvailable`); and a remove, shown as the pointer finds the row.
+ * Every change is written as it is made, through the board's own writes,
+ * and the page shows it. **Add feature** in the last
  * row makes a text feature named "New feature" with its name selected,
  * ready to be typed over. The order is the page's: a feature is reordered
  * by moving its block in the outline. **Suggest** in the title bar —
@@ -92,12 +95,20 @@ export function BoardFeaturesDialog({
     const id = writes.addFeature()
     if (id) setFocusId(id)
   }
+  // The feature whose values are open in the Values editor, by its block,
+  // read off the live features so a change shows in it at once.
+  const [valuesId, setValuesId] = React.useState<string | null>(null)
+  const editing = features.find((state) => state.feature.id === valuesId) ?? null
+  const valuesDialog = (
+    <BoardValuesDialog state={editing} writes={writes} onClose={() => setValuesId(null)} />
+  )
   const onOpenChange = (next: boolean) => (next ? undefined : onClose())
   const row = (state: BoardFeatureState) => ({
     state,
     notes,
     focus: state.feature.id === focusId,
     writes,
+    onValues: () => setValuesId(state.feature.id),
   })
 
   if (coarse) {
@@ -131,6 +142,7 @@ export function BoardFeaturesDialog({
               Add feature
             </Button>
           </div>
+          {valuesDialog}
         </Sheet.Content>
       </Sheet>
     )
@@ -151,6 +163,7 @@ export function BoardFeaturesDialog({
                 </th>
                 <th className="px-2 py-1.5 text-left font-normal">Name</th>
                 <th className="w-20 px-2 py-1.5 text-center font-normal">Multiple</th>
+                <th className="w-16 px-2 py-1.5 text-center font-normal">Values</th>
                 {notes ? <th className="w-48 px-2 py-1.5 text-left font-normal">Notes</th> : null}
                 <th className="w-8 py-1.5 pl-2" />
               </tr>
@@ -160,7 +173,7 @@ export function BoardFeaturesDialog({
                 <TableRow key={state.feature.id} {...row(state)} />
               ))}
               <tr className="border-t border-border-secondary">
-                <td colSpan={notes ? 5 : 4} className="pt-3">
+                <td colSpan={notes ? 6 : 5} className="pt-3">
                   <Button onClick={add}>
                     <PlusIcon16 />
                     Add feature
@@ -169,6 +182,7 @@ export function BoardFeaturesDialog({
               </tr>
             </tbody>
           </table>
+          {valuesDialog}
         </Dialog.Content>
       ) : null}
     </Dialog>
@@ -182,6 +196,8 @@ interface RowProps {
   /** Whether the name takes the focus, selected: a feature just added. */
   focus: boolean
   writes: BoardWrites
+  /** Opens the Values editor on this feature. */
+  onValues: () => void
 }
 
 /**
@@ -194,7 +210,7 @@ interface RowProps {
  * greyed. Every feature has notes, a link feature too — kept with it,
  * though the model is only told about text and place features.
  */
-function useFeatureCells({ state, focus, writes }: RowProps) {
+function useFeatureCells({ state, focus, writes, onValues }: RowProps) {
   const { feature, values } = state
   const [name, setName] = React.useState(feature.label)
   const [notes, setNotes] = React.useState(feature.notes)
@@ -284,6 +300,19 @@ function useFeatureCells({ state, focus, writes }: RowProps) {
       onKeyDown={onEnter(commitNotes)}
     />
   )
+  // How many values the feature has, and the way to them; nothing to open
+  // while it has none.
+  const valuesButton = (className?: string) => (
+    <Button
+      size="small"
+      aria-label={`Values of ${shown}`}
+      className={className}
+      disabled={values.length === 0}
+      onClick={onValues}
+    >
+      {values.length}
+    </Button>
+  )
   const remove = (size: "small" | "medium", className?: string) => (
     <IconButton
       aria-label={`Remove ${shown}`}
@@ -295,7 +324,7 @@ function useFeatureCells({ state, focus, writes }: RowProps) {
       <TrashIcon16 />
     </IconButton>
   )
-  return { typeMenu, nameField, multiBox, notesField, remove }
+  return { typeMenu, nameField, multiBox, valuesButton, notesField, remove }
 }
 
 /** A feature as a table row: its cells top-aligned, a hairline above, the
@@ -307,6 +336,7 @@ function TableRow(props: RowProps) {
       <td className="py-[3px] pr-2">{cells.typeMenu("small", "mx-auto mt-1")}</td>
       <td className="px-2 py-[3px]">{cells.nameField()}</td>
       <td className="px-2 py-[3px] text-center">{cells.multiBox("mx-auto mt-2")}</td>
+      <td className="px-2 py-[3px] text-center">{cells.valuesButton("mt-1")}</td>
       {props.notes ? <td className="px-2 py-[3px]">{cells.notesField()}</td> : null}
       <td className="py-[3px] pl-2">
         {cells.remove(
@@ -318,8 +348,8 @@ function TableRow(props: RowProps) {
   )
 }
 
-/** A feature on the sheet's grid: the four cells on one line, the notes
- * beneath the name alone, a hairline below. */
+/** A feature on the sheet's grid: the four cells on one line, the values
+ * and the notes beneath the name alone, a hairline below. */
 function SheetRow(props: RowProps) {
   const cells = useFeatureCells(props)
   return (
@@ -332,11 +362,11 @@ function SheetRow(props: RowProps) {
       {cells.nameField("text-[16px]")}
       {cells.multiBox("justify-self-center")}
       {cells.remove("medium")}
-      {props.notes ? (
-        <div className="col-start-2 mb-2 mt-1">{cells.notesField()}</div>
-      ) : (
-        <div className="col-start-2 h-1.5" />
-      )}
+      <div className="col-start-2 mb-2 flex items-center gap-2 px-3 text-sm text-text-secondary">
+        {cells.valuesButton()}
+        <span>{props.state.values.length === 1 ? "value" : "values"}</span>
+      </div>
+      {props.notes ? <div className="col-start-2 mb-2">{cells.notesField()}</div> : null}
     </div>
   )
 }
