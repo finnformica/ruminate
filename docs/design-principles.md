@@ -478,7 +478,7 @@ gated by `isBootingAtom`): pulsing bars at chrome rank
 (`--color-bg-tertiary`), sized and placed like the content they wait for, so
 the page settles rather than jumping when it lands. They carry no words; one
 live region names the state for screen readers. Nothing spins: a spinner
-says "wait" without saying for what, and the app's one spinner (the "Saving…"
+says "wait" without saying for what, and the app's one spinner (the "Saving"
 trace in a note's header) marks an action in flight, not a page. Skeletons
 never stand in for an empty corpus that is really empty — that state says
 what it is (the offline notice, an empty list).
@@ -504,10 +504,10 @@ a state the data layer reports (the replica's full push) — passes `loading`
 itself, with `usePending` (`src/hooks/pending.ts`) to hold a flight. A
 request that ends in leaving the page (signing in, taking an update) stays
 busy until the page has gone, since on this page it has no after. The
-"Saving…" trace in a note's header is the same rule on a surface rather
+"Saving" trace in a note's header is the same rule on a surface rather
 than a control: it shows from the edit until its push has landed, and only
 while a push can land. The sidebar's sync row uses the same word for the
-same state — "Saving…", never "Syncing…" — so one save in flight is never
+same state — "Saving", never "Syncing…" — so one save in flight is never
 named two ways on one screen. Offline, the edit lands on this device and its push
 waits for the network, so once the write is down the trace turns into
 **Saved offline** with the offline icon and no spinner — nothing is in
@@ -519,8 +519,8 @@ Signed out, the sidebar's "Signed out" is the news and the header says
 nothing (`saveTrace`, `src/components/sync-status.tsx`). The trace is
 held a moment past the save it reports (`useSteadySaveTrace`): typing is
 a save per keystroke, each landing within a moment, and a header that
-flipped between "Saving…" and what follows it at typing speed would
-flicker. So "Saving…" shows the instant a save starts and stays for the
+flipped between "Saving" and what follows it at typing speed would
+flicker. So "Saving" shows the instant a save starts and stays for the
 whole burst, and what comes after it waits until the typing has paused.
 
 ## Empty-block placeholder

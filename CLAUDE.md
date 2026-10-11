@@ -110,7 +110,7 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 - Prettier configuration: no semicolons, trailing commas, 100 character line length
 - ESLint rules enforced for TypeScript, React, and accessibility
 - A setting is a label and nothing under it. Never add or change descriptive copy on a setting without the owner's sign-off: propose the line and wait (docs/settings.md, Copy)
-- Never use an ellipsis (`…` or `...`) in user-facing copy: a menu item, a button, a placeholder, a title or a toast. "Edit values", not "Edit values…". Clipping a long name to fit is not copy
+- Never use an ellipsis (`…` or `...`) in user-facing copy: a menu item, a button, a title, a toast, a progress word ("Saving", not "Saving…"). "Edit values", not "Edit values…". A text input's placeholder may end in one, and clipping a long name to fit is not copy
 
 ### Before Committing
 

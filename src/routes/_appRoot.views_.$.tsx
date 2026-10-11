@@ -135,7 +135,7 @@ function NotePage() {
   const calendarId =
     noteId !== undefined && (isValidDateString(noteId) || isValidWeekString(noteId))
 
-  // Show "Saving…" the instant a change is dispatched, rather than waiting for
+  // Show "Saving" the instant a change is dispatched, rather than waiting for
   // the debounced sync to actually start. Cleared when the sync finishes (or a
   // short fallback, in case no sync was needed).
   const [pendingSave, setPendingSave] = useState(false)
@@ -272,14 +272,14 @@ function NotePage() {
 
   // The dispatch moment is over once the pending pushes change: the write
   // landed on this device and queued its push (rising), or the push landed
-  // (falling). Online the trace carries on as "Saving…" until the push has
+  // (falling). Online the trace carries on as "Saving" until the push has
   // landed; offline it becomes "Saved offline" (`saveTrace`).
   useEffect(() => {
     setPendingSave(false)
   }, [pushesPending])
 
   // Held through a burst of typing, so the header does not flicker between
-  // "Saving…" and what follows it on every keystroke (`useSteadySaveTrace`).
+  // "Saving" and what follows it on every keystroke (`useSteadySaveTrace`).
   const trace = useSteadySaveTrace(saveTrace(syncStatus, { pendingSave, pushesPending }))
 
   // Note props (width, gist) are one `setProps` op, written at once.
@@ -413,7 +413,7 @@ function NotePage() {
           {trace === "saving" ? (
             <span className="flex items-center gap-1.5 text-sm text-text-secondary print:hidden">
               <LoadingIcon16 className="animate-spin" />
-              Saving…
+              Saving
             </span>
           ) : trace === "saved-offline" ? (
             <span className="flex items-center gap-1.5 text-sm text-text-secondary print:hidden">

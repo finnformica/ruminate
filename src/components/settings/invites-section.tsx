@@ -156,7 +156,7 @@ function InviteList({
   invites: InviteSummary[] | null
   onRevoke: (id: string) => void | Promise<void>
 }) {
-  if (invites === null) return <span className="text-text-secondary">Loading…</span>
+  if (invites === null) return <span className="text-text-secondary">Loading</span>
   if (invites.length === 0) return <span className="text-text-secondary">No invites yet.</span>
 
   return (

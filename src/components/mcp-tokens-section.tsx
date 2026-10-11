@@ -220,7 +220,7 @@ function TokenList({
 }) {
   const notes = useAtomValue(notesAtom)
 
-  if (tokens === null) return <span className="text-text-secondary">Loading…</span>
+  if (tokens === null) return <span className="text-text-secondary">Loading</span>
   if (tokens.length === 0) {
     return <span className="text-text-secondary">No tokens yet.</span>
   }

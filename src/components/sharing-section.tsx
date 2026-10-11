@@ -152,7 +152,7 @@ function GivenList({
   onRevoke: (id: string) => void | Promise<void>
 }) {
   const labelOf = useRootLabel()
-  if (shares === null) return <span className="text-text-secondary">Loading…</span>
+  if (shares === null) return <span className="text-text-secondary">Loading</span>
   if (shares.length === 0) {
     return <span className="text-text-secondary">You have not shared anything yet.</span>
   }

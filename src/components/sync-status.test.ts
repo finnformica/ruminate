@@ -71,12 +71,12 @@ describe("saveTrace", () => {
   const dispatched = { pendingSave: true, pushesPending: false }
   const queued = { pendingSave: false, pushesPending: true }
 
-  it("reads Saving… while pushes are in flight (the sidebar's word too)", () => {
+  it("reads Saving while pushes are in flight (the sidebar's word too)", () => {
     expect(saveTrace("syncing", idle)).toBe("saving")
     expect(saveTrace("syncing", queued)).toBe("saving")
   })
 
-  it("reads Saving… from the dispatch until the write lands, where a push can land", () => {
+  it("reads Saving from the dispatch until the write lands, where a push can land", () => {
     expect(saveTrace("synced", dispatched)).toBe("saving")
     expect(saveTrace("expiring", dispatched)).toBe("saving")
     expect(saveTrace("failed", dispatched)).toBe("saving")
@@ -84,7 +84,7 @@ describe("saveTrace", () => {
     expect(saveTrace("failed", idle)).toBeNull()
   })
 
-  it("offline, reads Saving… while the write is landing, then Saved offline", () => {
+  it("offline, reads Saving while the write is landing, then Saved offline", () => {
     expect(saveTrace("offline", dispatched)).toBe("saving")
     // A further edit while one is already waiting: the write comes first.
     expect(saveTrace("offline", { pendingSave: true, pushesPending: true })).toBe("saving")

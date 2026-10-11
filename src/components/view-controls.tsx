@@ -51,7 +51,7 @@ import { QualifierPicture } from "./qualifier-suggestions"
  *
  * **Parent** and **Under** name a row by what it is or what it says
  * (docs/query-language.md, "Under a block, by what it says"). Their
- * submenus list what is chosen, and **Choose…** opens the ⌘K palette as a
+ * submenus list what is chosen, and **Choose a block** opens the ⌘K palette as a
  * picker (`src/components/palette.ts`) over the rows of this note — or of
  * the focused block — that have children: pick a row and the filter names
  * it by id; take the typed text, offered as the first row ("Contains
@@ -337,7 +337,7 @@ export function FilterMenu({
                   icon={<SearchIcon16 />}
                   onClick={() => pickAncestor(key)}
                 >
-                  Choose…
+                  Choose a block
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Submenu>
@@ -373,7 +373,7 @@ export function FilterMenu({
               icon={<SearchIcon16 />}
               onClick={pickText}
             >
-              Type…
+              Type words
             </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Submenu>
