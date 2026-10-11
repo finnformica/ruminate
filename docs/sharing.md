@@ -3,8 +3,8 @@
 Share a subgraph of your notes with another Ruminate user. From a note's or a
 block's menu, type the email address they sign in to GitHub with; they see
 that root and everything beneath it — including blocks you add later — under
-a **Shared** heading in their sidebar, and can edit or delete there only
-if you said so. **A share is a view shared with someone** (docs/metadata.md,
+a **Shared** heading in their sidebar, and can edit there only if you said
+so. **A share is a view shared with someone** (docs/metadata.md,
 "Views"): the share row holds the grant — who, which view, which verbs — and
 the view holds what is shared and how it opens. Save a filter or a sort on
 the note you shared and the person you shared it with opens it that way.
@@ -15,7 +15,7 @@ the note you shared and the person you shared it with opens it that way.
 | What is shared | The reachability closure beneath the view's root, computed per request                                           |
 | How it opens   | The view's filter and sort — presentation; the slice is the whole subtree                                        |
 | Who            | An email address, matched to the primary verified GitHub email                                                   |
-| Verbs          | `read` (always), `write`, `delete`                                                                               |
+| Verbs          | `read` (always), `write` — which carries `delete` with it                                                        |
 | Endpoints      | `/api/shares`, `/api/shares/:id`, `/api/shares/:id/notes`                                                        |
 | Storage        | Control plane: `shares` (0012, 0017, 0020), `users.email` (0010, 0011); the view is a corpus row (`views`, 0015) |
 | Where it lives | `worker/shares/`, `worker/handlers/shares.ts`, `src/data/shared-mode.ts`                                         |
@@ -75,8 +75,12 @@ grant, and that choice decides everything else:
 - **The Unassigned basket.** The MCP scope includes blocks _written in_ a
   granted note (`notes_id`) so an agent sees what the person sees. A share
   does not: "downstream of the roots" is reachability, and a block the owner
-  removed from the outline is, from the grantee's side, gone. The grantee's
-  note page hides the basket for shared notes.
+  removed from the outline is, from the grantee's side, gone. What the
+  grantee removes _themselves_ is kept on their device alone, in memory, as
+  the shared note's basket until the page reloads (§4, "parked"); the owner's
+  basket is never served. A block born in a shared root stays _writable_
+  from the grantee's side while out of reach (§3, "parked"), so an undo can
+  link it back.
 - **`notes_id` values outside the closure.** A block the owner mirrored into
   a shared note from a private one was _born_ in the private note, and its
   `notes_id` would name that note's id. The slice blanks it. Nothing the
@@ -120,22 +124,36 @@ named, and it is designed so the app never becomes a directory:
 
 ## 3. Verbs
 
-`read` is always granted; `write` and `delete` are opted into, per share.
+`read` is always granted; `write` is opted into, per share. A share is
+read-only or editable.
 
-| Verb     | Lets the grantee                                                              |
-| -------- | ----------------------------------------------------------------------------- |
-| `read`   | See the slice: the notes, their blocks, search across them, hover cards       |
-| `write`  | Edit text and types, add blocks, reorder, **unlink** a block from the outline |
-| `delete` | **Tombstone** a node — the context menu's Delete, the basket's remove, a note |
+| Verb     | Lets the grantee                                                                |
+| -------- | ------------------------------------------------------------------------------- |
+| `read`   | See the slice: the notes, their blocks, search across them, hover cards         |
+| `write`  | Edit text and types, add blocks, reorder, unlink a block, **tombstone** a block |
+| `delete` | Nothing of its own: stored beside `write` and implied by it (`grant.ts`)        |
 
-The write/delete line follows the app's own (docs/graph-storage.md, "Remove =
-unlink, delete is explicit"): removing a row from the outline is an unlink and
-the block survives in the owner's Unassigned basket, so it is a `write`;
-retiring the row itself is a `delete`. Width is a prop on the note node — the
-owner's node — so a shared note has none. A view is not: it is the grantee's
-own row about the owner's node (docs/metadata.md), so a shared note or block
-can be filtered and sorted from the grantee's side, a shared block made a
-view of the grantee's own, and none of it reaches the owner.
+`write` and `delete` were once separate verbs, drawn along the app's own line
+(docs/graph-storage.md, "Remove = unlink, delete is explicit"): removing a
+row from the outline is an unlink, and the block survives in the owner's
+Unassigned basket; retiring the row itself is a delete. But the line
+protected nothing. `write` already let a grantee empty every block's text
+and remove every row into a basket the owner seldom opens, so withholding
+`delete` only ever stopped them taking out a _blank_ row — which is what
+Backspace on an emptied line does, so the one place it bit was mid-edit, as
+a refusal of a keystroke. And since every write is an event
+(docs/event-sourcing.md), the owner puts back a deleted block exactly as they
+put back an emptied one. So `write` carries `delete`: the grant is widened at
+its one mint (`shareFromRow`), a `read,write` row from before reads the same
+as one written now, and the dialog offers **Edit** alone. The one thing an
+editor may never tombstone is the **root** — the note or block that was
+shared is the owner's; the grantee leaves the share instead (§4).
+
+Width is a prop on the note node — the owner's node — so a shared note has
+none. A view is not: it is the grantee's own row about the owner's node
+(docs/metadata.md), so a shared note or block can be filtered and sorted from
+the grantee's side, a shared block made a view of the grantee's own, and none
+of it reaches the owner.
 
 ### The write boundary
 
@@ -143,13 +161,25 @@ view of the grantee's own, and none of it reaches the owner.
 and is planned by a pure function (`planSliceWrite`), refused as a whole if
 any row would leave the slice:
 
-- A node row must name a node in the closure, or a **new** id — one the
-  owner's partition has never held — that is **anchored**: written in a shared
-  note (`notes_id` names a live root) or linked beneath a slice node in the
-  same push. An unanchored new row would be an orphan dropped into someone
-  else's corpus, visible to nobody; a tombstoned id revived from outside would
-  be a write to a row the grantee cannot see.
-- A link row must have both ends in the closure or among those new ids.
+- A node row must name a node in the closure, a **parked** id, or a **new**
+  id — one the owner's partition has never held — that is **anchored**:
+  written in a shared note (`notes_id` names a live root) or linked beneath a
+  slice node in the same push. An unanchored new row would be an orphan
+  dropped into someone else's corpus, visible to nobody; one of the owner's
+  rows revived or edited from outside would be a write to a row the grantee
+  cannot see.
+- A **parked** id is a block _born in one of the share's roots_ (its
+  `notes_id`) that the closure no longer reaches: unlinked, so it sits in the
+  owner's basket, or tombstoned. It is the shared note's own block still, and
+  a grantee writes it as they write a slice node. This is what lets undo and
+  redo work from their side: a removed row's undo re-links a block the slice
+  no longer serves, a deleted block's redo re-creates a tombstoned id, and
+  the basket they keep in memory (§4) edits rows the server has stopped
+  sending. Without it every removal was final for the grantee — the server
+  refused the re-link as a write outside the slice, and the row came back on
+  screen for a moment and vanished. A block born anywhere else is refused by
+  id, live or dead; nothing outside the closure is ever _served_.
+- A link row must have both ends in the closure or among those ids.
 - A row keeps its home note (`notes_id` lands only on a new row) and the
   owner's own props — `font`, `width` (docs/metadata.md) — which a push may
   carry unchanged but never change; a new row never carries them. A type is
@@ -199,9 +229,21 @@ someone else's rows does not belong in it. So shared notes live in memory
   refused with a toast: a block cannot live in two people's corpora at once.
   A share's verbs are checked client-side first, so a read-only note says so
   on the first keystroke rather than after a round trip.
+- **Parked**: a row the reader removes from the outline is an unlink, and the
+  block drops out of the next pull — into the owner's basket, which the
+  reader never sees. The slice keeps it, with everything beneath it, as
+  _parked_: still in the graph, so the shared note shows an **Unassigned**
+  basket beneath the outline holding what this device removed, and an undo
+  has something to link back. A parked block the server serves again is a
+  slice row once more; one it no longer holds at all is gone. Nothing is
+  stored — a reload starts from what the server serves, and the basket is
+  empty again. (The owner's basket, and what other devices removed, stay
+  out of the slice: §1.)
 - **Sync**: the ambient triggers the replica pull uses (visibility, focus,
   online) re-pull every slice, coalesced to one per 30 s; a slice with a push
-  in flight keeps its local copy until it lands.
+  in flight, or edits waiting behind one, keeps its local copy until they
+  land — a pull put on screen over them showed the text as it stood a push
+  ago, flickering back for a second until the next push caught up.
 - **How the UI sees it**: `graphSnapshotAtom` merges the own graph with the
   union of every slice, so the editor, search, hover cards and the Views page
   read a shared note exactly as they read an own one. `sharedOriginAtom`
@@ -209,8 +251,10 @@ someone else's rows does not belong in it. So shared notes live in memory
   under **Views** and the notes shared with them under **Shared** (who shared
   each is the row's tooltip, and the page header's first crumb), and the note
   page shows a notice with the owner and the verbs, renders read-only without
-  `write`, and hides Rename, Delete and the basket as the verbs dictate (Add
-  to Views on a block stays: the view is the grantee's own, docs/metadata.md).
+  `write`, and hides Rename and the basket without it. Delete on the note is
+  hidden on every share: the root is the owner's, and the grantee leaves the
+  share instead (Add to Views on a block stays: the view is the grantee's
+  own, docs/metadata.md).
 - **A shared block is a note here.** A root may be a block, and a block has
   no page of its own to open; so on the way into the snapshot a root that is
   not a note is given the note type. It lists in the sidebar, opens at

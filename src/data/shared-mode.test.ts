@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import type { ReceivedShareSummary, SliceBody } from "../../worker/shares/wire"
 import { clearSession, seedSession } from "../utils/github-session"
+import { basketRootIds } from "./basket"
 import { buildGraphSnapshot, noteDoc } from "./graph"
 import type { Op } from "./ops"
 import {
@@ -322,13 +323,103 @@ describe("shared mode", () => {
     expect(puts(stub)).toHaveLength(0)
   })
 
-  it("refuses a delete without the delete verb", async () => {
+  it("deletes a block with write: editing includes deleting", async () => {
+    vi.useFakeTimers()
     const stub = stubServer()
     startSharedMode({ fetchImpl: stub.fetch })
     await flushSharedMode()
     sharedApplyOps("shr_1", [{ op: "delete", id: "blk_a" }])
+    expect(store.get(sharedGraphAtom).nodes.has("blk_a")).toBe(false)
+    expect(toasts).toEqual([])
+    await vi.advanceTimersByTimeAsync(1_500)
+    const pushed = puts(stub)[0].body as { nodes: NodeRow[] }
+    expect(pushed.nodes).toEqual([
+      expect.objectContaining({ id: "blk_a", deleted_at: expect.any(Number) }),
+    ])
+  })
+
+  it("keeps edits that land while a re-pull is out, rather than showing the pull over them", async () => {
+    vi.useFakeTimers()
+    const stub = stubServer()
+    // While `hold` is on, a slice pull waits until `release` is called.
+    let hold = false
+    let release: (() => void) | null = null
+    const good = stub.fetch
+    stub.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? "GET"
+      if (String(input) === "/api/shares/shr_1/notes" && method === "GET" && hold) {
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+      }
+      return good(input, init)
+    }) as typeof fetch
+    startSharedMode({ fetchImpl: stub.fetch })
+    await flushSharedMode()
+    hold = true
+
+    sharedApplyOps("shr_1", [{ op: "setText", id: "blk_a", text: "changed" }])
+    await vi.advanceTimersByTimeAsync(1_500)
+    expect(puts(stub)).toHaveLength(1)
+    expect(release).not.toBeNull()
+    // Typed while the re-pull was in the air.
+    sharedApplyOps("shr_1", [{ op: "setText", id: "blk_a", text: "changed more" }])
+    hold = false
+    ;(release as unknown as () => void)()
+    await vi.advanceTimersByTimeAsync(0)
+    // The pull's rows (text "one") are older than what is on screen.
+    expect(store.get(sharedGraphAtom).nodes.get("blk_a")?.text).toBe("changed more")
+    // The edit still pushes, and that flush re-pulls in its turn.
+    await vi.advanceTimersByTimeAsync(1_500)
+    expect(puts(stub)).toHaveLength(2)
+    expect((puts(stub)[1].body as { nodes: NodeRow[] }).nodes[0].text).toBe("changed more")
+  })
+
+  it("keeps a removed block in the basket until the page reloads, and an undo links it back", async () => {
+    vi.useFakeTimers()
+    const stub = stubServer()
+    startSharedMode({ fetchImpl: stub.fetch })
+    await flushSharedMode()
+
+    // Removing the row is an unlink; the server then stops serving blk_a.
+    stub.slice = { ...SLICE, nodes: [SLICE.nodes[0]], links: [] }
+    sharedApplyOps("shr_1", [{ op: "unlink", source: "blk_note", destination: "blk_a" }])
+    await vi.advanceTimersByTimeAsync(1_500)
+    expect(puts(stub)).toHaveLength(1)
+    // Re-pulled, and still here: parked, as the shared note's basket.
+    let graph = store.get(sharedGraphAtom)
+    expect(graph.nodes.has("blk_a")).toBe(true)
+    expect(noteDoc("blk_note", graph)?.rootBlockIds).toEqual([])
+    expect(basketRootIds("blk_note", graph)).toEqual(["blk_a"])
+    expect(store.get(sharedOriginAtom).get("blk_a")).toBe("shr_1")
+    // An ambient refresh keeps it too.
+    await requestSharesRefresh()
     expect(store.get(sharedGraphAtom).nodes.has("blk_a")).toBe(true)
-    expect(toasts[0]).toMatch(/delete/)
+
+    // Undo: the link goes back, and the push names the block the server no
+    // longer serves — which it accepts as the shared note's own.
+    stub.slice = SLICE
+    sharedApplyOps("shr_1", [
+      { op: "link", source: "blk_note", destination: "blk_a", sortKey: "a0" },
+    ])
+    await vi.advanceTimersByTimeAsync(1_500)
+    expect(puts(stub)).toHaveLength(2)
+    expect((puts(stub)[1].body as { links: LinkRow[] }).links).toEqual([
+      expect.objectContaining({ source_id: "blk_note", destination_id: "blk_a" }),
+    ])
+    graph = store.get(sharedGraphAtom)
+    expect(noteDoc("blk_note", graph)?.rootBlockIds).toEqual(["blk_a"])
+    expect(basketRootIds("blk_note", graph)).toEqual([])
+
+    // A reload starts from what the server serves: the basket is memory only.
+    stub.slice = { ...SLICE, nodes: [SLICE.nodes[0]], links: [] }
+    sharedApplyOps("shr_1", [{ op: "unlink", source: "blk_note", destination: "blk_a" }])
+    await vi.advanceTimersByTimeAsync(1_500)
+    expect(store.get(sharedGraphAtom).nodes.has("blk_a")).toBe(true)
+    stopSharedMode()
+    startSharedMode({ fetchImpl: stub.fetch })
+    await flushSharedMode()
+    expect(store.get(sharedGraphAtom).nodes.has("blk_a")).toBe(false)
   })
 
   it("reverts to the owner's rows when the server refuses a push", async () => {

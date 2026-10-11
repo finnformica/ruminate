@@ -14,7 +14,7 @@ import {
   isNoteType,
   type GraphSnapshot,
 } from "./graph"
-import { applyOps, type Op } from "./ops"
+import { applyOps, reachableFrom, type Op } from "./ops"
 import { opsToRows } from "./ops-rows"
 import {
   isSharesRefusal,
@@ -43,7 +43,18 @@ import {
  *           replica queue, and per-row last-writer-wins at the owner's rows
  *   sync    the same ambient triggers the replica pull uses (visibility,
  *           focus, online) re-pull every slice, coalesced; a slice with a
- *           push in flight is left alone until it lands
+ *           push in flight, or edits waiting behind one, is left alone
+ *           until they land — a pull put on screen over them would show
+ *           the text as it stood a push ago until the next push caught up
+ *
+ * **Removed rows wait in a basket, on this device.** The server serves what
+ * the root reaches, so a row the reader removes from the outline (an
+ * unlink, docs/graph-storage.md) drops out of the next pull — into the
+ * owner's Unassigned basket, which the reader never sees. The slice keeps
+ * such a block, and what it holds, as PARKED (`Slice.parked`): still in the
+ * graph, so the shared note's Unassigned basket lists it beneath the
+ * outline, and an undo can link it back. Nothing is stored: a reload starts
+ * from what the server serves, and the basket is empty again.
  *
  * **A shared block is a note here.** A root may be a block (shared from its
  * right-click menu), and a block has no page of its own to open. The slice
@@ -126,6 +137,11 @@ interface Slice {
   /** The stored type of every root that is presented as a note (see
    * `asNotes`) — what a pushed row of it carries. */
   rootTypes: ReadonlyMap<string, string>
+  /** Blocks the reader took out of the outline on this device, kept in the
+   * graph (with what they hold) though the server no longer serves them:
+   * the shared note's Unassigned basket, until the page reloads
+   * (`sliceOf`, `parkedOf`). */
+  parked: ReadonlySet<string>
 }
 
 interface PendingPush {
@@ -258,28 +274,80 @@ function rootTypesOf(nodes: NodeRow[], rootIds: readonly string[]): Map<string, 
   return types
 }
 
-/** A slice from the rows the server sent. The view rides with the rows, so
- * a pull follows the owner's edits to what the share opens as. */
+/**
+ * A slice from the rows the server sent. The view rides with the rows, so a
+ * pull follows the owner's edits to what the share opens as.
+ *
+ * `carry` is the slice as it stood: its PARKED blocks — rows the reader took
+ * out of the outline here, which the server no longer reaches and so no
+ * longer serves — are kept, with everything beneath them, so the shared
+ * note's Unassigned basket on this device shows what was just removed and
+ * an undo has something to put back. A parked block the server serves
+ * again (re-linked, by an undo or a paste) is a slice row once more; one it
+ * no longer holds at all is gone. Memory only: a reload starts from what
+ * the server serves (`parkedOf`).
+ */
 const sliceOf = (
   summary: ReceivedShareSummary,
   rows: { nodes: NodeRow[]; links: LinkRowsOf; view?: ShareView },
+  carry?: Slice,
 ): Slice => {
   const share = rows.view ? { ...summary, view: rows.view } : summary
   const roots = [share.view.rootId]
+  const nodes = asNotes(rows.nodes, roots)
+  const links = [...rows.links]
+  const parked = new Set<string>()
+  if (carry && carry.parked.size > 0) {
+    const served = new Set(nodes.map((node) => node.id))
+    const kept = [...carry.parked].filter((id) => !served.has(id) && carry.graph.nodes.has(id))
+    for (const id of [...kept, ...reachableFrom(carry.graph, kept)]) {
+      if (served.has(id)) continue
+      const node = carry.graph.nodes.get(id)
+      if (!node) continue
+      served.add(id)
+      nodes.push(node)
+      links.push(...(carry.graph.childLinks.get(id) ?? []))
+    }
+    for (const id of kept) parked.add(id)
+  }
   return {
     share,
-    graph: buildGraphSnapshot(asNotes(rows.nodes, roots), rows.links),
+    graph: buildGraphSnapshot(nodes, links),
     rootTypes: rootTypesOf(rows.nodes, roots),
+    parked,
   }
 }
 type LinkRowsOf = Parameters<typeof buildGraphSnapshot>[1]
 
-/** The verbs a share grants, as flags. */
-export const sharePermissions = (
-  share: ReceivedShareSummary,
-): { write: boolean; delete: boolean } => ({
+/**
+ * The parked blocks after a batch: a block an `unlink` leaves with no parent
+ * in the slice is parked (it would otherwise vanish from the screen on the
+ * next pull, into a basket the reader cannot see); a `link` to a parked
+ * block, or its `delete`, takes it out. A note is never parked: the basket
+ * is for blocks (`src/data/basket.ts`).
+ */
+function parkedOf(
+  parked: ReadonlySet<string>,
+  ops: readonly Op[],
+  next: GraphSnapshot,
+): Set<string> {
+  const out = new Set(parked)
+  for (const op of ops) {
+    if (op.op === "unlink") {
+      const node = next.nodes.get(op.destination)
+      if (node && !isNoteType(node.type) && !next.parentLinks.has(op.destination)) {
+        out.add(op.destination)
+      }
+    } else if (op.op === "link") out.delete(op.destination)
+    else if (op.op === "delete") out.delete(op.id)
+  }
+  return out
+}
+
+/** The verbs a share grants, as flags. A share is read-only or editable;
+ * editing includes deleting blocks (`worker/shares/grant.ts`). */
+export const sharePermissions = (share: ReceivedShareSummary): { write: boolean } => ({
   write: share.permissions.includes("write" satisfies SharePermission),
-  delete: share.permissions.includes("delete" satisfies SharePermission),
 })
 
 // -----------------------------------------------------------------------------
@@ -433,7 +501,7 @@ async function pullAll(activation: SharedRuntime): Promise<void> {
           next.set(share.id, { ...current, share })
           return
         }
-        next.set(share.id, sliceOf(share, await pullShare(share.id, activation.fetchImpl)))
+        next.set(share.id, sliceOf(share, await pullShare(share.id, activation.fetchImpl), current))
       }),
     )
     if (runtime !== activation) return
@@ -463,7 +531,13 @@ async function repull(activation: SharedRuntime, shareId: string) {
     if (runtime !== activation) return
     const current = activation.slices.get(shareId)
     if (!current) return
-    activation.slices.set(shareId, sliceOf(current.share, rows))
+    // Edits landed while the pull was out: the rows it brought are already
+    // behind them, and putting them on screen would show the text as it
+    // stood a push ago until the next push caught up. The flush that
+    // follows those edits re-pulls.
+    const pending = activation.pending.get(shareId)
+    if (pending && (pending.inFlight || !isEmptyGraphDiff(pending.diff))) return
+    activation.slices.set(shareId, sliceOf(current.share, rows, current))
     publish(activation)
   } catch (error) {
     if (runtime === activation) console.error("[ruminate] share re-pull failed:", error)
@@ -476,9 +550,10 @@ async function repull(activation: SharedRuntime, shareId: string) {
 
 /**
  * Apply a batch of ops to one share: the slice's snapshot takes them at once,
- * the row diff coalesces briefly and is pushed. A batch the share's verbs do
- * not cover is refused HERE, before anything changes on screen — the server
- * would refuse it anyway, but a toast now beats a revert later.
+ * the row diff coalesces briefly and is pushed. A batch on a read-only share
+ * is refused HERE, before anything changes on screen — the server would
+ * refuse it anyway, but a toast now beats a revert later. (The editor is in
+ * `browse` on such a note, so in practice nothing reaches this.)
  */
 export function sharedApplyOps(shareId: string, ops: readonly Op[]) {
   const activation = runtime
@@ -486,15 +561,8 @@ export function sharedApplyOps(shareId: string, ops: readonly Op[]) {
   const slice = activation.slices.get(shareId)
   if (!slice) return
 
-  const verbs = sharePermissions(slice.share)
-  const deletes = ops.some((op) => op.op === "delete")
-  const edits = ops.some((op) => op.op !== "delete")
-  if (edits && !verbs.write) {
+  if (!sharePermissions(slice.share).write) {
     toast("This note was shared with you to read, not to edit.")
-    return
-  }
-  if (deletes && !verbs.delete) {
-    toast("This share does not let you delete blocks.")
     return
   }
 
@@ -507,7 +575,8 @@ export function sharedApplyOps(shareId: string, ops: readonly Op[]) {
     const stored = slice.rootTypes.get(row.id)
     if (stored !== undefined && row.type === NOTE_TYPE) row.type = stored
   }
-  activation.slices.set(shareId, { ...slice, graph: applyOps(slice.graph, ops, now) })
+  const graph = applyOps(slice.graph, ops, now)
+  activation.slices.set(shareId, { ...slice, graph, parked: parkedOf(slice.parked, ops, graph) })
   publish(activation)
 
   let pending = activation.pending.get(shareId)

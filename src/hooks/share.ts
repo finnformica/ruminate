@@ -9,8 +9,9 @@ import type { NoteId } from "../schema"
  * which verbs the owner granted (docs/sharing.md). */
 export interface NoteShare {
   share: ReceivedShareSummary
+  /** Editable, which includes deleting blocks; the shared note or block
+   * itself is the owner's to delete. */
   canWrite: boolean
-  canDelete: boolean
 }
 
 /**
@@ -33,7 +34,6 @@ export function useNoteShare(id: NoteId | undefined): NoteShare | null {
   const share = useAtomValue(shareAtom)
   return React.useMemo(() => {
     if (!share) return null
-    const verbs = sharePermissions(share)
-    return { share, canWrite: verbs.write, canDelete: verbs.delete }
+    return { share, canWrite: sharePermissions(share).write }
   }, [share])
 }

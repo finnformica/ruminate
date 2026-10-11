@@ -138,9 +138,11 @@ export async function pushShare(
   })
 }
 
-/** "read + write", for lists and summaries. */
+/** "read" or "read + write", for lists and summaries. A share is read-only
+ * or editable; `delete` rides with `write` (worker/shares/grant.ts) and is
+ * not a thing of its own to list. */
 export const describeSharePermissions = (permissions: readonly SharePermission[]): string =>
-  (permissions.length === 0 ? ["read"] : permissions).join(" + ")
+  permissions.includes("write") ? "read + write" : "read"
 
 /** A person's name for a share's owner: their display name, else their login. */
 export const shareOwnerName = (share: ReceivedShareSummary): string =>

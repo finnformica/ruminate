@@ -14,10 +14,11 @@ import { TextInput } from "./ui/text-input"
 /**
  * "Share…" from a note's menu, or from a block's right-click menu
  * (docs/sharing.md): the root is already chosen — the note, or that block —
- * so the dialog asks for the address and the verbs. Read is always granted;
- * edit and delete are opted into, and the sentence above the button says
- * what is about to be granted. Mounted once by the app root; a
- * menu opens it by setting `shareDialogAtom` to the root's id.
+ * so the dialog asks for the address and whether it can be edited. Read is
+ * always granted; edit is opted into (and brings deleting blocks with it,
+ * worker/shares/grant.ts), and the sentence above the button says what is
+ * about to be granted. Mounted once by the app root; a menu opens it by
+ * setting `shareDialogAtom` to the root's id.
  *
  * Only the user's own rows can be shared — a note someone shared with them
  * is that person's to share — and only signed in, so the dialog simply does
@@ -25,26 +26,12 @@ import { TextInput } from "./ui/text-input"
  */
 export const shareDialogAtom = atom<string | null>(null)
 
-/** What each permission lets be done to the note, said of the note. */
-const DONE_TO_IT: Record<SharePermission, string> = {
-  read: "read",
-  write: "edited",
-  delete: "deleted",
-}
-
-/** "read", "read and edited", "read, edited and deleted". */
-function describeGrant(verbs: readonly SharePermission[]): string {
-  const words = (["read", "write", "delete"] as const)
-    .filter((verb) => verb === "read" || verbs.includes(verb))
-    .map((verb) => DONE_TO_IT[verb])
-  return words.length <= 1
-    ? words.join("")
-    : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`
-}
+/** "read" or "read and edited": what is about to be allowed, said of the note. */
+const describeGrant = (verbs: readonly SharePermission[]): string =>
+  verbs.includes("write") ? "read and edited" : "read"
 
 const VERB_OPTIONS: { value: SharePermission; label: string; detail: string }[] = [
-  { value: "write", label: "Edit", detail: "Change it, and add blocks beneath it" },
-  { value: "delete", label: "Delete", detail: "Delete blocks, or the root itself" },
+  { value: "write", label: "Edit", detail: "Change it, and add or delete blocks beneath it" },
 ]
 
 /** How much of a block's text names it in the dialog's title. */
