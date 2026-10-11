@@ -255,7 +255,10 @@ stays at the top while the outline scrolls under it, then the outline in the
 block editor's read-only mode — with what the day did to each row marked
 (`BlockEditor.diff`, `block-item.tsx`): a row added or removed sits on its
 tint with a `+` or `−` at the editor's edge, and a reworded row shows the
-words that went and came. The outline folds as the note's own view folds (the
+words that went and came. A row whose type changed — a task ticked, a line
+made a heading — is drawn as a line diff draws it, since a key has no words
+to diff: the row as it was goes out in red with its old key, and the row as it
+is comes in in green just below. The outline folds as the note's own view folds (the
 reader's folds over the depth setting, `useFoldRule`), except that a row with
 a change beneath it is held open so everything the day did shows. Then it is
 cut down the way a pull request shows a file (`foldContext`): a changed row,

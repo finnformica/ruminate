@@ -36,8 +36,12 @@ import { keyOf } from "../blocks/view"
  * A note is compared as two outlines, block by block: a block only the
  * after-outline holds was **added**, one only the before-outline holds was
  * **removed** — and is spliced back where it stood, so it draws as a row —
- * and one in both whose text or type differs was **changed**, carrying the
- * words that went and the words that came (`diffWords`). Everything else is
+ * and one in both whose text differs was **changed**, carrying the words
+ * that went and the words that came (`diffWords`). A block whose **type**
+ * changed (a task ticked, a line made a heading) is drawn as a line diff
+ * draws it: the row as it was goes out, with its old key, and the row as it
+ * is comes in — a ghost row (`was:<id>`) marked removed just above the block
+ * marked added — since a key has no words to diff. Everything else is
  * unchanged, and drawn as the note's own view draws it — folded where the
  * reader's folds and the depth setting fold it — then cut down to the
  * changes and a row of context on either side (`foldContext`): the rows
@@ -328,14 +332,20 @@ function noteChange(
 
   const marks = new Map<string, DiffMark>()
   const base: BlockDoc = docAfter ?? { props: docBefore!.props, rootBlockIds: [], blocks: {} }
+  // Blocks whose type changed, with the row as it was.
+  const retyped = new Map<string, Block>()
   for (const [id, block] of Object.entries(base.blocks)) {
     const was = docBefore?.blocks[id]
     if (!was) marks.set(id, { kind: "added" })
-    else if (was.text !== block.text || was.type !== block.type) {
+    else if (was.type !== block.type) {
+      marks.set(id, { kind: "added" })
+      retyped.set(id, was)
+    } else if (was.text !== block.text) {
       marks.set(id, { kind: "changed", words: diffWords(was.text, block.text) })
     }
   }
-  const doc = docBefore ? spliceRemoved(base, docBefore, marks) : base
+  const spliced = docBefore ? spliceRemoved(base, docBefore, marks) : base
+  const doc = retyped.size > 0 ? ghostRetyped(spliced, retyped, marks) : spliced
   const added = countMarks(marks, "added")
   const removed = countMarks(marks, "removed")
   const changed = countMarks(marks, "changed")
@@ -356,6 +366,35 @@ function noteChange(
 
 const countMarks = (marks: ReadonlyMap<string, DiffMark>, kind: DiffMark["kind"]) =>
   [...marks.values()].filter((mark) => mark.kind === kind).length
+
+/**
+ * For every block whose type changed, the row as it was — its old type and
+ * text, no children (those stay with the live row) — put in just above it as
+ * a ghost (`was:<id>`) marked removed, so the pair reads as a line diff's
+ * replacement: old key out, new key in.
+ */
+function ghostRetyped(
+  doc: BlockDoc,
+  retyped: ReadonlyMap<string, Block>,
+  marks: Map<string, DiffMark>,
+): BlockDoc {
+  const blocks: Record<string, Block> = { ...doc.blocks }
+  const withGhosts = (list: readonly string[]): string[] =>
+    list.flatMap((id) => {
+      const was = retyped.get(id)
+      if (!was) return [id]
+      const ghostId = `was:${id}`
+      blocks[ghostId] = { ...was, id: ghostId, children: [] }
+      marks.set(ghostId, { kind: "removed" })
+      return [ghostId, id]
+    })
+  for (const [id, block] of Object.entries(doc.blocks)) {
+    if (block.children.some((child) => retyped.has(child))) {
+      blocks[id] = { ...blocks[id], children: withGhosts(block.children) }
+    }
+  }
+  return { ...doc, blocks, rootBlockIds: withGhosts(doc.rootBlockIds) }
+}
 
 /**
  * The after-outline with every block only the before-outline holds put back
