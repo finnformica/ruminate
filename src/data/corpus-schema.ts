@@ -345,6 +345,23 @@ async function applyV10(driver: SqlDriver, tenancy: CorpusTenancy): Promise<void
   if (tenancy === "single") await driver.execScript(LOCAL_V10_SQL)
 }
 
+/**
+ * Every local step that has shipped, by the version it leaves behind — for
+ * `corpus-schema.test.ts`, which pins a hash of each. A step that has reached
+ * a device cannot be edited without that test failing; the next change to
+ * the schema is the next step.
+ */
+export const SHIPPED_LOCAL_STEPS: Readonly<Record<number, string>> = {
+  3: LOCAL_V3_SQL,
+  4: LOCAL_V4_SQL,
+  5: LOCAL_V5_SQL,
+  6: LOCAL_V6_SQL,
+  7: LOCAL_V7_SQL,
+  8: LOCAL_V8_SQL,
+  9: LOCAL_V9_SQL,
+  10: LOCAL_V10_SQL,
+}
+
 type Step = (
   driver: SqlDriver,
   migrations: CorpusMigrations,
