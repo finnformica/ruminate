@@ -258,9 +258,14 @@ tint with a `+` or `−` at the editor's edge, and a reworded row shows the
 words that went and came. A row whose type changed — a task ticked, a line
 made a heading — is drawn as a line diff draws it, since a key has no words
 to diff: the row as it was goes out in red with its old key, and the row as it
-is comes in in green just below. The outline folds as the note's own view folds (the
+is comes in in green just below. A row the day moved — a picture given another
+value on a board, a row dragged under a different heading — is compared by
+where it is held: it goes out in red where it stood and comes in in green where
+it landed, and a row still held where it was and held somewhere new as well is
+marked only in the new place. The outline folds as the note's own view folds (the
 reader's folds over the depth setting, `useFoldRule`), except that a row with
-a change beneath it is held open so everything the day did shows. Then it is
+a change beneath it starts open whatever the depth setting says, so everything
+the day did shows; the reader folds it like any other row. Then it is
 cut down the way a pull request shows a file (`foldContext`): a changed row,
 a row of context on either side, and the unchanged rows between folded behind
 "n rows above" / "n rows below", each click giving back a few more.
