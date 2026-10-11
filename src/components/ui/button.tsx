@@ -7,7 +7,12 @@ import { Keys } from "./keys"
 const button = cva(
   // A busy button is disabled but not dimmed: it is working, not unavailable,
   // and its spinner says so (docs/design-principles.md, "Busy controls").
-  "focus-ring inline-flex cursor-pointer select-none items-center justify-center gap-2 whitespace-nowrap rounded leading-4 disabled:cursor-not-allowed disabled:opacity-50 disabled:data-loading:cursor-progress disabled:data-loading:opacity-100 coarse:h-10 coarse:px-4",
+  // The label keeps the body's leading: a tighter line box (this was
+  // `leading-4`, 16px under a 14px face whose own box is 21px) is clipped
+  // where a label truncates, so a descender — the g of "typography" — was
+  // cut flat on a picker's trigger. A centred single line sits at the same
+  // baseline whatever its leading, so nothing moves.
+  "focus-ring inline-flex cursor-pointer select-none items-center justify-center gap-2 whitespace-nowrap rounded disabled:cursor-not-allowed disabled:opacity-50 disabled:data-loading:cursor-progress disabled:data-loading:opacity-100 coarse:h-10 coarse:px-4",
   {
     variants: {
       variant: {

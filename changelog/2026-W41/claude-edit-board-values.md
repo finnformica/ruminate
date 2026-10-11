@@ -5,3 +5,7 @@
 ### Changed
 
 - No more trailing dots on menu items and progress words. "Saving", "Loading" and the Filter menu's **Choose a block** and **Type words** (formerly **Choose…** and **Type…**) read without them.
+
+### Fixed
+
+- A button's label no longer loses the tails of its letters. On a board, a picker showing a value such as "typography" cut the bottom off its g, p and y; the label now has the room the font needs.
