@@ -471,9 +471,7 @@ function NotePage() {
                 Shared by {shareOwnerName(share.share)}
                 {readOnlyShare
                   ? " — you can read this note but not change it."
-                  : share.canDelete
-                    ? " — you can edit and delete."
-                    : " — you can edit; deleting is not allowed."}
+                  : " — you can edit."}
               </Notice>
             ) : null}
 
@@ -535,7 +533,11 @@ function NotePage() {
                 // the filter hides the moment it is typed into.
                 starter={!narrowed}
               />
-              {noteId && noteExists && share === null ? <UnassignedBasket noteId={noteId} /> : null}
+              {/* A shared note's basket holds only what this device removed
+                  from it since the page loaded (src/data/shared-mode.ts,
+                  "Removed rows wait in a basket"); the owner's basket is
+                  theirs. */}
+              {noteId && noteExists && !readOnlyShare ? <UnassignedBasket noteId={noteId} /> : null}
             </div>
             {/* The page's foot: half a screen of room beneath the note, so
                 its last block is never pinned to the bottom edge — and, where

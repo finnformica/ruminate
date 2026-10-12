@@ -42,6 +42,7 @@ import {
   resolveShareViews,
   sliceRows,
   takenIds,
+  type SliceNode,
 } from "../shares/slice"
 import {
   countLiveShares,
@@ -371,8 +372,13 @@ async function write(
   if (!payload) return json({ error: "invalid_payload" }, 400)
 
   const closure = await closureIds(owner, grant)
-  const outside = payload.nodes.map((node) => node.id).filter((id) => !closure.nodes.has(id))
-  const taken = outside.length > 0 ? await takenIds(owner, outside) : new Set<string>()
+  // Every id the push names that the slice does not hold — a link's ends
+  // included: an undo that re-links a block the grantee removed names it in
+  // the link alone (`planSliceWrite`, "parked").
+  const named = new Set<string>(payload.nodes.map((node) => node.id))
+  for (const link of payload.links) named.add(link.source_id).add(link.destination_id)
+  const outside = [...named].filter((id) => !closure.nodes.has(id))
+  const taken = outside.length > 0 ? await takenIds(owner, outside) : new Map<string, SliceNode>()
 
   const now = Date.now()
   const plan = planSliceWrite(

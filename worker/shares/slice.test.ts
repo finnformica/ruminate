@@ -31,7 +31,15 @@ const slice = {
     ["blk_b", stored("ul")],
   ]),
   roots: new Set(["blk_note"]),
-  taken: new Set(["blk_private", "blk_gone"]),
+  // Ids the owner's partition holds outside the closure: a block of a
+  // private note, one the owner tombstoned there, and a PARKED one — born in
+  // the shared note, out of reach now (unlinked into the owner's basket, or
+  // tombstoned), the shared note's own still.
+  taken: new Map<string, SliceNode>([
+    ["blk_private", { notes_id: "blk_other", props: null }],
+    ["blk_gone", { notes_id: "blk_other", props: null }],
+    ["blk_parked", stored("ul")],
+  ]),
 }
 const NOW = 1_000
 
@@ -115,18 +123,62 @@ describe("planSliceWrite", () => {
     ).toMatchObject({ ok: false, refusal: { error: "outside_share" } })
   })
 
-  it("needs delete for a node tombstone and only write for a link tombstone", () => {
-    expect(plan("read,write", [node("blk_a", { deleted_at: 5 })])).toMatchObject({
+  it("tombstones and unlinks a block with write; a read-only share does neither", () => {
+    // `write` carries `delete` (grant.ts): the one switch is read or edit.
+    expect(plan("read,write", [node("blk_a", { deleted_at: 5 })]).ok).toBe(true)
+    expect(plan("read,write", [], [link("blk_note", "blk_a", { deleted_at: 5 })]).ok).toBe(true)
+    expect(plan("read", [node("blk_a", { deleted_at: 5 })])).toMatchObject({
       ok: false,
       refusal: { error: "permission_denied" },
     })
-    expect(plan("read,write,delete", [node("blk_a", { deleted_at: 5 })]).ok).toBe(true)
-    expect(plan("read,write", [], [link("blk_note", "blk_a", { deleted_at: 5 })]).ok).toBe(true)
-    // Delete without write: the tombstone lands, an edit does not.
+    // A row that somehow holds delete without write: the tombstone lands, an
+    // edit does not. Nothing writes such a row; the grant still reads it.
     expect(plan("read,delete", [node("blk_a", { deleted_at: 5 })]).ok).toBe(true)
     expect(plan("read,delete", [node("blk_a")])).toMatchObject({
       ok: false,
       refusal: { error: "permission_denied" },
+    })
+  })
+
+  it("never tombstones the root: what was shared is the owner's to delete", () => {
+    const root = node("blk_note", {
+      type: "note",
+      props: '{"pinned":true,"width":"wide"}',
+      deleted_at: 5,
+    })
+    expect(plan("read,write,delete", [root])).toMatchObject({
+      ok: false,
+      refusal: { error: "permission_denied", detail: expect.stringContaining("owner") },
+    })
+  })
+
+  it("writes a parked block — born in a root, out of reach — as it writes a slice row", () => {
+    // An undo re-links a removed row before the slice has caught up: the
+    // link alone names it.
+    expect(plan("read,write", [], [link("blk_a", "blk_parked")]).ok).toBe(true)
+    // …or after: the client no longer holds it and creates it anew.
+    expect(plan("read,write", [node("blk_parked")], [link("blk_a", "blk_parked")]).ok).toBe(true)
+    // The basket the grantee keeps on their side edits it where it sits.
+    expect(plan("read,write", [node("blk_parked")]).ok).toBe(true)
+    // And deletes it there; a redo of a deleted block revives the tombstone.
+    expect(plan("read,write", [node("blk_parked", { deleted_at: 5 })]).ok).toBe(true)
+    // It keeps its home note, like any row the owner already holds.
+    const result = plan("read,write", [node("blk_parked", { notes_id: "blk_note" })])
+    expect(result.ok && "notes_id" in result.nodes[0]).toBe(false)
+    // Its props are the owner's as any slice node's are.
+    expect(plan("read,write", [node("blk_parked", { props: '{"width":"wide"}' })])).toMatchObject({
+      ok: false,
+      refusal: { error: "permission_denied", detail: expect.stringContaining("width") },
+    })
+    // Still a write.
+    expect(plan("read", [node("blk_parked")])).toMatchObject({
+      ok: false,
+      refusal: { error: "permission_denied" },
+    })
+    // A block born anywhere else is the owner's, by id, live or dead.
+    expect(plan("read,write", [node("blk_gone")], [link("blk_a", "blk_gone")])).toMatchObject({
+      ok: false,
+      refusal: { error: "outside_share" },
     })
   })
 

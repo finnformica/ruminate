@@ -18,12 +18,18 @@ const row: ShareRow = {
 }
 
 describe("shareFromRow", () => {
-  it("reads the view and verbs off the row", () => {
+  it("reads the view and verbs off the row; write carries delete with it", () => {
     const grant = shareFromRow(row)
     expect(grant.viewId).toBe("blk_a")
-    expect([...grant.permissions]).toEqual(["read", "write"])
+    // A `read,write` row from before the verbs were folded reads as the
+    // grant it is now: editable, deleting included.
+    expect([...grant.permissions].sort()).toEqual(["delete", "read", "write"])
     expect(shareAllows(grant, "write")).toBe(true)
-    expect(shareAllows(grant, "delete")).toBe(false)
+    expect(shareAllows(grant, "delete")).toBe(true)
+    const reader = shareFromRow({ ...row, permissions: "read" })
+    expect(shareAllows(reader, "read")).toBe(true)
+    expect(shareAllows(reader, "write")).toBe(false)
+    expect(shareAllows(reader, "delete")).toBe(false)
   })
 
   it("permits nothing once revoked", () => {
@@ -37,9 +43,11 @@ describe("shareFromRow", () => {
 })
 
 describe("serializeSharePermissions", () => {
-  it("forces read in and keeps the canonical order", () => {
+  it("forces read in, delete beside write, and keeps the canonical order", () => {
     expect(serializeSharePermissions([])).toBe("read")
     expect(serializeSharePermissions(["delete", "write"])).toBe("read,write,delete")
+    expect(serializeSharePermissions(["write"])).toBe("read,write,delete")
+    expect(serializeSharePermissions(["delete"])).toBe("read,delete")
   })
 })
 

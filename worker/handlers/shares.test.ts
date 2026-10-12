@@ -316,7 +316,8 @@ describe("list", () => {
         id,
         owner: { login: "user-7", name: null },
         view: { id: NOTE_A, rootId: NOTE_A, filter: null, sort: null },
-        permissions: ["read", "write"],
+        // Write carries delete (grant.ts): the client reads one editable share.
+        permissions: ["read", "write", "delete"],
         createdAt: expect.any(Number),
       },
     ])
@@ -648,8 +649,8 @@ describe("write", () => {
     expect(Number(theirs[0].n)).toBe(0)
   })
 
-  it("cannot reach a row outside the slice, even one the owner tombstoned", async () => {
-    const id = await share(["read", "write", "delete"])
+  it("cannot reach the owner's rows outside the slice, live or tombstoned", async () => {
+    const id = await share(["read", "write"])
     for (const target of [B1, NOTE_B]) {
       const response = await push(id, { nodes: [edit(target, "pwned")], links: [] })
       expect(response.status).toBe(403)
@@ -657,15 +658,60 @@ describe("write", () => {
     }
     expect((await ownerNode(B1))?.text).toBe("secret")
 
-    // A3 tombstoned by the owner: reviving it is a write outside the slice.
+    // B1 tombstoned by the owner: still theirs, still out of reach.
     await corpusPut(
       harness.tenant(OWNER),
-      { nodes: [{ ...node(A3, "three", "ul", NOTE_A), deleted_at: T0 + 1 }], links: [] },
+      { nodes: [{ ...node(B1, "secret", "ul", NOTE_B), deleted_at: T0 + 1 }], links: [] },
       T0 + 1,
     )
-    const revive = await push(id, { nodes: [edit(A3, "back")], links: [] })
+    const revive = await push(id, { nodes: [edit(B1, "back")], links: [] })
     expect(revive.status).toBe(403)
-    expect((await ownerNode(A3))?.deleted_at).toBe(T0 + 1)
+    expect((await ownerNode(B1))?.deleted_at).toBe(T0 + 1)
+  })
+
+  it("writes a block born in the shared note while the slice no longer reaches it", async () => {
+    const id = await share(["read", "write"])
+    // The grantee removed A3 from the outline (an unlink): it sits in the
+    // owner's basket, out of the slice. Their undo links it back.
+    const unlinked = await push(id, {
+      nodes: [],
+      links: [{ ...link(NOTE_A, A3, "a1"), updated_at: T0 + 10, deleted_at: T0 + 10 }],
+    })
+    expect(unlinked.status).toBe(200)
+    expect(sliceIds(await bodyOf(await slice(id)))).not.toContain(A3)
+    const relinked = await push(id, {
+      nodes: [],
+      links: [{ ...link(NOTE_A, A3, "a1"), updated_at: T0 + 20 }],
+    })
+    expect(relinked.status).toBe(200)
+    expect(sliceIds(await bodyOf(await slice(id)))).toContain(A3)
+
+    // The grantee deleted A3 (a tombstone), then redid: the same id comes
+    // back as a create, and lives again.
+    const deleted = await push(id, {
+      nodes: [{ ...edit(A3, "three", T0 + 30), deleted_at: T0 + 30 }],
+      links: [],
+    })
+    expect(deleted.status).toBe(200)
+    expect((await ownerNode(A3))?.deleted_at).toBe(T0 + 30)
+    const redone = await push(id, {
+      nodes: [edit(A3, "three again", T0 + 40)],
+      links: [{ ...link(NOTE_A, A3, "a1"), updated_at: T0 + 40 }],
+    })
+    expect(redone.status).toBe(200)
+    expect(await ownerNode(A3)).toMatchObject({ text: "three again", deleted_at: null })
+    expect(sliceIds(await bodyOf(await slice(id)))).toContain(A3)
+  })
+
+  it("never tombstones the root: the shared note is the owner's to delete", async () => {
+    const id = await share(["read", "write"])
+    const response = await push(id, {
+      nodes: [{ ...node(NOTE_A, "Plan", "note"), updated_at: T0 + 10, deleted_at: T0 + 10 }],
+      links: [],
+    })
+    expect(response.status).toBe(403)
+    expect((await bodyOf(response)).error).toBe("permission_denied")
+    expect((await ownerNode(NOTE_A))?.deleted_at).toBeNull()
   })
 
   it("cannot link the slice to anything outside it", async () => {
@@ -710,24 +756,24 @@ describe("write", () => {
     expect(await ownerNode("blk_orphan")).toBeUndefined()
   })
 
-  it("needs delete to tombstone a block, and write to unlink one", async () => {
-    const writer = await share(["read", "write"])
-    const tombstone = await push(writer, {
+  it("tombstones and unlinks a block with write; a read-only share does neither", async () => {
+    const reader = await share(["read"])
+    const refused = await push(reader, {
       nodes: [{ ...edit(A2, "two"), deleted_at: T0 + 10 }],
       links: [],
     })
-    expect(tombstone.status).toBe(403)
-    expect((await bodyOf(tombstone)).error).toBe("permission_denied")
+    expect(refused.status).toBe(403)
+    expect((await bodyOf(refused)).error).toBe("permission_denied")
     expect((await ownerNode(A2))?.deleted_at).toBeNull()
 
+    // Write carries delete (grant.ts): a share made with Edit alone.
+    const writer = await share(["read", "write"])
     const unlink = await push(writer, {
       nodes: [],
       links: [{ ...link(A1, A2, "a0"), updated_at: T0 + 10, deleted_at: T0 + 10 }],
     })
     expect(unlink.status).toBe(200)
-
-    const deleter = await share(["read", "write", "delete"])
-    const deleted = await push(deleter, {
+    const deleted = await push(writer, {
       nodes: [{ ...edit(A3, "three"), deleted_at: T0 + 20 }],
       links: [],
     })
@@ -814,6 +860,7 @@ describe("the client's push", () => {
   async function editShared(
     id: string,
     change: (doc: ReturnType<typeof noteDoc>) => ReturnType<typeof noteDoc>,
+    at = T0 + 100,
   ) {
     const body: SliceBody = await bodyOf(await slice(id))
     const snapshot = buildGraphSnapshot(body.nodes, body.links)
@@ -821,7 +868,7 @@ describe("the client's push", () => {
     const after = change(before)
     if (!before || !after) throw new Error("no doc")
     const ops = docToOps(NOTE_A, after, snapshot)
-    const diff = opsToRows(snapshot, ops, T0 + 100)
+    const diff = opsToRows(snapshot, ops, at)
     return push(id, { nodes: diff.nodes, links: diff.links })
   }
 
@@ -856,7 +903,7 @@ describe("the client's push", () => {
     expect(sliceIds(body)).toContain("blk_added")
   })
 
-  it("removes a block from the outline with write, but deletes it only with delete", async () => {
+  it("removes a block from the outline, puts it back, and deletes one, all with write", async () => {
     const writer = await share(["read", "write"])
     // Removing a row is an unlink (the block keeps its note and goes to the
     // owner's Unassigned basket) — a write, so it lands.
@@ -868,16 +915,26 @@ describe("the client's push", () => {
     expect((await ownerNode(A3))?.deleted_at).toBeNull()
     expect(sliceIds(await bodyOf(await slice(writer)))).not.toContain(A3)
 
-    // The context menu's Delete tombstones the node: refused without `delete`.
+    // Undo, as the client does it once the slice has caught up: the block is
+    // no longer in the snapshot, so the doc that names it again creates it.
+    const undone = await editShared(
+      writer,
+      (doc) =>
+        doc && {
+          ...doc,
+          blocks: { ...doc.blocks, [A3]: { id: A3, type: "ul", text: "three", children: [] } },
+          rootBlockIds: [...doc.rootBlockIds, A3],
+        },
+      T0 + 150,
+    )
+    expect(undone.status).toBe(200)
+    expect(sliceIds(await bodyOf(await slice(writer)))).toContain(A3)
+
+    // The context menu's Delete tombstones the node: write carries delete.
     const body: SliceBody = await bodyOf(await slice(writer))
     const snapshot = buildGraphSnapshot(body.nodes, body.links)
     const diff = opsToRows(snapshot, deleteBlockOps(A1, snapshot), T0 + 200)
-    const refused = await push(writer, { nodes: diff.nodes, links: diff.links })
-    expect(refused.status).toBe(403)
-    expect((await ownerNode(A1))?.deleted_at).toBeNull()
-
-    const deleter = await share(["read", "write", "delete"])
-    const deleted = await push(deleter, { nodes: diff.nodes, links: diff.links })
+    const deleted = await push(writer, { nodes: diff.nodes, links: diff.links })
     expect(deleted.status).toBe(200)
     expect((await ownerNode(A1))?.deleted_at).toBe(T0 + 200)
   })

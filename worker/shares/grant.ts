@@ -57,6 +57,23 @@ export interface ShareRow {
   revoked_by?: string | null
 }
 
+/**
+ * `write` carries `delete` with it. The two were once separate verbs, but
+ * the line between them protected nothing: `write` already let a grantee
+ * empty every block's text and unlink every block into the owner's
+ * Unassigned basket, so withholding `delete` only ever stopped them taking
+ * out a blank row — and, since every write is an event now
+ * (docs/event-sourcing.md), the owner can put back a deleted block exactly
+ * as they can an emptied one. So a share is read-only or editable, and an
+ * editable one may delete blocks. Rows are stored as they were (a
+ * `read,write` row from before still parses) and widened at the one mint,
+ * so every reader of a grant gets the same answer.
+ */
+const withImpliedVerbs = (permissions: Set<Permission>): Set<Permission> => {
+  if (permissions.has("write")) permissions.add("delete")
+  return permissions
+}
+
 /** Mint a `ShareGrant` from a row — the ONE mint there is. A revoked row is
  * still minted (the owner's list shows it); `shareAllows` and the handler
  * refuse it, so there is no path that serves a slice from a dead share. */
@@ -67,7 +84,7 @@ export function shareFromRow(row: ShareRow): ShareGrant {
     granteeEmail: row.grantee_email,
     // A row we cannot read is a share over nothing, never over everything.
     viewId: typeof row.view_id === "string" ? row.view_id : "",
-    permissions: parsePermissions(row.permissions),
+    permissions: withImpliedVerbs(parsePermissions(row.permissions)),
     createdAt: row.created_at,
     revokedAt: row.revoked_at ?? null,
     revokedBy: row.revoked_by === "owner" || row.revoked_by === "grantee" ? row.revoked_by : null,
@@ -78,10 +95,11 @@ export function shareFromRow(row: ShareRow): ShareGrant {
 export const shareAllows = (grant: ShareGrant, permission: Permission): boolean =>
   grant.revokedAt === null && grant.permissions.has(permission)
 
-/** Storage form of a permission set, `read` forced in: a share that cannot
- * be read is not a share of anything. */
+/** Storage form of a permission set, `read` forced in — a share that cannot
+ * be read is not a share of anything — and `delete` beside `write`, so the
+ * row reads as the grant it is. */
 export const serializeSharePermissions = (permissions: Iterable<Permission>): string =>
-  serializePermissions(new Set<Permission>(["read", ...permissions]))
+  serializePermissions(withImpliedVerbs(new Set<Permission>(["read", ...permissions])))
 
 // -----------------------------------------------------------------------------
 // Addresses

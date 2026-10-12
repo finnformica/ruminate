@@ -186,19 +186,28 @@ export async function sliceRows(
 }
 
 /** Which of these ids already exist in the owner's partition, live OR
- * tombstoned — a tombstoned id is still taken, and reviving it from outside
- * the slice would be a write to a row the grantee cannot see. */
-export async function takenIds(owner: TenantDb, ids: string[]): Promise<Set<string>> {
-  const taken = new Set<string>()
+ * tombstoned, and what each was born in and carries — a tombstoned id is
+ * still taken: reviving it from outside the slice would be a write to a
+ * row the grantee cannot see. The planner reads the home note off each to
+ * tell the shared note's own parked blocks (`parked`, below) from the
+ * owner's private rows. */
+export async function takenIds(owner: TenantDb, ids: string[]): Promise<Map<string, SliceNode>> {
+  const taken = new Map<string, SliceNode>()
   const all = owner.includingDeleted()
   for (let at = 0; at < ids.length; at += 80) {
     const batch = ids.slice(at, at + 80)
     const rows = await all.exec(
-      `SELECT id FROM nodes WHERE user_id = :tenant AND id IN (${holes(batch.length)}) ` +
+      `SELECT id, notes_id, props FROM nodes WHERE user_id = :tenant ` +
+        `AND id IN (${holes(batch.length)}) ` +
         `/* includes-deleted: a tombstoned id is still taken */`,
       batch,
     )
-    for (const row of rows) taken.add(String(row.id))
+    for (const row of rows) {
+      taken.set(String(row.id), {
+        notes_id: row.notes_id === null || row.notes_id === undefined ? null : String(row.notes_id),
+        props: row.props === null || row.props === undefined ? null : String(row.props),
+      })
+    }
   }
   return taken
 }
@@ -259,21 +268,32 @@ const changedOwnerProp = (
  * so the boundary rules are pinned by unit tests without a database:
  *
  * - **Every row stays inside the slice.** A node row must name a node in
- *   the closure, or a NEW id (one the owner's partition has never held) that
- *   is anchored to the slice: written in a shared note (`notes_id` names a
- *   live root) or linked beneath a slice node in the same push. A link row
- *   must have both ends in the closure or among those new ids. Anything
- *   else — an id outside the slice, a tombstoned id revived from outside,
- *   an unanchored new row — refuses the WHOLE push, so nothing lands
- *   half-applied.
- * - **A row keeps its home and the owner's props.** A slice node keeps its
- *   home note (`notes_id`, which lands only on a new row) and the owner's
- *   own props (`OWNER_PROPS`); a new row never carries them. Its type is an
- *   edit like any other: `write` may make any block any type, a note or a
- *   board included, as the owner's own editor may.
- * - **Verbs.** A node tombstone needs `delete`; every other row needs
- *   `write`. Unlinking (a link tombstone) is an edit, not a delete: the
- *   block stays, in the owner's Unassigned basket.
+ *   the closure, a PARKED id, or a NEW id (one the owner's partition has
+ *   never held) that is anchored to the slice: written in a shared note
+ *   (`notes_id` names a live root) or linked beneath a slice node in the
+ *   same push. A link row must have both ends among those. Anything else —
+ *   an id outside the slice, one of the owner's tombstones revived from
+ *   outside, an unanchored new row — refuses the WHOLE push, so nothing
+ *   lands half-applied.
+ * - **A parked id is the shared note's own.** A block born in one of this
+ *   share's roots (`notes_id`) that the closure no longer reaches — the
+ *   grantee removed it from the outline, so it sits in the owner's basket,
+ *   or deleted it, so it is tombstoned — is still that note's block, and a
+ *   grantee writes it as they write a slice node: an undo re-links a
+ *   removed row, a redo brings a deleted one back, the basket they keep on
+ *   their side (src/data/shared-mode.ts) edits it. The owner's own rows
+ *   stay out of reach: a block born anywhere else is refused by id, live or
+ *   dead, and nothing outside the closure is ever served.
+ * - **A row keeps its home and the owner's props.** A slice or parked node
+ *   keeps its home note (`notes_id`, which lands only on a new row) and the
+ *   owner's own props (`OWNER_PROPS`); a new row never carries them. Its
+ *   type is an edit like any other: `write` may make any block any type, a
+ *   note or a board included, as the owner's own editor may.
+ * - **Verbs.** Every row needs `write`, a node tombstone `delete` — which
+ *   `write` carries with it (`grant.ts`). Unlinking (a link tombstone) is
+ *   an edit: the block stays, in the owner's Unassigned basket. The root
+ *   itself is the owner's: a grantee never tombstones it, whatever the
+ *   verbs — leaving the share is theirs instead.
  * - **Time is the server's.** A pushed `updated_at` (and `deleted_at`) is
  *   clamped to `now`, so a grantee's clock cannot claim a row into the
  *   future and win every edit the owner makes after it.
@@ -285,7 +305,9 @@ export function planSliceWrite(
   slice: {
     nodes: ReadonlyMap<string, SliceNode>
     roots: ReadonlySet<string>
-    taken: ReadonlySet<string>
+    /** Every id the push names outside the closure that the owner's
+     * partition holds, live or tombstoned (`takenIds`). */
+    taken: ReadonlyMap<string, SliceNode>
   },
   payload: ReplicaPutPayload,
   now: number = Date.now(),
@@ -307,20 +329,38 @@ export function planSliceWrite(
           detail: `This share does not allow you to ${what}.`,
         }
 
+  // Place every id the push names that the closure does not hold: parked
+  // (the shared note's own, out of reach for now), the owner's (refused),
+  // or — a pushed node row the partition has never held — new.
   const newIds = new Set<string>()
-  for (const node of payload.nodes) {
-    if (slice.nodes.has(node.id)) continue
-    if (slice.taken.has(node.id)) {
-      return refuse({
-        status: 403,
-        error: "outside_share",
-        detail: `Block ${node.id} is not part of this share.`,
-      })
+  const parked = new Set<string>()
+  const place = (id: string): SliceWritePlan | null => {
+    if (slice.nodes.has(id) || parked.has(id)) return null
+    const held = slice.taken.get(id)
+    if (held === undefined) return null
+    if (held.notes_id !== null && slice.roots.has(held.notes_id)) {
+      parked.add(id)
+      return null
     }
-    newIds.add(node.id)
+    return refuse({
+      status: 403,
+      error: "outside_share",
+      detail: `Block ${id} is not part of this share.`,
+    })
+  }
+  for (const node of payload.nodes) {
+    const refused = place(node.id)
+    if (refused) return refused
+    if (!slice.nodes.has(node.id) && !parked.has(node.id)) newIds.add(node.id)
+  }
+  for (const link of payload.links) {
+    for (const end of [link.source_id, link.destination_id]) {
+      const refused = place(end)
+      if (refused) return refused
+    }
   }
 
-  const inside = (id: string) => slice.nodes.has(id) || newIds.has(id)
+  const inside = (id: string) => slice.nodes.has(id) || newIds.has(id) || parked.has(id)
 
   for (const link of payload.links) {
     if (!inside(link.source_id) || !inside(link.destination_id)) {
@@ -352,7 +392,7 @@ export function planSliceWrite(
 
   // The owner's props stay the owner's.
   for (const node of payload.nodes) {
-    const stored = slice.nodes.get(node.id)
+    const stored = slice.nodes.get(node.id) ?? slice.taken.get(node.id)
     if (stored === undefined) {
       const key = changedOwnerProp(node.props, null)
       if (key !== null) {
@@ -375,6 +415,13 @@ export function planSliceWrite(
   }
 
   for (const node of payload.nodes) {
+    if (isTombstone(node) && slice.roots.has(node.id)) {
+      return refuse({
+        status: 403,
+        error: "permission_denied",
+        detail: "What was shared with you is the owner's to delete; you can leave the share.",
+      })
+    }
     const denied = isTombstone(node)
       ? needs("delete", "delete blocks")
       : needs("write", "edit these notes")
@@ -391,7 +438,7 @@ export function planSliceWrite(
     if (isTombstone(node)) landed.deleted_at = clamp(node.deleted_at as number)
     // An existing row keeps the home note it has; the landing statement
     // keeps the stored value when none is sent.
-    if (slice.nodes.has(node.id)) delete landed.notes_id
+    if (slice.nodes.has(node.id) || parked.has(node.id)) delete landed.notes_id
     return landed
   })
   const links = payload.links.map((link) => {

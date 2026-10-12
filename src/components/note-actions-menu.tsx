@@ -152,7 +152,10 @@ export function useNoteMenuEntries() {
           : jotaiStore.get(receivedSharesAtom).find((entry) => entry.id === shareId)
       const verbs = share ? sharePermissions(share) : null
       const canRename = !isSignedOut && (verbs === null || verbs.write)
-      const canDelete = !isSignedOut && (verbs === null || verbs.delete)
+      // What was shared is the owner's to delete, whatever the verbs; the
+      // person it was shared with leaves the share instead (Settings →
+      // Sharing). Blocks beneath it delete as the editor's verbs allow.
+      const canDelete = !isSignedOut && verbs === null
       const canShare = !isSignedOut && verbs === null
 
       // Copy what the view holds, not what the note holds: focused on a
