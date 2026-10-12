@@ -1179,28 +1179,35 @@ export function BlockItem({
       {api.diff ? (
         // The diff's sign, in the gutter at the editor's edge: `left` is
         // measured from this row's own edge, which the indent pads inside of,
-        // so every sign sits in the one column whatever the row's depth.
+        // so every sign sits in the one column whatever the row's depth. Its
+        // box is one line at the row's first-line scale, as the chevron
+        // column's is — a heading's scale on a heading, the body's otherwise —
+        // so the sign centres on the same line as the chevron and the key;
+        // the glyph itself stays at the body's small scale inside it.
         <span
           aria-hidden
           data-testid="diff-sign"
           data-diff={mark?.kind ?? "same"}
           className={cx(
-            "absolute -left-6 top-0.5 flex h-[1lh] w-[15px] select-none items-center justify-center font-mono text-sm leading-relaxed",
+            "absolute -left-6 top-0.5 flex h-[1lh] w-[15px] select-none items-center justify-center",
+            slot === "hash" ? headingScale(scaleDepth) : "text-base leading-relaxed",
             mark?.kind === "added" && "text-text-success",
             mark?.kind === "removed" && "text-text-danger",
             mark?.kind === "changed" && "text-text-changed",
             mark?.kind === "fold" && "text-text-tertiary",
           )}
         >
-          {mark?.kind === "added"
-            ? "+"
-            : mark?.kind === "removed"
-              ? "−"
-              : mark?.kind === "changed"
-                ? "~"
-                : mark?.kind === "fold"
-                  ? "⋯"
-                  : ""}
+          <span className="font-mono text-sm leading-relaxed">
+            {mark?.kind === "added"
+              ? "+"
+              : mark?.kind === "removed"
+                ? "−"
+                : mark?.kind === "changed"
+                  ? "~"
+                  : mark?.kind === "fold"
+                    ? "⋯"
+                    : ""}
+          </span>
         </span>
       ) : null}
       {occurrence.guideKeys.map((guideKey, level) => (
