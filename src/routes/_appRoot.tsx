@@ -9,6 +9,7 @@ import { NewBoardDialog } from "../components/new-board-dialog"
 import { ShareDialog } from "../components/share-note-dialog"
 import { Toaster } from "../components/ui/toaster"
 import { useDatabaseMode } from "../data/use-database-mode"
+import { useUploadQueue } from "../data/use-upload-queue"
 import { GlobalShortcuts } from "../shortcuts/global-shortcuts"
 
 export const Route = createFileRoute("/_appRoot")({
@@ -30,6 +31,8 @@ function RouteComponent() {
   // SQL store, pulls from D1, and re-pulls when the app becomes visible or
   // the browser comes back online. Inert while signed out (sample notes).
   useDatabaseMode()
+  // Pictures added offline go up once they can (src/data/image-queue.ts).
+  useUploadQueue()
 
   // Apply overflow classes to parent elements
   React.useEffect(() => {
