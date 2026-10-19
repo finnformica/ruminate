@@ -1,4 +1,4 @@
-import type { Element, ElementContent } from "hast"
+import type { Element, ElementContent, Root as HastRoot } from "hast"
 import type { Root } from "mdast"
 import { Fragment, useContext } from "react"
 import ReactMarkdown from "react-markdown"
@@ -71,6 +71,24 @@ function remarkDisplayMathLines() {
     }
     visit(tree as unknown as MathNode)
   }
+}
+
+/**
+ * `->` is drawn as an arrow (`→`) in the rendered text. The stored text keeps
+ * the two characters, so the textarea and a markdown export show `->` as
+ * typed. Code is never touched: a code span, and inline maths, which is a
+ * `code` element until KaTeX sets it (this runs first).
+ */
+function rehypeArrows() {
+  const visit = (node: HastRoot | Element) => {
+    for (const child of node.children) {
+      if (child.type === "text") child.value = child.value.replaceAll("->", "→")
+      else if (child.type === "element" && child.tagName !== "code" && child.tagName !== "pre") {
+        visit(child)
+      }
+    }
+  }
+  return visit
 }
 
 /** The text of a link's markdown node — its title, formatting and all. */
@@ -205,7 +223,7 @@ export function BlockContent({ content }: { content: string }) {
                   remarkInlineOnly,
                   remarkDisplayMathLines,
                 ]}
-                rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
+                rehypePlugins={[rehypeArrows, [rehypeKatex, KATEX_OPTIONS]]}
                 components={components}
               >
                 {middle}
