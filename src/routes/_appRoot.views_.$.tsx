@@ -446,6 +446,7 @@ function NotePage() {
                 onWidth: updateWidth,
                 onDeleted: () => navigate({ to: "/", search: { query: undefined }, replace: true }),
                 focusBlockId: focusBlockId ?? null,
+                filter,
               }}
             />
           </div>

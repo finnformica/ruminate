@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest"
 import { parse } from "../blocks/parse"
 import type { BlockDoc } from "../blocks/types"
 import type { ViewNarrowing } from "../utils/view-narrowing"
-import { filteredView, isNarrowed } from "./filter-view"
-import type { GraphView } from "./graph"
+import { filteredRollup, filteredView, isNarrowed } from "./filter-view"
+import { buildGraphSnapshot, docToGraph, rollup, type GraphView } from "./graph"
 
 /**
  * The SHAPE of a narrowed view — what survives the prune, what is kept as
@@ -190,5 +190,43 @@ describe("filteredView sorting", () => {
       compare: byText(view.doc).compare,
     })
     expect(outline(doc, context)).toEqual(["~Chores", "  hoover", "~Shopping", "  bread", "  milk"])
+  })
+})
+
+describe("filteredRollup", () => {
+  // Copy markdown in a filtered view: the rows the view shows, nested as
+  // shown, and nothing the filter hid.
+  const graph = () => {
+    const { nodes, links } = docToGraph(
+      "note",
+      "- Shopping\n  - [ ] milk\n    - semi-skimmed\n  - [x] bread\n- Chores\n  - [ ] laundry\n",
+      0,
+    )
+    return buildGraphSnapshot(nodes, links)
+  }
+  const ids = (snapshot: ReturnType<typeof graph>, texts: string[]) =>
+    new Set(
+      [...snapshot.nodes.values()].filter((node) => texts.includes(node.text)).map((n) => n.id),
+    )
+  const visible = (markdown: string | null) =>
+    (markdown ?? "").split("\n").filter((line) => line.trim() !== "" && !/id::/.test(line))
+
+  it("copies the matches, their ancestors and what hangs beneath them, nothing else", () => {
+    const snapshot = graph()
+    const copied = filteredRollup("note", null, ids(snapshot, ["milk"]), snapshot)
+    expect(visible(copied)).toEqual(["- Shopping", "  [ ] milk", "    - semi-skimmed"])
+  })
+
+  it("is the whole rollup when every row matches", () => {
+    const snapshot = graph()
+    const all = new Set([...snapshot.nodes.keys()])
+    expect(filteredRollup("note", null, all, snapshot)).toBe(rollup("note", snapshot))
+  })
+
+  it("keeps the focused block, filtering what is beneath it", () => {
+    const snapshot = graph()
+    const [shopping] = ids(snapshot, ["Shopping"])
+    const copied = filteredRollup("note", shopping, ids(snapshot, ["bread"]), snapshot)
+    expect(visible(copied)).toEqual(["- Shopping", "  [x] bread"])
   })
 })
