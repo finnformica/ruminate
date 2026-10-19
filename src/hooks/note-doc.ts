@@ -1,8 +1,9 @@
 import { useAtomValue, useStore } from "jotai"
 import { useCallback, useMemo, useRef } from "react"
 import { isEmptyDoc } from "../blocks/ops"
-import type { BlockDoc, ChangeHint } from "../blocks/types"
+import { asBlockType, type BlockDoc, type ChangeHint } from "../blocks/types"
 import type { ExpandedRule } from "../blocks/view"
+import { titlesFocus } from "../blocks/markers"
 import { basketDoc, basketToOps } from "../data/basket"
 import { filteredView, isNarrowed, type FilteredView } from "../data/filter-view"
 import { blockView, isNoteType, noteView, type LinkDirections } from "../data/graph"
@@ -102,7 +103,17 @@ export function useNoteDoc({
     // over what survived (`filteredView`) rather than by the walk — the
     // same rule, the narrowed view's own (`useFoldRule`), so a filtered
     // note folds exactly as the note does.
-    const rule = narrowed ? undefined : expanded
+    // A heading in focus is the view's title, always open (`titlesFocus`,
+    // src/blocks/view.ts), so the walk opens it whatever the reader's fold
+    // on it says: a top-level heading folded in the note has its fold under
+    // its bare id, the very key the focus walk gives the root, and the walk
+    // would stop there with nothing beneath the title.
+    const focusType = focusBlockId ? snapshot.nodes.get(focusBlockId)?.type : undefined
+    const viewRule: ExpandedRule | undefined =
+      expanded && focusBlockId && focusType && titlesFocus(asBlockType(focusType))
+        ? (key, level, type) => key === focusBlockId || expanded(key, level, type)
+        : expanded
+    const rule = narrowed ? undefined : viewRule
     const focused = focusBlockId ? blockView(focusBlockId, snapshot, rule, directions) : null
     const base = focused ?? noteView(noteId, snapshot, rule, directions)
     if (!base) return null
@@ -111,7 +122,7 @@ export function useNoteDoc({
     // away (`keepRoots`).
     return filteredView(base, narrowing, {
       keepRoots: focused !== null,
-      expanded,
+      expanded: viewRule,
       startLevel: focused ? 0 : 1,
       keep,
     })
