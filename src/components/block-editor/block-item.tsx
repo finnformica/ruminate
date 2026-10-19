@@ -459,7 +459,17 @@ export function BlockItem({
     // An empty textarea would size to its ghost placeholder (which could wrap
     // on narrow screens); the empty row is exactly one line (matching the view
     // branch's min-h-[1lh]) — the ghost must never move layout.
-    el.style.height = el.value === "" ? "1lh" : `${el.scrollHeight}px`
+    // Otherwise the height is a count of whole lines, as the view's is:
+    // `scrollHeight` is a whole pixel, and a heading's large glyphs overflow
+    // its tight line, so in pixels the row grew by up to a pixel on an edit
+    // and the rows below it moved.
+    const line = parseFloat(getComputedStyle(el).lineHeight)
+    el.style.height =
+      el.value === ""
+        ? "1lh"
+        : line > 0
+          ? `${Math.max(1, Math.round(el.scrollHeight / line))}lh`
+          : `${el.scrollHeight}px`
     if (pendingCaret.current !== null) {
       const pos = pendingCaret.current
       pendingCaret.current = null
