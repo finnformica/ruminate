@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { Link, createFileRoute } from "@tanstack/react-router"
 import { useAtomValue, useStore } from "jotai"
 import React, { useEffect, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
@@ -404,7 +404,20 @@ function NotePage() {
           <span className="truncate">{pageTitle}</span>
         </span>
       }
-      icon={share === null ? favicon : undefined}
+      // The note's icon leads back to the Views page, the list it was opened
+      // from, on a phone as on a desktop.
+      icon={
+        share === null ? (
+          <Link
+            to="/"
+            search={{ query: undefined }}
+            aria-label="Views"
+            className="focus-ring flex rounded-sm"
+          >
+            {favicon}
+          </Link>
+        ) : undefined
+      }
       actions={
         <div className="flex items-center gap-2">
           {/* Changes save automatically; this is the honest-but-quiet trace of
