@@ -2,10 +2,12 @@ import { useLocation, useNavigate } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
 import { useAtom, useAtomValue, useSetAtom, useStore } from "jotai"
 import React from "react"
-import { graphSnapshotAtom, isSignedOutAtom, notesAtom } from "../global-state"
+import { blockIndexAtom, graphSnapshotAtom, isSignedOutAtom, notesAtom } from "../global-state"
+import { filteredRollup } from "../data/filter-view"
 import { blockRollup, rollup } from "../data/graph"
 import { receivedSharesAtom, sharePermissions, sharedOriginAtom } from "../data/shared-mode"
 import { copyAsMarkdown } from "../utils/copy-markdown"
+import { viewNarrowing } from "../utils/view-narrowing"
 import { developerDebugPreferenceAtom, useIsDeveloper } from "../hooks/is-developer"
 import { useNoteShare } from "../hooks/share"
 import { useMakeBoard, useMakeNote } from "../hooks/board"
@@ -81,6 +83,11 @@ interface EditorActions {
    * beneath it — what is on screen — rather than the whole note behind it.
    */
   focusBlockId?: string | null
+  /**
+   * The view's filter, if any (the query-language string the page narrows
+   * by). Filtered, **Copy markdown** takes only the rows the view shows.
+   */
+  filter?: string
 }
 
 /**
@@ -135,6 +142,8 @@ export function useNoteMenuEntries() {
       noteId: string,
       options: {
         focusBlockId?: string | null
+        /** The view's filter: copy only the rows it shows. */
+        filter?: string
         onDeleted?: () => void
         /** Opens the note's board page, where the surface can do so. */
         openBoard?: () => void
@@ -158,9 +167,20 @@ export function useNoteMenuEntries() {
       // Copy what the view holds, not what the note holds: focused on a
       // block, that block and everything beneath it. A focused block the
       // graph has since lost falls back to the note, which is what the page
-      // itself falls back to.
+      // itself falls back to. Filtered, only the rows the view shows, a
+      // match's ancestors (its context) with it; the sort is the view's
+      // order, not its content, so the copy keeps the note's own.
       const copyMarkdown = () => {
         const graph = jotaiStore.get(graphSnapshotAtom)
+        const { matched } = viewNarrowing({
+          filter: options.filter,
+          noteId,
+          index: jotaiStore.get(blockIndexAtom),
+        })
+        if (matched !== null) {
+          copyAsMarkdown(filteredRollup(noteId, options.focusBlockId ?? null, matched, graph) ?? "")
+          return
+        }
         const focused = options.focusBlockId ? blockRollup(options.focusBlockId, graph) : null
         copyAsMarkdown(focused ?? rollup(noteId, graph) ?? "")
       }
@@ -394,6 +414,7 @@ export function NoteActionsMenu({
             ...(reorder ? reorderEntries(reorder) : []),
             ...entriesFor(noteId, {
               focusBlockId: editor?.focusBlockId,
+              filter: editor?.filter,
               onDeleted,
               ...(surface === "board"
                 ? {

@@ -1,8 +1,9 @@
 import { collapsedKeysOf } from "../blocks/default-collapsed"
+import { serialize } from "../blocks/serialize"
 import type { Block, BlockDoc } from "../blocks/types"
 import type { ExpandedRule } from "../blocks/view"
 import type { ViewNarrowing } from "../utils/view-narrowing"
-import type { GraphView } from "./graph"
+import { blockView, noteView, type GraphSnapshot, type GraphView } from "./graph"
 
 /**
  * **Filtering and sorting a view, without leaving the view.**
@@ -107,6 +108,27 @@ export function filteredView(
       : prune(sorted, matched, keepRoots, keep)
   const collapsed = new Set(expanded ? collapsedKeysOf(doc, expanded, startLevel) : [])
   return { doc, collapsed, context, matches: matched === null ? null : matched.size }
+}
+
+/**
+ * The markdown of a filtered view — what **Copy markdown** takes while a
+ * filter is on: the rows the view shows, nested as it nests them, a match's
+ * ancestors (the dimmed context) included. The note's (or, focused, the
+ * block's) rollup, pruned as `filteredView` prunes the page. Folds play no
+ * part, as they play none in the unfiltered rollup. Null when the view's
+ * root is not in the graph.
+ */
+export function filteredRollup(
+  noteId: string,
+  focusBlockId: string | null,
+  matched: ReadonlySet<string>,
+  graph: GraphSnapshot,
+): string | null {
+  const focused = focusBlockId ? blockView(focusBlockId, graph) : null
+  const base = focused ?? noteView(noteId, graph)
+  if (!base) return null
+  const { doc } = filteredView(base, { matched, compare: null }, { keepRoots: focused !== null })
+  return serialize(doc)
 }
 
 /**
