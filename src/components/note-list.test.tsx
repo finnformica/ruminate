@@ -15,7 +15,11 @@ const mocks = vi.hoisted(() => ({
   recent: [] as { id: string; noteId: string }[],
 }))
 
-vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }))
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => vi.fn(),
+  // No split note page open (`useOpenInPane`).
+  useRouter: () => ({ state: { matches: [] } }),
+}))
 vi.mock("../hooks/search-results", () => ({ useSearchResults: () => mocks.results }))
 vi.mock("../data/store", () => ({ useApplyOps: () => () => {} }))
 vi.mock("../hooks/recent-roots", () => ({ useRecentRoots: () => mocks.recent }))

@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => mocks.navigate,
   useMatch: () => mocks.match,
+  // No split note page open (`useOpenInPane`): a note opens as it always has.
+  useRouter: () => ({ state: { matches: [] } }),
 }))
 
 vi.mock("../hooks/note", () => ({
