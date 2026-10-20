@@ -1,9 +1,19 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
-import { useAtomValue, useStore } from "jotai"
+import { useAtomValue, useSetAtom, useStore } from "jotai"
 import React, { useEffect, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
+import { useMedia } from "react-use"
 import useResizeObserver from "use-resize-observer"
-import { LoadingIcon16, NoteIcon16, OfflineIcon16, ShareIcon16 } from "../components/icons"
+import {
+  LoadingIcon16,
+  NoteIcon16,
+  OfflineIcon16,
+  ShareIcon16,
+  SplitIcon16,
+  XIcon16,
+} from "../components/icons"
+import { FocusTrail } from "../components/focus-trail"
+import { IconButton } from "../components/ui/icon-button"
 import { Notice } from "../components/notice"
 import { parse } from "../blocks/parse"
 import type { BlockDoc, ChangeHint } from "../blocks/types"
@@ -22,6 +32,7 @@ import {
   isDatabaseModeAtom,
   isSignedOutAtom,
   linkDirectionsAtom,
+  otherPaneAtom,
 } from "../global-state"
 import { useCreateNote, useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
 import { useSavedView, useWriteView } from "../hooks/views"
@@ -35,8 +46,25 @@ import { useFoldRule } from "../data/view-state"
 import { keyOf } from "../blocks/view"
 import { useNoteShare } from "../hooks/share"
 import { shareOwnerName } from "../data/shares"
+import {
+  activate,
+  closePane,
+  currentFrame,
+  goTo,
+  layoutFromSearch,
+  layoutToSearch,
+  nextPaneIndex,
+  openBeside,
+  popFrame,
+  popTo,
+  withPane,
+  type FocusMove,
+  type Pane,
+  type PaneLayout,
+  type ViewTarget,
+} from "../data/panes"
 import { Width, fontSchema, widthSchema } from "../schema"
-import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
+import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS, formatCombo } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString } from "../utils/date"
 
@@ -55,6 +83,12 @@ type RouteSearch = {
   /** How each parent's children are ordered (`text`, `text:desc`), the
    * nesting untouched. Absent = the note's own order. */
   sort?: string
+  /** The first pane's focus stack beneath the view on screen, and each
+   * other pane's whole stack (`src/data/panes.ts`, docs/split-view.md). */
+  stack?: string
+  pane1?: string
+  /** The pane with the keyboard, when it is not the first. */
+  active?: number
 }
 
 export const Route = createFileRoute("/_appRoot/views_/$")({
@@ -64,20 +98,22 @@ export const Route = createFileRoute("/_appRoot/views_/$")({
       block: typeof search.block === "string" ? search.block : undefined,
       filter: typeof search.filter === "string" ? search.filter : undefined,
       sort: typeof search.sort === "string" ? search.sort : undefined,
+      stack: typeof search.stack === "string" ? search.stack : undefined,
+      pane1: typeof search.pane1 === "string" ? search.pane1 : undefined,
+      active: Number.isInteger(Number(search.active)) ? Number(search.active) : undefined,
     }
   },
   component: RouteComponent,
 })
 
 function RouteComponent() {
-  const { _splat: noteId } = Route.useParams()
   const isSignedOut = useAtomValue(isSignedOutAtom)
   // Signed in, the store serves notes immediately; signed out, the sample
   // notes render. Only the brief auth resolution at boot is gated.
   const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
 
   if (isSignedOut || isDatabaseMode) {
-    return <NotePage key={noteId} />
+    return <SplitView />
   }
 
   return (
@@ -87,10 +123,186 @@ function RouteComponent() {
   )
 }
 
-function NotePage() {
+/** Two panes need the room of a wide screen; narrower (a phone,
+ * docs/mobile.md) only the pane with the keyboard shows. */
+const SPLIT_QUERY = "(min-width: 1024px)"
+
+/**
+ * The page's panes (docs/split-view.md): the layout read out of the URL
+ * (`layoutFromSearch`), one `NotePage` per pane on screen, and every change
+ * — a focus pushed or popped, a block opened beside, a pane closed or the
+ * keyboard moved — written back to the URL, so a reload and the browser's
+ * back and forward keep it. Both panes read the one live graph, so an edit in
+ * either shows in the other at once.
+ */
+function SplitView() {
+  const { _splat: noteId = "" } = Route.useParams()
+  const search = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const layout = React.useMemo(() => layoutFromSearch(noteId, search), [noteId, search])
+  const wide = useMedia(SPLIT_QUERY)
+  // A pop lands on the row that was selected in the view it returns to; the
+  // pane reads it once its view is on screen. Kept beside the URL rather
+  // than in it, so a reload, or back and forward, land by the editor's own
+  // rule.
+  const [landing, setLanding] = useState<{ pane: number; view: ViewTarget; key: string } | null>(
+    null,
+  )
+  // `g p` hands the keyboard to a pane's editor: a bump per request.
+  const [refocus, setRefocus] = useState({ pane: -1, n: 0 })
+
+  const write = React.useCallback(
+    (
+      next: PaneLayout,
+      { replace = false, land }: { replace?: boolean; land?: { pane: number; key: string } } = {},
+    ) => {
+      const { noteId: first, search: params } = layoutToSearch(next)
+      setLanding(
+        land ? { pane: land.pane, view: currentFrame(next.panes[land.pane]), key: land.key } : null,
+      )
+      navigate({
+        to: "/views/$",
+        params: { _splat: first },
+        // The filter and sort are the first pane's view: another note there
+        // starts without them.
+        search: (prev) => ({
+          ...prev,
+          ...params,
+          ...(first === noteId ? {} : { filter: undefined, sort: undefined }),
+        }),
+        replace,
+      })
+    },
+    [navigate, noteId],
+  )
+
+  // A pane's focus moved: its stack is the new one, and it has the keyboard.
+  const move = (index: number, focusMove: FocusMove) =>
+    write(
+      { panes: withPane(layout, index, focusMove.pane).panes, active: index },
+      { land: focusMove.landing ? { pane: index, key: focusMove.landing } : undefined },
+    )
+  const split = () => {
+    const from = layout.active
+    write(openBeside(layout, from, currentFrame(layout.panes[from])).layout)
+  }
+  const close = (index: number) => write(closePane(layout, index))
+  const openBesideFrom = (index: number, id: string) => {
+    const result = openBeside(layout, index, {
+      noteId: currentFrame(layout.panes[index]).noteId,
+      root: id,
+    })
+    const to = result.layout.active
+    write(result.layout, { land: result.landing ? { pane: to, key: result.landing } : undefined })
+  }
+
+  // ⌘\: a second pane on the view, or close the one with the keyboard.
+  useHotkeys(
+    APP_SHORTCUTS.toggleSplit,
+    () => {
+      if (layout.panes.length > 1) close(layout.active)
+      else if (wide) split()
+    },
+    GLOBAL_HOTKEY_OPTIONS,
+    [layout, wide, write],
+  )
+
+  const shown = wide ? layout.panes.map((_, index) => index) : [layout.active]
+  const isSplit = shown.length > 1
+
+  // `g p`: the keyboard to the next pane, its editor back on the row it had.
+  const setOtherPane = useSetAtom(otherPaneAtom)
+  useEffect(() => {
+    if (!isSplit) return
+    setOtherPane(() => () => {
+      const index = nextPaneIndex(layout)
+      write(activate(layout, index), { replace: true })
+      setRefocus((prev) => ({ pane: index, n: prev.n + 1 }))
+    })
+    return () => setOtherPane(null)
+  }, [isSplit, layout, write, setOtherPane])
+
+  return (
+    <div className={cx("grid overflow-hidden", isSplit && "grid-cols-2")}>
+      {shown.map((index) => {
+        const pane = layout.panes[index]
+        const frame = currentFrame(pane)
+        const lands =
+          landing !== null &&
+          landing.pane === index &&
+          landing.view.noteId === frame.noteId &&
+          landing.view.root === frame.root
+        return (
+          <NotePage
+            key={`${index}:${frame.noteId}`}
+            pane={pane}
+            primary={index === 0}
+            split={isSplit}
+            active={index === layout.active}
+            landing={lands ? landing.key : null}
+            refocusRequest={refocus.pane === index ? refocus.n : 0}
+            onMove={(focusMove) => move(index, focusMove)}
+            onOpenBeside={wide ? (id) => openBesideFrom(index, id) : undefined}
+            onActivate={() => {
+              if (index !== layout.active) write(activate(layout, index), { replace: true })
+            }}
+            onSplit={wide && !isSplit ? split : undefined}
+            onClose={layout.panes.length > 1 ? () => close(index) : undefined}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+/** One pane of the page: a note, or a block focused on in one. */
+interface NotePageProps {
+  /** The pane's focus stack; the last frame is the view on screen. */
+  pane: Pane
+  /** The first pane: the one the address's filter and sort are for, and
+   * the page's own header keys. */
+  primary: boolean
+  /** More than one pane on screen. */
+  split: boolean
+  /** The pane with the keyboard. */
+  active: boolean
+  /** The row a pop lands on (`BlockEditor.landing`). */
+  landing: string | null
+  /** Bumped to hand the keyboard to this pane's editor (`g p`). */
+  refocusRequest: number
+  /** The pane's focus moved (`goTo`, `popFrame`, `popTo`). */
+  onMove: (move: FocusMove) => void
+  /** Open a block in the pane beside (`o`); absent on a narrow screen. */
+  onOpenBeside?: (id: string) => void
+  /** The reader is in this pane now (a click, a focus inside it). */
+  onActivate: () => void
+  /** Open a second pane on this view; absent where there is no room. */
+  onSplit?: () => void
+  /** Close this pane; absent with one pane. */
+  onClose?: () => void
+}
+
+function NotePage({
+  pane,
+  primary,
+  split,
+  active,
+  landing,
+  refocusRequest,
+  onMove,
+  onOpenBeside,
+  onActivate,
+  onSplit,
+  onClose,
+}: NotePageProps) {
   // Router
-  const { _splat: noteId } = Route.useParams()
-  const { block: focusBlockId, filter: filterParam, sort: sortParam } = Route.useSearch()
+  const { noteId, root } = currentFrame(pane)
+  const focusBlockId = root ?? undefined
+  const routeSearch = Route.useSearch()
+  // The address's narrowing is the first pane's; another pane opens with
+  // what its view saved (`resolveNarrowing`).
+  const filterParam = primary ? routeSearch.filter : undefined
+  const sortParam = primary ? routeSearch.sort : undefined
   const navigate = Route.useNavigate()
   // A board card's "Open board" (docs/boards.md, "A board in a note").
   const openNote = useOpenNote()
@@ -206,9 +418,9 @@ function NotePage() {
   // loading, or under a shared note's id (see `notesLoaded`).
   const isNewNote = !noteExists && notesLoaded && share === null
   React.useEffect(() => {
-    if (!calendarId || !notesLoaded || noteExists || share !== null) return
+    if (!calendarId || !notesLoaded || noteExists || share !== null || split) return
     navigate({ to: "/calendar/$", params: { _splat: noteId }, search: {}, replace: true })
-  }, [calendarId, notesLoaded, noteExists, share, noteId, navigate])
+  }, [calendarId, notesLoaded, noteExists, share, noteId, navigate, split])
   // What is open — the focused block, or else the note — is TOUCHED, for
   // the Recent lists, exactly when it is opened (focusing on a block opens
   // it: `focusBlockId` changes), edited (an edit lands through
@@ -239,8 +451,10 @@ function NotePage() {
   const parsedWidthResult = widthSchema.safeParse(note?.props.width)
   const resolvedWidth = parsedWidthResult.success ? parsedWidthResult.data : "fixed"
 
-  // Set the font
+  // Set the font: the page's, from the pane with the keyboard. Side by
+  // side, each pane also sets its own on itself (`fontVars`, below).
   React.useEffect(() => {
+    if (!active) return
     document.documentElement.style.setProperty(
       "--font-family-content",
       `var(--font-family-${resolvedFont})`,
@@ -249,7 +463,13 @@ function NotePage() {
       "--font-family-mono",
       `var(--font-family-${resolvedFont}-mono)`,
     )
-  }, [resolvedFont])
+  }, [resolvedFont, active])
+  const fontVars = split
+    ? ({
+        "--font-family-content": `var(--font-family-${resolvedFont})`,
+        "--font-family-mono": `var(--font-family-${resolvedFont}-mono)`,
+      } as React.CSSProperties)
+    : undefined
 
   // Layout
   const { ref: containerRef, width: containerWidth = 0 } = useResizeObserver()
@@ -373,185 +593,292 @@ function NotePage() {
 
   // ⌘S writes the coalescing ops immediately (changes save on their own;
   // this is just "save now").
-  useHotkeys(APP_SHORTCUTS.save, () => requestDatabaseFlush(), GLOBAL_HOTKEY_OPTIONS)
+  useHotkeys(APP_SHORTCUTS.save, () => requestDatabaseFlush(), {
+    ...GLOBAL_HOTKEY_OPTIONS,
+    enabled: active,
+  })
 
   // Focus the editor from anywhere on the page (never while typing): restores
   // the last selected block so `i` means "put me back where I was".
   useHotkeys(APP_SHORTCUTS.focusEditor, () => setRefocusSignal((n) => n + 1), {
     preventDefault: true,
+    enabled: active,
   })
+  // `g p` brought the keyboard here (`SplitView`).
+  React.useEffect(() => {
+    if (refocusRequest) setRefocusSignal((n) => n + 1)
+  }, [refocusRequest])
+
+  // The pane's focus stack (src/data/panes.ts). Focusing on a block pushes
+  // a frame, with the row selected here recorded beneath it; going to a
+  // view already on the stack (a crumb, ⌘⇧. to the note) pops back to it,
+  // and Shift+F pops one. A frame popped back to keeps its folds as they
+  // were, and lands on its recorded row (`landing`); a new view first opens
+  // the folds down to the block just left (`revealOnLeaveFocus`).
+  const focusTo = (id: string | null, selected: string | null) => {
+    if (!noteId) return
+    const move = goTo(pane, { noteId, root: id }, selected)
+    if (!move) return
+    if (!move.restored) revealOnLeaveFocus(id)
+    onMove(move)
+  }
+  const canPop = popFrame(pane) !== null
+  const focusBack = () => {
+    const move = popFrame(pane)
+    if (!move) return
+    if (!move.restored) revealOnLeaveFocus(currentFrame(move.pane).root)
+    onMove(move)
+  }
+  const popToFrame = (index: number) => {
+    const move = popTo(pane, index)
+    if (move) onMove(move)
+  }
+  // The stack drawn as a trail: in focus, where the editor draws its
+  // breadcrumb; outside it, above the title, once the stack holds a view
+  // beneath this one.
+  const trail =
+    focusBlockId || pane.frames.length > 1 ? (
+      <FocusTrail
+        frames={pane.frames}
+        onPopTo={popToFrame}
+        onGoTo={(target) => {
+          if (target.noteId === noteId) return focusTo(target.root, null)
+          const move = goTo(pane, target, null)
+          if (move) onMove(move)
+        }}
+      />
+    ) : null
 
   const favicon = note ? <NoteFavicon note={note} /> : <NoteIcon16 />
   const pageTitle = note?.displayName || "Untitled"
 
   return (
-    <PageLayout
-      // The note's name is its title now, not its (opaque) id. A shared
-      // note's header leads with whose it is, quietly, then the note as the
-      // current crumb — its favicon beside its name, as in the sidebar's
-      // rows — so the icon slot stays empty for a share.
-      title={
-        <span className="flex min-w-0 items-center gap-1.5">
-          {share !== null ? (
-            <>
-              <span className="truncate text-text-secondary">{shareOwnerName(share.share)}</span>
-              <span aria-hidden className="shrink-0 text-text-tertiary">
-                ›
-              </span>
-              <span className="flex size-icon shrink-0 text-text-secondary">{favicon}</span>
-            </>
-          ) : null}
-          <span className="truncate">{pageTitle}</span>
-        </span>
-      }
-      // The note's icon leads back to the Views page, the list it was opened
-      // from, on a phone as on a desktop.
-      icon={
-        share === null ? (
-          <Link
-            to="/"
-            search={{ query: undefined }}
-            aria-label="Views"
-            className="focus-ring flex rounded-sm"
-          >
-            {favicon}
-          </Link>
-        ) : undefined
-      }
-      actions={
-        <div className="flex items-center gap-2">
-          {/* Changes save automatically; this is the honest-but-quiet trace of
+    // The pane takes the keyboard's place the moment the reader is in it:
+    // a click anywhere on it, or focus arriving inside it.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+    <div
+      data-testid="note-pane"
+      data-active={split ? active : undefined}
+      className={cx(
+        "grid overflow-hidden",
+        split && !primary && "border-l border-border-secondary",
+      )}
+      style={fontVars}
+      onPointerDownCapture={onActivate}
+      onFocusCapture={onActivate}
+    >
+      <PageLayout
+        secondary={!primary}
+        // The note's name is its title now, not its (opaque) id. A shared
+        // note's header leads with whose it is, quietly, then the note as the
+        // current crumb — its favicon beside its name, as in the sidebar's
+        // rows — so the icon slot stays empty for a share.
+        title={
+          <span className="flex min-w-0 items-center gap-1.5">
+            {share !== null ? (
+              <>
+                <span className="truncate text-text-secondary">{shareOwnerName(share.share)}</span>
+                <span aria-hidden className="shrink-0 text-text-tertiary">
+                  ›
+                </span>
+                <span className="flex size-icon shrink-0 text-text-secondary">{favicon}</span>
+              </>
+            ) : null}
+            {/* Side by side, the pane without the keyboard says so quietly. */}
+            <span className={cx("truncate", split && !active && "text-text-secondary")}>
+              {pageTitle}
+            </span>
+          </span>
+        }
+        // The note's icon leads back to the Views page, the list it was opened
+        // from, on a phone as on a desktop.
+        icon={
+          share === null ? (
+            <Link
+              to="/"
+              search={{ query: undefined }}
+              aria-label="Views"
+              className="focus-ring flex rounded-sm"
+            >
+              {favicon}
+            </Link>
+          ) : undefined
+        }
+        actions={
+          <div className="flex items-center gap-2">
+            {/* Changes save automatically; this is the honest-but-quiet trace of
               a save in flight — and, offline, of one that is on this device
               and waiting to sync (`saveTrace`). */}
-          {trace === "saving" ? (
-            <span className="flex items-center gap-1.5 text-sm text-text-secondary print:hidden">
-              <LoadingIcon16 className="animate-spin" />
-              Saving
-            </span>
-          ) : trace === "saved-offline" ? (
-            <span className="flex items-center gap-1.5 text-sm text-text-secondary print:hidden">
-              <OfflineIcon16 />
-              {/* A phone's header has no room for the second word; the icon
+            {trace === "saving" ? (
+              <span className="flex items-center gap-1.5 text-sm text-text-secondary print:hidden">
+                <LoadingIcon16 className="animate-spin" />
+                Saving
+              </span>
+            ) : trace === "saved-offline" ? (
+              <span className="flex items-center gap-1.5 text-sm text-text-secondary print:hidden">
+                <OfflineIcon16 />
+                {/* A phone's header has no room for the second word; the icon
                   says offline there. */}
-              <span className="sm:hidden">Saved</span>
-              <span className="hidden sm:inline">Saved offline</span>
-            </span>
-          ) : null}
+                <span className="sm:hidden">Saved</span>
+                <span className="hidden sm:inline">Saved offline</span>
+              </span>
+            ) : null}
 
-          <div className="flex items-center">
-            <SortMenu
-              sort={sort}
-              onSortChange={(next) => setNarrowing({ sort: next })}
-              saved={savedView.writable ? { ...savedViewActions, dirty: sortDirty } : undefined}
-            />
-            <FilterMenu
-              filter={filter}
-              onFilterChange={(next) => setNarrowing({ filter: next })}
-              scope={focusBlockId ?? noteId}
-              saved={savedView.writable ? { ...savedViewActions, dirty: filterDirty } : undefined}
-            />
-            <NoteActionsMenu
-              noteId={noteId ?? ""}
-              align="end"
-              editor={{
-                showWidth: containerWidth > 800,
-                width: resolvedWidth,
-                onWidth: updateWidth,
-                onDeleted: () => navigate({ to: "/", search: { query: undefined }, replace: true }),
-                focusBlockId: focusBlockId ?? null,
-                filter,
-              }}
-            />
+            <div className="flex items-center">
+              {/* The address's filter and sort are the first pane's; another
+                pane shows its view as saved. */}
+              {primary ? (
+                <>
+                  <SortMenu
+                    sort={sort}
+                    onSortChange={(next) => setNarrowing({ sort: next })}
+                    saved={
+                      savedView.writable ? { ...savedViewActions, dirty: sortDirty } : undefined
+                    }
+                  />
+                  <FilterMenu
+                    filter={filter}
+                    onFilterChange={(next) => setNarrowing({ filter: next })}
+                    scope={focusBlockId ?? noteId}
+                    saved={
+                      savedView.writable ? { ...savedViewActions, dirty: filterDirty } : undefined
+                    }
+                  />
+                </>
+              ) : null}
+              <NoteActionsMenu
+                noteId={noteId ?? ""}
+                align="end"
+                editor={{
+                  showWidth: containerWidth > 800,
+                  width: resolvedWidth,
+                  onWidth: updateWidth,
+                  onDeleted: () =>
+                    onClose
+                      ? onClose()
+                      : navigate({ to: "/", search: { query: undefined }, replace: true }),
+                  focusBlockId: focusBlockId ?? null,
+                  filter,
+                }}
+              />
+              {onSplit ? (
+                <IconButton
+                  aria-label="Split view"
+                  shortcut={formatCombo(APP_SHORTCUTS.toggleSplit)}
+                  size="small"
+                  tooltipAlign="end"
+                  onClick={onSplit}
+                >
+                  <SplitIcon16 />
+                </IconButton>
+              ) : null}
+              {onClose ? (
+                <IconButton
+                  aria-label="Close pane"
+                  shortcut={active ? formatCombo(APP_SHORTCUTS.toggleSplit) : undefined}
+                  size="small"
+                  tooltipAlign="end"
+                  onClick={onClose}
+                >
+                  <XIcon16 />
+                </IconButton>
+              ) : null}
+            </div>
           </div>
-        </div>
-      }
-    >
-      <div ref={containerRef} className="@container">
-        {/* --note-header-pull: how far the title, focus breadcrumb and focus
+        }
+      >
+        <div ref={containerRef} className="@container">
+          {/* --note-header-pull: how far the title, focus breadcrumb and focus
             title hang into the gutter (`.note-header`, block-editor.css) —
             the full marker-slot offset, but only once the gutter is 40px, as
             the hanging # needs the room. */}
-        <div className="p-4 @[480px]:p-5 @[640px]:p-10 @[640px]:[--note-header-pull:27px]">
-          <div
-            className={cx(
-              "flex flex-col gap-8",
-              resolvedWidth === "fixed" && "mx-auto max-w-[700px]",
-            )}
-          >
-            {share !== null ? (
-              // -mx-0.5: the notice's edges sit where the rows' surfaces
-              // reach (2px past the text column), as the title's do.
-              <Notice icon={<ShareIcon16 />} className="-mx-0.5 print:hidden">
-                Shared by {shareOwnerName(share.share)}
-                {readOnlyShare
-                  ? " — you can read this note but not change it."
-                  : share.canDelete
-                    ? " — you can edit and delete."
-                    : " — you can edit; deleting is not allowed."}
-              </Notice>
-            ) : null}
-
-            <div className="flex flex-col gap-3">
-              {/* While focused, the breadcrumb (inside the editor) carries the
-                    note title as its first crumb — hide the standalone title to
-                    avoid doubling it. */}
-              {showsTitle ? (
-                <NoteTitle
-                  title={note?.title ?? ""}
-                  onRename={renameTo}
-                  readOnly={readOnlyShare}
-                  startEditing={isNewNote}
-                  onArrowDown={(mode) => {
-                    setFocusFirstMode(mode)
-                    setFocusFirstSignal((n) => n + 1)
-                  }}
-                  onCreateBelow={() => setNewRootSignal((n) => n + 1)}
-                  focusSignal={titleFocusSignal}
-                />
+          <div className="p-4 @[480px]:p-5 @[640px]:p-10 @[640px]:[--note-header-pull:27px]">
+            <div
+              className={cx(
+                "flex flex-col gap-8",
+                resolvedWidth === "fixed" && "mx-auto max-w-[700px]",
+              )}
+            >
+              {share !== null ? (
+                // -mx-0.5: the notice's edges sit where the rows' surfaces
+                // reach (2px past the text column), as the title's do.
+                <Notice icon={<ShareIcon16 />} className="-mx-0.5 print:hidden">
+                  Shared by {shareOwnerName(share.share)}
+                  {readOnlyShare
+                    ? " — you can read this note but not change it."
+                    : share.canDelete
+                      ? " — you can edit and delete."
+                      : " — you can edit; deleting is not allowed."}
+                </Notice>
               ) : null}
-              <BlockNoteEditor
-                key={noteId}
-                noteId={noteId}
-                doc={editorDoc}
-                onChange={setEditorDoc}
-                folds={{
-                  collapsed,
-                  toggle: (key) => setFold(key, collapsed.has(key)),
-                  setOpen: (key) => setFold(key, true),
-                }}
-                onToggleCollapse={touch}
-                startEditing={isNewNote && !showsTitle}
-                readOnly={readOnlyShare}
-                browse={readOnlyShare}
-                // Only where there IS a title above the editor to take the
-                // keyboard: a focused block carries its name in the
-                // breadcrumb instead (the focused heading's own title is
-                // the editor's to hand focus to, not ours).
-                onExitTop={showsTitle ? () => setTitleFocusSignal((n) => n + 1) : undefined}
-                focusFirstSignal={focusFirstSignal}
-                focusFirstMode={focusFirstMode}
-                newRootSignal={newRootSignal}
-                appendRootSignal={appendRootSignal}
-                refocusSignal={refocusSignal}
-                focusBlockId={focusBlockId ?? null}
-                onFocusNavigate={(id) => {
-                  revealOnLeaveFocus(id)
-                  // A plain push, so the back button undoes focus naturally.
-                  navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) })
-                }}
-                noteTitle={note?.displayName ?? ""}
-                context={context}
-                onOpenBoard={(id) => void openNote(id)}
-                onEditingChange={setEditingBlockId}
-                // Narrowed, there is no starter row to type into. A new
-                // row lands in the note as it does anywhere (Enter on a
-                // row, `useNoteDoc`), but a blank one is a plain text row
-                // the filter hides the moment it is typed into.
-                starter={!narrowed}
-              />
-              {noteId && noteExists && share === null ? <UnassignedBasket noteId={noteId} /> : null}
-            </div>
-            {/* The page's foot: half a screen of room beneath the note, so
+
+              <div className="flex flex-col gap-3">
+                {/* While focused, the breadcrumb (inside the editor) carries the
+                    note title as its first crumb — hide the standalone title to
+                    avoid doubling it. Outside focus, a stack with views
+                    beneath this one shows them above the title. */}
+                {showsTitle ? trail : null}
+                {showsTitle ? (
+                  <NoteTitle
+                    title={note?.title ?? ""}
+                    onRename={renameTo}
+                    readOnly={readOnlyShare}
+                    startEditing={isNewNote}
+                    onArrowDown={(mode) => {
+                      setFocusFirstMode(mode)
+                      setFocusFirstSignal((n) => n + 1)
+                    }}
+                    onCreateBelow={() => setNewRootSignal((n) => n + 1)}
+                    focusSignal={titleFocusSignal}
+                  />
+                ) : null}
+                <BlockNoteEditor
+                  key={noteId}
+                  noteId={noteId}
+                  doc={editorDoc}
+                  onChange={setEditorDoc}
+                  folds={{
+                    collapsed,
+                    toggle: (key) => setFold(key, collapsed.has(key)),
+                    setOpen: (key) => setFold(key, true),
+                  }}
+                  onToggleCollapse={touch}
+                  startEditing={isNewNote && !showsTitle}
+                  readOnly={readOnlyShare}
+                  browse={readOnlyShare}
+                  // Only where there IS a title above the editor to take the
+                  // keyboard: a focused block carries its name in the
+                  // breadcrumb instead (the focused heading's own title is
+                  // the editor's to hand focus to, not ours).
+                  onExitTop={showsTitle ? () => setTitleFocusSignal((n) => n + 1) : undefined}
+                  focusFirstSignal={focusFirstSignal}
+                  focusFirstMode={focusFirstMode}
+                  newRootSignal={newRootSignal}
+                  appendRootSignal={appendRootSignal}
+                  refocusSignal={refocusSignal}
+                  focusBlockId={focusBlockId ?? null}
+                  // Each move is a plain push of the URL, so the back button
+                  // undoes it too.
+                  onFocusNavigate={focusTo}
+                  onFocusBack={canPop ? focusBack : undefined}
+                  focusTrail={trail ?? undefined}
+                  landing={landing}
+                  onOpenBeside={onOpenBeside}
+                  noteTitle={note?.displayName ?? ""}
+                  context={context}
+                  onOpenBoard={(id) => void openNote(id)}
+                  onEditingChange={setEditingBlockId}
+                  // Narrowed, there is no starter row to type into. A new
+                  // row lands in the note as it does anywhere (Enter on a
+                  // row, `useNoteDoc`), but a blank one is a plain text row
+                  // the filter hides the moment it is typed into.
+                  starter={!narrowed}
+                />
+                {noteId && noteExists && share === null ? (
+                  <UnassignedBasket noteId={noteId} />
+                ) : null}
+              </div>
+              {/* The page's foot: half a screen of room beneath the note, so
                 its last block is never pinned to the bottom edge — and, where
                 the note can be written, the place to click for a block at its
                 end, as the foot of a Notion page is: the last block if it is
@@ -563,15 +890,16 @@ function NotePage() {
                 room is the target, whole. The keyboard has its own ways to
                 the end of a note (↓ to the last row, Enter), so the click
                 needs no key. */}
-            {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
-            <div
-              data-testid="page-foot"
-              className={cx("-mt-8 h-[50vh]", canAppend && "cursor-text")}
-              onClick={canAppend ? () => setAppendRootSignal((n) => n + 1) : undefined}
-            />
+              {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
+              <div
+                data-testid="page-foot"
+                className={cx("-mt-8 h-[50vh]", canAppend && "cursor-text")}
+                onClick={canAppend ? () => setAppendRootSignal((n) => n + 1) : undefined}
+              />
+            </div>
           </div>
         </div>
-      </div>
-    </PageLayout>
+      </PageLayout>
+    </div>
   )
 }

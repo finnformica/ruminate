@@ -1051,15 +1051,31 @@ describe("focus", () => {
         "focusBack",
         input(doc, "b/b1", { visibleOrder: ["b/b1"], focusRootId: "b1", focusBackId: "b" }),
       ).focusRoot,
-    ).toEqual({ id: "b" })
+    ).toEqual({ id: "b", back: true })
     // No stack below (deep link): out exits fully.
-    expect(runCommand("focusBack", focused(doc, "b/b1")).focusRoot).toEqual({ id: null })
+    expect(runCommand("focusBack", focused(doc, "b/b1")).focusRoot).toEqual({
+      id: null,
+      back: true,
+    })
   })
 
   it("focusBack / leaveFocus are ignored when not focused", () => {
     const doc = fixture()
     expect(runCommand("focusBack", input(doc, "b")).handled).toBe(false)
     expect(runCommand("leaveFocus", input(doc, "b")).handled).toBe(false)
+  })
+
+  it("focusBack pops a pane's stack even outside focus (src/data/panes.ts)", () => {
+    const doc = fixture()
+    expect(runCommand("focusBack", input(doc, "b", { focusCanPop: true })).focusRoot).toEqual({
+      id: null,
+      back: true,
+    })
+  })
+
+  it("openBeside asks for the row's block in the pane beside", () => {
+    const doc = fixture()
+    expect(runCommand("openBeside", input(doc, "b/b1")).openBeside).toBe("b1")
   })
 
   it("leaveFocus requests a full exit", () => {
