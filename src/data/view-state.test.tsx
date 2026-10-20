@@ -7,8 +7,10 @@ import { expandedByDepth } from "../blocks/default-collapsed"
 import { expandedLevelsAtom } from "../global-state"
 import {
   MAX_STORED_VIEWS,
+  clearFolds,
   foldKeyOf,
   foldRule,
+  openFolds,
   readFolds,
   useFoldRule,
   withFold,
@@ -280,5 +282,23 @@ describe("useFoldRule, narrowed", () => {
     // The first filter again: the fold made in it is back.
     rerender({ id: "n1", narrowing: { filter: "type:todo" } })
     expect(result.current.expanded("a", 1)).toBe(false)
+  })
+})
+
+describe("folds of a focus frame (docs/split-view.md)", () => {
+  it("keeps a frame's folds under a key of its own, whatever narrows it", () => {
+    const frame = foldKeyOf("n1", { scope: "p0f1:blk_a" })
+    expect(frame).not.toBe(foldKeyOf("n1"))
+    expect(foldKeyOf("n1", { filter: "type:todo", scope: "p0f1:blk_a" })).toBe(frame)
+    expect(foldKeyOf("n1", { scope: "p0f2:blk_a" })).not.toBe(frame)
+  })
+
+  it("forgets a frame's folds when it is pushed again, and opens rows ahead of a view", () => {
+    const frame = foldKeyOf("n1", { scope: "p0f1:blk_a" })
+    writeFolds(frame, { open: new Set(), closed: new Set(["blk_a/blk_b"]) })
+    clearFolds(frame)
+    expect(readFolds(frame)).toBeNull()
+    openFolds("n1", ["blk_x", "blk_x/blk_y"])
+    expect([...readFolds("n1")!.open]).toEqual(["blk_x", "blk_x/blk_y"])
   })
 })

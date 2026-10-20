@@ -130,6 +130,22 @@ export function goTo(pane: Pane, target: ViewTarget, selected: string | null): F
   }
 }
 
+/**
+ * Go to a view by way of frame `index`: pop back to that frame, then push
+ * `target` from it — a crumb on the path between two frames' roots
+ * (docs/split-view.md). The frame keeps the row it recorded, and the frames
+ * above it go. On the frame on screen, it is a plain push.
+ */
+export function goVia(pane: Pane, index: number, target: ViewTarget): FocusMove | null {
+  if (index < 0 || index >= pane.frames.length) return null
+  const popped = popTo(pane, index)
+  const base = popped?.pane ?? pane
+  const selected = popped ? popped.landing : null
+  const move = goTo(base, target, selected)
+  if (move) return move
+  return popped
+}
+
 export const withPane = (layout: PaneLayout, index: number, pane: Pane): PaneLayout => ({
   ...layout,
   panes: layout.panes.map((p, i) => (i === index ? pane : p)),

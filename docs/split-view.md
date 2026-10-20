@@ -39,6 +39,9 @@ interface PaneLayout {
   as the **landing**: the editor selects that row once the view shows it
   (`BlockEditor.landing`). <kbd>⇧</kbd> <kbd>F</kbd> pops one frame; a crumb
   pops to its frame.
+- **By way of a frame.** `goVia(pane, i, target)` pops to frame `i`, then
+  pushes `target` from it. A path crumb between two frames does this (see
+  "The breadcrumb").
 - **No view twice.** `goTo` to a view that is already on the stack pops back
   to it. So <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd> (the whole note) and the
   note's crumb return to the bottom frame when it is the note, with its
@@ -46,13 +49,17 @@ interface PaneLayout {
 - **One frame left.** With one frame and a block in focus, <kbd>⇧</kbd>
   <kbd>F</kbd> leaves the focus for the whole note, as it did before the
   stack. On the whole note with nothing beneath, it does nothing.
-- **Folds.** A frame does not record folds. Folds are kept per view, keyed
-  by the row's path from the view's root (`src/data/view-state.ts`), so a
-  fold made inside a focus never touches the view it came from. A pop
-  (`restored: true`) leaves the folds of the view it returns to as they were.
-  A push to a new, wider view (<kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd> from a
-  deep link) first opens the folds down to the block just left
-  (`revealOnLeaveFocus`), as before.
+- **Folds.** Each frame keeps its own folds, so a pop restores them. A
+  frame focused on a block stores its folds under a key of its own:
+  `foldKeyOf(note, { scope })`, with the scope `p<pane>f<depth>:<root>`
+  (`frameScope`, `src/routes/_appRoot.views_.$.tsx`). A push clears that key
+  (`clearFolds`), so the new frame starts with the default folds. A pop
+  (`restored: true`) does not touch the key, so the frame shows its folds as
+  the reader left them. A frame on the whole note uses the note's own folds,
+  as before. A move to a new, wider view (<kbd>⌘</kbd> <kbd>⇧</kbd>
+  <kbd>.</kbd> from a deep link) first opens the folds down to the block
+  just left (`openFolds`). The page does all of this in storage before the
+  move (`settleFolds`), so the new view never shows the wrong folds.
 - **Across notes.** A frame names its note, so one stack can hold views from
   more than one note. While the page is split, a note opened from the sidebar,
   the palette or the Views page opens in the active pane, as a push
@@ -62,9 +69,35 @@ interface PaneLayout {
   (never the last one). `activate` moves the keyboard. `MAX_PANES` is 2.
 
 Each pane keeps its own folds and selection. The selection is the editor's
-own state, and each pane has its own editor. The folds are the pane's own
-`useFoldRule` state. Two panes on the same note write to the same stored
-entry, so after a reload both start from the folds written last.
+own state, and each pane has its own editor. A focused frame's fold key
+names its pane. Two panes on the whole of the same note write to the note's
+one stored entry, so after a reload both start from the folds written last.
+
+## The breadcrumb
+
+There is one focus breadcrumb, `FocusTrail` (`src/components/focus-trail.tsx`).
+It takes the place of the editor's own and hangs in the gutter as before
+(`.note-header`, docs/design-principles.md, "Header pull"). It merges the
+stack and the graph path:
+
+- **Frame segments.** Each frame of the stack is a segment, with its root as
+  the label (the note's title for a whole-note frame). A click pops back to
+  that frame, with its root, selection and folds.
+- **The path between frames.** Between two frames, the trail shows the blocks
+  on the path from the earlier root down to the later root, in a quieter
+  colour. This is the path from the frame root to the focused block, as the
+  breadcrumb showed it before. A click on one goes by way of the earlier
+  frame (`goVia`): it pops to that frame and focuses the block from there.
+- **A stack that starts on a block** (an old `?block=` link) leads with the
+  note and the path down to the block, so the whole note is one click away.
+- **A block with more than one parent.** The stack decides the path. The
+  frame beneath recorded the row it was left from as an occurrence key, and
+  that key is the path the reader took (`A/B/C`). When the key does not end
+  at the next root (the reader focused from another row), the trail shows
+  the shortest path from the earlier root (`pathToBlock`).
+
+Outside a focus, the pane draws the same trail above the note title once the
+stack holds a frame beneath the view on screen.
 
 ## The URL
 
@@ -136,6 +169,30 @@ block and back along the path taken. So the stack keeps those two keys, and
 <kbd>⇧</kbd> <kbd>F</kbd> now also restores the selection. <kbd>⌘</kbd>
 <kbd>\\</kbd> is the split key in VS Code. <kbd>g</kbd> <kbd>p</kbd> joins
 the `g` chords, and works from select mode.
+
+## Decisions Finn can change
+
+These are choices, not constraints. Each one is local to the file named.
+
+1. **A pushed frame starts with the default folds.** It does not copy the
+   folds of the frame beneath. To copy them, read the parent frame's folds in
+   `settleFolds` and write them under the new key in place of `clearFolds`.
+   The keys differ (a focus view keys rows from its own root), so a copy
+   must cut the parent's keys down to the new root.
+2. **A whole-note frame uses the note's own folds**, which persist across
+   sessions as they did before the stack. Only a frame focused on a block
+   has folds of its own. To give every frame its own, set a scope for a root
+   of `null` too (`frameScope`).
+3. **A focused frame's folds ignore the filter and sort.** The key holds the
+   scope and not the narrowing, because the page cannot read the target's
+   saved view before the move. A filtered frame still opens every row by the
+   standing rule beneath its own folds.
+4. **The breadcrumb shows the path between frames**, and a click on a path
+   crumb pops to the earlier frame and then pushes. To make a path crumb
+   push on top of the stack instead, call `goTo` in place of `goVia`.
+5. **Frame fold keys name the pane by its index.** When the first pane
+   closes, the second becomes the first and its focused frames start with
+   the default folds again.
 
 ## Later
 

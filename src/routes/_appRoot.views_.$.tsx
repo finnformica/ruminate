@@ -42,7 +42,7 @@ import { useOpenNote } from "../hooks/open-note"
 import { pathToBlock } from "../data/graph"
 import { narrowingParam, resolveNarrowing } from "../utils/view-filter"
 import { FilterMenu, SortMenu } from "../components/view-controls"
-import { useFoldRule } from "../data/view-state"
+import { clearFolds, foldKeyOf, openFolds, useFoldRule } from "../data/view-state"
 import { keyOf } from "../blocks/view"
 import { useNoteShare } from "../hooks/share"
 import { shareOwnerName } from "../data/shares"
@@ -51,6 +51,7 @@ import {
   closePane,
   currentFrame,
   goTo,
+  goVia,
   layoutFromSearch,
   layoutToSearch,
   nextPaneIndex,
@@ -254,6 +255,7 @@ function SplitView() {
         return (
           <NotePage
             key={`${index}:${frame.noteId}`}
+            index={index}
             pane={pane}
             primary={index === 0}
             leading={index === shown[0]}
@@ -275,8 +277,14 @@ function SplitView() {
   )
 }
 
+/** Where a focused frame keeps its folds: its pane, its depth on the
+ * stack and its root (docs/split-view.md). */
+const frameScope = (pane: number, depth: number, root: string) => `p${pane}f${depth}:${root}`
+
 /** One pane of the page: a note, or a block focused on in one. */
 interface NotePageProps {
+  /** The pane's place in the layout. */
+  index: number
   /** The pane's focus stack; the last frame is the view on screen. */
   pane: Pane
   /** The first pane: the one the address's filter and sort are for, and
@@ -306,6 +314,7 @@ interface NotePageProps {
 }
 
 function NotePage({
+  index,
   pane,
   primary,
   leading,
@@ -385,7 +394,12 @@ function NotePage({
   // to the graph — see useNoteDoc. The folds are the VIEW's: the note's, or
   // — narrowed — the ones kept for this filter and sort, so a chevron
   // clicked here never lands on the note's own.
-  const { expanded, setFold } = useFoldRule(noteId, { filter, sort })
+  //
+  // A focused frame keeps folds of its own (`frameScope`), so a frame pushed
+  // starts from the standing rule and a frame popped back to has its folds
+  // as it was left (docs/split-view.md).
+  const scope = root === null ? undefined : frameScope(index, pane.frames.length - 1, root)
+  const { expanded, setFold } = useFoldRule(noteId, { filter, sort, scope })
   const narrowed = filter !== "" || sort !== ""
   // Whether a click beneath the note may add a block to its end (the page's
   // foot, below): an editable note, shown whole.
@@ -416,26 +430,26 @@ function NotePage({
     keep,
   })
   const jotaiStore = useStore()
-  // Leaving a focus for a wider view — the note, or a block above — must
-  // show the block just left, so the reader lands back on it: the folds
-  // along one path from the new root to it are opened first (nothing to do
-  // when the walk already shows it).
-  const revealOnLeaveFocus = React.useCallback(
-    (target: string | null) => {
-      if (!noteId || !focusBlockId || target === focusBlockId) return
-      const graph = jotaiStore.get(graphSnapshotAtom)
-      const chain = pathToBlock(graph, target ?? noteId, focusBlockId)
-      if (!chain) return
-      // Each ancestor's key and level, counted as the walk counts them: a
-      // note's roots are level 1, a focused block's children too.
-      let key: string | null = target
-      chain.slice(0, -1).forEach((id, index) => {
-        key = keyOf(key, id)
-        if (!expanded(key, index + 1)) setFold(key, true)
-      })
-    },
-    [noteId, focusBlockId, jotaiStore, expanded, setFold],
-  )
+  // The folds of the view a move goes to, settled in storage before it
+  // shows. A frame popped back to is left as it was. A new focused frame
+  // starts from the standing rule: its own folds are forgotten. And leaving
+  // a focus for a wider view — the note, or a block above — must show the
+  // block just left, so the reader lands back on it: the folds along one
+  // path from the new root to it are opened.
+  const settleFolds = (move: FocusMove) => {
+    if (move.restored) return
+    const next = currentFrame(move.pane)
+    const nextScope =
+      next.root === null ? undefined : frameScope(index, move.pane.frames.length - 1, next.root)
+    const viewKey = foldKeyOf(next.noteId, { filter, sort, scope: nextScope })
+    if (nextScope !== undefined) clearFolds(viewKey)
+    if (!noteId || !focusBlockId || next.noteId !== noteId || next.root === focusBlockId) return
+    const chain = pathToBlock(jotaiStore.get(graphSnapshotAtom), next.root ?? noteId, focusBlockId)
+    if (!chain) return
+    let key: string | null = next.root
+    const keys = chain.slice(0, -1).map((id) => (key = keyOf(key, id)))
+    openFolds(viewKey, keys)
+  }
   // A brand-new note opens ready to be written: the title editing when there
   // is one (naming it is the first thing to do, and naming it creates it —
   // `renameTo`), else the first block. Never while the notes are still
@@ -637,26 +651,19 @@ function NotePage({
   // a frame, with the row selected here recorded beneath it; going to a
   // view already on the stack (a crumb, ⌘⇧. to the note) pops back to it,
   // and Shift+F pops one. A frame popped back to keeps its folds as they
-  // were, and lands on its recorded row (`landing`); a new view first opens
-  // the folds down to the block just left (`revealOnLeaveFocus`).
-  const focusTo = (id: string | null, selected: string | null) => {
-    if (!noteId) return
-    const move = goTo(pane, { noteId, root: id }, selected)
+  // were, and lands on its recorded row (`landing`); a new focused frame
+  // starts from the standing rule, and a new view opens the folds down to
+  // the block just left (`settleFolds`).
+  const applyMove = (move: FocusMove | null) => {
     if (!move) return
-    if (!move.restored) revealOnLeaveFocus(id)
+    settleFolds(move)
     onMove(move)
+  }
+  const focusTo = (id: string | null, selected: string | null) => {
+    if (noteId) applyMove(goTo(pane, { noteId, root: id }, selected))
   }
   const canPop = popFrame(pane) !== null
-  const focusBack = () => {
-    const move = popFrame(pane)
-    if (!move) return
-    if (!move.restored) revealOnLeaveFocus(currentFrame(move.pane).root)
-    onMove(move)
-  }
-  const popToFrame = (index: number) => {
-    const move = popTo(pane, index)
-    if (move) onMove(move)
-  }
+  const focusBack = () => applyMove(popFrame(pane))
   // The stack drawn as a trail: in focus, where the editor draws its
   // breadcrumb; outside it, above the title, once the stack holds a view
   // beneath this one.
@@ -664,12 +671,8 @@ function NotePage({
     focusBlockId || pane.frames.length > 1 ? (
       <FocusTrail
         frames={pane.frames}
-        onPopTo={popToFrame}
-        onGoTo={(target) => {
-          if (target.noteId === noteId) return focusTo(target.root, null)
-          const move = goTo(pane, target, null)
-          if (move) onMove(move)
-        }}
+        onPopTo={(at) => applyMove(popTo(pane, at))}
+        onGoVia={(at, target) => applyMove(goVia(pane, at, target))}
       />
     ) : null
 

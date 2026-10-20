@@ -5,6 +5,7 @@ import {
   currentFrame,
   formatFrame,
   goTo,
+  goVia,
   layoutFromSearch,
   layoutToSearch,
   nextPaneIndex,
@@ -84,6 +85,20 @@ describe("the focus stack", () => {
     expect(move.landing).toBe("k2")
     expect(popTo(deep, 2)).toBeNull()
     expect(popTo(deep, -1)).toBeNull()
+  })
+
+  it("goes by way of a frame: pops to it, then pushes the view from it", () => {
+    const deep = push(push(paneOf(A), "blk_b2", "k1"), "blk_b3", "k2")
+    // A crumb on the path between the note and b2: the note keeps k1.
+    const move = goVia(deep, 0, { noteId: A, root: "blk_b1" })!
+    expect(move.pane.frames).toEqual([
+      { noteId: A, root: null, selected: "k1" },
+      { noteId: A, root: "blk_b1", selected: null },
+    ])
+    expect(move.restored).toBe(false)
+    // On the frame on screen it is a plain push.
+    expect(goVia(deep, 2, { noteId: A, root: "blk_x" })!.pane.frames).toHaveLength(4)
+    expect(goVia(deep, 5, { noteId: A, root: "blk_x" })).toBeNull()
   })
 
   it("spans notes: a frame keeps the note it was in", () => {

@@ -48,6 +48,12 @@ export const MAX_STORED_VIEWS = 500
 export interface Narrowing {
   filter?: string
   sort?: string
+  /**
+   * A focus frame of the split view's panes (docs/split-view.md): a block
+   * focused on keeps folds of its own per frame, apart from the note's, so
+   * each frame pushed starts from the standing rule. Absent = the note's.
+   */
+  scope?: string
 }
 
 /**
@@ -56,7 +62,13 @@ export interface Narrowing {
  * filter and sort appended for a narrowed view. Newlines separate the parts
  * because neither an id nor a query holds one.
  */
-export function foldKeyOf(noteId: string, { filter = "", sort = "" }: Narrowing = {}): string {
+export function foldKeyOf(
+  noteId: string,
+  { filter = "", sort = "", scope }: Narrowing = {},
+): string {
+  // A focus frame's folds are its own whatever narrows it: the frame is
+  // the place, and a filter's rows open by the standing rule beneath them.
+  if (scope !== undefined) return `${noteId}\n@${scope}`
   return filter === "" && sort === "" ? noteId : `${noteId}\n${filter}\n${sort}`
 }
 
@@ -177,6 +189,26 @@ export function writeFolds(viewKey: string, folds: Folds) {
   }
 }
 
+/** Forget a view's folds: a focus frame just pushed starts from the
+ * standing rule (docs/split-view.md). */
+export function clearFolds(viewKey: string) {
+  if (typeof localStorage === "undefined") return
+  try {
+    localStorage.removeItem(storageKey(viewKey))
+  } catch {
+    // Storage unavailable — nothing was kept to forget.
+  }
+}
+
+/** Record rows as open in a view that is not on screen yet — the folds
+ * down to a block a wider view must show as it opens. */
+export function openFolds(viewKey: string, keys: string[]) {
+  if (keys.length === 0) return
+  let folds = readFolds(viewKey) ?? NO_FOLDS
+  for (const key of keys) folds = withFold(folds, key, true)
+  writeFolds(viewKey, folds)
+}
+
 /**
  * The rule a view descends by: the reader's explicit folds over the depth
  * rule. A key's own entry wins; failing that an entry naming its block id
@@ -240,8 +272,8 @@ export function useFoldRule(
   held?: ReadonlySet<string>,
 ) {
   const levels = useAtomValue(expandedLevelsAtom)
-  const { filter = "", sort = "" } = narrowing
-  const viewKey = noteId === undefined ? undefined : foldKeyOf(noteId, { filter, sort })
+  const { filter = "", sort = "", scope } = narrowing
+  const viewKey = noteId === undefined ? undefined : foldKeyOf(noteId, { filter, sort, scope })
   const narrowed = filter !== "" || sort !== ""
   const [state, setState] = React.useState<{ viewKey: string | undefined; folds: Folds }>(() => ({
     viewKey,
