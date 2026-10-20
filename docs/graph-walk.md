@@ -2,8 +2,11 @@
 
 Status: **design, not built.** Requested by Finn, who prefers the walk of
 [Pensive](https://github.com/aatack/Pensive) to the walk ruminate has now.
-This document describes the two walks, lists what a reader sees differently,
-and proposes a design and a migration plan for ruminate. Pensive has no
+This document describes the two walks and lists what a reader sees
+differently. It proposes a design for pivots (section 4), a sections-only
+toggle and an in-place filter in the walk (section 5), and fixes for fold
+state (section 6). It gives a migration plan, open questions, and a note on
+layered stores for later. Pensive has no
 license: this document takes ideas from it and copies no code.
 
 Nothing here changes storage, events, sync or the D1 schema. The `link` table
@@ -132,8 +135,13 @@ Pensive's walk is about 150 lines (`frontend/src/queries/resolution.ts`,
 - **Drawing.** The result tree is flattened depth-first for display, so
   breadth-first order changes only which rows the budget drops. A pivoted
   row shows a small label (`--> inbound`).
-- **Filter.** The frame's highlight (text, section) prunes the result. The
-  prune keeps a pivoted subtree whole.
+- **Filter.** Each frame has a highlight: a text, a sections-only flag and
+  "hide snoozed". A row passes when its text holds the highlight text, it
+  is a section (when the flag is on), and it is not snoozed. `prune` keeps a
+  row when it passes or when a row beneath it passes, so the ancestors stay
+  as the path. A passing row's children go unless they pass too. The prune
+  keeps a pivoted subtree whole. A section is a flag on any entity, not a
+  type. Finn toggles sections-only with `q`.
 - **Focus.** A frame has a `context` (the frame beneath it). Push makes the
   selected entity the new root with no pivots. Pop goes back to the frame
   beneath, with its pivots.
@@ -142,21 +150,22 @@ Pensive's walk is about 150 lines (`frontend/src/queries/resolution.ts`,
 
 ## 3. What a reader sees differently
 
-| Topic                     | Ruminate today                                                                                       | Pensive                                                                                      |
-| ------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Who chooses the direction | One setting per device, for every row of every note.                                                 | The reader, per entity, in the view. One row shows its backlinks; the rest show children.    |
-| Mixed directions          | "Both" shows children and then parents beneath every open row.                                       | A row shows one direction. There is no "both".                                               |
-| Beneath an up row         | Its other children and its parents ("both"), or only its parents ("upstream").                       | Only its parents: the inbound query continues down the chain of holders until another pivot. |
-| The row it came from      | Skipped. A block's own parent is not shown beneath it.                                               | Shown. An inbound pivot under its parent lists that parent again beneath it.                 |
-| How deep a view opens     | n levels (2 by default), then rows start closed. Each closed row has a chevron.                      | Everything opens until 200 rows, then the rest is marked incomplete.                         |
-| Fold scope                | Per row (occurrence key), per view, per device. A block with two rows has two folds.                 | Per entity, per tab. A collapse closes every row of that entity.                             |
-| Pivot scope               | No pivots.                                                                                           | Per entity, per frame.                                                                       |
-| Root direction            | The note's blocks are always the roots.                                                              | The root is always walked outbound. A pivot on the root is not read.                         |
-| Cycles                    | Shown once where they close (down), or skipped (up).                                                 | Repeated until the budget is spent.                                                          |
-| Focus                     | One level (`?block=`), plus browser history. The split-view work adds a stack per pane.              | A stack of frames per tab. Each frame keeps its pivots.                                      |
-| A marker on the row       | Up rows look like child rows.                                                                        | A pivoted row has a label that names its query.                                              |
-| Editing a parent row      | Direction-aware: Enter adds a new holder, indent and outdent move the link the other way, ⌫ unlinks. | The move tool takes the row above as the parent in every direction.                          |
-| Filter                    | Applies to every row. A narrowed view walks eagerly.                                                 | Prunes rows, but keeps a pivoted subtree whole.                                              |
+| Topic                     | Ruminate today                                                                                                                                   | Pensive                                                                                                                               |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Who chooses the direction | One setting per device, for every row of every note.                                                                                             | The reader, per entity, in the view. One row shows its backlinks; the rest show children.                                             |
+| Mixed directions          | "Both" shows children and then parents beneath every open row.                                                                                   | A row shows one direction. There is no "both".                                                                                        |
+| Beneath an up row         | Its other children and its parents ("both"), or only its parents ("upstream").                                                                   | Only its parents: the inbound query continues down the chain of holders until another pivot.                                          |
+| The row it came from      | Skipped. A block's own parent is not shown beneath it.                                                                                           | Shown. An inbound pivot under its parent lists that parent again beneath it.                                                          |
+| How deep a view opens     | n levels (2 by default), then rows start closed. Each closed row has a chevron.                                                                  | Everything opens until 200 rows, then the rest is marked incomplete.                                                                  |
+| Fold scope                | Per row (occurrence key), per view, per device. A block with two rows has two folds.                                                             | Per entity, per tab. A collapse closes every row of that entity.                                                                      |
+| Pivot scope               | No pivots.                                                                                                                                       | Per entity, per frame.                                                                                                                |
+| Root direction            | The note's blocks are always the roots.                                                                                                          | The root is always walked outbound. A pivot on the root is not read.                                                                  |
+| Cycles                    | Shown once where they close (down), or skipped (up).                                                                                             | Repeated until the budget is spent.                                                                                                   |
+| Focus                     | One level (`?block=`), plus browser history. The split-view work adds a stack per pane.                                                          | A stack of frames per tab. Each frame keeps its pivots.                                                                               |
+| A marker on the row       | Up rows look like child rows.                                                                                                                    | A pivoted row has a label that names its query.                                                                                       |
+| Editing a parent row      | Direction-aware: Enter adds a new holder, indent and outdent move the link the other way, ⌫ unlinks.                                             | The move tool takes the row above as the parent in every direction.                                                                   |
+| Filter                    | A query in the note's header (`?filter=`), first pane only. It keeps a match's ancestors and all of its children. A narrowed view walks eagerly. | A text, a sections-only flag (`q`) and hide snoozed, per frame. It keeps a match's ancestors only, and keeps a pivoted subtree whole. |
+| Sections                  | No toggle. ⌘P lists the headings in the palette.                                                                                                 | Sections-only shows the structure without the detail.                                                                                 |
 
 ## 4. The design
 
@@ -380,10 +389,9 @@ region copies the selected blocks with what they hold, as today.
 
 ### 4.9 Filter and sort
 
-A narrowed view (`filteredView`) walks eagerly, with the frame's pivots, and
-then applies the fold rule to what survives. The guard in 4.3 bounds the
-eager walk in an up region. A filter applies to every row, pivoted or not
-(open question 7).
+Section 5 moves the filter, the sort and a new sections-only toggle into the
+walk. They apply to down rows only. An up region is kept whole, as Pensive's
+prune keeps a pivoted subtree whole (open question 7).
 
 ### 4.10 What the reader sees
 
@@ -405,7 +413,230 @@ eager walk in an up region. A filter applies to every row, pivoted or not
 - The doc maths for up rows.
 - Markdown import and export.
 
-## 5. Migration plan
+## 5. Sections and the in-place filter
+
+Finn uses Pensive's sections toggle (`q`) to walk the structure of a note
+without the detail. This section adds a sections-only toggle to each pane,
+and moves the text filter into the walk.
+
+### 5.1 What ruminate has now
+
+- **Filter.** The note header's Filter takes a query-language string
+  (`?filter=`, `viewNarrowing`, `src/utils/view-narrowing.ts`). The search
+  engine answers it (`searchBlocks`). `filteredView`
+  (`src/data/filter-view.ts`) then prunes an **eager** walk. It keeps a
+  match, the match's ancestors (drawn dimmed, as `context`), and everything
+  beneath the match. The row in edit stays until the edit leaves it
+  (`keep`). The split-view work keeps the filter on the first pane only.
+- **Sections.** There is no toggle. `type:heading` as a filter does not do
+  the job: it keeps everything beneath each heading, so the note comes back
+  almost whole. ⌘P lists the headings in the palette, but that is a list,
+  not the outline.
+
+### 5.2 State: on the frame
+
+A pane's frame gets two more fields, beside its pivots (4.4):
+
+```ts
+interface FocusFrame {
+  noteId: string
+  root: string | null
+  selected: string | null
+  pivots: LinkPivots
+  /** Sections-only: walk the structure without the detail. */
+  sections: boolean
+  /** The in-place filter: a query-language string; "" for none. */
+  filter: string
+}
+```
+
+- Each pane, and each frame in a pane's focus stack, has its own toggle and
+  its own filter. A pop restores them with the frame, as in Pensive.
+- In the URL, `sections` is a flag in the frame field after the pivots. The
+  filter is URI-encoded inside the frame field, so its `:` and `,` cannot
+  break the frame format. The first pane's frame on screen keeps `?filter=`,
+  so links made before panes still open filtered.
+- A saved view's filter (the `views` row) is the bottom frame's start
+  value, as `narrowingParam` makes it today. The sort stays a view setting.
+
+### 5.3 Sections-only
+
+**What counts as a section.** The heading types: `h1`, `h2` and `h3`
+(`isHeading`, `src/blocks/markers.ts`). This design also counts a linked
+note row (`note`) and a board row (`board`). Each names a part of the
+structure, and a reader walks into it by focus. No other type counts
+(open question 12).
+
+**The rule.** With sections-only on, a down row shows when:
+
+1. it is a section, or
+2. a section is beneath it. It is then drawn dimmed, as path, like the
+   filter's `context`.
+
+Beneath a section, only rows that pass the same rule show. So the body of a
+section is hidden, and a section's chevron shows only when a section is
+beneath it. This is Pensive's prune, and it is different from the text
+filter, which keeps a match's body.
+
+**With a text filter.** Both apply: a row passes when it is a section and
+it matches. Its ancestors stay as path.
+
+**The view's root** always stays, as the filter keeps it today
+(`keepRoots`). A note with no sections shows its title and a short notice.
+The notice copy is for Finn.
+
+**Pivots.** Sections-only applies to down rows only. An up region is kept
+whole (4.9).
+
+**Edits.** A sections-only view is a narrowed view. It edits by the rules a
+filtered view edits by today (`docToOps` with `shown`): text and type edits
+act on the block; a move or an indent acts among the rows shown; the hidden
+rows and their order do not change. A new row made by Enter after a heading
+is not a section. It stays while in edit (`keep`), and then goes, as a
+non-matching row does under a filter today.
+
+### 5.4 The in-place text filter
+
+The filter keeps its query language and its prune rule (a match, its
+ancestors as path, and its body). The change is where it runs: in the walk,
+per frame, for every pane.
+
+- **Per frame and per pane.** It comes from `FocusFrame.filter`. The
+  second pane gets a filter of its own.
+- **One box.** The pane header's Filter field. `/` already focuses the
+  page's search field (`APP_SHORTCUTS.focusSearch`). On a note, `/` in select
+  mode focuses the active pane's filter field. `Escape` in the field leaves
+  it, and `Escape` again on an empty field clears the filter.
+- **Scope.** The engine scopes hits to the note (`viewNarrowing`). Rows of
+  other notes in an up region never match. So the filter keeps an up region
+  whole (4.9).
+
+Pensive also has "hide snoozed". Ruminate has no snooze. The nearest
+counterpart is "hide done to-dos" (`-type:done` as a filter today). A third
+toggle is open question 15.
+
+### 5.5 Part of the walk, and still lazy
+
+Today a narrowed view walks the whole note eagerly, because a branch's fate
+depends on what is beneath it. Both narrowings can tell that from an index
+instead, so the walk stays lazy and has no budget:
+
+- **Sections.** A `sectionReach` set per snapshot: every node from which a
+  section can be reached down. Build it once by walking **up** from each
+  section over the reverse index (`parentLinks`). Memoise it on
+  `graphSnapshotAtom`, so every pane shares it. The cost is O(sections ×
+  their ancestors).
+- **Text filter.** The ancestor closure of the matched ids, built by
+  walking up from each match to the view's root. The cost is O(matches ×
+  depth), once per filter and snapshot.
+- **Sort.** `walkGraph` orders a block's child list when it walks the
+  block. Each `Block` already holds the complete list, so the sort needs no
+  eager walk either.
+
+`walkGraph` takes the narrowing as one more option. Beneath a row it lists
+only the children that pass: in the reach set or the closure, or beneath a
+match. Then it asks the fold rule as usual. `filteredView` becomes a thin
+wrapper and then goes away (step 13).
+
+### 5.6 Keys
+
+**Row keys.** A narrowed row keeps the occurrence key it has in the full
+note, because the key is the row's path in the graph (`src/blocks/view.ts`).
+So a selection, a fold or a pivot survives a toggle of sections-only or of
+the filter.
+
+**Fold entries.** A narrowed view keeps folds of its own, over a standing
+rule of everything open (`foldKeyOf`, `src/data/view-state.ts`).
+Sections-only joins that key: `foldKeyOf(noteId, { filter, sort, sections
+})`. So a fold made in sections-only never closes a row of the full note.
+
+**Keyboard keys.**
+
+| Key (select mode)   | Action                                                   |
+| ------------------- | -------------------------------------------------------- |
+| `q`                 | Toggle sections-only in the active pane. Free on `main`. |
+| `/`                 | Focus the active pane's filter field.                    |
+| `Escape` (in field) | Leave the field. On an empty field, clear the filter.    |
+
+The split-view work adds `o` (open beside), so `q` does not collide. The
+help panel lists the keys from `src/shortcuts/registry.ts` as usual.
+
+## 6. Fold state: why rows need folding again
+
+Finn often folds and unfolds the same rows again and again. This section
+finds the causes in the code, compares Pensive, and ranks the fixes.
+
+### 6.1 The fold model today
+
+- A standing **depth rule**: a row is open while `level < n`, n = 2 by
+  default (`expandedByDepth`, `src/blocks/default-collapsed.ts`).
+- Over it, the reader's **own folds**: open and closed occurrence keys, per
+  view, in localStorage (`collapse:<viewKey>`, `src/data/view-state.ts`).
+  At most 500 views are kept.
+- A board row starts closed (`foldRule`).
+- A narrowed view has its own entry, over a rule of everything open.
+
+### 6.2 Causes
+
+1. **Leaving a focus stores opens.** `revealOnLeaveFocus`
+   (`src/routes/_appRoot.views_.$.tsx`) opens each closed fold on the path
+   back to the block, with `setFold(key, true)`. These are stored as the
+   reader's own opens. After a few focus trips the note stays open along
+   every path the reader came back on, and the reader folds those rows
+   again.
+2. **Focus changes the keys and the levels.** `blockView` keys rows from
+   the focused block (`F/c`). The note keys the same row `a/F/c`. So a fold
+   made in focus does not apply in the note, and the opposite. The depth
+   rule also counts from the focused block (level 0), so a row closed in
+   the note can be open in focus, and the opposite.
+3. **A fold is lost when its row moves.** Indent, outdent, a move to
+   another parent, cut and paste, and a drag give the row a new path, and
+   so a new key. The new key has no entry, so the depth rule decides. The
+   level can change too, so a row that was open can now start closed.
+4. **The depth rule closes new rows.** A row that arrives from another
+   device, a paste or a sync is decided by the rule. Every parent at
+   level n starts closed.
+5. **A block with two places has two folds.** The reader folds it in one
+   place and finds it open in the other.
+6. **Folds stay on one device.** Another device, a cleared browser, or a
+   note older than the last 500 written starts on the depth rule again.
+7. **Two panes overwrite each other** (when the split view lands). Each
+   `useFoldRule` holds its own copy and writes the whole entry on each
+   toggle (`writeFolds`). Two panes, or two browser tabs, on one note undo
+   each other's toggles. A reload shows the last pane's set.
+8. **A filter's folds stay with the filter.** A fold made while filtered
+   does not carry to the note. This is by design.
+
+### 6.3 What Pensive does
+
+- Everything is open by default. The 200-row budget stops the walk.
+- A collapse is keyed by entity id, per tab. It survives a move and
+  applies at every place the entity shows.
+- The reader narrows by scope, not by folds: push a frame (focus), or
+  turn on sections-only or a text filter. A pop restores the frame as it
+  was.
+
+### 6.4 Fixes, ranked by value against cost
+
+| Rank | Fix                                                                                                                                                                                                                                                                          | Causes  | Value  | Cost   |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------ | ------ |
+| 1    | **Do not store the opens that leaving a focus makes.** Hold them on the frame, as a transient layer over the folds. `useFoldRule` already takes a `held` set for this kind of layer.                                                                                         | 1       | High   | Low    |
+| 2    | **Write one key, not the whole entry.** Read the stored entry, change the one key, and write it back. Listen for the `storage` event so other panes and tabs see the change.                                                                                                 | 7       | High   | Low    |
+| 3    | **Move a fold with its row.** `indentBlock` and `outdentBlock` already return the row's new key. A move among siblings keeps its key. Cut and paste, and a drag, pass the old and the new path. Rewrite the stored keys under the old path to the new path in the same step. | 3       | High   | Low    |
+| 4    | **Scope instead of fold.** Sections-only (`q`) and the per-pane filter (section 5) let the reader see the structure without closing rows one by one, and leave the folds alone.                                                                                              | 4, 5    | High   | Medium |
+| 5    | **A depth setting of "All"** (Pensive's default), plus two fold commands: fold the siblings of the row, and fold the note to the row's level.                                                                                                                                | 4       | Medium | Low    |
+| 6    | **Collapse by block id** (Pensive), with a key per row only for a block that shows in more than one place. A fold then survives a move and applies in focus and in the note. `foldRule` already reads bare-id entries.                                                       | 2, 3, 5 | Medium | Medium |
+| 7    | **Folds per focus frame.** A frame keeps the folds made in it, so a pop restores them exactly. With fixes 1 and 2, a pop already restores the view it returns to, so this adds little.                                                                                       | 1, 2    | Low    | Medium |
+| 8    | **Folds on every device.** Sync the reader's folds. This needs a store change, which is out of scope here.                                                                                                                                                                   | 6       | Medium | High   |
+
+The proposal: do 1, 2 and 3 first (small, and each removes a cause). Do 4
+with the walk work. Ask Finn about 5 and 6 (open question 16). Leave 7 and 8.
+
+Fix 6 changes one rule of the split-view work: there, a fold made in focus
+never touches the view it came from. With fold by id, it does. Fix 3 gives
+most of fix 6's gain without that change.
+
+## 7. Migration plan
 
 Each step is one small PR. Each PR runs only the test files it touches, and
 the pre-push gate. A step that a reader can see adds a changelog file.
@@ -455,9 +686,10 @@ the pre-push gate. A step that a reader can see adds a changelog file.
    Tests (`graph.test.ts`, `view.test.ts`): a two-block cycle walked up
    shows one looped leaf; the row it came from is still skipped.
 8. **Pivots in a narrowed view.** `filteredView` walks with the frame's
-   pivots.
-   Tests (`filter-view.test.ts`): a filter inside an up region; a sort
-   leaves up rows in holder order.
+   pivots, and keeps an up region whole (4.9). Step 13 later moves the
+   narrowing into the walk.
+   Tests (`filter-view.test.ts`): a filter does not prune an up region; a
+   sort leaves up rows in holder order.
 9. **Retire "Show links".** Remove `linkDirectionsAtom`, `LinkDirections`,
    the `directions` options and the Settings entry. Remove the stored
    `link-directions` value. Update `docs/graph-schema-v2.md` ("Upstream"),
@@ -467,10 +699,54 @@ the pre-push gate. A step that a reader can see adds a changelog file.
    Tests: the settings tests lose the option; the walk tests that used
    `directions` move to pivots.
 
-Steps 1 to 3 change nothing a reader sees. Step 4 needs the split-view work
-or the route parameter. Steps 5 to 8 can merge in any order after 4.
+10. **Write one fold key at a time** (6.4, fix 2). `setFold` reads the
+    stored entry, changes one key and writes it back. `useFoldRule` listens
+    for the `storage` event.
+    Tests (`view-state.test.ts`): two hooks on one view keep both toggles;
+    a toggle in one hook shows in the other.
+11. **Do not store the opens that leaving a focus makes** (fix 1).
+    `revealOnLeaveFocus` puts its opens in a transient layer on the frame
+    (the `held` set of `useFoldRule`), not in the stored folds.
+    Tests (`view-state.test.ts`): a held open shows the row and is not
+    written; a reload is back on the stored folds. Add a changelog file.
+12. **Move a fold with its row** (fix 3). Add a pure `rekeyFolds(folds,
+from, to)` to `src/data/view-state.ts`. Indent, outdent, cut and
+    paste, and a drag call it with the old and the new key.
+    Tests (`view-state.test.ts`, `commands.test.ts`): a closed row stays
+    closed after indent and outdent; its closed descendants stay closed;
+    other keys do not change. Add a changelog file.
+13. **Narrow inside the walk** (5.5). Add the `sectionReach` index and the
+    filter's ancestor closure. `walkGraph` takes the narrowing and sorts
+    child lists as it walks. `filteredView` becomes a thin wrapper, then
+    goes.
+    Tests (`graph.test.ts`, `filter-view.test.ts`): the lazy walk gives
+    the same rows, context and matches as the eager walk for every
+    existing filter test; a closed row is not walked; a loop ends the
+    walk.
+14. **Sections-only** (5.3). Add the `sections` frame flag, its URL form,
+    the `q` key, a header toggle and the fold entry key.
+    Tests: `query.test.ts` or `graph.test.ts` for the rule (a section, a
+    path row, a hidden body, a linked note and a board row, a note with
+    no sections); `panes.test.ts` for the URL; `keymap.test.ts` for `q`; a
+    Storybook story. Add a changelog file.
+15. **A filter per frame and per pane** (5.4). Move the filter to
+    `FocusFrame.filter`, with the first pane's `?filter=` kept. The second
+    pane gets a filter field. `/` focuses the active pane's field.
+    Tests (`panes.test.ts`): an encoded filter round-trips; a pop restores
+    the frame's filter; two panes keep their own. Add a changelog file.
+16. **Collapse by block id** (fix 6), only if Finn wants it (open question
+    16). Write a fold by id for a block with one place, by key for a block
+    with more.
+    Tests (`view-state.test.ts`): a fold survives a move to another parent;
+    a fold made in focus shows in the note; a block in two places keeps a
+    fold per place.
 
-## 6. Open questions for Finn
+Steps 1 to 3 change nothing a reader sees. Step 4 needs the split-view work
+or the route parameter. Steps 5 to 8 can merge in any order after 4. Steps
+10 to 12 do not depend on pivots and can go first. Steps 14 and 15 need
+step 13, and step 15 needs the frame model of step 4.
+
+## 8. Open questions for Finn
 
 1. **Pivot key.** This design keys a pivot by block id, as Pensive does, so
    a pivot applies to every row of the block in the frame. Do you want it
@@ -490,8 +766,9 @@ or the route parameter. Steps 5 to 8 can merge in any order after 4.
 6. **An up pivot on the note root.** It replaces the note's blocks with what
    holds the note, as in Pensive. Is that what you want, or must the note's
    blocks stay?
-7. **Filter and pivots.** Pensive keeps a pivoted subtree whole under a
-   filter. This design filters every row. Which do you want?
+7. **Filter and pivots.** This design keeps an up region whole under a
+   filter and under sections-only, as Pensive keeps a pivoted subtree
+   whole. Do you want the filter to prune holders too?
 8. **Paste and drag into an up region.** Refuse (proposed for the first
    version), or link each pasted block as a new holder?
 9. **Order of holders.** Holders have no order of their own. Do you want
@@ -500,3 +777,50 @@ or the route parameter. Steps 5 to 8 can merge in any order after 4.
     them. Do you want folds per pane as well?
 11. **Labels and shortcut.** Which words and which key do you want for the
     pivot entries and the cycle shortcut?
+12. **What is a section.** Headings, plus linked note rows and board rows,
+    is proposed. Do you want headings only, or other types as well (for
+    example quotes, or bold first lines)?
+13. **A section's hidden body.** Do you want a count of hidden rows on a
+    section in sections-only, so you can see where the detail is?
+14. **The filter's language.** The design keeps the query language
+    (`type:`, `under:`, text). Pensive matches plain text only. Is the
+    query language right for the in-place filter?
+15. **A third toggle.** Do you want "hide done to-dos" as a toggle, the
+    nearest counterpart of Pensive's "hide snoozed"?
+16. **Fold by id.** Fix 6 makes a fold follow the block, and a fold made
+    in focus then shows in the note. Do you want that, or are fixes 1 to 3
+    enough? Do you want a depth setting of "All" (fix 5)?
+17. **Keys.** Is `q` right for sections-only, and `/` for the filter field?
+
+## 9. Later: layered stores
+
+Finn: a nice-to-have, not for now. This section records the idea only.
+
+**Today.** A share is a slice of another user's corpus, fetched whole and
+held in memory, then merged into `graphSnapshotAtom`
+(`src/data/shared-mode.ts`, docs/sharing.md). The write seam
+(`src/data/store.ts`) sends a batch of ops to the share it names, and only
+the verbs the owner granted are allowed. A block cannot live in a shared
+note and in one of your own at once.
+
+**The idea.** Treat each share as a read-only **layer** under your own
+corpus. Your edits go in your own layer, on top:
+
+- A link from one of your blocks to a block of the share puts that block in
+  your outline, with no copy.
+- A change of text or type on a share's block is an override row in your
+  layer. You see the override; the owner's block does not change.
+- To hide a share's link in your view is a hide row in your layer.
+
+**What the walk needs.** Nothing new. The walk reads one merged snapshot,
+so pivots, folds, sections and the filter work across layers. An up pivot
+on a share's block shows its holders in both layers.
+
+**What it needs elsewhere.** This is why it is not for now:
+
+- Override and hide rows in your corpus, keyed by share and node. That is
+  a schema and sync change.
+- A rule for an override when the owner later changes the same text.
+- A marker on a row that shows an override, and a way to drop it.
+- A share with write still writes to the owner's corpus. The layer is for
+  read-only shares, or for edits the reader wants to keep private.
