@@ -40,3 +40,33 @@ describe("BlockContent maths", () => {
     expect(container.textContent).toBe("Opening $$ only")
   })
 })
+
+describe("BlockContent arrows", () => {
+  it("draws -> as an arrow", () => {
+    const { container } = render(<BlockContent content="Idea -> draft -> note" />)
+    expect(container.textContent).toBe("Idea → draft → note")
+  })
+
+  it("draws an arrow inside formatting and a link's text", () => {
+    const { container } = render(
+      <BlockContent content="**a -> b** and [x -> y](https://example.com/a->b)" />,
+    )
+    expect(container.querySelector("strong")?.textContent).toBe("a → b")
+    const link = container.querySelector("a")
+    expect(link?.textContent).toBe("x → y")
+    expect(link?.getAttribute("href")).not.toContain("→")
+  })
+
+  it("leaves -> in a code span as typed", () => {
+    const { container } = render(<BlockContent content="Call `a->b` -> done" />)
+    expect(container.querySelector("code")?.firstChild?.textContent).toBe("a->b")
+    expect(container.textContent).toContain("a->b")
+    expect(container.textContent).toContain("→ done")
+  })
+
+  it("leaves -> in maths to KaTeX", () => {
+    const { container } = render(<BlockContent content="$$a -> b$$" />)
+    expect(container.querySelector("math")).not.toBeNull()
+    expect(container.textContent).not.toContain("→")
+  })
+})
