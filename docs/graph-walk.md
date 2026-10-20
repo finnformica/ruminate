@@ -5,8 +5,9 @@ Status: **design, not built.** Requested by Finn, who prefers the walk of
 This document describes the two walks and lists what a reader sees
 differently. It proposes a design for pivots (section 4), a sections-only
 toggle and an in-place filter in the walk (section 5), and fixes for fold
-state (section 6). It gives a migration plan, open questions, and a note on
-layered stores for later. Pensive has no
+state (section 6). Section 7 shows how Views, panes and frames fit
+together, with the decisions that model needs. It gives a migration plan,
+open questions, and a note on layered stores for later. Pensive has no
 license: this document takes ideas from it and copies no code.
 
 Nothing here changes storage, events, sync or the D1 schema. The `link` table
@@ -636,7 +637,173 @@ Fix 6 changes one rule of the split-view work: there, a fold made in focus
 never touches the view it came from. With fold by id, it does. Fix 3 gives
 most of fix 6's gain without that change.
 
-## 7. Migration plan
+## 7. How it fits together
+
+This section puts the parts above into one model, as Finn sees it, and
+lists the decisions it needs. The names on the left are ruminate's; the
+names in brackets are Pensive's.
+
+### 7.1 The model
+
+| Ruminate        | Pensive          | What it is                                                      | Where it is kept                         |
+| --------------- | ---------------- | --------------------------------------------------------------- | ---------------------------------------- |
+| The graph       | The entity store | One graph per user: `nodes` and `link` rows.                    | D1 and the browser's SQLite, synced      |
+| The hidden root | —                | A node (`corpus_root`) that notes hang under.                   | A node and its `child` links             |
+| A **View**      | A saved frame    | An entry point into the graph: a saved query.                   | The `views` table, synced as view events |
+| A **pane**      | A tab            | One column of the split view: a stack of live frames.           | The URL (`src/data/panes.ts`)            |
+| A **frame**     | A frame          | One live query: root, selection, pivots, filter, sections-only. | The URL (4.4, 5.2)                       |
+| A pivot         | A pivot          | A query on one block (section 4).                               | The frame                                |
+| A fold          | A collapse       | A collapse on one row (4.5, section 6).                         | localStorage, per view                   |
+
+1. **One graph.** Notes hang under a hidden root node. Today the root
+   (`corpus_root`, docs/graph-storage.md, "Ordering notes") is for order
+   only. It is made on the first drag, and it holds only the notes that
+   were dragged. A note is a note because its type is `note`.
+2. **Views are the entry points.** The sidebar's Views list is the `views`
+   rows that say `pinned` (`root_id`, `filter`, `sort`, `pinned`,
+   `sort_key`; docs/metadata.md, "Views"). Every note and board is made
+   with one. A block gets one from **Add to Views**.
+3. **A saved View is a saved query**, the same as a Pensive frame: a root,
+   a filter (text and sections-only), pivots, and perhaps a default depth.
+   Today the row holds the root, the filter and the sort. The other fields
+   are decision 3 below.
+4. **A pane is a tab:** a stack of live frames, as the split-view work
+   builds it.
+5. **Opening a View sets the pane's base frame.** The stack becomes one
+   frame, made from the View's row.
+6. **Focus pushes a frame. Pop restores the frame below:** its root, its
+   selection, its pivots, its filter and its folds. Folds come back
+   because they are kept per view (section 6). Fix 1 in 6.4 stops a pop
+   from storing new opens.
+7. **Save as view** turns the frame on screen into a View row: its root,
+   its filter and its other saved fields, and `pinned`. Today this takes
+   two steps: **Update to default** (filter and sort) and **Add to
+   Views**.
+8. **The focus breadcrumb** shows the stack's frames, then the path inside
+   the frame on screen. The split-view work builds it. A frame crumb pops
+   to that frame. A path crumb is an ancestor of the selected row, read
+   off its occurrence key (`pathIdsOf`). A click on a path crumb pushes a
+   frame rooted there. Beneath an up pivot, a path crumb shows an up
+   arrow, because the key's segment is marked `^`.
+
+### 7.2 An example
+
+1. Finn opens the View "Project X" from the sidebar. Pane 1 has one
+   frame: root "Project X", its saved filter.
+2. Finn presses `q`. The frame now has sections-only on. The outline shows
+   the headings only.
+3. Finn selects the heading "Decisions" and presses `f`. A frame is
+   pushed, rooted at "Decisions". The crumbs read "Project X ›
+   Decisions".
+4. Finn puts an up pivot on one row, to see the other notes that hold it.
+5. Finn presses `⇧F`. The pane pops to "Project X", with sections-only on,
+   "Decisions" selected and its folds as they were.
+6. Finn chooses **Save as view**. The "Project X" row now saves
+   sections-only too, so the View opens that way next time.
+
+### 7.3 Decisions for Finn
+
+1. **What a pushed frame inherits.**
+   - None of it, as in Pensive. The new frame starts with no filter, no
+     sections-only and no pivots.
+   - The filter and sections-only (the "lens"), but no pivots.
+   - The lens and the pivots. Pivots are keyed by block id (4.4), so they
+     apply in the new frame without change.
+
+   Proposed: the lens, plus the pushed row's own pivot as the new frame's
+   root query (open question 4). A pop always restores the frame below
+   exactly, whatever the choice.
+
+2. **Selection identity for a block with many parents.** A frame records
+   the row selected when the reader left it.
+   - Pensive records a path: the list of ids from the root.
+   - Ruminate records an occurrence key. It is a path too, with each up
+     segment marked `^`, so it also tells the direction.
+
+   Proposed: the occurrence key. When the key is no longer a row (the
+   block moved), select the block's first row in the frame
+   (`firstOccurrenceKey`). When the block is gone, select nothing.
+
+3. **Where each part of frame state lives.**
+
+   | State                   | URL (live, per pane) | localStorage (per device) | View row (synced as view events)                  |
+   | ----------------------- | -------------------- | ------------------------- | ------------------------------------------------- |
+   | The stack and each root | Yes                  | —                         | The base frame's root is the View's `root_id`     |
+   | Selection               | Yes                  | —                         | No                                                |
+   | Filter                  | Yes                  | —                         | Yes (`filter`, today)                             |
+   | Sort                    | Yes                  | —                         | Yes (`sort`, today)                               |
+   | Sections-only           | Yes                  | —                         | Decision: a new field, or a qualifier in `filter` |
+   | Pivots                  | Yes                  | —                         | Decision: a new field, or never saved             |
+   | Default depth           | —                    | The device setting        | Decision: a new field, or never saved             |
+   | Folds                   | —                    | Yes                       | No                                                |
+
+   A new field in the `views` row is a schema change and a change to view
+   events. This design does not make one. One way avoids it for
+   sections-only: a qualifier in the query language (for example
+   `is:section`), saved in the `filter` column as today. Pivots and depth
+   need new fields, or stay unsaved.
+
+4. **Do notes still need root links, and what happens to a note with no
+   View?** Today a note with no `views` row still exists and still opens
+   from search, Recent, the calendar, a link and its address. It is only
+   off the list. Two models:
+   - **Every note under the root.** Each note gets a `child` link from the
+     hidden root, so the root reaches the whole corpus. Reachability (the
+     Unassigned basket, the delete rescue) then starts at one node. This
+     is a backfill of ops, not a schema change. The list order still comes
+     from the views' `sort_key`.
+   - **Views are the only entry points.** The root keeps only its order
+     role, or goes. A note with no View is "unlisted". It is still found by
+     search, Recent and the calendar.
+
+   Proposed: keep the note type as what makes a note, and keep the root
+   for order only. Ask Finn if an unlisted note needs a place of its own
+   (an "Unlisted" group).
+
+5. **What is a section.** Two models:
+   - **The heading types** (`h1`–`h3`), as 5.3 proposes, plus linked note
+     and board rows.
+   - **A section flag on any block**, as in Pensive. It is a prop
+     (`props.section`), set with `setProps`, so it needs no schema change.
+     A to-do or a bullet can then be a section. But a block then has two
+     ways to say "heading", and the flag needs a marker and a key.
+
+   Proposed: the heading types first. Add the flag only if Finn marks
+   non-heading blocks as sections in practice (open question 12).
+
+6. **Edits inside an inbound pivot.** 4.8 gives the full table. The parts
+   that need Finn:
+   - Paste and drag into an up region: refuse (proposed), or link each
+     pasted block as a new holder (open question 8).
+   - Enter on a heading with an up pivot makes a new holder, not a child.
+   - Move up and move down stay refused, because holders have no order
+     (open question 9).
+   - **Add upstream link** writes straight to the graph and is not an undo
+     step today. Do the other edits in an up region stay undo steps?
+
+7. **The stack on a phone.** The split-view work shows the active pane
+   only on a narrow screen. The decisions:
+   - Does the phone's Back (the gesture, or Android's Back key) pop a
+     frame? Proposed: yes. Each push adds a history entry, and Back pops
+     it. A change of pivot or filter replaces the entry and adds none.
+   - The breadcrumb is too wide for a phone. Proposed: show the frame
+     below as one Back crumb, and the full stack in a sheet on a tap.
+   - A phone has no `q` and no `/`. Proposed: a Sections toggle and the
+     Filter field in the header, and the pivot entries in the long-press
+     sheet (4.10).
+
+8. **Open a View: set or push.** Finn's model sets the pane's base frame,
+   so the old stack goes. The split-view work pushes instead
+   (`useOpenInPane`), so Back returns to what the pane showed. Proposed:
+   set the base frame, as Finn describes. Browser history still returns
+   to the old stack, because the URL holds it.
+
+9. **Save as view when the root has a View.** There is one View per root,
+   minted under the root's id. So **Save as view** on a root that has a
+   View overwrites that row. Do you want more than one View per root (for
+   example "Project X, sections") later? That is a schema change.
+
+## 8. Migration plan
 
 Each step is one small PR. Each PR runs only the test files it touches, and
 the pre-push gate. A step that a reader can see adds a changelog file.
@@ -746,7 +913,7 @@ or the route parameter. Steps 5 to 8 can merge in any order after 4. Steps
 10 to 12 do not depend on pivots and can go first. Steps 14 and 15 need
 step 13, and step 15 needs the frame model of step 4.
 
-## 8. Open questions for Finn
+## 9. Open questions for Finn
 
 1. **Pivot key.** This design keys a pivot by block id, as Pensive does, so
    a pivot applies to every row of the block in the frame. Do you want it
@@ -792,7 +959,7 @@ step 13, and step 15 needs the frame model of step 4.
     enough? Do you want a depth setting of "All" (fix 5)?
 17. **Keys.** Is `q` right for sections-only, and `/` for the filter field?
 
-## 9. Later: layered stores
+## 10. Later: layered stores
 
 Finn: a nice-to-have, not for now. This section records the idea only.
 
