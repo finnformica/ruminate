@@ -1591,3 +1591,63 @@ describe("a selection of rows (`keys`)", () => {
     })
   })
 })
+
+describe("the rows beneath a row read the pivots (docs/graph-walk.md, 3.8)", () => {
+  /** The note n holds a > x > y and b; p holds x and z, and m holds p: the
+   * doc a walk with an up pivot on x draws (x and p carry their holders). */
+  function pivoted(): BlockDoc {
+    return {
+      props: null,
+      rootBlockIds: ["a", "b"],
+      blocks: {
+        a: { id: "a", type: "text", text: "A", children: ["x"] },
+        b: { id: "b", type: "text", text: "B", children: [] },
+        x: { id: "x", type: "text", text: "X", children: ["y"], upstream: ["a", "p"] },
+        p: { id: "p", type: "text", text: "P", children: ["x", "z"], upstream: ["m"] },
+        z: { id: "z", type: "text", text: "Z", children: [] },
+        m: { id: "m", type: "note", text: "M", children: ["p"] },
+      },
+    }
+  }
+  const up = (...ids: string[]) => new Map(ids.map((id) => [id, "up" as const]))
+  const at = (key: string, over: Partial<CommandInput> = {}) =>
+    input(pivoted(), key, { rootId: "n", directions: "downstream", ...over })
+
+  it("a fold toggle under a pivot acts on the right row", () => {
+    // x up: its holder p is beneath it, so it folds.
+    expect(runCommand("toggleCollapse", at("a/x", { pivots: up("x") })).toggleCollapse).toBe("a/x")
+    // a up: its only holder is the note, so nothing is beneath it.
+    expect(
+      runCommand("toggleCollapse", at("a", { pivots: up("a") })).toggleCollapse,
+    ).toBeUndefined()
+    expect(runCommand("toggleCollapse", at("a")).toggleCollapse).toBe("a")
+  })
+
+  it("the first row beneath is the walk's first row", () => {
+    const first = (key: string, over: Partial<CommandInput>) =>
+      runCommand("selectFirstChild", at(key, over)).focus
+    expect(first("a/x", {})).toEqual({ mode: "select", key: "a/x/y" })
+    expect(first("a/x", { pivots: up("x") })).toEqual({ mode: "select", key: "a/x/^p" })
+    // Beneath an up pivot the rows inherit up: p's holder m, not z.
+    expect(first("a/x/^p", { pivots: up("x") })).toEqual({ mode: "select", key: "a/x/^p/^m" })
+    // A down pivot inside the up region: what p holds, less x (where it came from).
+    expect(
+      first("a/x/^p", {
+        pivots: new Map([
+          ["x", "up"],
+          ["p", "down"],
+        ]),
+      }),
+    ).toEqual({
+      mode: "select",
+      key: "a/x/^p/z",
+    })
+  })
+
+  it("in focus, a pivot above the focused block does not apply", () => {
+    // Focused on x: its query starts at x, down, whatever a's pivot says.
+    expect(
+      runCommand("selectFirstChild", at("a/x", { pivots: up("a"), focusRootId: "x" })).focus,
+    ).toEqual({ mode: "select", key: "a/x/y" })
+  })
+})

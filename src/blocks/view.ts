@@ -1,3 +1,5 @@
+import type { LinkDirections } from "../data/graph"
+import { rootDirection, type LinkPivots } from "./query"
 import type { Block, BlockDoc } from "./types"
 
 /**
@@ -53,6 +55,52 @@ export interface Occurrence {
    * a fresh path, which is how a reader descends deliberately.
    */
   looped?: boolean
+  /** The row's block has a link pivot (src/blocks/query.ts): the rows
+   * beneath walk this way. The editor draws the marker from it. Absent on a
+   * looped row, which has nothing beneath it. */
+  pivot?: Direction
+}
+
+/**
+ * What the rows read to follow the walk (`walkGraph`, src/data/graph.ts),
+ * so a view's rows are the rows the walk drew. Each row has a query: its
+ * block's link pivot, or the query of the row above (the root query at the
+ * top: the pivot on `rootId`, down when there is none). An up row lists its
+ * holders only; a down row lists what `directions` names.
+ */
+export interface RowRule {
+  /** The frame's link pivots. None by default. */
+  pivots?: LinkPivots
+  /** Which links a row whose query is down follows: the "Show links"
+   * setting, as the walk took it (`WalkOptions.directions`). Absent: what the
+   * doc carries, a block's children and its `upstream` list when it has one,
+   * which is right only with no pivots. Retires with the setting (GW-18). */
+  directions?: LinkDirections
+  /** The id of the view's own root when it is not a block in the doc (the
+   * note): on the path from the start, and the root query's block. */
+  rootId?: string | null
+}
+
+const NO_PIVOTS: LinkPivots = new Map()
+
+/** A row's query: its block's pivot, or the query of the row above. */
+const queryOf = (pivots: LinkPivots, id: string, inherited: Direction): Direction =>
+  pivots.get(id) ?? inherited
+
+/** The root query of a view rooted at `rootId` (the note): the pivot on it,
+ * down when there is none or no root is named. */
+export const rootQueryOf = (pivots: LinkPivots, rootId: string | null | undefined): Direction =>
+  rootId ? rootDirection(pivots, rootId) : "down"
+
+/** The query of the row at the end of a path of ids (`pathIdsOf`): the
+ * pivots along it, from `inherited` (the root query) down. The rows beneath
+ * that row walk this way. */
+export function queryOfPath(
+  ids: readonly string[],
+  pivots: LinkPivots,
+  inherited: Direction = "down",
+): Direction {
+  return ids.reduce<Direction>((query, id) => queryOf(pivots, id, query), inherited)
 }
 
 /**
@@ -87,15 +135,26 @@ export interface DocWalkStep {
  * skipped too: the block it was reached up from is not something it holds
  * beneath it, but where the row came from. `path` holds the ids on the
  * path, the view's root included.
+ *
+ * `query` is the row's own query (`RowRule`): up, the rows beneath are its
+ * parents only; down, what `directions` names (absent: the children, and
+ * the parents the block carries). At the top (`block` null), a down query
+ * lists the doc's roots in every setting.
  */
 export function rowsBeneath(
   doc: BlockDoc,
   block: Block | null,
   path: ReadonlySet<string>,
   direction: Direction = "down",
+  query: Direction = "down",
+  directions?: LinkDirections,
 ): { id: string; direction: Direction }[] {
-  const children = block ? block.children : doc.rootBlockIds
-  const upstream = block ? (block.upstream ?? []) : (doc.upstream ?? [])
+  // The doc's own roots are rows whenever the root query is down, whatever
+  // the setting: the walk starts from them.
+  const followsDown = query === "down" && (block === null || directions !== "upstream")
+  const followsUp = query === "up" || directions !== "downstream"
+  const children = !followsDown ? [] : block ? block.children : doc.rootBlockIds
+  const upstream = !followsUp ? [] : block ? (block.upstream ?? []) : (doc.upstream ?? [])
   const down = direction === "up" ? children.filter((id) => !path.has(id)) : children
   return [
     ...down.map((id) => ({ id, direction: "down" as const })),
@@ -110,38 +169,49 @@ export function rowsBeneath(
  * once more as a leaf (`looped`) and never descended, so a doc holding a
  * loop (docs/graph-schema-v2.md, "Loops") ends where the loop closes rather
  * than hanging. Return `false` from `visit` to skip a block's children.
+ * Beneath each block it visits the rows `rowsBeneath` lists for the row's
+ * query (`rule`), children before parents. From the doc's own roots, the
+ * root's parents (`doc.upstream`) come after them.
  */
 export function walkDoc(
   doc: BlockDoc,
   ids: string[],
   visit: (step: DocWalkStep) => boolean | void,
-  parentKey: string | null = null,
-  depth = 0,
-  path: Set<string> = new Set(),
-  direction: Direction = "down",
+  { pivots = NO_PIVOTS, directions, rootId = null }: RowRule = {},
 ): void {
-  ids.forEach((id, index) => {
-    const block = doc.blocks[id]
-    if (!block) return
-    const looped = path.has(id)
-    const key = keyOf(parentKey, id, direction)
-    const descend = visit({ block, key, direction, parentKey, depth, index, looped })
-    if (looped || descend === false) return
-    path.add(id)
-    // Beneath a parent row, the block it was reached up from is not a row.
-    const down =
-      direction === "up" ? block.children.filter((child) => !path.has(child)) : block.children
-    walkDoc(doc, down, visit, key, depth + 1, path)
-    // Its parents beneath its children, those on the path above skipped.
-    const up = (block.upstream ?? []).filter((parent) => !path.has(parent))
-    if (up.length > 0) walkDoc(doc, up, visit, key, depth + 1, path, "up")
-    path.delete(id)
-  })
-  // At the top level, the root's own parents after the roots.
-  if (parentKey === null && direction === "down" && doc.upstream && ids === doc.rootBlockIds) {
-    const up = doc.upstream.filter((parent) => !path.has(parent))
-    if (up.length > 0) walkDoc(doc, up, visit, null, depth, path, "up")
+  const path = new Set<string>()
+  if (rootId) path.add(rootId)
+  const walk = (
+    rows: { id: string; direction: Direction }[],
+    parentKey: string | null,
+    depth: number,
+    inherited: Direction,
+  ) => {
+    // Each direction counts its own positions, children and parents apart.
+    for (const side of ["down", "up"] as const) {
+      rows
+        .filter((row) => row.direction === side)
+        .forEach(({ id, direction }, index) => {
+          const block = doc.blocks[id]
+          if (!block) return
+          const looped = path.has(id)
+          const key = keyOf(parentKey, id, direction)
+          const descend = visit({ block, key, direction, parentKey, depth, index, looped })
+          if (looped || descend === false) return
+          const query = queryOf(pivots, id, inherited)
+          path.add(id)
+          walk(rowsBeneath(doc, block, path, direction, query, directions), key, depth + 1, query)
+          path.delete(id)
+        })
+    }
   }
+  const rootQuery = rootQueryOf(pivots, rootId)
+  // At the top level, the root's own parents after the roots.
+  const top =
+    ids === doc.rootBlockIds
+      ? rowsBeneath(doc, null, path, "down", rootQuery, directions)
+      : ids.map((id) => ({ id, direction: "down" as const }))
+  walk(top, null, 0, rootQuery)
 }
 
 /** The key of `id` occurring under `parentKey` (null = a root), as a child
@@ -226,18 +296,23 @@ export function hasOccurrence(doc: BlockDoc, key: string): boolean {
  * reachable twice yields two keys; a loop's closing occurrence is one key
  * (`walkDoc`).
  */
-export function occurrenceKeys(doc: BlockDoc): string[] {
+export function occurrenceKeys(doc: BlockDoc, rule?: RowRule): string[] {
   const keys: string[] = []
-  walkDoc(doc, doc.rootBlockIds, ({ key }) => {
-    keys.push(key)
-  })
+  walkDoc(
+    doc,
+    doc.rootBlockIds,
+    ({ key }) => {
+      keys.push(key)
+    },
+    rule,
+  )
   return keys
 }
 
 /** The first occurrence (document order) of a block, or null. */
-export function firstOccurrenceKey(doc: BlockDoc, id: string): string | null {
+export function firstOccurrenceKey(doc: BlockDoc, id: string, rule?: RowRule): string | null {
   const suffix = `/${id}`
-  for (const key of occurrenceKeys(doc)) {
+  for (const key of occurrenceKeys(doc, rule)) {
     if (key === id || key.endsWith(suffix)) return key
   }
   return null
@@ -281,6 +356,11 @@ function olPositions(doc: BlockDoc, ids: string[]): number[] {
  *
  * Either way the root's key is its first occurrence in the document, so a
  * fold made while focused is the same fold outside focus.
+ *
+ * Given the walk's pivots and `directions` (`RowRule`), the rows are the
+ * rows the walk drew: each row lists what its query walks, and its
+ * `hasChildren` reads the same lists. In focus, the focused block's query is
+ * its own pivot, down when there is none.
  */
 export function buildRows(
   doc: BlockDoc,
@@ -289,33 +369,34 @@ export function buildRows(
     focusTitled = true,
     folds,
     rootId = null,
-  }: {
+    pivots = NO_PIVOTS,
+    directions,
+  }: RowRule & {
     focusRootId?: string | null
     /** Focused: is the root the view's title (a heading) rather than its
      * first row? See the note above. */
     focusTitled?: boolean
     folds: ReadonlySet<string>
-    /** The id of the view's own root when it is not a block in the doc (the
-     * note): on the path from the start, so a block's parent that is the
-     * note is never listed beneath it. */
-    rootId?: string | null
   },
 ): Occurrence[] {
   const rows: Occurrence[] = []
   const path = new Set<string>()
+  const beneath = (block: Block | null, direction: Direction, query: Direction) =>
+    rowsBeneath(doc, block, path, direction, query, directions)
   const walk = (
     block: Block | null,
     parentKey: string | null,
     depth: number,
     guideKeys: string[],
     direction: Direction,
+    query: Direction,
   ) => {
-    const beneath = rowsBeneath(doc, block, path, direction)
+    const list = beneath(block, direction, query)
     const numbers = olPositions(
       doc,
-      beneath.map((row) => row.id),
+      list.map((row) => row.id),
     )
-    beneath.forEach(({ id, direction }, index) => {
+    list.forEach(({ id, direction }, index) => {
       const row = doc.blocks[id]
       if (!row) return
       // The block is already on the path above: this row closes a loop. It is
@@ -323,10 +404,12 @@ export function buildRows(
       // the loop closes (focus on it to go round again).
       const looped = path.has(id)
       const key = keyOf(parentKey, id, direction)
+      const rowQuery = queryOf(pivots, id, query)
       path.add(id)
-      const hasChildren = !looped && rowsBeneath(doc, row, path, direction).length > 0
+      const hasChildren = !looped && beneath(row, direction, rowQuery).length > 0
       path.delete(id)
       const collapsed = hasChildren && folds.has(key)
+      const pivot = looped ? undefined : pivots.get(id)
       rows.push({
         key,
         id,
@@ -339,29 +422,32 @@ export function buildRows(
         collapsed,
         guideKeys,
         ...(looped ? { looped: true } : {}),
+        ...(pivot ? { pivot } : {}),
       })
       if (hasChildren && !collapsed) {
         path.add(id)
-        walk(row, key, depth + 1, [...guideKeys, key], direction)
+        walk(row, key, depth + 1, [...guideKeys, key], direction, rowQuery)
         path.delete(id)
       }
     })
   }
 
   const focusRoot = focusRootId ? doc.blocks[focusRootId] : undefined
+  const focusQuery = focusRoot ? queryOf(pivots, focusRoot.id, "down") : "down"
   if (focusRoot && focusTitled) {
     // Titled: the rows are the focus root's children (and parents), from
     // depth 0 — the root itself is not a row but the view's title (the
     // editor draws it as the note title, above the rows), always open.
     const key = focusRootKeyOf(doc, focusRoot.id)
     path.add(focusRoot.id)
-    walk(focusRoot, key, 0, [], "down")
+    walk(focusRoot, key, 0, [], "down", focusQuery)
   } else if (focusRoot) {
     // Untitled: the focused block is the view's first row, its own subtree
     // indented beneath it — a row like any other, fold and all.
     const key = focusRootKeyOf(doc, focusRoot.id)
-    const hasChildren = rowsBeneath(doc, focusRoot, path, "down").length > 0
+    const hasChildren = beneath(focusRoot, "down", focusQuery).length > 0
     const collapsed = hasChildren && folds.has(key)
+    const pivot = pivots.get(focusRoot.id)
     rows.push({
       key,
       id: focusRoot.id,
@@ -376,15 +462,16 @@ export function buildRows(
       hasChildren,
       collapsed,
       guideKeys: [],
+      ...(pivot ? { pivot } : {}),
     })
     if (hasChildren && !collapsed) {
       path.add(focusRoot.id)
-      walk(focusRoot, key, 1, [key], "down")
+      walk(focusRoot, key, 1, [key], "down", focusQuery)
       path.delete(focusRoot.id)
     }
   } else {
     if (rootId) path.add(rootId)
-    walk(null, null, 0, [], "down")
+    walk(null, null, 0, [], "down", rootQueryOf(pivots, rootId))
   }
   return rows
 }

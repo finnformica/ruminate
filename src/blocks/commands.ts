@@ -1,3 +1,4 @@
+import type { LinkDirections } from "../data/graph"
 import type { BlockOp } from "./history"
 import { DEFAULT_NEW_BLOCK_TYPE, isHeading, toggleType } from "./markers"
 import { defOf } from "./registry"
@@ -14,6 +15,7 @@ import {
   updateText,
   updateType,
 } from "./ops"
+import type { LinkPivots } from "./query"
 import type { BlockDoc, BlockType } from "./types"
 import {
   ancestorKeys,
@@ -24,7 +26,9 @@ import {
   keyOf,
   parentKeyOf,
   pathIdsOf,
+  queryOfPath,
   rootKeys,
+  rootQueryOf,
   rowsBeneath,
   siblingKey,
 } from "./view"
@@ -118,6 +122,13 @@ export interface CommandInput {
    * note) — on the path above every row, so a row's parent that is the
    * note is never one of the rows beneath it (`rowsBeneath`). */
   rootId?: string | null
+  /** The frame's link pivots (src/blocks/query.ts), as the walk took them:
+   * a command reads the rows beneath a row as the view drew them
+   * (`keysBeneath`). None by default. */
+  pivots?: LinkPivots
+  /** The "Show links" setting, as the walk took it (`RowRule.directions`).
+   * Retires with the setting (GW-18). */
+  directions?: LinkDirections
   /** Where stepping back one level returns to: the previous entry in the focus
    * navigation stack — the path the user actually took, which under the graph
    * model (multi-parent blocks) is the only honest "up". Null/absent when
@@ -201,19 +212,29 @@ export interface CommandResult {
 type Command = (input: CommandInput) => CommandResult
 
 const IGNORED: CommandResult = { handled: false }
+const NO_PIVOTS: LinkPivots = new Map()
 const STRUCTURAL: BlockOp = { type: "structural" }
 
 /** The block a row shows. */
 const blockOf = ({ doc, key }: CommandInput) => doc.blocks[idOfKey(key)]
 
 /** The keys of the rows beneath a row, in order: its children, then the
- * parents shown under it (`rowsBeneath`) — what a fold hides or shows. */
-function keysBeneath({ doc, key, rootId, focusRootId }: CommandInput): string[] {
-  const path = new Set(pathIdsOf(key))
+ * parents shown under it (`rowsBeneath`) — what a fold hides or shows. The
+ * row's query is the pivots along its path, from the view's root query (in
+ * focus, from the focused block down), so the keys are the rows drawn. */
+function keysBeneath(input: CommandInput): string[] {
+  const { doc, key, rootId, focusRootId, pivots = NO_PIVOTS, directions } = input
+  const ids = pathIdsOf(key)
+  const path = new Set(ids)
   if (rootId) path.add(rootId)
   if (focusRootId) path.add(focusRootId)
   const block = doc.blocks[idOfKey(key)] ?? null
-  return rowsBeneath(doc, block, path, directionOfKey(key)).map((row) =>
+  const from = focusRootId ? ids.indexOf(focusRootId) : -1
+  const query =
+    from >= 0
+      ? queryOfPath(ids.slice(from), pivots)
+      : queryOfPath(ids, pivots, rootQueryOf(pivots, rootId))
+  return rowsBeneath(doc, block, path, directionOfKey(key), query, directions).map((row) =>
     keyOf(key, row.id, row.direction),
   )
 }

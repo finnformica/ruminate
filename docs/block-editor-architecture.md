@@ -74,6 +74,14 @@ indent, outdent) read the direction off the key and act on the matching list —
 address siblings with `siblingKey` and what lies beneath a row with
 `rowsBeneath`, so none of them branch on direction themselves.
 
+Each row also has a **query** (docs/graph-walk.md, 3): the frame's link
+pivot on its block, or the query of the row above. An up row lists its
+holders only. A down row lists what the "Show links" setting names. The
+rows (`buildRows`, `walkDoc`, `occurrenceKeys`) take the pivots and the
+setting as `RowRule`, and a command takes them on `CommandInput`, so
+`rowsBeneath` lists the rows the walk drew. With no pivots, the rows are
+the rows of today.
+
 ## Adding a behaviour
 
 1. If it needs a new doc transform, add a pure function to `ops.ts` (+ test).

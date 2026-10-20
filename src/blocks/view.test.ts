@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest"
+import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
+import { blockView, buildGraphSnapshot, noteView, type LinkDirections } from "../data/graph"
 import { parse } from "./parse"
 import type { BlockDoc } from "./types"
 import {
@@ -333,11 +335,161 @@ describe("upstream occurrences", () => {
       ({ key, direction }) => {
         seen.push(`${direction === "up" ? "↑" : ""}${key}`)
       },
-      null,
-      0,
-      new Set(["n"]),
+      { rootId: "n" },
     )
     expect(seen).toEqual(["a", "a/s", "↑a/s/^p", "↑a/s/^p/^q", "b"])
     expect(occurrenceKeys({ ...graphed, upstream: ["q"] })).toContain("^q")
+  })
+})
+
+describe("rows read pivots (docs/graph-walk.md, 3)", () => {
+  const node = (id: string, type: string): NodeRow => ({
+    id,
+    type,
+    text: id,
+    props: null,
+    updated_at: 0,
+  })
+  const link = (source: string, destination: string, sortKey: string): LinkRow => ({
+    source_id: source,
+    destination_id: destination,
+    kind: "child",
+    sort_key: sortKey,
+    updated_at: 0,
+  })
+  // N > A > X > Y, N > B and N > P; M > P > X (X has two holders, A and P),
+  // P > Z; M > L > N (L holds the note N).
+  const graph = buildGraphSnapshot(
+    [
+      node("n", "note"),
+      node("m", "note"),
+      ...["a", "b", "x", "y", "p", "z", "l"].map((id) => node(id, "ul")),
+    ],
+    [
+      link("n", "a", "a0"),
+      link("n", "b", "a1"),
+      link("n", "p", "a2"),
+      link("a", "x", "a0"),
+      link("x", "y", "a0"),
+      link("m", "p", "a0"),
+      link("m", "l", "a1"),
+      link("p", "x", "a0"),
+      link("p", "z", "a1"),
+      link("l", "n", "a0"),
+    ],
+  )
+  const pivots = (entries: Record<string, "up" | "down">) => new Map(Object.entries(entries))
+
+  /** The note's rows as the walk draws them, and the keys the walk asked the
+   * fold rule about (each row with something beneath it), in order. */
+  const view = (
+    over: Record<string, "up" | "down">,
+    directions: LinkDirections = "downstream",
+    open: (key: string, level: number) => boolean = () => true,
+  ) => {
+    const asked: string[] = []
+    const rule = (key: string, level: number) => {
+      asked.push(key)
+      return open(key, level)
+    }
+    const { doc, collapsed } = noteView("n", graph, rule, directions, pivots(over))!
+    const rows = buildRows(doc, { folds: collapsed, rootId: "n", pivots: pivots(over), directions })
+    return { doc, rows, asked }
+  }
+
+  it("the rows equal the walk for the same pivots", () => {
+    const sets = [{}, { x: "up" }, { x: "up", p: "down" }, { a: "up" }, { n: "up" }] as const
+    const rules = [
+      () => true,
+      (_key: string, level: number) => level < 2,
+      (key: string) => key !== "a/x",
+    ]
+    for (const over of sets) {
+      for (const directions of ["downstream", "upstream", "both"] as const) {
+        for (const open of rules) {
+          const { doc, rows, asked } = view(over, directions, open)
+          // Each walked block is a row, and no other block is.
+          expect(new Set(rows.map((row) => row.id))).toEqual(new Set(Object.keys(doc.blocks)))
+          // A row has a chevron exactly where the walk asked about it.
+          expect(rows.filter((row) => row.hasChildren).map((row) => row.key)).toEqual(asked)
+        }
+      }
+    }
+  })
+
+  it("an up pivot draws the holders beneath its row, less the row it came from", () => {
+    const { rows } = view({ x: "up" })
+    expect(summary(rows)).toEqual([
+      "a",
+      "  a/x",
+      "    a/x/^p",
+      "      a/x/^p/^m",
+      "b",
+      "p",
+      "  p/x",
+      "    p/x/^a",
+      "  p/z",
+    ])
+    expect(rows.filter((row) => row.pivot).map((row) => [row.key, row.pivot])).toEqual([
+      ["a/x", "up"],
+      ["p/x", "up"],
+    ])
+  })
+
+  it("a block walked up in one row lists only what it holds in a down row", () => {
+    // P is walked up beneath a/x, so it carries its holders M and N. Its own
+    // row, down, follows the setting: no holders.
+    const { doc, rows } = view({ x: "up" })
+    expect(doc.blocks.p.upstream).toEqual(["m", "n"])
+    expect(rows.map((row) => row.key)).not.toContain("p/^m")
+    // Without the setting, the rows read what the doc carries (no pivots).
+    const loose = buildRows(doc, { folds: NONE, rootId: "n", pivots: pivots({ x: "up" }) })
+    expect(loose.map((row) => row.key)).toContain("p/^m")
+  })
+
+  it("hasChildren follows the row's query", () => {
+    // A holds X, but walked up it has nothing beneath: its holder is the note.
+    const a = view({ a: "up" }).rows.find((row) => row.key === "a")!
+    expect(a).toMatchObject({ hasChildren: false, pivot: "up" })
+    expect(view({}).rows.find((row) => row.key === "a")!.hasChildren).toBe(true)
+  })
+
+  it("an up pivot on the note root draws its holders as the rows", () => {
+    expect(summary(view({ n: "up" }).rows)).toEqual(["^l", "  ^l/^m"])
+  })
+
+  it("a focused block's query is its own pivot", () => {
+    const { doc } = blockView("x", graph, () => true, "downstream", pivots({ x: "up" }))!
+    const rows = buildRows(doc, {
+      folds: NONE,
+      focusRootId: "x",
+      focusTitled: false,
+      pivots: pivots({ x: "up" }),
+      directions: "downstream",
+    })
+    expect(summary(rows)).toEqual([
+      "x",
+      "  x/^a",
+      "    x/^a/^n",
+      "      x/^a/^n/^l",
+      "        x/^a/^n/^l/^m",
+      "  x/^p",
+      "    x/^p/^m",
+      "    x/^p/^n",
+      "      x/^p/^n/^l",
+      "        x/^p/^n/^l/^m",
+    ])
+    expect(rows[0].pivot).toBe("up")
+  })
+
+  it("walkDoc and the occurrence keys read the pivots", () => {
+    const over = pivots({ x: "up" })
+    const { doc } = noteView("n", graph, undefined, "downstream", over)!
+    const rule = { pivots: over, directions: "downstream" as const, rootId: "n" }
+    expect(occurrenceKeys(doc, rule)).toEqual(
+      buildRows(doc, { folds: NONE, ...rule }).map((row) => row.key),
+    )
+    expect(firstOccurrenceKey(doc, "p", rule)).toBe("p")
+    expect(firstOccurrenceKey(doc, "m", rule)).toBeNull()
   })
 })
