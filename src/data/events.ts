@@ -437,6 +437,10 @@ function applyByStamp(state: StampedState, raw: RuminateEvent): void {
     entity.stamp = stamp
     entity.seq = event.seq ?? 0
     entity.at = event.at
+  } else if (stamp === entity.stamp && (event.seq ?? 0) > entity.seq) {
+    // The same event, placed since it was first applied (a snapshot took it
+    // unpushed): it now has the `seq` the replica gave it.
+    entity.seq = event.seq ?? 0
   }
   table.set(event.entity_id, entity)
 }

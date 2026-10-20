@@ -57,6 +57,7 @@ describe("the migrations that have shipped", () => {
       9: "34e8594abd0a8bf1", // as first shipped on 2026-10-10; the columns v10 adds are not here
       10: "90308fe01b9e8736",
       11: "3647126993277b6c",
+      12: "49490fc8d460ce99",
     }
     expect(await hashes(SHIPPED_LOCAL_STEPS), RULE).toEqual(pinned)
   })

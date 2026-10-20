@@ -10,6 +10,7 @@ from there — and the replica takes them in as made. Code: `src/data/events.ts`
 `worker/handlers/event-log.ts` (append, reconcile, reading the past),
 `src/data/sql-note-store.ts` (the device's log and its projection),
 `src/data/replica-sync.ts` (the push), `src/data/hlc.ts` (the stamp),
+`src/data/snapshot.ts` (snapshots of the fold),
 `migrations/0023_events.sql`, `migrations/0024_event_hlc.sql`.
 
 ## Why
@@ -235,6 +236,35 @@ the batch (D1 has no interactive transactions), so two writers racing on one
 row both derive against the same held row and the higher **stamp** wins each
 field, where the later `updated_at` used to. The fold and the tables agree
 either way.
+
+### Snapshots
+
+The store keeps snapshots of the fold by stamp (`src/data/snapshot.ts`,
+docs/event-only-sync.md, item 5) in its `snapshots` table (schema v12). A
+snapshot is the encoded `StampedState`, every field with its stamp and
+tombstones too, and the **log position** it covers.
+
+- **Position.** `events.position` is the log's append order. Every event
+  takes the next position: one this device makes, and one it pulls. An event
+  the replica places (`markEventsPushed`, or a pull that brings back one of
+  this device's own) moves to the next position. So the tail past a snapshot
+  that took an event unpushed holds it again, with its `seq`.
+- **When.** After each batch (`applyEvents`, `applyPulledEvents`) and at
+  open, the store writes a snapshot when 1,000 events are past the newest one,
+  or when the newest is 24 hours old and any event is past it. With no
+  snapshot, the first event writes one.
+- **Keep 2.** One write adds the new snapshot and deletes all but the 2
+  newest. A snapshot is a cache of the log, so this is not a purge. A
+  snapshot that fails to write does not fail the batch: the next batch tries
+  again.
+- **Read.** `loadFold` reads the newest snapshot that parses, then applies
+  every event past its position. When the newest does not parse, it reads the
+  one before. With none that parses, it folds the whole log. The fold does
+  not depend on order and applies an event twice as once, so the result is
+  the fold of the whole log.
+
+Nothing in the app reads the fold yet (item 7 of docs/event-only-sync.md).
+`clear` deletes the snapshots with the log.
 
 ### Cost, by construction
 

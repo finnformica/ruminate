@@ -727,4 +727,15 @@ describe("the fold by stamp", () => {
     const log = [base, old(9, 50, "nine"), old(10, 50, "ten"), old(11, 40, "eleven, older")]
     expect(toGraphSnapshot(foldByStamp([...log].reverse())).nodes.get("x")?.text).toBe("ten")
   })
+
+  it("takes the seq of an event applied again once it is placed, in either order", () => {
+    const { seq: _seq, ...unplaced } = create as RuminateEvent & { seq?: number }
+    const placed = { ...create, seq: 42 }
+    for (const order of [
+      [unplaced, placed],
+      [placed, unplaced],
+    ]) {
+      expect(foldByStamp(order as RuminateEvent[]).blocks.get("x")?.seq).toBe(42)
+    }
+  })
 })
