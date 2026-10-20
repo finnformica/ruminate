@@ -19,8 +19,7 @@ export function useOpenInPane() {
       const page = router.state.matches.find((match) => match.routeId === "/_appRoot/views_/$")
       const pageNote = (page?.params as { _splat?: string } | undefined)?._splat
       if (!page || !pageNote) return false
-      const pageSearch = page.search as Record<string, unknown>
-      const layout = layoutFromSearch(pageNote, pageSearch)
+      const layout = layoutFromSearch(pageNote, page.search as Record<string, unknown>)
       if (layout.panes.length < 2) return false
       const move = goTo(layout.panes[layout.active], { noteId, root: block ?? null }, null)
       if (!move) return true
@@ -28,15 +27,8 @@ export function useOpenInPane() {
       void navigate({
         to: "/views/$",
         params: { _splat: first },
-        search: {
-          query: undefined,
-          ...search,
-          // The filter and sort are the first pane's view, and stay with it
-          // while it shows the same note.
-          ...(first === pageNote
-            ? { filter: pageSearch.filter as string, sort: pageSearch.sort as string }
-            : {}),
-        },
+        // Each frame's narrowing and folds travel with the layout.
+        search: { query: undefined, ...search },
       })
       return true
     },

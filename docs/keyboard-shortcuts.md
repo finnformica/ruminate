@@ -356,7 +356,8 @@ Focus makes one block's subtree the whole editor view. Each pane keeps a
 **focus stack** (docs/split-view.md): focusing on a block pushes a frame,
 and <kbd>⇧</kbd> <kbd>F</kbd> pops one, back to the view before with the
 block that was selected there selected again and its folds as they were.
-A frame pushed starts with the default folds. The one breadcrumb draws the
+A frame pushed starts from the defaults: no filter or sort of its own and
+the default folds; each frame keeps its own in the URL. The one breadcrumb draws the
 stack and the path between its frames (`Note title › ancestor › focused
 block › …`): a click on a frame pops back to it, a click on a block on the
 path between two frames goes back to the earlier frame and focuses that

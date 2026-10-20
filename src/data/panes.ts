@@ -3,13 +3,17 @@
  * state only, held in the URL, never in the graph.
  *
  * A **pane** shows one note, rooted at the note or at one block in it, and
- * keeps a **focus stack**: the views the reader went into, in order, the
- * last the one on screen. Focusing on a block pushes a frame; popping one
- * goes back to the view beneath it, with the row that was selected there
- * selected again. Folds need no record: they are kept per view, keyed by
- * the row's path from the view's root (`src/data/view-state.ts`), so what is
- * folded inside a focus never touches the view it was entered from, and a
- * pop leaves those folds as they were.
+ * keeps a **focus stack**: its history of frames, the last the one on
+ * screen. A **frame** is one live query state: its root, its selection, its
+ * filter and sort, and its folds. Focusing on a block pushes a frame, which
+ * starts from the defaults — the root's saved view, the standing fold rule
+ * and nothing selected; popping one goes back to the frame beneath, with
+ * its selection, narrowing and folds as they were.
+ *
+ * The frame at the bottom comes from a View (or opens a note) and keeps its
+ * folds where a note always has, on the device (`src/data/view-state.ts`).
+ * Every frame pushed above it carries its folds itself, as what the reader
+ * changed over the standing rule, so they travel in the URL with it.
  *
  * A **layout** is a list of panes and which one has the keyboard. Two panes
  * sit side by side today (`MAX_PANES`); nothing here depends on the number,
@@ -33,6 +37,21 @@ export interface FocusFrame {
    * screen, whose selection is the editor's own.
    */
   selected: string | null
+  /** The frame's filter and sort (the query language, `src/data/filter-view.ts`);
+   * absent = what the root's view saved. A pushed frame starts with none. */
+  filter?: string
+  sort?: string
+  /** A pushed frame's folds: the rows the reader opened and closed over the
+   * standing rule. Absent on the bottom frame, whose folds are the note's
+   * own, kept on the device; and on a frame still at the defaults. */
+  folds?: FrameFolds
+}
+
+/** Folds as differences from the standing rule (`Folds`,
+ * `src/data/view-state.ts`), in a form the URL can hold. */
+export interface FrameFolds {
+  open: readonly string[]
+  closed: readonly string[]
 }
 
 /** One pane: its focus stack, bottom first. Never empty; the last frame is
@@ -63,8 +82,9 @@ export interface FocusMove {
    * editor's own landing rule. */
   landing: string | null
   /** Whether the move went back to a frame already on the stack. A frame
-   * restored keeps its folds as they were; a new view first opens the folds
-   * down to the block just left (the page's `revealOnLeaveFocus`). */
+   * restored keeps its narrowing and folds as they were; a new frame starts
+   * from the defaults, with the folds down to the block just left opened
+   * (the page's `settleFolds`). */
   restored: boolean
 }
 
@@ -146,6 +166,11 @@ export function goVia(pane: Pane, index: number, target: ViewTarget): FocusMove 
   return popped
 }
 
+/** The pane with its frame on screen changed: its narrowing or folds. */
+export const withCurrent = (pane: Pane, patch: Partial<FocusFrame>): Pane => ({
+  frames: [...pane.frames.slice(0, -1), { ...currentFrame(pane), ...patch }],
+})
+
 export const withPane = (layout: PaneLayout, index: number, pane: Pane): PaneLayout => ({
   ...layout,
   panes: layout.panes.map((p, i) => (i === index ? pane : p)),
@@ -197,20 +222,32 @@ export function closePane(layout: PaneLayout, index: number): PaneLayout {
 // ── The URL ─────────────────────────────────────────────────────────────────
 //
 // The first pane is the page's own address, as it has always been:
-// `/views/<note>?block=<root>`, so every link made before panes still opens
-// the same view. Its stack beneath the view on screen is `stack`; each other
-// pane is one `pane<i>` parameter holding its whole stack; `active` names the
-// pane with the keyboard when it is not the first.
+// `/views/<note>?block=<root>&filter=…&sort=…`, so every link made before
+// panes still opens the same view. Its frame on screen also writes `folds`;
+// its stack beneath that frame is `stack`; each other pane is one `pane<i>`
+// parameter holding its whole stack; `active` names the pane with the
+// keyboard when it is not the first.
 //
-//   /views/A?block=b2&stack=A,A:b1:b1/c3&pane1=B,B:b9&active=1
+//   /views/A?block=b2&stack=A::x1,A:b1:@&pane1=B,B:c1;f=type%3Atodo&active=1
 //
-// A frame is `note[:root[:selected]]`, frames are joined by commas. Ids are
-// `blk_…` (or, for old notes, date-shaped) and occurrence keys join ids with
-// `/` and `^`, so neither separator can appear inside one.
+// A frame is `note[:root[:selected]]`, then any of `;f=<filter>`,
+// `;s=<sort>` and `;z=<folds>`; frames are joined by commas. Ids are `blk_…`
+// (or, for old notes, date-shaped) and occurrence keys join ids with `/` and
+// `^`, so neither `,` nor `:` can appear inside one; a filter or sort escapes
+// `%`, `,`, `:` and `;`.
+//
+// Kept short: a row's path (the selection, a fold) is written from the
+// frame's root — the root's own id, which every path in a focused frame
+// starts with, is left out (`@` is the root itself) — and each id drops its
+// `blk_` (an id without one is written after `~`). Folds are `+path` for a
+// row opened and `-path` for a row closed, joined by `.`.
 
 /** The search parameters the layout is written to. */
 export interface PaneSearch {
   block?: string
+  filter?: string
+  sort?: string
+  folds?: string
   stack?: string
   pane1?: string
   active?: number
@@ -219,20 +256,104 @@ export interface PaneSearch {
 /** The parameter that holds pane `index` (1 and up). */
 const paneParam = (index: number) => `pane${index}` as const
 
-const validId = (id: string) => id !== "" && !/[,:]/.test(id)
+const validId = (id: string) => id !== "" && !/[,:;.@~+]/.test(id) && !id.startsWith("-")
 
-export function formatFrame({ noteId, root, selected }: FocusFrame): string {
-  if (selected !== null) return `${noteId}:${root ?? ""}:${selected}`
-  if (root !== null) return `${noteId}:${root}`
-  return noteId
+const MINTED = "blk_"
+
+/** A row's path (an occurrence key) as the URL writes it, from `root`. */
+function formatPath(key: string, root: string | null): string {
+  let segments = key.split("/")
+  if (root !== null && segments[0] === root) segments = segments.slice(1)
+  if (segments.length === 0) return "@"
+  return segments
+    .map((segment) => {
+      const up = segment.startsWith("^") ? "^" : ""
+      const id = up ? segment.slice(1) : segment
+      return up + (id.startsWith(MINTED) ? id.slice(MINTED.length) : `~${id}`)
+    })
+    .join("/")
+}
+
+/** A path read back from the URL: the occurrence key it names. */
+function parsePath(text: string, root: string | null): string {
+  const ids =
+    text === "@"
+      ? []
+      : text.split("/").map((segment) => {
+          const up = segment.startsWith("^") ? "^" : ""
+          const id = up ? segment.slice(1) : segment
+          return up + (id.startsWith("~") ? id.slice(1) : MINTED + id)
+        })
+  return (root !== null ? [root, ...ids] : ids).join("/")
+}
+
+/** Folds as the URL writes them (`+path` open, `-path` closed, `.`-joined). */
+function formatFolds(folds: FrameFolds, root: string | null): string {
+  return [
+    ...folds.open.map((key) => `+${formatPath(key, root)}`),
+    ...folds.closed.map((key) => `-${formatPath(key, root)}`),
+  ].join(".")
+}
+
+function parseFolds(text: string, root: string | null): FrameFolds | undefined {
+  const open: string[] = []
+  const closed: string[] = []
+  for (const entry of text.split(".")) {
+    const path = entry.slice(1)
+    if (path === "") continue
+    if (entry[0] === "+") open.push(parsePath(path, root))
+    else if (entry[0] === "-") closed.push(parsePath(path, root))
+  }
+  return open.length + closed.length > 0 ? { open, closed } : undefined
+}
+
+const escapeText = (text: string) => text.replace(/[%,:;]/g, (c) => encodeURIComponent(c))
+const unescapeText = (text: string) => {
+  try {
+    return decodeURIComponent(text)
+  } catch {
+    return text
+  }
+}
+
+export function formatFrame(frame: FocusFrame): string {
+  const { noteId, root, selected } = frame
+  let text =
+    selected !== null
+      ? `${noteId}:${root ?? ""}:${formatPath(selected, root)}`
+      : root !== null
+        ? `${noteId}:${root}`
+        : noteId
+  if (frame.filter) text += `;f=${escapeText(frame.filter)}`
+  if (frame.sort) text += `;s=${escapeText(frame.sort)}`
+  if (frame.folds && frame.folds.open.length + frame.folds.closed.length > 0) {
+    text += `;z=${formatFolds(frame.folds, root)}`
+  }
+  return text
 }
 
 /** A frame read back from the URL; null for anything malformed. */
 export function parseFrame(text: string): FocusFrame | null {
-  const [noteId = "", root = "", selected = "", ...rest] = text.split(":")
+  const [base = "", ...extras] = text.split(";")
+  const [noteId = "", root = "", selected = "", ...rest] = base.split(":")
   if (rest.length > 0 || !validId(noteId)) return null
   if (root !== "" && !validId(root)) return null
-  return { noteId, root: root || null, selected: selected || null }
+  const frameRoot = root || null
+  const frame: FocusFrame = {
+    noteId,
+    root: frameRoot,
+    selected: selected ? parsePath(selected, frameRoot) : null,
+  }
+  for (const extra of extras) {
+    const value = extra.slice(2)
+    if (extra.startsWith("f=") && value) frame.filter = unescapeText(value)
+    else if (extra.startsWith("s=") && value) frame.sort = unescapeText(value)
+    else if (extra.startsWith("z=")) {
+      const folds = parseFolds(value, frameRoot)
+      if (folds) frame.folds = folds
+    }
+  }
+  return frame
 }
 
 const formatFrames = (frames: FocusFrame[]) => frames.map(formatFrame).join(",")
@@ -245,21 +366,27 @@ const parseFrames = (text: unknown): FocusFrame[] =>
         .filter((f): f is FocusFrame => f !== null)
     : []
 
+const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : undefined)
+
 /** The layout a URL holds: the first pane from the address (`noteId`,
- * `block`, `stack`), the rest from `pane<i>`. Malformed parts are dropped. */
+ * `block`, `filter`, `sort`, `folds`, `stack`), the rest from `pane<i>`.
+ * Malformed parts are dropped. */
 export function layoutFromSearch(noteId: string, search: Record<string, unknown>): PaneLayout {
-  const block = typeof search.block === "string" && search.block !== "" ? search.block : null
-  const first: Pane = {
-    frames: [
-      // The frame on screen carries no selection of its own.
-      ...parseFrames(search.stack),
-      { noteId, root: block, selected: null },
-    ],
-  }
-  const panes = [first]
+  const root = text(search.block) ?? null
+  const top: FocusFrame = { noteId, root, selected: null }
+  const filter = text(search.filter)
+  const sort = text(search.sort)
+  const folds = text(search.folds) ? parseFolds(search.folds as string, root) : undefined
+  if (filter) top.filter = filter
+  if (sort) top.sort = sort
+  const below = parseFrames(search.stack)
+  // Only a pushed frame keeps its folds in the URL.
+  if (folds && below.length > 0) top.folds = folds
+  const panes: Pane[] = [{ frames: [...below, top] }]
   for (let i = 1; i < MAX_PANES; i += 1) {
     const frames = parseFrames(search[paneParam(i)])
     if (frames.length === 0) break
+    // The frame on screen carries no selection of its own.
     frames[frames.length - 1] = { ...frames[frames.length - 1], selected: null }
     panes.push({ frames })
   }
@@ -276,8 +403,12 @@ export function layoutFromSearch(noteId: string, search: Record<string, unknown>
 export function layoutToSearch(layout: PaneLayout): { noteId: string; search: PaneSearch } {
   const [first, ...rest] = layout.panes
   const top = currentFrame(first)
+  const folds = first.frames.length > 1 && top.folds ? formatFolds(top.folds, top.root) : undefined
   const search: PaneSearch & Record<string, string | number | undefined> = {
     block: top.root ?? undefined,
+    filter: top.filter || undefined,
+    sort: top.sort || undefined,
+    folds: folds || undefined,
     stack: first.frames.length > 1 ? formatFrames(first.frames.slice(0, -1)) : undefined,
   }
   for (let i = 1; i < MAX_PANES; i += 1) {

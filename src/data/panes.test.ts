@@ -9,6 +9,7 @@ import {
   layoutFromSearch,
   layoutToSearch,
   nextPaneIndex,
+  withCurrent,
   openBeside,
   paneOf,
   parseFrame,
@@ -110,6 +111,64 @@ describe("the focus stack", () => {
   })
 })
 
+describe("a frame's state (Finn's decisions, docs/split-view.md)", () => {
+  const narrowed = withCurrent(paneOf(A), {
+    filter: "type:todo",
+    sort: "text",
+  })
+
+  it("starts a pushed frame from the defaults: no filter, sort or folds", () => {
+    const pane = withCurrent(push(narrowed, "blk_b1", "blk_b1"), {})
+    expect(currentFrame(pane)).toEqual({ noteId: A, root: "blk_b1", selected: null })
+  })
+
+  it("restores a popped frame's filter, sort and folds", () => {
+    const folded = withCurrent(push(narrowed, "blk_b1", "blk_b1"), {
+      folds: { open: [], closed: ["blk_b1/blk_c1"] },
+    })
+    const deeper = push(folded, "blk_c2", "blk_b1/blk_c2")
+    const back = popFrame(deeper)!
+    expect(currentFrame(back.pane).folds).toEqual({ open: [], closed: ["blk_b1/blk_c1"] })
+    const bottom = popFrame(back.pane)!
+    expect(currentFrame(bottom.pane)).toMatchObject({ filter: "type:todo", sort: "text" })
+  })
+
+  it("names a selection by the path of ids from the frame's root", () => {
+    // The occurrence key is that path: written from the root, read back whole.
+    const pane = push(push(paneOf(A), "blk_b1", "blk_x/blk_b1"), "blk_b2", "blk_b1/blk_y/blk_b2")
+    const { noteId, search } = layoutToSearch({ panes: [pane], active: 0 })
+    expect(search.stack).toBe(`${A}::x/b1,${A}:blk_b1:y/b2`)
+    const back = layoutFromSearch(noteId, search as Record<string, unknown>)
+    expect(back.panes[0].frames.map((f) => f.selected)).toEqual([
+      "blk_x/blk_b1",
+      "blk_b1/blk_y/blk_b2",
+      null,
+    ])
+  })
+
+  it("writes a frame's narrowing and folds into the URL, and reads them back", () => {
+    const first = withCurrent(push(narrowed, "blk_b1", "blk_b1"), {
+      filter: "has:link, text:a;b",
+      folds: { open: ["blk_b1/blk_c1"], closed: ["blk_b1/^blk_up", "blk_b1"] },
+    })
+    const second = withCurrent(push(paneOf(B), "2024-01-02", null, B), {
+      folds: { open: [], closed: ["2024-01-02/blk_d"] },
+    })
+    const layout: PaneLayout = { panes: [first, second], active: 0 }
+    const { noteId, search } = layoutToSearch(layout)
+    expect(search.folds).toBe("+c1.-^up.-@")
+    expect(search.filter).toBe("has:link, text:a;b")
+    expect(search.stack).toBe(`${A}::b1;f=type%3Atodo;s=text`)
+    expect(search.pane1).toBe(`${B},${B}:2024-01-02;z=-d`)
+    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(layout)
+  })
+
+  it("keeps the bottom frame's folds off the URL: they are the note's own", () => {
+    const layout = layoutFromSearch(A, { folds: "-x" })
+    expect(currentFrame(layout.panes[0]).folds).toBeUndefined()
+  })
+})
+
 describe("the layout", () => {
   const one: PaneLayout = { panes: [paneOf(A)], active: 0 }
 
@@ -177,7 +236,8 @@ describe("the URL", () => {
     expect(noteId).toBe(A)
     expect(search).toEqual({
       block: "blk_b2",
-      stack: `${A}::blk_x/blk_b1,${A}:blk_b1:blk_b1/^blk_p`,
+      // Paths from the frame's root, without `blk_`.
+      stack: `${A}::x/b1,${A}:blk_b1:^p`,
       pane1: `${B},${B}:blk_c1`,
       active: 1,
     })

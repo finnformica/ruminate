@@ -4,4 +4,4 @@
 
 ### Changed
 
-- Stepping back out of a focus selects the block you had selected before you went in. <kbd>⇧</kbd> <kbd>F</kbd> and the breadcrumb now return you to each earlier view with its block selected and its folds as you left them. Reload, and the browser's back and forward buttons, keep the whole trail.
+- Stepping back out of a focus selects the block you had selected before you went in. <kbd>⇧</kbd> <kbd>F</kbd> and the breadcrumb now return you to each earlier view with its block selected, and its filter and folds as you left them. A new focus starts without a filter and with the usual folds. Reload, and the browser's back and forward buttons, keep the whole trail.

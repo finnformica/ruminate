@@ -48,12 +48,6 @@ export const MAX_STORED_VIEWS = 500
 export interface Narrowing {
   filter?: string
   sort?: string
-  /**
-   * A focus frame of the split view's panes (docs/split-view.md): a block
-   * focused on keeps folds of its own per frame, apart from the note's, so
-   * each frame pushed starts from the standing rule. Absent = the note's.
-   */
-  scope?: string
 }
 
 /**
@@ -62,13 +56,7 @@ export interface Narrowing {
  * filter and sort appended for a narrowed view. Newlines separate the parts
  * because neither an id nor a query holds one.
  */
-export function foldKeyOf(
-  noteId: string,
-  { filter = "", sort = "", scope }: Narrowing = {},
-): string {
-  // A focus frame's folds are its own whatever narrows it: the frame is
-  // the place, and a filter's rows open by the standing rule beneath them.
-  if (scope !== undefined) return `${noteId}\n@${scope}`
+export function foldKeyOf(noteId: string, { filter = "", sort = "" }: Narrowing = {}): string {
   return filter === "" && sort === "" ? noteId : `${noteId}\n${filter}\n${sort}`
 }
 
@@ -189,17 +177,6 @@ export function writeFolds(viewKey: string, folds: Folds) {
   }
 }
 
-/** Forget a view's folds: a focus frame just pushed starts from the
- * standing rule (docs/split-view.md). */
-export function clearFolds(viewKey: string) {
-  if (typeof localStorage === "undefined") return
-  try {
-    localStorage.removeItem(storageKey(viewKey))
-  } catch {
-    // Storage unavailable — nothing was kept to forget.
-  }
-}
-
 /** Record rows as open in a view that is not on screen yet — the folds
  * down to a block a wider view must show as it opens. */
 export function openFolds(viewKey: string, keys: string[]) {
@@ -207,6 +184,16 @@ export function openFolds(viewKey: string, keys: string[]) {
   let folds = readFolds(viewKey) ?? NO_FOLDS
   for (const key of keys) folds = withFold(folds, key, true)
   writeFolds(viewKey, folds)
+}
+
+/**
+ * Folds the caller holds rather than the device: a frame pushed onto a
+ * pane's focus stack keeps its own in the URL (docs/split-view.md). Given,
+ * `useFoldRule` reads and writes these and touches no storage.
+ */
+export interface HeldFolds {
+  folds: Folds
+  onChange: (folds: Folds) => void
 }
 
 /**
@@ -270,10 +257,11 @@ export function useFoldRule(
   noteId: string | undefined,
   narrowing: Narrowing = {},
   held?: ReadonlySet<string>,
+  owned?: HeldFolds,
 ) {
   const levels = useAtomValue(expandedLevelsAtom)
-  const { filter = "", sort = "", scope } = narrowing
-  const viewKey = noteId === undefined ? undefined : foldKeyOf(noteId, { filter, sort, scope })
+  const { filter = "", sort = "" } = narrowing
+  const viewKey = noteId === undefined ? undefined : foldKeyOf(noteId, { filter, sort })
   const narrowed = filter !== "" || sort !== ""
   const [state, setState] = React.useState<{ viewKey: string | undefined; folds: Folds }>(() => ({
     viewKey,
@@ -283,15 +271,28 @@ export function useFoldRule(
   // with the old one's folds. Settles in one extra render.
   if (state.viewKey !== viewKey) setState({ viewKey, folds: readFolds(viewKey) ?? NO_FOLDS })
 
+  // Folds the caller holds stand in for the device's.
+  const folds = owned ? owned.folds : state.folds
   const expanded = React.useMemo(() => {
     const byDepth = narrowed ? EVERYTHING_OPEN : expandedByDepth(levels)
     const standing: ExpandedRule = held
       ? (key, level, type) => held.has(idOfKey(key)) || byDepth(key, level, type)
       : byDepth
-    return foldRule(state.folds, standing)
-  }, [state.folds, narrowed, levels, held])
+    return foldRule(folds, standing)
+  }, [folds, narrowed, levels, held])
 
+  // Read through a ref, so two toggles in one event build on each other and
+  // `setFold` keeps one identity.
+  const ownedRef = React.useRef(owned)
+  ownedRef.current = owned
   const setFold = React.useCallback((key: string, open: boolean) => {
+    const held = ownedRef.current
+    if (held) {
+      const next = withFold(held.folds, key, open)
+      held.folds = next
+      held.onChange(next)
+      return
+    }
     setState((prev) => {
       const folds = withFold(prev.folds, key, open)
       if (prev.viewKey) writeFolds(prev.viewKey, folds)
@@ -299,5 +300,5 @@ export function useFoldRule(
     })
   }, [])
 
-  return { expanded, setFold, folds: state.folds }
+  return { expanded, setFold, folds }
 }

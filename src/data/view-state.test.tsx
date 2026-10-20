@@ -7,7 +7,6 @@ import { expandedByDepth } from "../blocks/default-collapsed"
 import { expandedLevelsAtom } from "../global-state"
 import {
   MAX_STORED_VIEWS,
-  clearFolds,
   foldKeyOf,
   foldRule,
   openFolds,
@@ -285,20 +284,41 @@ describe("useFoldRule, narrowed", () => {
   })
 })
 
-describe("folds of a focus frame (docs/split-view.md)", () => {
-  it("keeps a frame's folds under a key of its own, whatever narrows it", () => {
-    const frame = foldKeyOf("n1", { scope: "p0f1:blk_a" })
-    expect(frame).not.toBe(foldKeyOf("n1"))
-    expect(foldKeyOf("n1", { filter: "type:todo", scope: "p0f1:blk_a" })).toBe(frame)
-    expect(foldKeyOf("n1", { scope: "p0f2:blk_a" })).not.toBe(frame)
+describe("folds a pushed frame holds (docs/split-view.md)", () => {
+  it("reads and writes the caller's folds, and stores nothing", () => {
+    const store = createStore()
+    store.set(expandedLevelsAtom, 2)
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <Provider store={store}>{children}</Provider>
+    )
+    let held = { open: new Set<string>(), closed: new Set(["a"]) } as const
+    const changes: unknown[] = []
+    const { result, rerender } = renderHook(
+      () =>
+        useFoldRule("n1", {}, undefined, {
+          folds: held,
+          onChange: (next) => {
+            changes.push(next)
+            held = next as typeof held
+          },
+        }),
+      { wrapper },
+    )
+    expect(result.current.expanded("a", 1)).toBe(false)
+    // Two toggles in one event build on each other.
+    act(() => {
+      result.current.setFold("a", true)
+      result.current.setFold("a/b", true)
+    })
+    rerender()
+    expect(changes).toHaveLength(2)
+    expect(result.current.expanded("a", 1)).toBe(true)
+    expect(result.current.expanded("a/b", 2)).toBe(true)
+    expect(stored("n1")).toBe(null)
   })
 
-  it("forgets a frame's folds when it is pushed again, and opens rows ahead of a view", () => {
-    const frame = foldKeyOf("n1", { scope: "p0f1:blk_a" })
-    writeFolds(frame, { open: new Set(), closed: new Set(["blk_a/blk_b"]) })
-    clearFolds(frame)
-    expect(readFolds(frame)).toBeNull()
-    openFolds("n1", ["blk_x", "blk_x/blk_y"])
-    expect([...readFolds("n1")!.open]).toEqual(["blk_x", "blk_x/blk_y"])
+  it("opens rows ahead of a view that is not on screen yet", () => {
+    openFolds("n1", ["a", "a/b"])
+    expect(stored("n1")).toMatchObject({ open: ["a", "a/b"], closed: [] })
   })
 })

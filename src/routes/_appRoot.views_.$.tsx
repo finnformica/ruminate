@@ -42,7 +42,7 @@ import { useOpenNote } from "../hooks/open-note"
 import { pathToBlock } from "../data/graph"
 import { narrowingParam, resolveNarrowing } from "../utils/view-filter"
 import { FilterMenu, SortMenu } from "../components/view-controls"
-import { clearFolds, foldKeyOf, openFolds, useFoldRule } from "../data/view-state"
+import { foldKeyOf, openFolds, useFoldRule, type Folds } from "../data/view-state"
 import { keyOf } from "../blocks/view"
 import { useNoteShare } from "../hooks/share"
 import { shareOwnerName } from "../data/shares"
@@ -58,8 +58,11 @@ import {
   openBeside,
   popFrame,
   popTo,
+  withCurrent,
   withPane,
+  type FocusFrame,
   type FocusMove,
+  type FrameFolds,
   type Pane,
   type PaneLayout,
   type ViewTarget,
@@ -75,6 +78,9 @@ type RouteSearch = {
   query: string | undefined
   /** Block id the editor is focused on; absent = outside focus. */
   block?: string
+  /** The folds of a frame pushed onto the first pane's stack, as what the
+   * reader changed over the standing rule (docs/split-view.md). */
+  folds?: string
   /**
    * The view's filter, in the query language (`type:todo`): the rows that
    * match stay, their ancestors are kept as dimmed context and everything
@@ -99,6 +105,7 @@ export const Route = createFileRoute("/_appRoot/views_/$")({
       block: typeof search.block === "string" ? search.block : undefined,
       filter: typeof search.filter === "string" ? search.filter : undefined,
       sort: typeof search.sort === "string" ? search.sort : undefined,
+      folds: typeof search.folds === "string" ? search.folds : undefined,
       stack: typeof search.stack === "string" ? search.stack : undefined,
       pane1: typeof search.pane1 === "string" ? search.pane1 : undefined,
       active: Number.isInteger(Number(search.active)) ? Number(search.active) : undefined,
@@ -170,19 +177,19 @@ function SplitView() {
       navigate({
         to: "/views/$",
         params: { _splat: first },
-        // The filter and sort are the first pane's view: another note there
-        // starts without them.
-        search: (prev) => ({
-          ...prev,
-          ...params,
-          ...(first === noteId ? {} : { filter: undefined, sort: undefined }),
-        }),
+        // Every frame's narrowing and folds are the layout's: the first
+        // pane's frame on screen writes `filter`, `sort` and `folds`.
+        search: (prev) => ({ ...prev, ...params }),
         replace,
       })
     },
-    [navigate, noteId],
+    [navigate],
   )
 
+  // A pane's frame on screen changed its narrowing or folds: the same
+  // place, so the URL entry is replaced rather than added to.
+  const update = (index: number, patch: Partial<FocusFrame>) =>
+    write(withPane(layout, index, withCurrent(layout.panes[index], patch)), { replace: true })
   // A pane's focus moved: its stack is the new one, and it has the keyboard.
   const move = (index: number, focusMove: FocusMove) =>
     write(
@@ -255,15 +262,14 @@ function SplitView() {
         return (
           <NotePage
             key={`${index}:${frame.noteId}`}
-            index={index}
             pane={pane}
-            primary={index === 0}
             leading={index === shown[0]}
             split={isSplit}
             active={index === layout.active}
             landing={lands ? landing.key : null}
             refocusRequest={refocus.pane === index ? refocus.n : 0}
             onMove={(focusMove) => move(index, focusMove)}
+            onUpdate={(patch) => update(index, patch)}
             onOpenBeside={wide ? (id) => openBesideFrom(index, id) : undefined}
             onActivate={() => {
               if (index !== layout.active) write(activate(layout, index), { replace: true })
@@ -277,19 +283,20 @@ function SplitView() {
   )
 }
 
-/** Where a focused frame keeps its folds: its pane, its depth on the
- * stack and its root (docs/split-view.md). */
-const frameScope = (pane: number, depth: number, root: string) => `p${pane}f${depth}:${root}`
+/** A frame's folds as `useFoldRule` holds them, and back. */
+const foldsOf = (folds: FrameFolds | undefined): Folds => ({
+  open: new Set(folds?.open ?? []),
+  closed: new Set(folds?.closed ?? []),
+})
+const frameFoldsOf = (folds: Folds): FrameFolds => ({
+  open: [...folds.open],
+  closed: [...folds.closed],
+})
 
 /** One pane of the page: a note, or a block focused on in one. */
 interface NotePageProps {
-  /** The pane's place in the layout. */
-  index: number
   /** The pane's focus stack; the last frame is the view on screen. */
   pane: Pane
-  /** The first pane: the one the address's filter and sort are for, and
-   * the page's own header keys. */
-  primary: boolean
   /** The first pane on screen: its header carries the page's own keys,
    * buttons and notices. */
   leading: boolean
@@ -303,6 +310,8 @@ interface NotePageProps {
   refocusRequest: number
   /** The pane's focus moved (`goTo`, `popFrame`, `popTo`). */
   onMove: (move: FocusMove) => void
+  /** The frame on screen changed its narrowing or folds. */
+  onUpdate: (patch: Partial<FocusFrame>) => void
   /** Open a block in the pane beside (`o`); absent on a narrow screen. */
   onOpenBeside?: (id: string) => void
   /** The reader is in this pane now (a click, a focus inside it). */
@@ -314,28 +323,27 @@ interface NotePageProps {
 }
 
 function NotePage({
-  index,
   pane,
-  primary,
   leading,
   split,
   active,
   landing,
   refocusRequest,
   onMove,
+  onUpdate,
   onOpenBeside,
   onActivate,
   onSplit,
   onClose,
 }: NotePageProps) {
   // Router
-  const { noteId, root } = currentFrame(pane)
+  const frame = currentFrame(pane)
+  const { noteId, root } = frame
   const focusBlockId = root ?? undefined
-  const routeSearch = Route.useSearch()
-  // The address's narrowing is the first pane's; another pane opens with
-  // what its view saved (`resolveNarrowing`).
-  const filterParam = primary ? routeSearch.filter : undefined
-  const sortParam = primary ? routeSearch.sort : undefined
+  // The frame's own narrowing, over what its root's view saved
+  // (`resolveNarrowing`): a frame pushed starts with none.
+  const filterParam = frame.filter
+  const sortParam = frame.sort
   const navigate = Route.useNavigate()
   // A board card's "Open board" (docs/boards.md, "A board in a note").
   const openNote = useOpenNote()
@@ -395,11 +403,22 @@ function NotePage({
   // — narrowed — the ones kept for this filter and sort, so a chevron
   // clicked here never lands on the note's own.
   //
-  // A focused frame keeps folds of its own (`frameScope`), so a frame pushed
-  // starts from the standing rule and a frame popped back to has its folds
-  // as it was left (docs/split-view.md).
-  const scope = root === null ? undefined : frameScope(index, pane.frames.length - 1, root)
-  const { expanded, setFold } = useFoldRule(noteId, { filter, sort, scope })
+  // The bottom frame's folds are the note's, kept on the device. A frame
+  // pushed above it holds its own in the URL, as what the reader changed
+  // over the standing rule: it starts with none, and a pop gives them back
+  // (docs/split-view.md).
+  const pushed = pane.frames.length > 1
+  const { expanded, setFold } = useFoldRule(
+    noteId,
+    { filter, sort },
+    undefined,
+    pushed
+      ? {
+          folds: foldsOf(frame.folds),
+          onChange: (next) => onUpdate({ folds: frameFoldsOf(next) }),
+        }
+      : undefined,
+  )
   const narrowed = filter !== "" || sort !== ""
   // Whether a click beneath the note may add a block to its end (the page's
   // foot, below): an editable note, shown whole.
@@ -430,25 +449,28 @@ function NotePage({
     keep,
   })
   const jotaiStore = useStore()
-  // The folds of the view a move goes to, settled in storage before it
-  // shows. A frame popped back to is left as it was. A new focused frame
-  // starts from the standing rule: its own folds are forgotten. And leaving
-  // a focus for a wider view — the note, or a block above — must show the
-  // block just left, so the reader lands back on it: the folds along one
-  // path from the new root to it are opened.
-  const settleFolds = (move: FocusMove) => {
-    if (move.restored) return
+  // The folds of the view a move goes to, settled before it shows. A frame
+  // popped back to is left as it was, and a new one starts from the
+  // standing rule. But leaving a focus for a wider view — the note, or a
+  // block above — must show the block just left, so the reader lands back
+  // on it: the folds along one path from the new root to it are opened, in
+  // the new frame's own folds, or the note's on the device for the bottom
+  // frame.
+  const settleFolds = (move: FocusMove): FocusMove => {
+    if (move.restored) return move
     const next = currentFrame(move.pane)
-    const nextScope =
-      next.root === null ? undefined : frameScope(index, move.pane.frames.length - 1, next.root)
-    const viewKey = foldKeyOf(next.noteId, { filter, sort, scope: nextScope })
-    if (nextScope !== undefined) clearFolds(viewKey)
-    if (!noteId || !focusBlockId || next.noteId !== noteId || next.root === focusBlockId) return
+    if (!noteId || !focusBlockId || next.noteId !== noteId || next.root === focusBlockId) {
+      return move
+    }
     const chain = pathToBlock(jotaiStore.get(graphSnapshotAtom), next.root ?? noteId, focusBlockId)
-    if (!chain) return
+    if (!chain || chain.length < 2) return move
     let key: string | null = next.root
     const keys = chain.slice(0, -1).map((id) => (key = keyOf(key, id)))
-    openFolds(viewKey, keys)
+    if (move.pane.frames.length === 1) {
+      openFolds(foldKeyOf(next.noteId, { filter: next.filter, sort: next.sort }), keys)
+      return move
+    }
+    return { ...move, pane: withCurrent(move.pane, { folds: { open: keys, closed: [] } }) }
   }
   // A brand-new note opens ready to be written: the title editing when there
   // is one (naming it is the first thing to do, and naming it creates it —
@@ -568,20 +590,20 @@ function NotePage({
 
   // Writing to the URL, so every narrowing is a link and the back button
   // undoes it. `replace`, so a menu is not a step in the history.
+  //
+  // The narrowing is the frame's (docs/split-view.md): each pane's frame on
+  // screen has its own, a frame pushed starts with none, and a pop gives the
+  // frame beneath its own back.
   const setNarrowing = React.useCallback(
     (patch: { filter?: string; sort?: string }) => {
-      navigate({
-        search: (prev) => ({
-          ...prev,
-          ...("filter" in patch
-            ? { filter: narrowingParam(patch.filter ?? "", savedView.filter) }
-            : {}),
-          ...("sort" in patch ? { sort: narrowingParam(patch.sort ?? "", savedView.sort) } : {}),
-        }),
-        replace: true,
+      onUpdate({
+        ...("filter" in patch
+          ? { filter: narrowingParam(patch.filter ?? "", savedView.filter) }
+          : {}),
+        ...("sort" in patch ? { sort: narrowingParam(patch.sort ?? "", savedView.sort) } : {}),
       })
     },
-    [navigate, savedView],
+    [onUpdate, savedView],
   )
 
   // The save is explicit, both ways: **Update to default** writes what is on
@@ -595,11 +617,11 @@ function NotePage({
     if (!rootId) return
     writeView(rootId, { filter, sort })
     // The URL has nothing left to say now that the view says it.
-    navigate({ search: (prev) => ({ ...prev, filter: undefined, sort: undefined }), replace: true })
-  }, [focusBlockId, noteId, filter, sort, writeView, navigate])
+    onUpdate({ filter: undefined, sort: undefined })
+  }, [focusBlockId, noteId, filter, sort, writeView, onUpdate])
   const resetToDefaultView = React.useCallback(() => {
-    navigate({ search: (prev) => ({ ...prev, filter: undefined, sort: undefined }), replace: true })
-  }, [navigate])
+    onUpdate({ filter: undefined, sort: undefined })
+  }, [onUpdate])
   // Both menus are handed the same pair: a node holds ONE view, so settling
   // it from the Sort menu must keep the filter that is set, and the other
   // way round. Only the dot differs, which says which half moved.
@@ -656,8 +678,7 @@ function NotePage({
   // the block just left (`settleFolds`).
   const applyMove = (move: FocusMove | null) => {
     if (!move) return
-    settleFolds(move)
-    onMove(move)
+    onMove(settleFolds(move))
   }
   const focusTo = (id: string | null, selected: string | null) => {
     if (noteId) applyMove(goTo(pane, { noteId, root: id }, selected))
@@ -750,27 +771,18 @@ function NotePage({
             ) : null}
 
             <div className="flex items-center">
-              {/* The address's filter and sort are the first pane's; another
-                pane shows its view as saved. */}
-              {primary ? (
-                <>
-                  <SortMenu
-                    sort={sort}
-                    onSortChange={(next) => setNarrowing({ sort: next })}
-                    saved={
-                      savedView.writable ? { ...savedViewActions, dirty: sortDirty } : undefined
-                    }
-                  />
-                  <FilterMenu
-                    filter={filter}
-                    onFilterChange={(next) => setNarrowing({ filter: next })}
-                    scope={focusBlockId ?? noteId}
-                    saved={
-                      savedView.writable ? { ...savedViewActions, dirty: filterDirty } : undefined
-                    }
-                  />
-                </>
-              ) : null}
+              {/* Each pane's frame has its own filter and sort. */}
+              <SortMenu
+                sort={sort}
+                onSortChange={(next) => setNarrowing({ sort: next })}
+                saved={savedView.writable ? { ...savedViewActions, dirty: sortDirty } : undefined}
+              />
+              <FilterMenu
+                filter={filter}
+                onFilterChange={(next) => setNarrowing({ filter: next })}
+                scope={focusBlockId ?? noteId}
+                saved={savedView.writable ? { ...savedViewActions, dirty: filterDirty } : undefined}
+              />
               <NoteActionsMenu
                 noteId={noteId ?? ""}
                 align="end"
