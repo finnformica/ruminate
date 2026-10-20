@@ -1,7 +1,14 @@
-import { collapsedKeysOf } from "../blocks/default-collapsed"
+import { levelBeneath, queryAt, type LinkPivots } from "../blocks/query"
 import { serialize } from "../blocks/serialize"
 import type { Block, BlockDoc } from "../blocks/types"
-import type { ExpandedRule } from "../blocks/view"
+import {
+  keyOf,
+  rootQueryOf,
+  rowsBeneath,
+  type Direction,
+  type ExpandedRule,
+  type RowRule,
+} from "../blocks/view"
 import type { ViewNarrowing } from "../utils/view-narrowing"
 import { blockView, noteView, type GraphSnapshot, type GraphView } from "./graph"
 
@@ -33,6 +40,13 @@ import { blockView, noteView, type GraphSnapshot, type GraphView } from "./graph
  * unfolded ones — because whether a branch survives depends on what is
  * beneath it, and whether a sort is right depends on the siblings it can
  * see. `useNoteDoc` walks eagerly exactly when a filter or a sort is on.
+ *
+ * **Pivots** (docs/graph-walk.md, 3.9): the filter and the sort apply to
+ * down rows only. An up region — the rows beneath a row whose query is up,
+ * and every row reached up — is kept whole, in holder order, as Pensive's
+ * prune keeps a pivoted subtree whole. A row whose query is up stands
+ * whatever the filter says, as the place its region hangs from. The rows of
+ * an up region are context unless they matched.
  */
 
 /** A narrowed view: the doc, the folds, and the rows kept only as context. */
@@ -65,7 +79,10 @@ export function filteredView(
     expanded,
     startLevel = 1,
     keep,
-  }: {
+    pivots = NO_PIVOTS,
+    rootId = null,
+    directions = "downstream",
+  }: RowRule & {
     /**
      * Keep the view's roots whatever the filter says. A focused block is its
      * view's root and is drawn as the view's TITLE, not as one of its rows
@@ -101,14 +118,21 @@ export function filteredView(
   const { matched, compare } = narrowing
   if (matched === null && compare === null) return { ...view, context: NO_CONTEXT, matches: null }
 
-  const sorted = compare ? sortSiblings(view.doc, compare) : view.doc
+  // The rule the view was walked by (`RowRule`): its pivots, the note as
+  // `rootId` (absent in focus, where the block reads its own pivot), and
+  // the "Show links" setting, "downstream" when absent as in `walkGraph`.
+  const rows: Required<RowRule> = { pivots, rootId, directions }
+  const rootQuery = rootQueryOf(pivots, rootId)
+  const sorted = compare ? sortSiblings(view.doc, compare, pivots, rootQuery) : view.doc
   const { doc, context } =
     matched === null
       ? { doc: sorted, context: new Set<string>() }
-      : prune(sorted, matched, keepRoots, keep)
-  const collapsed = new Set(expanded ? collapsedKeysOf(doc, expanded, startLevel) : [])
+      : prune(sorted, matched, pivots, rootQuery, keepRoots, keep)
+  const collapsed = expanded ? foldsOf(doc, expanded, startLevel, rows) : new Set<string>()
   return { doc, collapsed, context, matches: matched === null ? null : matched.size }
 }
+
+const NO_PIVOTS: LinkPivots = new Map()
 
 /**
  * The markdown of a filtered view — what **Copy markdown** takes while a
@@ -142,10 +166,17 @@ export function filteredRollup(
  *
  * A row in `kept` (the one being edited) stands as a match does, whatever
  * the filter made of it.
+ *
+ * The filter prunes down rows only. A row whose query is up (its block's
+ * pivot, or the query it inherits) stands with its region whole, as a match
+ * stands with its body. Beneath any kept row, its up rows are kept whole
+ * too, but they do not keep the row: they are not the note's to match.
  */
 function prune(
   doc: BlockDoc,
   matched: ReadonlySet<string>,
+  pivots: LinkPivots,
+  rootQuery: Direction,
   keepRoots: boolean,
   kept?: ReadonlySet<string>,
 ): { doc: BlockDoc; context: Set<string> } {
@@ -154,45 +185,52 @@ function prune(
   const path = new Set<string>()
   const held = (id: string): boolean => matched.has(id) || (kept?.has(id) ?? false)
 
-  // Whether `id` survives — it matched, or something beneath it did — and,
-  // on the way, the pruned block itself. Loops end the descent, as they do
-  // in the walk (docs/graph-schema-v2.md).
-  const keep = (id: string): boolean => {
+  // Whether `id` survives — it matched, or something beneath it did, or its
+  // query is up — and, on the way, the pruned block itself. Loops end the
+  // descent, as they do in the walk (docs/graph-schema-v2.md).
+  const keep = (id: string, inherited: Direction): boolean => {
     if (blocks[id]) return true
     const block = doc.blocks[id]
     if (!block || path.has(id)) return false
-    const isMatch = held(id)
+    const query = pivots.get(id) ?? inherited
+    // Beneath a match, and in an up region, every row is kept.
+    if (held(id) || query === "up") return keepAll(id)
     path.add(id)
-    // Beneath a match every row is kept; elsewhere only the branches that
-    // lead to one.
-    const children = isMatch
-      ? block.children.filter((childId) => keepAll(childId))
-      : block.children.filter((childId) => keep(childId))
+    const children = block.children.filter((childId) => keep(childId, query))
+    const upstream = children.length > 0 ? keepUpstream(block) : undefined
     path.delete(id)
-    if (!isMatch && children.length === 0) return false
-    if (!isMatch) context.add(id)
-    blocks[id] = { ...block, children }
+    if (children.length === 0) return false
+    context.add(id)
+    blocks[id] = { ...block, children, ...(upstream && { upstream }) }
     return true
   }
 
-  // Everything beneath a match, unconditionally — it is the match's content.
+  // Everything beneath a match or an up row, unconditionally: down and up.
   const keepAll = (id: string): boolean => {
     if (blocks[id]) return true
     const block = doc.blocks[id]
     if (!block || path.has(id)) return false
     path.add(id)
     const children = block.children.filter((childId) => keepAll(childId))
+    const upstream = keepUpstream(block)
     path.delete(id)
     if (!held(id)) context.add(id)
-    blocks[id] = { ...block, children }
+    blocks[id] = { ...block, children, ...(upstream && { upstream }) }
     return true
   }
+
+  // A block's holders, each kept whole. A holder on the path above stays
+  // listed (the rows decide where a loop closes); it is kept on the way back.
+  const keepUpstream = (block: Pick<Block, "upstream">): string[] | undefined =>
+    block.upstream?.filter((parentId) =>
+      path.has(parentId) ? parentId in doc.blocks : keepAll(parentId),
+    )
 
   // A root the filter emptied still stands when the view is rooted on it:
   // the page's title, with nothing beneath it, which is the honest way to
   // say the filter found nothing in here.
   const keepEmptyRoot = (id: string): boolean => {
-    if (keep(id)) return true
+    if (keep(id, "down")) return true
     const block = doc.blocks[id]
     if (!block) return false
     blocks[id] = { ...block, children: [] }
@@ -200,8 +238,11 @@ function prune(
     return true
   }
 
-  const rootBlockIds = doc.rootBlockIds.filter((id) => (keepRoots ? keepEmptyRoot(id) : keep(id)))
-  return { doc: { ...doc, rootBlockIds, blocks }, context }
+  const rootBlockIds = doc.rootBlockIds.filter((id) =>
+    keepRoots ? keepEmptyRoot(id) : keep(id, rootQuery),
+  )
+  const upstream = keepUpstream(doc)
+  return { doc: { ...doc, rootBlockIds, blocks, ...(upstream && { upstream }) }, context }
 }
 
 /**
@@ -209,12 +250,87 @@ function prune(
  * untouched. The comparator is the one a search sorts its results by
  * (`compareBlockHits`, through `src/utils/view-narrowing.ts`), so a key
  * orders a note's rows exactly as it orders results.
+ *
+ * Down rows only: the walk stops at a row whose query is up and at the up
+ * rows, so holders stay in the order `parentIdsOf` gives them. A block that
+ * is a down row anywhere has its children sorted.
  */
-function sortSiblings(doc: BlockDoc, compare: (a: string, b: string) => number): BlockDoc {
+function sortSiblings(
+  doc: BlockDoc,
+  compare: (a: string, b: string) => number,
+  pivots: LinkPivots,
+  rootQuery: Direction,
+): BlockDoc {
   const order = (ids: string[]): string[] => (ids.length > 1 ? [...ids].sort(compare) : ids)
-  const blocks: Record<string, Block> = {}
-  for (const [id, block] of Object.entries(doc.blocks)) {
+  const blocks: Record<string, Block> = { ...doc.blocks }
+  const sorted = new Set<string>()
+  const visit = (id: string, inherited: Direction) => {
+    const block = doc.blocks[id]
+    const query = pivots.get(id) ?? inherited
+    if (!block || query === "up" || sorted.has(id)) return
+    sorted.add(id)
     blocks[id] = { ...block, children: order(block.children) }
+    for (const childId of block.children) visit(childId, query)
   }
+  if (rootQuery === "up") return doc
+  for (const id of doc.rootBlockIds) visit(id, rootQuery)
   return { ...doc, rootBlockIds: order(doc.rootBlockIds), blocks }
+}
+
+/**
+ * The occurrence keys the fold rule closes in a narrowed doc: exactly the
+ * set the lazy walk (`walkGraph`, src/data/graph.ts) reports for the same
+ * rule, pivots and rows. The rows beneath each row are the ones the editor
+ * draws (`rowsBeneath`, with the `from` guard), less those the narrowing
+ * took away; the fold rule and the pivots decide each row (`queryAt`), and
+ * the depth count starts again beneath a pivot (`levelBeneath`). Leaves and
+ * looped rows are never closed.
+ */
+function foldsOf(
+  doc: BlockDoc,
+  expanded: ExpandedRule,
+  startLevel: number,
+  { pivots, rootId, directions }: Required<RowRule>,
+): Set<string> {
+  const rule = { pivots, expanded }
+  const collapsed = new Set<string>()
+  const path = new Set<string>()
+  const beneath = (
+    block: Block | null,
+    from: string | null,
+    direction: Direction,
+    query: Direction,
+  ) =>
+    rowsBeneath(doc, block, from, direction, query, directions, rootId).filter(
+      (row) => row.id in doc.blocks,
+    )
+  const visit = (
+    id: string,
+    parentKey: string | null,
+    level: number,
+    direction: Direction,
+    inherited: Direction,
+    from: string | null,
+  ) => {
+    const block = doc.blocks[id]
+    if (!block || path.has(id)) return
+    const key = keyOf(parentKey, id, direction)
+    const query = pivots.get(id) ?? inherited
+    const rows = beneath(block, from, direction, query)
+    if (rows.length === 0) return
+    const row = { key, id, level, type: block.type }
+    if (queryAt(rule, row, query).type === "collapse") {
+      collapsed.add(key)
+      return
+    }
+    const next = levelBeneath(rule, row)
+    path.add(id)
+    for (const below of rows) visit(below.id, key, next, below.direction, query, id)
+    path.delete(id)
+  }
+  const rootQuery = rootQueryOf(pivots, rootId)
+  for (const top of beneath(null, rootId, "down", rootQuery)) {
+    visit(top.id, null, startLevel, top.direction, rootQuery, rootId)
+  }
+  return collapsed
 }

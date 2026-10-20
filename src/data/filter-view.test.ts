@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
+import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import { parse } from "../blocks/parse"
+import { buildRows } from "../blocks/view"
 import type { BlockDoc } from "../blocks/types"
 import type { ViewNarrowing } from "../utils/view-narrowing"
 import { filteredRollup, filteredView, isNarrowed } from "./filter-view"
-import { buildGraphSnapshot, docToGraph, rollup, type GraphView } from "./graph"
+import { buildGraphSnapshot, docToGraph, noteView, rollup, type GraphView } from "./graph"
 
 /**
  * The SHAPE of a narrowed view — what survives the prune, what is kept as
@@ -228,5 +230,163 @@ describe("filteredRollup", () => {
     const [shopping] = ids(snapshot, ["Shopping"])
     const copied = filteredRollup("note", shopping, ids(snapshot, ["bread"]), snapshot)
     expect(visible(copied)).toEqual(["- Shopping", "  [x] bread"])
+  })
+})
+
+describe("filteredView with pivots (docs/graph-walk.md, 3.9)", () => {
+  // N > A > X > Y, and N > B. X has two more holders: P (in M, which also
+  // holds Z under P) and Q (in M). L in M holds the note N.
+  const row = (id: string, type: string, text: string): NodeRow => ({
+    id,
+    type,
+    text,
+    props: null,
+    updated_at: 0,
+  })
+  const edge = (source: string, destination: string, sortKey: string): LinkRow => ({
+    source_id: source,
+    destination_id: destination,
+    kind: "child",
+    sort_key: sortKey,
+    updated_at: 0,
+  })
+  const graph = () =>
+    buildGraphSnapshot(
+      [
+        row("n", "note", "N"),
+        row("m", "note", "M"),
+        row("blk_a", "ul", "a"),
+        row("blk_b", "ul", "b"),
+        row("blk_x", "ul", "x"),
+        row("blk_y", "ul", "y"),
+        row("blk_p", "ul", "p"),
+        row("blk_q", "ul", "q"),
+        row("blk_z", "ul", "z"),
+        row("blk_l", "ul", "l"),
+      ],
+      [
+        edge("n", "blk_a", "a0"),
+        edge("n", "blk_b", "a1"),
+        edge("blk_a", "blk_x", "a0"),
+        edge("blk_x", "blk_y", "a0"),
+        edge("m", "blk_q", "a0"),
+        edge("m", "blk_p", "a1"),
+        edge("m", "blk_l", "a2"),
+        edge("blk_q", "blk_x", "a0"),
+        edge("blk_p", "blk_x", "a0"),
+        edge("blk_p", "blk_z", "a1"),
+        edge("blk_l", "n", "a0"),
+      ],
+    )
+  const pivots = (entries: Record<string, "up" | "down">) => new Map(Object.entries(entries))
+  // The eager walk a narrowed page filters.
+  const eager = (pivotMap: ReturnType<typeof pivots>) =>
+    noteView("n", graph(), undefined, "downstream", pivotMap)!
+  const byIds = (ids: string[]): ViewNarrowing => ({ matched: new Set(ids), compare: null })
+
+  /** The rows the editor draws for `pivotMap` (`buildRows`, every row
+   * open): up rows marked `^`, dimmed rows (context) `~`. */
+  function rowsOf(
+    doc: BlockDoc,
+    context: ReadonlySet<string>,
+    pivotMap: ReadonlyMap<string, "up" | "down">,
+  ): string[] {
+    return buildRows(doc, { folds: new Set(), pivots: pivotMap, rootId: "n" }).map(
+      ({ id, depth, direction }) =>
+        `${"  ".repeat(depth)}${direction === "up" ? "^" : ""}${context.has(id) ? "~" : ""}${doc.blocks[id].text}`,
+    )
+  }
+
+  it("a filter does not prune an up region", () => {
+    const up = pivots({ blk_x: "up" })
+    const { doc, context, matches } = filteredView(eager(up), byIds(["blk_b"]), {
+      pivots: up,
+      rootId: "n",
+    })
+    // X stands for its region, which is kept whole and dimmed; A is its path.
+    expect(rowsOf(doc, context, up)).toEqual([
+      "~a",
+      "  ~x",
+      "    ^~p",
+      "      ^~M",
+      "    ^~q",
+      "      ^~M",
+      "b",
+    ])
+    expect(matches).toBe(1)
+  })
+
+  it("without the pivot, the same filter prunes the branch", () => {
+    const { doc, context } = filteredView(eager(new Map()), byIds(["blk_b"]))
+    expect(rowsOf(doc, context, new Map())).toEqual(["b"])
+  })
+
+  it("keeps the note's holders whole under a pivot on the note", () => {
+    const up = pivots({ n: "up" })
+    const { doc, context } = filteredView(eager(up), byIds([]), { pivots: up, rootId: "n" })
+    expect(rowsOf(doc, context, up)).toEqual(["^~l", "  ^~M"])
+  })
+
+  it("keeps an up loop's closing row under a filter", () => {
+    // C and D hold each other, and N holds C and B. Pivot C up.
+    const looped = buildGraphSnapshot(
+      [
+        row("n", "note", "N"),
+        row("blk_b", "ul", "b"),
+        row("blk_c", "ul", "c"),
+        row("blk_d", "ul", "d"),
+      ],
+      [
+        edge("n", "blk_c", "a0"),
+        edge("n", "blk_b", "a1"),
+        edge("blk_c", "blk_d", "a0"),
+        edge("blk_d", "blk_c", "a0"),
+      ],
+    )
+    const up = pivots({ blk_c: "up" })
+    const base = noteView("n", looped, undefined, "downstream", up)!
+    const { doc, context } = filteredView(base, byIds(["blk_b"]), { pivots: up, rootId: "n" })
+    // Beneath C: D, its holder. Beneath D: C closes the loop, as a leaf.
+    expect(rowsOf(doc, context, up)).toEqual(["~c", "  ^~d", "    ^~c", "b"])
+    expect(rowsOf(doc, context, up)).toEqual(rowsOf(base.doc, context, up))
+  })
+
+  it("a sort leaves up rows in holder order", () => {
+    const up = pivots({ blk_x: "up" })
+    const base = eager(up)
+    const compare = (a: string, b: string) =>
+      (base.doc.blocks[b]?.text ?? "").localeCompare(base.doc.blocks[a]?.text ?? "")
+    const { doc } = filteredView(base, { matched: null, compare }, { pivots: up, rootId: "n" })
+    // The down rows sort (descending): b before a.
+    expect(doc.rootBlockIds).toEqual(["blk_b", "blk_a"])
+    // The holders keep the order the graph gives them, p then q, where a
+    // descending sort puts q first.
+    expect(doc.blocks.blk_x.upstream).toEqual(["blk_a", "blk_p", "blk_q"])
+    expect(rowsOf(doc, new Set(), up)).toEqual([
+      "b",
+      "a",
+      "  x",
+      "    ^p",
+      "      ^M",
+      "    ^q",
+      "      ^M",
+    ])
+  })
+
+  it("folds as the lazy walk folds, the depth count starting again at a pivot", () => {
+    const up = pivots({ blk_x: "up" })
+    // Two levels, and X opened by the reader (setting a pivot opens a row).
+    const byDepth = (key: string, level: number) => level < 2 || key === "blk_a/blk_x"
+    const all = Object.keys(eager(up).doc.blocks)
+    const { collapsed } = filteredView(eager(up), byIds(all), {
+      pivots: up,
+      rootId: "n",
+      expanded: byDepth,
+    })
+    const lazy = noteView("n", graph(), byDepth, "downstream", up)!
+    expect([...collapsed].sort()).toEqual([...lazy.collapsed].sort())
+    // The holders sit at level 1 beneath the pivot, so they open: M shows
+    // beneath each. Counted from the note, they are at level 3 and close.
+    expect(collapsed.size).toBe(0)
   })
 })
