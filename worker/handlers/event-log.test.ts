@@ -486,7 +486,7 @@ describe("a client's own events", () => {
     expect(log[0].hlc).toBe(stamped.hlc)
     expect("hlc" in log[1]).toBe(false)
     // The reader derives the missing one from what every reader holds alike.
-    expect(eventStamp(log[1])).toBe(`000000000001020-0000-seq:2`)
+    expect(eventStamp(log[1])).toBe(`000000000001020-0000-seq:000000000000002`)
     // Nothing resolves by it yet: the projection is as it was.
     expect(await verifyLog(alice)).toMatchObject({ ok: true, events: 2 })
   })

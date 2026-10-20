@@ -41,6 +41,16 @@ the last event applied to it, so **the since-cursor pull is unchanged**.
 The property everything rests on, pinned by tests and checkable in production
 (`GET /api/replica/verify`): **fold(events) == tables**.
 
+`fold` is a left fold in `seq` order. A second fold, `foldByStamp`, resolves
+each field by the event's hybrid logical clock stamp (`src/data/hlc.ts`,
+docs/event-only-sync.md): every field of an entity, and its liveness, is a
+last-writer-wins register. Its state does not depend on the order of the
+events, and an event applied twice changes nothing. An event without a stamp
+gets the derived one (`eventStamp`, below), the same as every other reader.
+`toGraphSnapshot` and `toViewRows` read its state out. Nothing reads
+it yet: the replica, `verify`, `stateAt`, a history and the calendar use the
+fold by `seq`.
+
 ### One event = one change to one entity
 
 |           | `create`                                | `update`             | `delete`  | `restore`                                  |
@@ -117,9 +127,11 @@ its `base_seq`. Each event also takes its own **stamp** (`hlc`,
 `src/data/hlc.ts`): the next after the device's last, which the runtime keeps
 in `meta` (`hlc_last`) and moves up to every stamp it pulls. An event without
 one (made before stamps, or derived at the replica from rows) gets one derived
-when it is read: `ms` from its `at`, counter 0, `seq:<seq>` as the device
-(`eventStamp`). Nothing resolves by the stamp yet; `seq` still orders the
-fold and the projection. A typing run coalesces to its last event before it lands
+when it is read: `ms` from its `at`, counter 0, `seq:<seq>` as the device,
+with the `seq` zero-padded to 15 digits so that two such events in one ms keep
+their `seq` order (`eventStamp`, the one place this rule lives). Only
+`foldByStamp` resolves by the stamp yet; `seq` still orders `fold` and the
+projection. A typing run coalesces to its last event before it lands
 (`coalesceTyping`): once in the runtime, over the ops still coalescing, and
 again in the store against the unpushed tail of its log — never into an event
 a push already holds (`inFlightEventIds`).
