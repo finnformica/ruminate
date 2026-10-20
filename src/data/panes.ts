@@ -48,7 +48,7 @@ export interface PaneLayout {
 }
 
 /** How many panes the page shows side by side. */
-export const MAX_PANES = 2
+const MAX_PANES = 2
 
 /** A view to go to: a note, rooted at a block or not. */
 export interface ViewTarget {
@@ -217,7 +217,7 @@ export interface PaneSearch {
 }
 
 /** The parameter that holds pane `index` (1 and up). */
-export const paneParam = (index: number) => `pane${index}` as const
+const paneParam = (index: number) => `pane${index}` as const
 
 const validId = (id: string) => id !== "" && !/[,:]/.test(id)
 
