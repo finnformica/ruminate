@@ -211,22 +211,22 @@ describe("appending events", () => {
     expect(shape(await readEvents(bob))).toEqual(["1 block.create b", "2 block.create c"])
   })
 
-  it("is append-only: no update, and no delete without a recorded purge", async () => {
-    const { driver, alice } = await open()
+  it("is append-only: no update, and no delete for any tenant", async () => {
+    const { driver, alice, bob } = await open()
     await append(alice, [writer().block("a", "text", "A")])
+    await append(bob, [writer("bob").block("b", "text", "B")])
     // (The test driver throws synchronously; `async` makes either a rejection.)
-    await expect(
-      (async () => driver.exec("UPDATE events SET patch = '{}' WHERE user_id = 111"))(),
-    ).rejects.toThrow(/append-only/)
-    await expect(
-      (async () => driver.exec("DELETE FROM events WHERE user_id = 111"))(),
-    ).rejects.toThrow(/append-only/)
-    // Erasing an account is the one door: named, reasoned, and per tenant.
-    await driver.exec(
+    const refused = (sql: string) => expect((async () => driver.exec(sql))()).rejects
+    await refused("UPDATE events SET patch = '{}' WHERE user_id = 111").toThrow(/append-only/)
+    await refused("DELETE FROM events WHERE user_id = 111").toThrow(/append-only/)
+    await refused("DELETE FROM events WHERE user_id = 222").toThrow(/append-only/)
+    await refused("DELETE FROM events").toThrow(/append-only/)
+    // The door 0023 left open for erasing an account is gone (migrations/0026).
+    await refused(
       "INSERT INTO event_purges (user_id, reason, created_at) VALUES (111, 'account erasure', 1)",
-    )
-    await driver.exec("DELETE FROM events WHERE user_id = 111")
-    expect(await readEvents(alice)).toEqual([])
+    ).toThrow(/no such table/)
+    expect(await readEvents(alice)).toHaveLength(1)
+    expect(await readEvents(bob)).toHaveLength(1)
   })
 })
 
