@@ -49,7 +49,8 @@ afterEach(cleanup)
 const frame = (root: string | null, selected: string | null = null): FocusFrame => ({
   noteId: "N",
   root,
-  selected,
+  // A selection is a path of ids, written here as a key for short.
+  selected: selected === null ? null : selected.split("/"),
 })
 
 function trail(frames: FocusFrame[]) {

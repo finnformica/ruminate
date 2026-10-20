@@ -28,15 +28,18 @@ import {
 const A = "blk_notea"
 const B = "blk_noteb"
 
+/** A selection path, written as a key for short (`blk_a/blk_b`). */
+const P = (key: string) => key.split("/")
+
 /** Push `root` from the pane's current view, with `selected` selected there. */
 const push = (pane: Pane, root: string | null, selected: string | null, noteId = A) =>
-  goTo(pane, { noteId, root }, selected)!.pane
+  goTo(pane, { noteId, root }, selected === null ? null : P(selected))!.pane
 
 describe("the focus stack", () => {
   it("pushes a frame on a focus, recording the row selected beneath it", () => {
     const pane = push(paneOf(A), "blk_b1", "blk_x/blk_b1")
     expect(pane.frames).toEqual([
-      { noteId: A, root: null, selected: "blk_x/blk_b1" },
+      { noteId: A, root: null, selected: P("blk_x/blk_b1") },
       { noteId: A, root: "blk_b1", selected: null },
     ])
     expect(currentFrame(pane).root).toBe("blk_b1")
@@ -46,18 +49,18 @@ describe("the focus stack", () => {
     const deep = push(push(paneOf(A), "blk_b1", "blk_x/blk_b1"), "blk_b2", "blk_b1/blk_b2")
     const once = popFrame(deep)!
     expect(currentFrame(once.pane).root).toBe("blk_b1")
-    expect(once.landing).toBe("blk_b1/blk_b2")
+    expect(once.landing).toEqual(P("blk_b1/blk_b2"))
     // A frame restored keeps its folds: nothing is revealed on the way back.
     expect(once.restored).toBe(true)
     const twice = popFrame(once.pane)!
     expect(twice.pane).toEqual(paneOf(A))
-    expect(twice.landing).toBe("blk_x/blk_b1")
+    expect(twice.landing).toEqual(P("blk_x/blk_b1"))
   })
 
   it("restores a selection that is not the block focused on", () => {
     // The focus dot clicked on one row while another is highlighted.
     const pane = push(paneOf(A), "blk_b1", "blk_other")
-    expect(popFrame(pane)!.landing).toBe("blk_other")
+    expect(popFrame(pane)!.landing).toEqual(P("blk_other"))
   })
 
   it("leaves a lone focus for the whole note, revealing the block left", () => {
@@ -71,19 +74,19 @@ describe("the focus stack", () => {
   it("pops back to a view already on the stack rather than pushing it twice", () => {
     const deep = push(push(paneOf(A), "blk_b1", "k1"), "blk_b2", "k2")
     // ⌘⇧. (the whole note) and the note's crumb are the bottom frame.
-    const out = goTo(deep, { noteId: A, root: null }, "k3")!
+    const out = goTo(deep, { noteId: A, root: null }, P("k3"))!
     expect(out.pane).toEqual(paneOf(A))
-    expect(out.landing).toBe("k1")
+    expect(out.landing).toEqual(P("k1"))
     expect(out.restored).toBe(true)
     // The view on screen is no move at all.
-    expect(goTo(deep, { noteId: A, root: "blk_b2" }, "k3")).toBeNull()
+    expect(goTo(deep, { noteId: A, root: "blk_b2" }, P("k3"))).toBeNull()
   })
 
   it("pops to any frame by index (a crumb), and refuses the frame on screen", () => {
     const deep = push(push(paneOf(A), "blk_b1", "k1"), "blk_b2", "k2")
     const move = popTo(deep, 1)!
     expect(currentFrame(move.pane).root).toBe("blk_b1")
-    expect(move.landing).toBe("k2")
+    expect(move.landing).toEqual(P("k2"))
     expect(popTo(deep, 2)).toBeNull()
     expect(popTo(deep, -1)).toBeNull()
   })
@@ -93,7 +96,7 @@ describe("the focus stack", () => {
     // A crumb on the path between the note and b2: the note keeps k1.
     const move = goVia(deep, 0, { noteId: A, root: "blk_b1" })!
     expect(move.pane.frames).toEqual([
-      { noteId: A, root: null, selected: "k1" },
+      { noteId: A, root: null, selected: P("k1") },
       { noteId: A, root: "blk_b1", selected: null },
     ])
     expect(move.restored).toBe(false)
@@ -107,7 +110,7 @@ describe("the focus stack", () => {
     expect(currentFrame(pane)).toEqual({ noteId: B, root: "blk_c1", selected: null })
     const back = popFrame(pane)!
     expect(currentFrame(back.pane)).toEqual({ noteId: A, root: "blk_b1", selected: null })
-    expect(back.landing).toBe("k1")
+    expect(back.landing).toEqual(P("k1"))
   })
 })
 
@@ -134,14 +137,15 @@ describe("a frame's state (Finn's decisions, docs/split-view.md)", () => {
   })
 
   it("names a selection by the path of ids from the frame's root", () => {
-    // The occurrence key is that path: written from the root, read back whole.
+    // Written from the root and without `blk_`, read back as the whole path:
+    // the same ids the editor's occurrence key joins with `/`.
     const pane = push(push(paneOf(A), "blk_b1", "blk_x/blk_b1"), "blk_b2", "blk_b1/blk_y/blk_b2")
     const { noteId, search } = layoutToSearch({ panes: [pane], active: 0 })
     expect(search.stack).toBe(`${A}::x/b1,${A}:blk_b1:y/b2`)
     const back = layoutFromSearch(noteId, search as Record<string, unknown>)
     expect(back.panes[0].frames.map((f) => f.selected)).toEqual([
-      "blk_x/blk_b1",
-      "blk_b1/blk_y/blk_b2",
+      ["blk_x", "blk_b1"],
+      ["blk_b1", "blk_y", "blk_b2"],
       null,
     ])
   })
@@ -161,6 +165,13 @@ describe("a frame's state (Finn's decisions, docs/split-view.md)", () => {
     expect(search.stack).toBe(`${A}::b1;f=type%3Atodo;s=text`)
     expect(search.pane1).toBe(`${B},${B}:2024-01-02;z=-d`)
     expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(layout)
+  })
+
+  it("is plain data, so a View can store a whole stack", () => {
+    const pane = withCurrent(push(push(narrowed, "blk_b1", "blk_b1"), "blk_b2", "blk_b1/blk_b2"), {
+      folds: { open: ["blk_b2/blk_c"], closed: [] },
+    })
+    expect(JSON.parse(JSON.stringify(pane))).toEqual(pane)
   })
 
   it("keeps the bottom frame's folds off the URL: they are the note's own", () => {
@@ -260,8 +271,8 @@ describe("the URL", () => {
     for (const frame of [
       { noteId: A, root: null, selected: null },
       { noteId: A, root: "blk_b1", selected: null },
-      { noteId: A, root: null, selected: "blk_b1/blk_b2" },
-      { noteId: "2024-01-02", root: "blk_b1", selected: "blk_b1" },
+      { noteId: A, root: null, selected: P("blk_b1/blk_b2") },
+      { noteId: "2024-01-02", root: "blk_b1", selected: P("blk_b1") },
     ]) {
       expect(parseFrame(formatFrame(frame))).toEqual(frame)
     }

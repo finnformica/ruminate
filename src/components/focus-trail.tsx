@@ -58,12 +58,12 @@ export function FocusTrail({
     frame.root === null ? textOf(frame.noteId) || "Untitled" : textOf(frame.root) || "…"
   // The blocks strictly between a frame's root and the next frame's. The
   // row the frame recorded as it was left is the way the reader went down
-  // (an occurrence key: the path from the frame's root to the row), so it
-  // names the path where a block sits under more than one parent. Failing
-  // that — the reader focused from another row — the shortest path.
+  // (`SelectionPath`: the ids from the frame's root to the row), so it names
+  // the path where a block sits under more than one parent. Failing that —
+  // the reader focused from another row — the shortest path.
   const between = (from: FocusFrame, to: string) => {
     if (from.selected !== null) {
-      const ids = from.selected.split("/").map(idOfKey)
+      const ids = from.selected.map(idOfKey)
       if (from.root !== null && ids[0] === from.root) ids.shift()
       if (ids[ids.length - 1] === to) return ids.slice(0, -1)
     }

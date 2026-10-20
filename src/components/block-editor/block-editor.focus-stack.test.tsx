@@ -4,7 +4,16 @@ import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { parse } from "../../blocks/parse"
 import type { BlockDoc } from "../../blocks/types"
-import { currentFrame, goTo, paneOf, popFrame, type FocusMove, type Pane } from "../../data/panes"
+import {
+  currentFrame,
+  goTo,
+  keyOfPath,
+  paneOf,
+  pathOfKey,
+  popFrame,
+  type FocusMove,
+  type Pane,
+} from "../../data/panes"
 import { BlockEditor } from "./block-editor"
 
 /**
@@ -27,7 +36,8 @@ function PaneHost({ doc, onStack }: { doc: BlockDoc; onStack: (pane: Pane) => vo
   const apply = (move: FocusMove | null) => {
     if (!move) return
     setPane(move.pane)
-    setLanding(move.landing)
+    // The page's step: a frame's path is the editor's occurrence key.
+    setLanding(move.landing ? keyOfPath(move.landing) : null)
     onStack(move.pane)
   }
   return (
@@ -36,7 +46,9 @@ function PaneHost({ doc, onStack }: { doc: BlockDoc; onStack: (pane: Pane) => vo
       onChange={() => {}}
       noteId="n"
       focusRootId={currentFrame(pane).root}
-      onFocusNavigate={(id, selected) => apply(goTo(pane, { noteId: "n", root: id }, selected))}
+      onFocusNavigate={(id, selected) =>
+        apply(goTo(pane, { noteId: "n", root: id }, selected ? pathOfKey(selected) : null))
+      }
       onFocusBack={popFrame(pane) ? () => apply(popFrame(pane)) : undefined}
       landing={landing}
     />
@@ -75,7 +87,7 @@ describe("the focus stack in the editor", () => {
     select("C")
     press("f")
     expect(stacks.at(-1)!.frames).toEqual([
-      { noteId: "n", root: null, selected: id("C") },
+      { noteId: "n", root: null, selected: [id("C")] },
       { noteId: "n", root: id("C"), selected: null },
     ])
   })

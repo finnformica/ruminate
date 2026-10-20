@@ -32,11 +32,11 @@ export interface FocusFrame {
   /** The block the view is rooted at; null = the whole note. */
   root: string | null
   /**
-   * The row selected when the reader left this view (an occurrence key,
-   * `src/blocks/view.ts`), so a pop lands on it again. Null on the frame on
-   * screen, whose selection is the editor's own.
+   * The row selected when the reader left this frame, as the path of block
+   * ids from the frame's root (`SelectionPath`), so a pop lands on it again.
+   * Null on the frame on screen, whose selection is the editor's own.
    */
-  selected: string | null
+  selected: SelectionPath | null
   /** The frame's filter and sort (the query language, `src/data/filter-view.ts`);
    * absent = what the root's view saved. A pushed frame starts with none. */
   filter?: string
@@ -46,6 +46,20 @@ export interface FocusFrame {
    * own, kept on the device; and on a frame still at the defaults. */
   folds?: FrameFolds
 }
+
+/**
+ * A selection: the path of block ids from the frame's root down to the row,
+ * as in Pensive, so a block that sits under two parents names one place.
+ * In a frame rooted at a block the path starts with that block; on a whole
+ * note it starts at a top row. A step up a link to a parent (docs/graph-
+ * schema-v2.md, "Upstream") carries `^` before its id. The editor names a
+ * row by the same ids joined with `/` (an occurrence key,
+ * `src/blocks/view.ts`): `keyOfPath` and `pathOfKey` cross between them.
+ */
+export type SelectionPath = readonly string[]
+
+export const pathOfKey = (key: string): SelectionPath => key.split("/")
+export const keyOfPath = (path: SelectionPath): string => path.join("/")
 
 /** Folds as differences from the standing rule (`Folds`,
  * `src/data/view-state.ts`), in a form the URL can hold. */
@@ -80,7 +94,7 @@ export interface FocusMove {
   pane: Pane
   /** The row to select in the new view (a popped frame's), or null for the
    * editor's own landing rule. */
-  landing: string | null
+  landing: SelectionPath | null
   /** Whether the move went back to a frame already on the stack. A frame
    * restored keeps its narrowing and folds as they were; a new frame starts
    * from the defaults, with the folds down to the block just left opened
@@ -131,7 +145,11 @@ export function popFrame(pane: Pane): FocusMove | null {
  * anything else is a new frame, pushed with the current frame's selection
  * recorded beneath it.
  */
-export function goTo(pane: Pane, target: ViewTarget, selected: string | null): FocusMove | null {
+export function goTo(
+  pane: Pane,
+  target: ViewTarget,
+  selected: SelectionPath | null,
+): FocusMove | null {
   if (sameView(currentFrame(pane), target)) return null
   for (let i = pane.frames.length - 2; i >= 0; i -= 1) {
     if (sameView(pane.frames[i], target)) return popTo(pane, i)
@@ -196,7 +214,7 @@ export function openBeside(
   layout: PaneLayout,
   from: number,
   target: ViewTarget,
-): { layout: PaneLayout; landing: string | null } {
+): { layout: PaneLayout; landing: SelectionPath | null } {
   if (layout.panes.length < MAX_PANES) {
     const panes = [...layout.panes]
     panes.splice(from + 1, 0, paneOf(target.noteId, target.root))
@@ -320,7 +338,7 @@ export function formatFrame(frame: FocusFrame): string {
   const { noteId, root, selected } = frame
   let text =
     selected !== null
-      ? `${noteId}:${root ?? ""}:${formatPath(selected, root)}`
+      ? `${noteId}:${root ?? ""}:${formatPath(keyOfPath(selected), root)}`
       : root !== null
         ? `${noteId}:${root}`
         : noteId
@@ -342,7 +360,7 @@ export function parseFrame(text: string): FocusFrame | null {
   const frame: FocusFrame = {
     noteId,
     root: frameRoot,
-    selected: selected ? parsePath(selected, frameRoot) : null,
+    selected: selected ? pathOfKey(parsePath(selected, frameRoot)) : null,
   }
   for (const extra of extras) {
     const value = extra.slice(2)

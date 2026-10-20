@@ -58,6 +58,8 @@ import {
   openBeside,
   popFrame,
   popTo,
+  keyOfPath,
+  pathOfKey,
   withCurrent,
   withPane,
   type FocusFrame,
@@ -65,6 +67,7 @@ import {
   type FrameFolds,
   type Pane,
   type PaneLayout,
+  type SelectionPath,
   type ViewTarget,
 } from "../data/panes"
 import { Width, fontSchema, widthSchema } from "../schema"
@@ -153,9 +156,11 @@ function SplitView() {
   // pane reads it once its view is on screen. Kept beside the URL rather
   // than in it, so a reload, or back and forward, land by the editor's own
   // rule.
-  const [landing, setLanding] = useState<{ pane: number; view: ViewTarget; key: string } | null>(
-    null,
-  )
+  const [landing, setLanding] = useState<{
+    pane: number
+    view: ViewTarget
+    path: SelectionPath
+  } | null>(null)
   // `g p` hands the keyboard to a pane's editor: a bump per request. On
   // load the active pane asks for it too, since each editor takes the
   // keyboard as it mounts when nothing has it, and the first pane mounts
@@ -168,11 +173,16 @@ function SplitView() {
   const write = React.useCallback(
     (
       next: PaneLayout,
-      { replace = false, land }: { replace?: boolean; land?: { pane: number; key: string } } = {},
+      {
+        replace = false,
+        land,
+      }: { replace?: boolean; land?: { pane: number; path: SelectionPath } } = {},
     ) => {
       const { noteId: first, search: params } = layoutToSearch(next)
       setLanding(
-        land ? { pane: land.pane, view: currentFrame(next.panes[land.pane]), key: land.key } : null,
+        land
+          ? { pane: land.pane, view: currentFrame(next.panes[land.pane]), path: land.path }
+          : null,
       )
       navigate({
         to: "/views/$",
@@ -194,7 +204,7 @@ function SplitView() {
   const move = (index: number, focusMove: FocusMove) =>
     write(
       { panes: withPane(layout, index, focusMove.pane).panes, active: index },
-      { land: focusMove.landing ? { pane: index, key: focusMove.landing } : undefined },
+      { land: focusMove.landing ? { pane: index, path: focusMove.landing } : undefined },
     )
   // The keyboard goes with the reader: into the pane a key opened or moved
   // to, or the one left when a pane closes.
@@ -219,7 +229,7 @@ function SplitView() {
       root: id,
     })
     const to = result.layout.active
-    write(result.layout, { land: result.landing ? { pane: to, key: result.landing } : undefined })
+    write(result.layout, { land: result.landing ? { pane: to, path: result.landing } : undefined })
     focusPane(to)
   }
 
@@ -266,7 +276,8 @@ function SplitView() {
             leading={index === shown[0]}
             split={isSplit}
             active={index === layout.active}
-            landing={lands ? landing.key : null}
+            // The editor names a row by its occurrence key: the same path.
+            landing={lands ? keyOfPath(landing.path) : null}
             refocusRequest={refocus.pane === index ? refocus.n : 0}
             onMove={(focusMove) => move(index, focusMove)}
             onUpdate={(patch) => update(index, patch)}
@@ -681,7 +692,7 @@ function NotePage({
     onMove(settleFolds(move))
   }
   const focusTo = (id: string | null, selected: string | null) => {
-    if (noteId) applyMove(goTo(pane, { noteId, root: id }, selected))
+    if (noteId) applyMove(goTo(pane, { noteId, root: id }, selected ? pathOfKey(selected) : null))
   }
   const canPop = popFrame(pane) !== null
   const focusBack = () => applyMove(popFrame(pane))

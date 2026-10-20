@@ -22,7 +22,7 @@ The model is pure and lives in `src/data/panes.ts` (tests in
 interface FocusFrame {
   noteId: string
   root: string | null // null = the whole note
-  selected: string | null // the row selected when the reader left this frame
+  selected: SelectionPath | null // the row selected when the reader left: ids from the root
   filter?: string // absent = what the root's view saved
   sort?: string
   folds?: FrameFolds // a pushed frame's: rows opened and closed over the rule
@@ -87,11 +87,18 @@ so after a reload both start from the folds written last.
 
 ### Selection
 
-A selection is the path of block ids from the frame's root, as in Pensive.
-The editor's occurrence keys (`src/blocks/view.ts`) are already this path:
-`a/b/c` from a note's top rows, `r/a/b` in a frame rooted at `r`, with `^`
-on a step upward. So the frame records the occurrence key as it is, and
-nothing converts between the two.
+A selection is the path of block ids from the frame's root, as in Pensive:
+`SelectionPath`, an array of ids (`src/data/panes.ts`). A block that sits
+under two parents is two paths, so a frame never names an unclear place.
+
+- On a whole note the path starts at a top row: `["a", "b", "c"]`.
+- In a frame rooted at `r` the path starts with `r`: `["r", "a", "b"]`.
+- A step up a link to a parent carries `^` before its id.
+
+The editor names a row by the same ids joined with `/` (an occurrence key,
+`src/blocks/view.ts`). The page crosses between the two at one place each
+way: `pathOfKey` when the editor reports the row it leaves, and `keyOfPath`
+when a pop hands the editor its landing row.
 
 ## The breadcrumb
 
@@ -255,6 +262,16 @@ Finn settled these. The ones this branch touches are built as stated:
    (`layoutFromSearch`). A note then opens with the default folds each time.
 
 ## Later
+
+### Views that save a stack
+
+A View will save a whole stack: its root is the top frame, with the frames
+beneath it. A frame is plain data (ids, strings, arrays; no sets, no
+functions), so a View can store `Pane.frames` as it is, and a test checks
+that a pane survives a JSON round trip (`panes.test.ts`). The URL codec
+(`formatFrame`, `parseFrame`) is a second way to write the same frames.
+
+### More panes
 
 The model does not count panes. To add panes or a tiling layout:
 
