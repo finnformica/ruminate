@@ -148,8 +148,14 @@ function SplitView() {
   const [landing, setLanding] = useState<{ pane: number; view: ViewTarget; key: string } | null>(
     null,
   )
-  // `g p` hands the keyboard to a pane's editor: a bump per request.
-  const [refocus, setRefocus] = useState({ pane: -1, n: 0 })
+  // `g p` hands the keyboard to a pane's editor: a bump per request. On
+  // load the active pane asks for it too, since each editor takes the
+  // keyboard as it mounts when nothing has it, and the first pane mounts
+  // first.
+  const [refocus, setRefocus] = useState(() => ({
+    pane: layout.active,
+    n: layout.active > 0 ? 1 : 0,
+  }))
 
   const write = React.useCallback(
     (
@@ -182,11 +188,23 @@ function SplitView() {
       { panes: withPane(layout, index, focusMove.pane).panes, active: index },
       { land: focusMove.landing ? { pane: index, key: focusMove.landing } : undefined },
     )
+  // The keyboard goes with the reader: into the pane a key opened or moved
+  // to, or the one left when a pane closes.
+  const focusPane = React.useCallback(
+    (index: number) => setRefocus((prev) => ({ pane: index, n: prev.n + 1 })),
+    [],
+  )
   const split = () => {
     const from = layout.active
-    write(openBeside(layout, from, currentFrame(layout.panes[from])).layout)
+    const next = openBeside(layout, from, currentFrame(layout.panes[from])).layout
+    write(next)
+    focusPane(next.active)
   }
-  const close = (index: number) => write(closePane(layout, index))
+  const close = (index: number) => {
+    const next = closePane(layout, index)
+    write(next)
+    focusPane(next.active)
+  }
   const openBesideFrom = (index: number, id: string) => {
     const result = openBeside(layout, index, {
       noteId: currentFrame(layout.panes[index]).noteId,
@@ -194,6 +212,7 @@ function SplitView() {
     })
     const to = result.layout.active
     write(result.layout, { land: result.landing ? { pane: to, key: result.landing } : undefined })
+    focusPane(to)
   }
 
   // ⌘\: a second pane on the view, or close the one with the keyboard.
@@ -217,10 +236,10 @@ function SplitView() {
     setOtherPane(() => () => {
       const index = nextPaneIndex(layout)
       write(activate(layout, index), { replace: true })
-      setRefocus((prev) => ({ pane: index, n: prev.n + 1 }))
+      focusPane(index)
     })
     return () => setOtherPane(null)
-  }, [isSplit, layout, write, setOtherPane])
+  }, [isSplit, layout, write, setOtherPane, focusPane])
 
   return (
     <div className={cx("grid overflow-hidden", isSplit && "grid-cols-2")}>
@@ -237,6 +256,7 @@ function SplitView() {
             key={`${index}:${frame.noteId}`}
             pane={pane}
             primary={index === 0}
+            leading={index === shown[0]}
             split={isSplit}
             active={index === layout.active}
             landing={lands ? landing.key : null}
@@ -262,6 +282,9 @@ interface NotePageProps {
   /** The first pane: the one the address's filter and sort are for, and
    * the page's own header keys. */
   primary: boolean
+  /** The first pane on screen: its header carries the page's own keys,
+   * buttons and notices. */
+  leading: boolean
   /** More than one pane on screen. */
   split: boolean
   /** The pane with the keyboard. */
@@ -285,6 +308,7 @@ interface NotePageProps {
 function NotePage({
   pane,
   primary,
+  leading,
   split,
   active,
   landing,
@@ -653,22 +677,20 @@ function NotePage({
   const pageTitle = note?.displayName || "Untitled"
 
   return (
-    // The pane takes the keyboard's place the moment the reader is in it:
-    // a click anywhere on it, or focus arriving inside it.
+    // The pane is the active one the moment the reader presses on it.
+    // Focus alone does not say so: an editor takes the keyboard as it
+    // mounts, and the keys that move between panes (`g p`, `o`, ⌘\) set
+    // the active pane themselves.
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions
     <div
       data-testid="note-pane"
       data-active={split ? active : undefined}
-      className={cx(
-        "grid overflow-hidden",
-        split && !primary && "border-l border-border-secondary",
-      )}
+      className={cx("grid overflow-hidden", !leading && "border-l border-border-secondary")}
       style={fontVars}
       onPointerDownCapture={onActivate}
-      onFocusCapture={onActivate}
     >
       <PageLayout
-        secondary={!primary}
+        secondary={!leading}
         // The note's name is its title now, not its (opaque) id. A shared
         // note's header leads with whose it is, quietly, then the note as the
         // current crumb — its favicon beside its name, as in the sidebar's

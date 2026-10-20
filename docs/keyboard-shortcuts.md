@@ -39,6 +39,7 @@ key navigates. The chords work from the block editor's select mode too.
 | Focus the search (Views page)         | <kbd>/</kbd>                                          |
 | `i`                                   | Focus the editor, restoring the last selected block   |
 | Back / forward (browser history)      | <kbd>⌘</kbd> <kbd>[</kbd> / <kbd>⌘</kbd> <kbd>]</kbd> |
+| Move to the other pane (split view)   | <kbd>g</kbd> then <kbd>p</kbd>                        |
 
 ### Headings
 
@@ -175,7 +176,8 @@ marker key on a highlighted block — empty or not — leaves it highlighted.
 | Turn into: quote / numbered item         | <kbd>></kbd> / <kbd>1</kbd>                                                |
 | Turn into: code block                    | <kbd>`</kbd>                                                               |
 | Focus on the block (see Focus below)     | <kbd>F</kbd> (or <kbd>⌘</kbd> <kbd>.</kbd>)                                |
-| Step back one level                      | <kbd>⇧</kbd> <kbd>F</kbd>                                                  |
+| Pop the focus stack                      | <kbd>⇧</kbd> <kbd>F</kbd>                                                  |
+| Open the block in the other pane         | <kbd>o</kbd> (see Split view below)                                        |
 | Leave focus entirely                     | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>                                     |
 | Focus the note title (from first block)  | <kbd>↑</kbd>                                                               |
 
@@ -350,10 +352,15 @@ newlines to single spaces because a block is one line in the serialized format.
 
 ### Focus
 
-Focus makes one block's subtree the whole editor view, with a breadcrumb
-tracing the full path (`Note title › ancestor › … › focused block`; every crumb
-is clickable, the note-title crumb exits fully). The focus lives in the URL
-(`?block=…`), so the browser back button undoes it.
+Focus makes one block's subtree the whole editor view. Each pane keeps a
+**focus stack** (docs/split-view.md): focusing on a block pushes a frame,
+and <kbd>⇧</kbd> <kbd>F</kbd> pops one, back to the view before with the
+block that was selected there selected again and its folds as they were.
+The breadcrumb draws the stack (`Note title › a view › … › focused block`):
+a click on a crumb pops back to it, and the note-title crumb goes to the
+whole note. The stack lives in the URL (`?block=…&stack=…`), so a reload
+keeps it and the browser back button undoes each step; an old `?block=`
+link opens with an empty stack.
 
 A focused **heading** renders as an editable title at the top, its children
 below it — a heading already names what hangs beneath it. **Every other type**
@@ -363,20 +370,25 @@ title above. The rules below that mention "the title" apply to the first
 kind; in the second the leading row behaves like any other row, except that it
 cannot be deleted or outdented out of its own view.
 
-| Action                        | Trigger                                             |
-| ----------------------------- | --------------------------------------------------- |
-| Focus on the selected block   | <kbd>F</kbd> (select mode)                          |
-| Step back one level           | <kbd>⇧</kbd> <kbd>F</kbd> (select mode)             |
-| Focus on the current block    | <kbd>⌘</kbd> <kbd>.</kbd> (both modes)              |
-| Leave focus entirely          | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd> (both modes) |
-| Focus on a block by finger    | **Focus on** in the edit bar (docs/mobile.md)       |
-| Navigate to a shallower level | click its breadcrumb crumb                          |
+| Action                      | Trigger                                             |
+| --------------------------- | --------------------------------------------------- |
+| Focus on the selected block | <kbd>F</kbd> (select mode)                          |
+| Pop the focus stack         | <kbd>⇧</kbd> <kbd>F</kbd> (select mode)             |
+| Focus on the current block  | <kbd>⌘</kbd> <kbd>.</kbd> (both modes)              |
+| Leave focus entirely        | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd> (both modes) |
+| Focus on a block by finger  | **Focus on** in the edit bar (docs/mobile.md)       |
+| Pop back to an earlier view | click its breadcrumb crumb                          |
 
 Rules while focused:
 
 - Focusing **in** selects the first child under a title, or the leading row
-  itself where there is none; **stepping back** lands on the block you came
-  from.
+  itself where there is none; **popping** lands on the block that was
+  selected when you went in. Where the stack has no frame to return to (an
+  old `?block=` link), <kbd>⇧</kbd> <kbd>F</kbd> leaves for the whole note
+  and lands on the block you came from.
+- Going to a view that is already on the stack (<kbd>⌘</kbd> <kbd>⇧</kbd>
+  <kbd>.</kbd> to the whole note, a crumb) pops back to it rather than
+  pushing it again.
 - <kbd>↵</kbd> / <kbd>⌘</kbd> <kbd>↵</kbd> on the title create its **first
   child** (title + body), never a sibling outside the view.
 - The title can't be deleted, moved, duplicated, indented, outdented, or
@@ -386,6 +398,26 @@ Rules while focused:
 - The <kbd>⌘</kbd> <kbd>A</kbd> ladder's "page" rung is the focused subtree.
 - If the focused block disappears (an undo, a stale link), the editor exits the
   focus gracefully and cleans the URL.
+
+### Split view
+
+The note page shows two panes side by side on a wide screen
+(docs/split-view.md). Each pane has its own note, focus, focus stack, folds
+and selection; an edit in one shows in the other at once. A narrow screen
+(a phone) shows the pane with the keyboard only.
+
+| Action                                       | Shortcut                       |
+| -------------------------------------------- | ------------------------------ |
+| Split the view / close the pane you are in   | <kbd>⌘</kbd> <kbd>\</kbd>      |
+| Open the highlighted block in the other pane | <kbd>o</kbd> (select mode)     |
+| Move the keyboard to the other pane          | <kbd>g</kbd> then <kbd>p</kbd> |
+
+A click in a pane makes it the one with the keyboard. While two panes are
+open, a note opened from the sidebar, the palette or the Views page opens in
+the pane with the keyboard, pushed onto its stack. Pensive, the inspiration,
+pushes with <kbd>d</kbd> and pops with <kbd>⇧</kbd> <kbd>A</kbd>; here
+<kbd>w</kbd> <kbd>a</kbd> <kbd>s</kbd> <kbd>d</kbd> walk the tree, so the
+stack keeps <kbd>F</kbd> / <kbd>⇧</kbd> <kbd>F</kbd>.
 
 ### Note title
 

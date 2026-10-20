@@ -3,6 +3,7 @@ import { Fragment } from "react"
 import type { FocusFrame, ViewTarget } from "../data/panes"
 import { graphSnapshotAtom } from "../global-state"
 import { cx } from "../utils/cx"
+import { inlineText } from "../utils/inline-text"
 
 /**
  * A pane's focus stack, drawn as a breadcrumb (docs/split-view.md): one
@@ -29,7 +30,8 @@ export function FocusTrail({
   className?: string
 }) {
   const graph = useAtomValue(graphSnapshotAtom)
-  const textOf = (id: string) => graph.nodes.get(id)?.text.trim() ?? ""
+  // A crumb is one plain line: its markdown marks go (`inlineText`).
+  const textOf = (id: string) => inlineText(graph.nodes.get(id)?.text ?? "")
   const labelOf = (frame: FocusFrame) =>
     frame.root === null ? textOf(frame.noteId) || "Untitled" : textOf(frame.root) || "…"
   const first = frames[0]
