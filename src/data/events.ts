@@ -48,6 +48,7 @@
 
 import type { LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
 import type { GraphSnapshot } from "./graph"
+import { decodeHlc, encodeHlc } from "./hlc"
 import type { Op } from "./ops"
 
 /** The event schema version this build writes. Old events are never rewritten:
@@ -105,6 +106,14 @@ interface EventEnvelope {
   ref_seq?: number | null
   /** Writer's clock, ms. Informational — order is `seq`, never this. */
   at: number
+  /**
+   * The writer's hybrid logical clock stamp (`src/data/hlc.ts`,
+   * docs/event-only-sync.md): the order a conflict will resolve by. Absent on
+   * every event written before stamps, and on the replica's own derived
+   * events until it stamps them; a reader derives one (`eventStamp`). Carried
+   * and stored, not yet resolved by: order is still `seq`.
+   */
+  hlc?: string
   /**
    * The writer's UTC offset at `at`, in minutes EAST of UTC (+60 is London in
    * summer, +540 is Tokyo; the sign `Date#getTimezoneOffset` does not use).
@@ -295,15 +304,35 @@ export function historyOf(
     .sort(bySeq)
 }
 
+/** The largest `ms` a stamp can hold (`encodeHlc`: 15 decimal digits). */
+const MAX_STAMP_MS = 10 ** 15 - 1
+
+/**
+ * The stamp an event resolves by: its own `hlc`, or — for an event written
+ * before stamps — one derived from what every reader holds alike: `ms` from
+ * its `at`, counter 0, and `seq:<seq>` as the device (docs/event-only-sync.md,
+ * Old events). The same event derives the same stamp on every reader. One
+ * not yet placed derives from the `seq` it has (none is 0, and a pending
+ * one's is provisional), so it may derive another once the replica places it.
+ */
+export function eventStamp(event: RuminateEvent): string {
+  if (event.hlc !== undefined) return event.hlc
+  const ms = Number.isFinite(event.at)
+    ? Math.min(Math.max(Math.floor(event.at), 0), MAX_STAMP_MS)
+    : 0
+  return encodeHlc({ ms, counter: 0, device: `seq:${event.seq ?? 0}` })
+}
+
 /**
  * Bring an old event up to `EVENT_VERSION`. Events are never rewritten in
  * place — the log is append-only — so every shape this app has ever written
  * must stay readable, and this is the one place that knows the old shapes.
- * Version 1 is the first, so today it is the identity; the next change to a
- * patch's fields adds a case here rather than a data migration.
+ * Version 1 is the first; the one change since is the stamp, which an event
+ * written before it gets derived (`eventStamp`). The next change to a patch's
+ * fields adds a case here rather than a data migration.
  */
 function upcast(event: RuminateEvent): RuminateEvent {
-  return event
+  return event.hlc === undefined ? { ...event, hlc: eventStamp(event) } : event
 }
 
 // -----------------------------------------------------------------------------
@@ -459,6 +488,10 @@ export interface EventContext {
   tz?: number
   /** Mints an event id (`evt_…`). Injected: this module makes no ids. */
   mintId: () => string
+  /** Mints each event's stamp (`EventEnvelope.hlc`), rising with each call.
+   * Injected like `mintId`: this module keeps no clock. Absent, the events
+   * carry none, and a reader derives one (`eventStamp`). */
+  stamp?: () => string
 }
 
 const envelope = (ctx: EventContext, baseSeq: number | null = null): EventEnvelope => ({
@@ -469,6 +502,7 @@ const envelope = (ctx: EventContext, baseSeq: number | null = null): EventEnvelo
   base_seq: baseSeq,
   at: ctx.at,
   ...(ctx.tz === undefined ? {} : { tz: ctx.tz }),
+  ...(ctx.stamp ? { hlc: ctx.stamp() } : {}),
   v: EVENT_VERSION,
 })
 
@@ -974,6 +1008,8 @@ const MAX_ID_LENGTH = 64
 const MAX_LABEL_LENGTH = 128
 /** A UTC offset no clock has: ±15 hours covers every zone there is. */
 const MAX_TZ_MINUTES = 15 * 60
+/** A stamp is 21 characters and a device (`writerDevice` is 15). */
+const MAX_HLC_LENGTH = 96
 
 const isString = (x: unknown): x is string => typeof x === "string"
 const isNullableString = (x: unknown): x is string | null => x === null || isString(x)
@@ -1059,6 +1095,11 @@ export function parseEvent(raw: unknown): RuminateEvent | null {
       x.tz === null ||
       (Number.isInteger(x.tz) && Math.abs(x.tz as number) <= MAX_TZ_MINUTES)
     ) ||
+    !(
+      x.hlc === undefined ||
+      x.hlc === null ||
+      (isShortString(x.hlc, MAX_HLC_LENGTH) && decodeHlc(x.hlc) !== null)
+    ) ||
     x.v !== EVENT_VERSION
   ) {
     return null
@@ -1093,6 +1134,9 @@ export function parseEvent(raw: unknown): RuminateEvent | null {
   if (x.base_seq !== undefined) event.base_seq = x.base_seq
   if (x.ref_seq !== undefined) event.ref_seq = x.ref_seq
   if (x.tz !== undefined) event.tz = x.tz
+  // An event from a build before stamps sends none: it stays without one,
+  // and a reader derives it (`eventStamp`).
+  if (isString(x.hlc)) event.hlc = x.hlc
   return event as unknown as RuminateEvent
 }
 

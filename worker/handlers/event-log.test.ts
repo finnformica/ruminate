@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest"
 import {
   EVENT_VERSION,
+  eventStamp,
   fold,
   linkEntityId,
   projectRows,
@@ -468,6 +469,26 @@ describe("a client's own events", () => {
       "SELECT value FROM meta WHERE user_id = 111 AND key = 'replica_cursor'",
     )
     expect(meta.value).toBe("c-7")
+  })
+
+  it("stores each event's stamp and serves it back; an event without one is served without", async () => {
+    const { driver, alice } = await open()
+    const w = writer("dev.tab")
+    const stamped = { ...w.block("a", "text", "A"), hlc: "000000000001010-0000-dev.tab" }
+    const old = w.edit("a", { text: "A!" }) // a build before stamps
+    await client(alice, [stamped, old])
+    const rows = await driver.exec("SELECT seq, hlc FROM events WHERE user_id = 111 ORDER BY seq")
+    expect(rows).toEqual([
+      { seq: 1, hlc: "000000000001010-0000-dev.tab" },
+      { seq: 2, hlc: null },
+    ])
+    const log = await readEvents(alice)
+    expect(log[0].hlc).toBe(stamped.hlc)
+    expect("hlc" in log[1]).toBe(false)
+    // The reader derives the missing one from what every reader holds alike.
+    expect(eventStamp(log[1])).toBe(`000000000001020-0000-seq:2`)
+    // Nothing resolves by it yet: the projection is as it was.
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, events: 2 })
   })
 
   it("reconciles first, like every write: a tenant's genesis can be its first push of events", async () => {

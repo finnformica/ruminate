@@ -3,6 +3,7 @@ import {
   EVENT_VERSION,
   MAX_EVENTS_PER_PUT,
   coalesceTyping,
+  eventStamp,
   fold,
   historyOf,
   linkEntityId,
@@ -19,6 +20,7 @@ import {
   type RuminateEvent,
 } from "./events"
 import { buildGraphSnapshot } from "./graph"
+import { decodeHlc, encodeHlc, tickHlc, type Hlc } from "./hlc"
 import type { Op } from "./ops"
 import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import type { ViewRow } from "./views"
@@ -261,6 +263,77 @@ describe("the envelope", () => {
   })
 })
 
+describe("the stamp", () => {
+  /** A context that stamps as the runtime does: each event ticks the clock. */
+  const stamping = (now = 1_000): EventContext => {
+    let last: Hlc | null = null
+    return {
+      ...context("dev.tab", now),
+      stamp: () => encodeHlc((last = tickHlc(last, now, "dev.tab"))),
+    }
+  }
+
+  it("gives each event of a batch its own stamp, rising in the order made", () => {
+    const events = opsToEvents(
+      snapshot,
+      [
+        { op: "create", id: "b", type: "text", text: "", props: null, notesId: "note" },
+        { op: "link", source: "note", destination: "b", sortKey: "a1" },
+        { op: "setText", id: "a", text: "A!" },
+      ],
+      stamping(),
+    )
+    const stamps = events.map((e) => e.hlc as string)
+    expect(stamps.map(decodeHlc)).toEqual([
+      { ms: 1_000, counter: 0, device: "dev.tab" },
+      { ms: 1_000, counter: 1, device: "dev.tab" },
+      { ms: 1_000, counter: 2, device: "dev.tab" },
+    ])
+    expect([...stamps].sort()).toEqual(stamps)
+  })
+
+  it("stamps a view's event, and leaves an event unstamped when the context mints none", () => {
+    const view: ViewRow = {
+      id: "v",
+      root_id: "note",
+      filter: null,
+      sort: null,
+      pinned: false,
+      sort_key: null,
+      updated_at: 5,
+    }
+    expect(viewChangeToEvent(undefined, view, stamping())?.hlc).toBe(
+      encodeHlc({ ms: 1_000, counter: 0, device: "dev.tab" }),
+    )
+    const [bare] = opsToEvents(snapshot, [{ op: "setText", id: "a", text: "A!" }], context())
+    expect("hlc" in bare).toBe(false)
+  })
+
+  it("is the event's own when it has one", () => {
+    const [event] = opsToEvents(snapshot, [{ op: "setText", id: "a", text: "A!" }], stamping())
+    expect(eventStamp({ ...event, seq: 7 })).toBe(event.hlc)
+  })
+
+  it("derives an old event's from its at and its seq, the same on every reader", () => {
+    const [old] = sequenced(
+      opsToEvents(snapshot, [{ op: "setText", id: "a", text: "A!" }], context("tab", 1_234.9)),
+      42,
+    )
+    expect(eventStamp(old)).toBe("000000000001234-0000-seq:42")
+    expect(eventStamp({ ...old })).toBe(eventStamp(old))
+    // A clock no stamp can hold is clamped, never thrown on: a log is forever.
+    expect(decodeHlc(eventStamp({ ...old, at: -5 }))?.ms).toBe(0)
+    expect(decodeHlc(eventStamp({ ...old, at: Number.NaN }))?.ms).toBe(0)
+  })
+
+  it("does not change what the fold makes: order is still seq", () => {
+    const ops: Op[] = [{ op: "setText", id: "a", text: "A!" }]
+    const stamped = sequenced(opsToEvents(snapshot, ops, stamping()), 4)
+    const bare = sequenced(opsToEvents(snapshot, ops, context()), 4)
+    expect(fold(stamped).blocks).toEqual(fold(bare).blocks)
+  })
+})
+
 describe("parseEvent", () => {
   const good = {
     id: "evt_1",
@@ -317,6 +390,15 @@ describe("parseEvent", () => {
     expect(parseEvent({ ...good, action: "restore", ref_seq: 4 })).toMatchObject({ ref_seq: 4 })
     expect(parseEvent({ ...good, action: "restore", ref_seq: null })).not.toBeNull()
     expect(parseEvent({ ...good, base_seq: 1.5 })).toBeNull()
+  })
+
+  it("takes a stamp when one is sent, and an event without one as it is", () => {
+    const hlc = "000000000001000-0003-dev.tab"
+    expect(parseEvent({ ...good, hlc })).toEqual({ ...good, hlc })
+    expect(parseEvent({ ...good, hlc: null })).toEqual(good)
+    expect(parseEvent({ ...good, hlc: "yesterday" })).toBeNull()
+    expect(parseEvent({ ...good, hlc: 1_000 })).toBeNull()
+    expect(parseEvent({ ...good, hlc: `000000000001000-0003-${"x".repeat(100)}` })).toBeNull()
   })
 
   it("a payload is all or nothing, and bounded", () => {

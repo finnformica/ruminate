@@ -300,8 +300,8 @@ function planChunk(
     {
       sql:
         "INSERT INTO events (user_id, seq, id, entity, entity_id, action, patch, v, batch, " +
-        "origin, device, client, cause, actor, base_seq, ref_seq, at, tz, received_at, append) " +
-        "SELECT :tenant, " +
+        "origin, device, client, cause, actor, base_seq, ref_seq, at, tz, hlc, received_at, " +
+        "append) SELECT :tenant, " +
         "(SELECT COALESCE(MAX(seq), 0) FROM events WHERE user_id = :tenant) + j.key + 1, " +
         "json_extract(j.value, '$.id'), json_extract(j.value, '$.entity'), " +
         "json_extract(j.value, '$.entity_id'), json_extract(j.value, '$.action'), " +
@@ -309,7 +309,7 @@ function planChunk(
         "json_extract(j.value, '$.batch'), ?5, json_extract(j.value, '$.device'), ?6, " +
         "json_extract(j.value, '$.cause'), ?4, json_extract(j.value, '$.base_seq'), " +
         "json_extract(j.value, '$.ref_seq'), json_extract(j.value, '$.at'), " +
-        "json_extract(j.value, '$.tz'), ?2, ?3 " +
+        "json_extract(j.value, '$.tz'), json_extract(j.value, '$.hlc'), ?2, ?3 " +
         "FROM json_each(?1) AS j WHERE true " +
         "ON CONFLICT (user_id, id) DO NOTHING",
       params: [JSON.stringify(events), ctx.now, ctx.appendId, ctx.actor, ctx.origin, ctx.client],
@@ -589,7 +589,7 @@ export async function writeRows(
 
 const EVENT_COLUMNS =
   "id, seq, entity, entity_id, action, patch, v, batch, origin, device, client, cause, actor, " +
-  "base_seq, ref_seq, at, tz, received_at"
+  "base_seq, ref_seq, at, tz, hlc, received_at"
 
 /** An event as the log holds it: the envelope plus what the replica stamped. */
 export type StoredEvent = RuminateEvent & {
@@ -619,6 +619,9 @@ const toEvent = (row: Record<string, SqlValue>): StoredEvent =>
     ref_seq: row.ref_seq === null ? null : Number(row.ref_seq),
     at: Number(row.at),
     tz: row.tz === null ? null : Number(row.tz),
+    // Null on an event written before stamps (0024): served without one, and
+    // the reader derives it (`eventStamp`).
+    ...(row.hlc === null ? {} : { hlc: String(row.hlc) }),
     received_at: Number(row.received_at),
   }) as StoredEvent
 

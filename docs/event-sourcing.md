@@ -9,7 +9,8 @@ from there — and the replica takes them in as made. Code: `src/data/events.ts`
 (the vocabulary, the fold, ops → events, the wire's validation),
 `worker/handlers/event-log.ts` (append, reconcile, reading the past),
 `src/data/sql-note-store.ts` (the device's log and its projection),
-`src/data/replica-sync.ts` (the push), `migrations/0023_events.sql`.
+`src/data/replica-sync.ts` (the push), `src/data/hlc.ts` (the stamp),
+`migrations/0023_events.sql`, `migrations/0024_event_hlc.sql`.
 
 ## Why
 
@@ -81,6 +82,7 @@ history, and can itself be undone. One action covers "undelete" and "revert".
 | `cause`       | The command, when a writer names one (`snapshot`, `restore`, `share:ensure-view`; a client may pass one through `useApplyOps`). |
 | `base_seq`    | The entity's `seq` as the writer last saw it — what it believed it was changing (the cached row's `seq`, from its last pull).   |
 | `ref_seq`     | On a restore: the moment being returned to.                                                                                     |
+| `hlc`         | The writer's hybrid logical clock stamp (docs/event-only-sync.md). Stored, not yet resolved by. Null before 0024: derived.      |
 | `append`      | The request that appended it (idempotency of the projections).                                                                  |
 
 Nothing else needs storing for a past moment to be viewable. Block content is
@@ -111,7 +113,13 @@ translated to events (`opsToEvents`; a view row becomes its one event with
 `viewChangeToEvent`). The batch's events share a `batch` id, the tab's
 `device` (`src/data/writer-identity.ts`), the writer's clock and `tz`, a
 `cause` when the caller names one, and each carries the cached row's `seq` as
-its `base_seq`. A typing run coalesces to its last event before it lands
+its `base_seq`. Each event also takes its own **stamp** (`hlc`,
+`src/data/hlc.ts`): the next after the device's last, which the runtime keeps
+in `meta` (`hlc_last`) and moves up to every stamp it pulls. An event without
+one (made before stamps, or derived at the replica from rows) gets one derived
+when it is read: `ms` from its `at`, counter 0, `seq:<seq>` as the device
+(`eventStamp`). Nothing resolves by the stamp yet; `seq` still orders the
+fold and the projection. A typing run coalesces to its last event before it lands
 (`coalesceTyping`): once in the runtime, over the ops still coalescing, and
 again in the store against the unpushed tail of its log — never into an event
 a push already holds (`inFlightEventIds`).

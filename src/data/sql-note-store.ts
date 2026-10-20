@@ -264,7 +264,7 @@ const ENTITY_OF = { nodes: "block", link: "link", views: "view" } as const
 async function loadUnpushed(driver: SqlDriver): Promise<RuminateEvent[]> {
   const rows = await driver.exec(
     "SELECT id, entity, entity_id, action, patch, v, batch, device, cause, base_seq, ref_seq, " +
-      "at, tz FROM events WHERE seq IS NULL ORDER BY position",
+      "at, tz, hlc FROM events WHERE seq IS NULL ORDER BY position",
   )
   return rows.map(toEvent)
 }
@@ -275,7 +275,7 @@ async function loadUnpushed(driver: SqlDriver): Promise<RuminateEvent[]> {
 async function loadLog(driver: SqlDriver): Promise<LoggedEvent[]> {
   const rows = await driver.exec(
     "SELECT id, seq, entity, entity_id, action, patch, v, batch, device, cause, base_seq, " +
-      "ref_seq, at, tz, origin, actor, received_at FROM events " +
+      "ref_seq, at, tz, hlc, origin, actor, received_at FROM events " +
       "ORDER BY seq IS NULL, seq, position",
   )
   let last = 0
@@ -315,6 +315,8 @@ const toEvent = (row: Record<string, SqlValue>): RuminateEvent =>
     ...(row.ref_seq === null ? {} : { ref_seq: Number(row.ref_seq) }),
     at: Number(row.at),
     tz: row.tz === null ? null : Number(row.tz),
+    // Null on an event made before stamps: a reader derives it (`eventStamp`).
+    ...(row.hlc === null ? {} : { hlc: String(row.hlc) }),
   }) as RuminateEvent
 
 /** A pulled event, placed: its `seq` is its position. One of this device's
@@ -322,8 +324,8 @@ const toEvent = (row: Record<string, SqlValue>): RuminateEvent =>
 const insertPulledEventStatement = (event: LoggedEvent): SqlStatement => ({
   sql:
     "INSERT INTO events (id, seq, entity, entity_id, action, patch, v, batch, device, cause, " +
-    "base_seq, ref_seq, at, tz, origin, actor, received_at, position) " +
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+    "base_seq, ref_seq, at, tz, hlc, origin, actor, received_at, position) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
     "ON CONFLICT (id) DO UPDATE SET seq = excluded.seq, origin = excluded.origin, " +
     "actor = excluded.actor, received_at = excluded.received_at",
   params: [
@@ -341,6 +343,7 @@ const insertPulledEventStatement = (event: LoggedEvent): SqlStatement => ({
     event.ref_seq ?? null,
     event.at,
     event.tz ?? null,
+    event.hlc ?? null,
     event.origin ?? null,
     event.actor ?? null,
     event.received_at ?? null,
@@ -351,7 +354,8 @@ const insertPulledEventStatement = (event: LoggedEvent): SqlStatement => ({
 const insertEventStatement = (event: RuminateEvent, position: number): SqlStatement => ({
   sql:
     "INSERT INTO events (id, seq, entity, entity_id, action, patch, v, batch, device, cause, " +
-    "base_seq, ref_seq, at, tz, position) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "base_seq, ref_seq, at, tz, hlc, position) " +
+    "VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   params: [
     event.id,
     event.entity,
@@ -366,6 +370,7 @@ const insertEventStatement = (event: RuminateEvent, position: number): SqlStatem
     event.ref_seq ?? null,
     event.at,
     event.tz ?? null,
+    event.hlc ?? null,
     position,
   ],
 })

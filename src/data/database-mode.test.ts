@@ -31,6 +31,7 @@ import { openSqlNoteStore } from "./sql-note-store"
 import { applyOpsToStore } from "./store-test-support"
 import { viewRootIdsAtom, viewsAtom, type ViewRow } from "./views"
 import type { LoggedEvent, RuminateEvent } from "./events"
+import { decodeHlc } from "./hlc"
 
 /**
  * Boot-flow tests for database-authoritative mode, at the highest level the
@@ -854,6 +855,42 @@ describe("cache generation", () => {
  * spent 61% of a day's D1 read budget learning nothing. The gap is the fix;
  * these tests are what stop it being quietly removed.
  */
+describe("database mode stamps", () => {
+  /** A stamp from a clock far ahead of this one. */
+  const AHEAD = "009999999999999-0003-other.tab"
+
+  it("stamps each event after every stamp it has pulled, in the order made, and saves the last", async () => {
+    const { source } = stubSource({
+      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
+      // One from a fast clock, and one from before stamps.
+      events: [{ ...placed(1, "note-a", "A"), hlc: AHEAD }, placed(2, "note-b", "B")],
+    })
+    const store = await boot({ source, replica: stubReplica().handle })
+    writeNote("note-c", "- C\n  id:: blk_c000000000\n")
+    await flushDatabaseMode()
+    const stamps = (await store.unpushedEvents()).map((event) => event.hlc as string)
+    expect(stamps.length).toBeGreaterThan(1)
+    expect(stamps.every((stamp) => stamp > AHEAD)).toBe(true)
+    expect([...stamps].sort()).toEqual(stamps)
+    expect(decodeHlc(stamps[0])).toMatchObject({ ms: 9_999_999_999_999, counter: 4 })
+    expect(await store.getMeta("hlc_last")).toBe(stamps.at(-1))
+  })
+
+  it("a new session stamps after the stamp the last one saved", async () => {
+    const store = await seededStore({ "note-a": NOTE_A })
+    await store.setMeta("hlc_last", AHEAD)
+    const { source } = stubSource({ since: () => remoteChanges({}, 200, "600") })
+    await boot({ store, source, replica: stubReplica().handle })
+    writeNote("note-c", "- C\n  id:: blk_c000000000\n")
+    await flushDatabaseMode()
+    const stamps = (await store.unpushedEvents())
+      .map((event) => event.hlc)
+      .filter((stamp) => stamp !== undefined)
+    expect(stamps.length).toBeGreaterThan(0)
+    expect(stamps.every((stamp) => stamp > AHEAD)).toBe(true)
+  })
+})
+
 describe("ambient pull coalescing", () => {
   const seeded = () => ({
     full: remoteCorpus({ keep: "- keep\n  id:: blk_keep000000\n" }, 1, "100"),

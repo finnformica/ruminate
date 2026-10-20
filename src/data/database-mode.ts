@@ -14,6 +14,7 @@ import {
 } from "./d1-note-source"
 import {
   coalesceTyping,
+  eventStamp,
   opsToEvents,
   viewChangeToEvent,
   type EventContext,
@@ -21,6 +22,7 @@ import {
   type RuminateEvent,
 } from "./events"
 import { buildGraphSnapshot, isNoteType, type GraphSnapshot } from "./graph"
+import { decodeHlc, encodeHlc, receiveHlc, tickHlc, type Hlc } from "./hlc"
 import { applyOps, notesTouchedBy, type Op } from "./ops"
 import { mintWriterId, writerDevice, writerTimezone } from "./writer-identity"
 import { resetReplicaAccess } from "./replica-access"
@@ -95,6 +97,10 @@ const EVENTS_CURSOR_KEY = "events_pull_cursor"
  * pull of a long log, never a limit on what arrives eventually. */
 const EVENTS_PAGE = 2_000
 const EVENTS_PAGES_PER_PULL = 10
+/** The highest stamp this device has made or pulled (`src/data/hlc.ts`,
+ * docs/event-only-sync.md), so a reload never stamps below it, even when the
+ * clock went back meanwhile. Not a cursor: a wiped cache keeps it. */
+const HLC_KEY = "hlc_last"
 /** The identity (GitHub id, or login for pre-id sessions) whose notes the
  * local database holds. The server is owner-locked, but the OPFS cache
  * follows the browser profile — on a shared machine a different signed-in
@@ -293,6 +299,9 @@ interface DatabaseModeRuntime {
   /** View rows on the atom and not yet written to the store: a refresh from
    * the store re-applies them, as it re-applies `pendingOps`. */
   pendingViews: ViewRow[]
+  /** The highest stamp this device has made or pulled: the next event's is
+   * after it (`tickHlc`). Held here, saved under `HLC_KEY`. */
+  lastStamp: Hlc | null
 }
 
 let runtime: DatabaseModeRuntime | null = null
@@ -395,6 +404,7 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     pendingNoteIds: new Set(),
     opsFlushTimer: null,
     pendingViews: [],
+    lastStamp: null,
   }
   runtime = activation
   // The sample corpus's views are the signed-out screen's; signed in, the
@@ -450,6 +460,11 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
         }
         if (runtime !== activation) return
       }
+
+      // The stamp the last session reached: an edit made while the store was
+      // opening has stamped from the clock alone, so keep the higher.
+      const saved = decodeHlc((await opened.store.getMeta(HLC_KEY)) ?? "")
+      if (saved !== null) activation.lastStamp = receiveHlc(activation.lastStamp, saved)
 
       const graph = await opened.store.getGraph()
       const views = await opened.store.getViews()
@@ -517,8 +532,14 @@ export function stopDatabaseMode() {
     stopped.pendingOps = []
     stopped.pendingEvents = []
     stopped.pendingViews = []
-    if (events.length > 0) await stopped.store?.applyEvents(events).catch(recordWriteError)
-    await stopped.store?.close().catch(() => {})
+    const closing = stopped.store
+    if (events.length > 0 && closing) {
+      await closing
+        .applyEvents(events)
+        .then(() => saveStamp(stopped, closing))
+        .catch(recordWriteError)
+    }
+    await closing?.close().catch(() => {})
   })
   const store = jotai()
   store.set(databaseModeStatusAtom, OFF_STATUS)
@@ -537,16 +558,30 @@ export function stopDatabaseMode() {
 /**
  * The envelope one gesture's events share (docs/event-sourcing.md): a batch
  * id, this tab, the command when the caller names one, the writer's clock and
- * its zone. The ids are minted here; `events.ts` makes none.
+ * its zone. The ids and the stamps are minted here; `events.ts` makes none.
+ * Each event takes the next stamp after the device's last (`tickHlc`), so the
+ * events of one gesture stamp in the order they were made.
  */
-function eventContext(now: number, cause?: string): EventContext {
+function eventContext(activation: DatabaseModeRuntime, now: number, cause?: string): EventContext {
+  const device = writerDevice()
   return {
     batch: mintWriterId("bat"),
-    device: writerDevice(),
+    device,
     ...(cause ? { cause } : {}),
     at: now,
     tz: writerTimezone(),
     mintId: () => mintWriterId("evt"),
+    stamp: () => {
+      activation.lastStamp = tickHlc(activation.lastStamp, now, device)
+      return encodeHlc(activation.lastStamp)
+    },
+  }
+}
+
+/** Save the device's last stamp beside the log it stamped (`HLC_KEY`). */
+async function saveStamp(activation: DatabaseModeRuntime, store: NoteStore) {
+  if (activation.lastStamp !== null) {
+    await store.setMeta(HLC_KEY, encodeHlc(activation.lastStamp))
   }
 }
 
@@ -578,7 +613,7 @@ export function databaseApplyOps(
   const activation = runtime
   if (!activation) return
   const now = Date.now()
-  const ctx = eventContext(now, cause)
+  const ctx = eventContext(activation, now, cause)
   if (ops.length === 0) {
     queueViewRows(activation, patchedViews(jotai().get(viewByRootAtom), views, now), ctx)
     return
@@ -624,7 +659,7 @@ export function databaseApplyOps(
 export function databaseApplyViews(views: readonly ViewRow[], cause?: string) {
   const activation = runtime
   if (!activation || views.length === 0) return
-  queueViewRows(activation, views, eventContext(Date.now(), cause))
+  queueViewRows(activation, views, eventContext(activation, Date.now(), cause))
 }
 
 function queueViewRows(
@@ -724,6 +759,7 @@ async function flushOps(activation: DatabaseModeRuntime) {
       await activation.store.applyEvents(events, {
         frozen: activation.replica?.inFlightEventIds?.() ?? new Set(),
       })
+      await saveStamp(activation, activation.store)
     }
     activation.pendingViews = activation.pendingViews.filter((row) => !views.includes(row))
     if (events.length > 0) {
@@ -993,6 +1029,13 @@ async function pullEventLog(activation: DatabaseModeRuntime, store: NoteStore) {
     if (runtime !== activation) return
     if (events.length > 0) {
       await store.applyPulledEvents(events)
+      // A device that has seen an edit stamps after it, whatever its clock
+      // says. An event from before stamps moves it by the stamp it derives.
+      for (const event of events) {
+        const stamp = decodeHlc(eventStamp(event))
+        if (stamp !== null) activation.lastStamp = receiveHlc(activation.lastStamp, stamp)
+      }
+      await saveStamp(activation, store)
       changed = true
     }
     if (cursor === null || cursor <= since) break
