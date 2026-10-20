@@ -554,11 +554,14 @@ export interface WalkOptions {
  * complete list of its parents' ids (`upstream`), and beneath an open row
  * the walk continues into its parents after its children — each an upstream
  * occurrence (`^` in the key, src/blocks/view.ts), walked on by the same
- * rule in both directions. A parent already on the path above is skipped
- * (a block's own parent is where the row came from, not something beneath
- * it), which is what keeps a single-homed block's rows exactly the tree's
- * and shows only the *other* places a multi-homed block is held. The view
- * is then the graph around the root, as far as the folds open it.
+ * rule in both directions. The guard is one rule both ways
+ * (docs/graph-walk.md, 3.3): the block a row came from (the row above,
+ * reached the other way; the view's root at the top) is not a row beneath
+ * it, which is what keeps a single-homed block's rows exactly the tree's
+ * and shows only the *other* places a multi-homed block is held. Any other
+ * block on the path is a looped row, so an up loop shows where it closes,
+ * as a down loop does. The view is then the graph around the root, as far
+ * as the folds open it.
  *
  * **Pivots** (`pivots`, docs/graph-walk.md, 3) set the query of a row by its
  * block: up, the row's holders are the rows beneath it (less the row it came
@@ -625,14 +628,16 @@ export function walkGraph(
     return block
   }
 
-  /** `direction` is how the row was reached (the key's mark); `inherited`
-   * is the query of the row above (the root query at the top). */
+  /** `direction` is how the row was reached (the key's mark), and `from` the
+   * block it was reached from (the row above; the view's root at the top);
+   * `inherited` is the query of the row above (the root query at the top). */
   const visit = (
     id: string,
     parentKey: string | null,
     level: number,
     direction: Direction,
     inherited: Direction,
+    from: string | null,
   ): boolean => {
     // Reached again from above (or the view's own root): the loop closes
     // here, as a leaf — named, not built again, never descended.
@@ -647,15 +652,21 @@ export function walkGraph(
     // (beneath an up pivot), its holders only.
     const followsDown = query === "down" && down
     const followsUp = query === "up" || up
-    // Beneath a parent row, the block it was reached up from is not a row.
+    // The block the row came from is not a row beneath it, in the other
+    // direction (docs/graph-walk.md, 3.3). Any other block on the path is a
+    // row, and closes its loop there as a leaf. The view's own root is not a
+    // block in the doc, so it is never a row against the row's direction.
+    const skip = (otherId: string) => otherId === from || otherId === rootId
     const beneathDown = !followsDown
       ? []
       : direction === "up"
-        ? block.children.filter((childId) => !path.has(childId))
+        ? block.children.filter((childId) => !skip(childId))
         : block.children
-    const beneathUp = followsUp
-      ? (block.upstream ?? []).filter((parentId) => !path.has(parentId))
-      : []
+    const beneathUp = !followsUp
+      ? []
+      : (block.upstream ?? []).filter((parentId) =>
+          direction === "down" ? !skip(parentId) : parentId !== rootId,
+        )
     if (beneathDown.length === 0 && beneathUp.length === 0) return true
     const row = { key, id, level, type: block.type }
     if (queryAt(rule, row, query).type === "collapse") {
@@ -664,8 +675,8 @@ export function walkGraph(
     }
     const next = levelBeneath(rule, row)
     path.add(id)
-    for (const childId of beneathDown) visit(childId, key, next, "down", query)
-    for (const parentId of beneathUp) visit(parentId, key, next, "up", query)
+    for (const childId of beneathDown) visit(childId, key, next, "down", query, id)
+    for (const parentId of beneathUp) visit(parentId, key, next, "up", query, id)
     path.delete(id)
     return true
   }
@@ -674,12 +685,16 @@ export function walkGraph(
   // there is none. A focused block is a root row, and reads its own pivot.
   const rootQuery = rootId ? rootDirection(pivots, rootId) : "down"
   const rootBlockIds =
-    rootQuery === "up" ? [] : rootIds.filter((id) => visit(id, null, startLevel, "down", "down"))
+    rootQuery === "up"
+      ? []
+      : rootIds.filter((id) => visit(id, null, startLevel, "down", "down", rootId ?? null))
   const doc: BlockDoc = { props: null, rootBlockIds, blocks }
   if ((up || rootQuery === "up") && rootId) {
     // The root's own parents: rows after the roots, at the roots' level.
     const upstream = parentsOf(rootId)
-    doc.upstream = upstream.filter((parentId) => visit(parentId, null, startLevel, "up", rootQuery))
+    doc.upstream = upstream.filter((parentId) =>
+      visit(parentId, null, startLevel, "up", rootQuery, rootId),
+    )
   }
   return { doc, collapsed }
 }

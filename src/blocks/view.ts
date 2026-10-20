@@ -129,12 +129,14 @@ export interface DocWalkStep {
 
 /**
  * The rows beneath an occurrence, in the order they are shown: the block's
- * children, then its parents that are not already on the path above it (a
- * block's own parent is never listed under it — that is where it came
- * from). Beneath a parent row (`direction` up) a child on the path is
- * skipped too: the block it was reached up from is not something it holds
- * beneath it, but where the row came from. `path` holds the ids on the
- * path, the view's root included.
+ * children, then its parents. One guard in both directions
+ * (docs/graph-walk.md, 3.3): `from`, the block the row came from (the row
+ * above; the view's root at the top), is not listed the other way — a child
+ * row's own parent is not listed under it, nor a parent row's own child.
+ * Any other block on the path is listed, and the walk shows it as a looped
+ * leaf (`walkDoc`, `buildRows`). The view's own root (`rootId`, the note) is
+ * not a block in the doc, so it is never listed against the row's direction
+ * either.
  *
  * `query` is the row's own query (`RowRule`): up, the rows beneath are its
  * parents only; down, what `directions` names (absent: the children, and
@@ -144,10 +146,11 @@ export interface DocWalkStep {
 export function rowsBeneath(
   doc: BlockDoc,
   block: Block | null,
-  path: ReadonlySet<string>,
+  from: string | null,
   direction: Direction = "down",
   query: Direction = "down",
   directions?: LinkDirections,
+  rootId: string | null = null,
 ): { id: string; direction: Direction }[] {
   // The doc's own roots are rows whenever the root query is down, whatever
   // the setting: the walk starts from them.
@@ -155,10 +158,12 @@ export function rowsBeneath(
   const followsUp = query === "up" || directions !== "downstream"
   const children = !followsDown ? [] : block ? block.children : doc.rootBlockIds
   const upstream = !followsUp ? [] : block ? (block.upstream ?? []) : (doc.upstream ?? [])
-  const down = direction === "up" ? children.filter((id) => !path.has(id)) : children
+  const skip = (id: string) => id === from || id === rootId
+  const down = direction === "up" ? children.filter((id) => !skip(id)) : children
+  const ups = upstream.filter((id) => (direction === "down" ? !skip(id) : id !== rootId))
   return [
     ...down.map((id) => ({ id, direction: "down" as const })),
-    ...upstream.filter((id) => !path.has(id)).map((id) => ({ id, direction: "up" as const })),
+    ...ups.map((id) => ({ id, direction: "up" as const })),
   ]
 }
 
@@ -181,8 +186,10 @@ export function walkDoc(
 ): void {
   const path = new Set<string>()
   if (rootId) path.add(rootId)
+  /** `above`: the block the rows came from (the view's root at the top). */
   const walk = (
     rows: { id: string; direction: Direction }[],
+    above: string | null,
     parentKey: string | null,
     depth: number,
     inherited: Direction,
@@ -200,7 +207,8 @@ export function walkDoc(
           if (looped || descend === false) return
           const query = queryOf(pivots, id, inherited)
           path.add(id)
-          walk(rowsBeneath(doc, block, path, direction, query, directions), key, depth + 1, query)
+          const beneath = rowsBeneath(doc, block, above, direction, query, directions, rootId)
+          walk(beneath, id, key, depth + 1, query)
           path.delete(id)
         })
     }
@@ -209,9 +217,9 @@ export function walkDoc(
   // At the top level, the root's own parents after the roots.
   const top =
     ids === doc.rootBlockIds
-      ? rowsBeneath(doc, null, path, "down", rootQuery, directions)
+      ? rowsBeneath(doc, null, rootId, "down", rootQuery, directions, rootId)
       : ids.map((id) => ({ id, direction: "down" as const }))
-  walk(top, null, 0, rootQuery)
+  walk(top, rootId, null, 0, rootQuery)
 }
 
 /** The key of `id` occurring under `parentKey` (null = a root), as a child
@@ -381,17 +389,25 @@ export function buildRows(
 ): Occurrence[] {
   const rows: Occurrence[] = []
   const path = new Set<string>()
-  const beneath = (block: Block | null, direction: Direction, query: Direction) =>
-    rowsBeneath(doc, block, path, direction, query, directions)
+  // `from`: the block the row came from (`rowsBeneath`).
+  const beneath = (
+    block: Block | null,
+    from: string | null,
+    direction: Direction,
+    query: Direction,
+  ) => rowsBeneath(doc, block, from, direction, query, directions, rootId)
   const walk = (
     block: Block | null,
+    from: string | null,
     parentKey: string | null,
     depth: number,
     guideKeys: string[],
     direction: Direction,
     query: Direction,
   ) => {
-    const list = beneath(block, direction, query)
+    const list = beneath(block, from, direction, query)
+    // The block each row beneath came from: this one, or the view's root.
+    const above = block ? block.id : rootId
     const numbers = olPositions(
       doc,
       list.map((row) => row.id),
@@ -405,9 +421,7 @@ export function buildRows(
       const looped = path.has(id)
       const key = keyOf(parentKey, id, direction)
       const rowQuery = queryOf(pivots, id, query)
-      path.add(id)
-      const hasChildren = !looped && beneath(row, direction, rowQuery).length > 0
-      path.delete(id)
+      const hasChildren = !looped && beneath(row, above, direction, rowQuery).length > 0
       const collapsed = hasChildren && folds.has(key)
       const pivot = looped ? undefined : pivots.get(id)
       rows.push({
@@ -426,7 +440,7 @@ export function buildRows(
       })
       if (hasChildren && !collapsed) {
         path.add(id)
-        walk(row, key, depth + 1, [...guideKeys, key], direction, rowQuery)
+        walk(row, above, key, depth + 1, [...guideKeys, key], direction, rowQuery)
         path.delete(id)
       }
     })
@@ -440,12 +454,12 @@ export function buildRows(
     // editor draws it as the note title, above the rows), always open.
     const key = focusRootKeyOf(doc, focusRoot.id)
     path.add(focusRoot.id)
-    walk(focusRoot, key, 0, [], "down", focusQuery)
+    walk(focusRoot, null, key, 0, [], "down", focusQuery)
   } else if (focusRoot) {
     // Untitled: the focused block is the view's first row, its own subtree
     // indented beneath it — a row like any other, fold and all.
     const key = focusRootKeyOf(doc, focusRoot.id)
-    const hasChildren = beneath(focusRoot, "down", focusQuery).length > 0
+    const hasChildren = beneath(focusRoot, null, "down", focusQuery).length > 0
     const collapsed = hasChildren && folds.has(key)
     const pivot = pivots.get(focusRoot.id)
     rows.push({
@@ -466,12 +480,12 @@ export function buildRows(
     })
     if (hasChildren && !collapsed) {
       path.add(focusRoot.id)
-      walk(focusRoot, key, 1, [key], "down", focusQuery)
+      walk(focusRoot, null, key, 1, [key], "down", focusQuery)
       path.delete(focusRoot.id)
     }
   } else {
     if (rootId) path.add(rootId)
-    walk(null, null, 0, [], "down", rootQueryOf(pivots, rootId))
+    walk(null, rootId, null, 0, [], "down", rootQueryOf(pivots, rootId))
   }
   return rows
 }

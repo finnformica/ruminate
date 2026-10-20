@@ -119,8 +119,8 @@ export interface CommandInput {
    * either way — nothing leaves the focused subtree. */
   focusTitled?: boolean
   /** The id of the view's own root when it is not a block in the doc (the
-   * note) — on the path above every row, so a row's parent that is the
-   * note is never one of the rows beneath it (`rowsBeneath`). */
+   * note) — the block a root row came from, so a root row's parent that is
+   * the note is never one of the rows beneath it (`rowsBeneath`). */
   rootId?: string | null
   /** The frame's link pivots (src/blocks/query.ts), as the walk took them:
    * a command reads the rows beneath a row as the view drew them
@@ -225,18 +225,18 @@ const blockOf = ({ doc, key }: CommandInput) => doc.blocks[idOfKey(key)]
 function keysBeneath(input: CommandInput): string[] {
   const { doc, key, rootId, focusRootId, pivots = NO_PIVOTS, directions } = input
   const ids = pathIdsOf(key)
-  const path = new Set(ids)
-  if (rootId) path.add(rootId)
-  if (focusRootId) path.add(focusRootId)
   const block = doc.blocks[idOfKey(key)] ?? null
-  const from = focusRootId ? ids.indexOf(focusRootId) : -1
+  const focusAt = focusRootId ? ids.indexOf(focusRootId) : -1
   const query =
-    from >= 0
-      ? queryOfPath(ids.slice(from), pivots)
+    focusAt >= 0
+      ? queryOfPath(ids.slice(focusAt), pivots)
       : queryOfPath(ids, pivots, rootQueryOf(pivots, rootId))
-  return rowsBeneath(doc, block, path, directionOfKey(key), query, directions).map((row) =>
-    keyOf(key, row.id, row.direction),
-  )
+  // The block the row came from: the one above it on the key, the view's
+  // root for a root row, nothing for the focused block's own row.
+  const from =
+    focusAt === ids.length - 1 ? null : ids.length > 1 ? ids[ids.length - 2] : (rootId ?? null)
+  const rows = rowsBeneath(doc, block, from, directionOfKey(key), query, directions, rootId)
+  return rows.map((row) => keyOf(key, row.id, row.direction))
 }
 
 /** Does `parentKey` name the focused block — i.e. is this row a direct child

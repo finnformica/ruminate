@@ -19,6 +19,7 @@ import {
   rowsBeneath,
   siblingKey,
   focusRootKeyOf,
+  type Occurrence,
 } from "./view"
 
 const NONE: ReadonlySet<string> = new Set()
@@ -282,14 +283,10 @@ describe("upstream occurrences", () => {
     expect(hasOccurrence({ ...graphed, upstream: ["q"] }, "^q")).toBe(true)
   })
 
-  it("rowsBeneath: children first, then the parents not already on the path", () => {
-    expect(rowsBeneath(graphed, graphed.blocks.s, new Set(["n", "a", "s"]))).toEqual([
-      { id: "p", direction: "up" },
-    ])
-    expect(rowsBeneath(graphed, graphed.blocks.a, new Set(["n", "a"]))).toEqual([
-      { id: "s", direction: "down" },
-    ])
-    expect(rowsBeneath(graphed, null, new Set(["n"]))).toEqual([
+  it("rowsBeneath: children first, then the parents, less the block the row came from", () => {
+    expect(rowsBeneath(graphed, graphed.blocks.s, "a")).toEqual([{ id: "p", direction: "up" }])
+    expect(rowsBeneath(graphed, graphed.blocks.a, "n")).toEqual([{ id: "s", direction: "down" }])
+    expect(rowsBeneath(graphed, null, "n")).toEqual([
       { id: "a", direction: "down" },
       { id: "b", direction: "down" },
     ])
@@ -491,5 +488,71 @@ describe("rows read pivots (docs/graph-walk.md, 3)", () => {
     )
     expect(firstOccurrenceKey(doc, "p", rule)).toBe("p")
     expect(firstOccurrenceKey(doc, "m", rule)).toBeNull()
+  })
+})
+
+describe("one guard in both directions (docs/graph-walk.md, 3.3)", () => {
+  const node = (id: string): NodeRow => ({
+    id,
+    type: id === "n" ? "note" : "ul",
+    text: id,
+    props: null,
+    updated_at: 0,
+  })
+  const link = (source: string, destination: string, sortKey: string): LinkRow => ({
+    source_id: source,
+    destination_id: destination,
+    kind: "child",
+    sort_key: sortKey,
+    updated_at: 0,
+  })
+  // N > C, C > D and D > C (C and D hold each other); N > A > X > Y.
+  const graph = buildGraphSnapshot(["n", "c", "d", "a", "x", "y"].map(node), [
+    link("n", "c", "a0"),
+    link("n", "a", "a1"),
+    link("c", "d", "a0"),
+    link("d", "c", "a0"),
+    link("a", "x", "a0"),
+    link("x", "y", "a0"),
+  ])
+  const rowsOf = (
+    pivots: Map<string, "up" | "down">,
+    directions: LinkDirections = "downstream",
+  ) => {
+    const { doc, collapsed } = noteView("n", graph, () => true, directions, pivots)!
+    return buildRows(doc, { folds: collapsed, rootId: "n", pivots, directions })
+  }
+  const shown = (rows: Occurrence[]) =>
+    rows.map((row) => `${row.key}${row.looped ? " (looped)" : ""}`)
+
+  it("a two-block cycle walked up shows one looped leaf", () => {
+    const rows = rowsOf(new Map([["c", "up"]]))
+    expect(shown(rows).filter((key) => key.startsWith("c"))).toEqual([
+      "c",
+      "c/^d",
+      "c/^d/^c (looped)",
+    ])
+    const looped = rows.find((row) => row.looped)!
+    expect(looped.hasChildren).toBe(false)
+    expect(looped.pivot).toBeUndefined()
+    expect(rows.find((row) => row.key === "c/^d")!.hasChildren).toBe(true)
+  })
+
+  it("a two-block cycle walked down still shows one looped leaf", () => {
+    expect(shown(rowsOf(new Map())).filter((key) => key.startsWith("c"))).toEqual([
+      "c",
+      "c/d",
+      "c/d/c (looped)",
+    ])
+  })
+
+  it("a single-homed block's rows are the tree's", () => {
+    const tree = shown(rowsOf(new Map())).filter((key) => key.startsWith("a"))
+    expect(tree).toEqual(["a", "a/x", "a/x/y"])
+    expect(shown(rowsOf(new Map(), "both")).filter((key) => key.startsWith("a"))).toEqual(tree)
+    // Up from X: A only, the row X came from, so X has nothing beneath it.
+    const up = rowsOf(new Map([["x", "up"]]))
+    expect(shown(up).filter((key) => key.startsWith("a"))).toEqual(["a", "a/x"])
+    expect(up.find((row) => row.key === "a/x")!.hasChildren).toBe(false)
   })
 })

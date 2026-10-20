@@ -1113,6 +1113,65 @@ describe("walkGraph pivots (docs/graph-walk.md, 3)", () => {
   })
 })
 
+describe("walkGraph: one guard in both directions (docs/graph-walk.md, 3.3)", () => {
+  // N > C, C > D and D > C (C and D hold each other); N > A > X > Y.
+  const graph = () =>
+    buildGraphSnapshot(
+      [
+        row("n", "note", "N"),
+        row("blk_c", "ul", "c"),
+        row("blk_d", "ul", "d"),
+        row("blk_a", "ul", "a"),
+        row("blk_x", "ul", "x"),
+        row("blk_y", "ul", "y"),
+      ],
+      [
+        edge("n", "blk_c", "a0"),
+        edge("n", "blk_a", "a1"),
+        edge("blk_c", "blk_d", "a0"),
+        edge("blk_d", "blk_c", "a0"),
+        edge("blk_a", "blk_x", "a0"),
+        edge("blk_x", "blk_y", "a0"),
+      ],
+    )
+  const asking = () => {
+    const asked: string[] = []
+    return {
+      asked,
+      rule: (key: string) => {
+        asked.push(key)
+        return true
+      },
+    }
+  }
+
+  it("a two-block cycle walked up shows one looped leaf", () => {
+    const { asked, rule } = asking()
+    const { doc } = noteView("n", graph(), rule, "downstream", new Map([["blk_c", "up"]]))!
+    // Beneath C (up): D, its holder. N is the row C came from.
+    expect(doc.blocks.blk_c.upstream).toEqual(["blk_d", "n"])
+    // Beneath D (still up): C, on the path, so D has a row beneath it: the
+    // looped leaf, which is not walked again.
+    expect(doc.blocks.blk_d.upstream).toEqual(["blk_c"])
+    expect(asked.filter((key) => key.startsWith("blk_c"))).toEqual(["blk_c", "blk_c/^blk_d"])
+  })
+
+  it("a single-homed block's rows are the tree's", () => {
+    for (const directions of ["upstream", "both"] as const) {
+      const { asked, rule } = asking()
+      noteView("n", graph(), rule, directions)
+      // Each of A, X and Y has one holder, the row it came from: no up rows.
+      expect(asked.filter((key) => key.startsWith("blk_a"))).toEqual(
+        directions === "both" ? ["blk_a", "blk_a/blk_x"] : [],
+      )
+    }
+    const { asked, rule } = asking()
+    noteView("n", graph(), rule, "downstream", new Map([["blk_x", "up"]]))
+    // Up from X: A only, the row X came from. Nothing beneath X.
+    expect(asked).not.toContain("blk_a/blk_x")
+  })
+})
+
 describe("property: generated documents round-trip", () => {
   // Deterministic PRNG so failures reproduce.
   const mulberry32 = (seed: number) => () => {
