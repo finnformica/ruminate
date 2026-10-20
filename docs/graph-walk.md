@@ -10,7 +10,8 @@ together, as Finn decided on 2026-10-20. It gives a migration plan, the
 questions still open, and a note on layered stores for later. Pensive has no
 license: this document takes ideas from it and copies no code.
 
-Nothing here changes storage, events, sync or the D1 schema. The `link` table
+The design changes no storage, events, sync or D1 schema, with one
+exception: the recommended `stack` field on a View (7.6). The `link` table
 (`source_id`, `destination_id`, `kind='child'`, `sort_key`) stays as it is. A
 pivot is view state, like a fold.
 
@@ -28,7 +29,8 @@ The words used below:
 - **Frame** — one live query state in a pane's stack: a root, a selection,
   pivots, a filter and folds (7.1; `FocusFrame` in the split-view work,
   `src/data/panes.ts`).
-- **View** — one saved frame: a bookmark (7.1).
+- **View** — a saved stack of frames: a bookmark. One frame is the simple
+  case (7.1, 7.6).
 - **Pane** — a stack of frames: the pane's history (7.1).
 
 ## 1. Ruminate's walk today
@@ -448,8 +450,9 @@ pivots and folds.
 - The URL holds both in the frame's encoding (7.5). The first pane's frame
   on screen keeps `?filter=`, so links made before panes still open
   filtered.
-- A View's filter (the `views` row) is the base frame's start value, as
-  `narrowingParam` makes it today. The sort stays a View setting.
+- A View's `filter` column is the top frame's filter, as `narrowingParam`
+  reads it today. The frames below keep theirs in the `stack` field (7.6).
+  The sort stays a View setting.
 
 ### 5.3 Sections-only
 
@@ -640,7 +643,7 @@ So:
   selection (decision 2).
 - **Fix 5 is still open** (open question 16).
 - **Fix 8 is in part solved.** A URL carries its folds to another device,
-  and a View row can carry them once 7.6 is settled.
+  A View does not save folds (7.6, 7.7).
 
 What stays from 6.2: cause 3 (a move) until step 12; cause 4 (the depth
 rule closes new rows), which is the rule; and cause 5, which is now by
@@ -649,13 +652,16 @@ design: a block in two places is two paths.
 ## 7. How it fits together
 
 Finn decided this model on 2026-10-20. This section records it as decided.
-Section 9 keeps the questions that are still open.
+7.6 records Finn's later proposal, recommended here: a View saves a whole
+stack. Section 9 keeps the questions that are still open.
 
 ### 7.1 Terms
 
-- **View** — ONE saved frame: a bookmark. It is not a stack. It is a row in
-  the `views` table (`root_id`, `filter`, `sort`, `pinned`, `sort_key`),
-  synced as view events.
+- **View** — a saved stack of frames: a bookmark. A View with one frame is
+  the simple case. It is a row in the `views` table (`root_id`, `filter`,
+  `sort`, `pinned`, `sort_key`, and the recommended `stack`), synced as
+  view events. Decided on 2026-10-20 as one saved frame; Finn's later
+  proposal, recommended here, makes it a stack (7.6).
 - **Pane** — one column of the split view. It holds a stack of frames: its
   history. Its **base frame** comes from a View, or from the hidden root.
 - **Frame** — one live query state: a root, a selection, pivots, a filter
@@ -667,7 +673,7 @@ Section 9 keeps the questions that are still open.
 | --------------- | ---------------- | ------------------------------------------------------------- | ---------------------------------------- |
 | The graph       | The entity store | One graph per user: `nodes` and `link` rows.                  | D1 and the browser's SQLite, synced      |
 | The hidden root | —                | The `corpus_root` node. Its frame lists every note.           | A node and its `child` links             |
-| A **View**      | A saved frame    | One saved frame: a bookmark into the graph.                   | The `views` table, synced as view events |
+| A **View**      | A saved stack    | A saved stack of frames: a bookmark into the graph.           | The `views` table, synced as view events |
 | A **pane**      | A tab            | A stack of live frames: the pane's history.                   | The URL (`src/data/panes.ts`)            |
 | A **frame**     | A frame          | One live query state: root, selection, pivots, filter, folds. | The URL (7.5)                            |
 | A pivot         | A pivot          | A query on one block (section 4).                             | The frame                                |
@@ -679,8 +685,9 @@ Section 9 keeps the questions that are still open.
    (docs/graph-storage.md, "Ordering notes") orders notes only. It holds
    only the notes that were dragged. A note is a note because its type is
    `note`.
-2. **Open a View.** The pane's stack becomes one frame: the base frame,
-   made from the View's row.
+2. **Open a View.** The pane's stack becomes the View's saved frames, base
+   first, with the top frame on screen (7.6). A one-frame View gives one
+   frame.
 3. **Open the hidden root.** The pane's base frame is the list of all
    notes (decision 5).
 4. **Focus pushes a frame.** The new frame is rooted at the focused block.
@@ -688,8 +695,8 @@ Section 9 keeps the questions that are still open.
 5. **Pop restores the frame below** as it was: its root, selection,
    pivots, filter and folds. The URL holds each of them, so nothing is
    recomputed.
-6. **Save as view** writes the frame on screen into the View row of its
-   root (7.6).
+6. **Save as view** writes the pane's stack, up to the frame on screen,
+   into the View row of the top frame's root (7.6).
 7. **The breadcrumb** shows the stack's frames, then the path inside the
    frame on screen. The split-view work builds it. A frame crumb pops to
    that frame. A path crumb is one id of the selection path (decision 2). A
@@ -711,8 +718,9 @@ Section 9 keeps the questions that are still open.
 5. Finn presses `⇧F` (or Back). The pane pops to "Project X", with
    sections-only on, "Decisions" selected and the frame's folds as they
    were. The pivot and the two folds of the popped frame are gone.
-6. Finn chooses **Save as view**. The "Project X" View now holds this frame
-   (7.6).
+6. Finn chooses **Save as view**. The "Project X" View now holds this
+   frame, with sections-only on (7.6). Had he saved in step 4, the View
+   would be rooted at "Decisions", with "Project X" saved below it.
 
 ### 7.4 Decisions (2026-10-20)
 
@@ -860,20 +868,92 @@ route, and Cloudflare refuses a URL over 16 KB.
 3. If the top frame alone is over the cap, move its folds the same way. The
    URL keeps the root, the selection, the pivots and the filter: the part
    that a shared link needs.
-4. **Save as view** keeps a frame for good, in the View row (7.6).
+4. **Save as view** keeps a stack for good, in the View row (7.6).
 
-### 7.6 Still open
+### 7.6 A View saves a stack (recommended)
 
-- **Where a View saves the frame.** A View is one saved frame, but the
-  `views` row holds only the root, the filter and the sort. To save the
-  pivots, sections-only, the depth and the folds, the row needs one more
-  text field that holds the frame's encoding (7.5). That is a schema
-  change and a change to view events, which this design does not make.
-  Until Finn approves it, **Save as view** saves the root, the filter and
-  the sort, as **Update to default** does today.
-- **One View per root.** A View is minted under its root's id. So **Save as
-  view** on a root that has a View overwrites that row. More than one View
-  per root is a schema change too.
+Status: proposed by Finn after the decisions of 2026-10-20. This design
+recommends it. It replaces "a View is one saved frame": a one-frame View is
+now the simple case of a saved stack.
+
+**Why.** Finn's "Todos" View is the path he walks: Ruminate › Tasks ›
+Todos. "Ruminate" is the hidden root frame (the list of all notes). Opening
+the View restores all three frames, so:
+
+- the breadcrumb shows the path he used, not a path the app picks;
+- `⇧F` and Back pop to "Tasks", then to "Ruminate", as if he had walked
+  there;
+- the saved path picks the parent of a block with many parents. If "Todos"
+  is held by "Tasks" and by "Projects", the View says "Tasks".
+
+**The row.**
+
+- `root_id` is the **top** frame's root: the frame on screen when the View
+  opens. So "one View per root" holds, and the row is still minted under
+  its root's id.
+- `filter` and `sort` stay the top frame's.
+- A new field, `stack`, holds the rest: the frames below the top, base
+  first, and the top frame's pivots and sections-only. Each frame below
+  holds its note, its root, its filter (text and sections-only) and its
+  pivots. The field uses the frame encoding of 7.5, without selections and
+  folds. Empty means a one-frame View, which is every View today.
+- Selections and folds are not saved. A lower frame's selection is the path
+  to the next frame's root. When the View opens, each lower frame opens the
+  folds on that path, as `revealOnLeaveFocus` does, so the crumbs and the
+  rows agree.
+
+**The event.** The view event vocabulary (docs/event-sourcing.md, "One
+event = one change to one entity") gains `stack`: `create` may set it, and
+`update` may set it, as an absolute value like every other field. An older
+client that edits another field of the row leaves `stack` as it is,
+because an update patches only the fields it names. This is a schema
+change: a `views.stack` column in D1 and in the local store's schema ladder
+(`migrations/`), and the field in the fold and in `GET /api/replica/verify`.
+This document only records it. The step that builds it (step 19) makes the
+migration.
+
+**Open a View.** The pane's stack becomes the saved frames, base first,
+with the top frame on screen. These frames are restored, not pushed, so
+they keep their saved filters and pivots (decision 1 applies to a push).
+
+**Save as view** saves the pane's whole stack, up to the frame on screen,
+into the View of the top frame's root. On a root that has a View, it
+overwrites that row. **Add to Views** stays as today: it lists the root
+alone, a one-frame View.
+
+**When the saved path no longer holds.** A block in the path can move, be
+unlinked or be deleted. On open, check the stack from the top down:
+
+1. Keep the top frame while its root exists. When the top root is gone,
+   leave the View out of the list, as today.
+2. Keep each lower frame while its root still reaches the root of the frame
+   above it (`pathToBlock`, `src/data/graph.ts`).
+3. At the first frame that fails, drop it and every frame below it.
+4. Show the graph path to the top root in the breadcrumb, as path crumbs:
+   the shortest chain that `pathToBlock` finds from the top frame's note.
+
+The row does not change on open. The next **Save as view** writes the
+stack as it is then.
+
+**The sidebar** shows the View's name, which is its top root's title or
+text, as today. After the name it shows the path as a hint: the roots of
+the frames below, for example "Todos" with "Ruminate › Tasks", in the
+secondary colour and clipped to fit. The Views page and the palette draw
+the same list (`viewEntriesAtom`), so they show the same hint. A one-frame
+View has no hint.
+
+### 7.7 Still open
+
+- **The `stack` field** (7.6) is a schema change. Until it is built,
+  **Save as view** saves the top frame's root, filter and sort, as
+  **Update to default** does today.
+- **One View per root.** A View is minted under its top root's id, so
+  **Save as view** on that root overwrites the row. Two Views that end on
+  the same block by two paths (for example "Todos" by "Tasks" and by
+  "Projects") are not possible. More than one View per root is a further
+  schema change.
+- **Folds in a View.** 7.6 saves no folds. Ask Finn if a View must also
+  restore folds.
 - **The root frame's entry.** Where the "all notes" entry sits, and its
   label.
 
@@ -999,10 +1079,22 @@ from, to)` over paths. Indent, outdent, cut and paste, and a drag call
     Tests: `panes.test.ts` for which changes push and which replace; an
     `e2e/` case for Back after two pushes, run in the e2e slot.
 
+19. **A View saves a stack** (7.6). Add the `views.stack` column (D1 and
+    the local schema ladder), the `stack` field in view events, the fold
+    and `GET /api/replica/verify`. **Save as view** writes the stack; opening
+    a View restores it and checks the path; the sidebar row shows the
+    path hint. Update docs/event-sourcing.md and docs/metadata.md. Add a
+    changelog file.
+    Tests: the migration on both stores; a `view.update` without `stack`
+    keeps it; fold equals tables; the codec round-trips a stack; opening
+    restores three frames with the path open; a moved block drops the
+    frames below the break and keeps the top; a gone top root leaves the
+    View out; the hint shows the lower roots.
+
 Steps 1 to 3 change nothing a reader sees. Steps 4, 10, 11, 15, 17 and 18
 need the split-view work's frame model. Steps 5 to 8 can merge in any
 order after 4. Step 12 needs step 10. Steps 14 and 15 need step 13. **Save
-as view** with pivots and folds waits for the schema decision (7.6).
+as view** with a stack waits for step 19 and its schema change (7.6).
 
 ## 9. Open questions for Finn
 
