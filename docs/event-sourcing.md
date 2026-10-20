@@ -308,8 +308,12 @@ and the page says so (`earliest`).
 
 ## Append-only, structurally
 
-Triggers refuse `UPDATE` on `events`, and refuse `DELETE` unless the tenant is
-named in `event_purges` — the one door, for erasing an account.
+Triggers refuse every `UPDATE` and every `DELETE` on `events`, for every
+tenant. Nothing is ever purged: a delete and a restore are events. 0023 left
+one door, `event_purges`, for erasing an account; nothing opened it, and
+`migrations/0026_events_no_purge.sql` closed it (docs/event-only-sync.md).
+So an account cannot be erased from the log, and text pasted by mistake stays
+in its history.
 
 ## Rolling back
 
@@ -329,13 +333,14 @@ first write after this Worker returns reconciles it. Nothing needs undoing.
   names one yet.
 - **Schema evolution.** Events are forever and this repo migrates weekly.
   Rule: never rewrite an event; add an `upcast` case per shape change.
-- **Per-block erasure.** Tenant purge exists. "Delete this block for good"
-  against an immutable log needs crypto-shredding or a redaction event plus
-  compaction.
-- **Compaction / retention.** Each push that touches a note also re-stamps the
-  note row (`props.updated_at`), so typing yields two events per push. Fine at
-  today's scale; thin old typing runs before the log is large. Folding a whole
-  log for `/at` is O(events) — checkpoints when that starts to matter.
+- **Erasure.** There is none, by decision (2026-10-20): not of a block, and
+  not of an account. If it is ever needed, it is a new design against an
+  immutable log, for example a key per tenant that can be destroyed.
+- **Size.** Each push that touches a note also re-stamps the note row
+  (`props.updated_at`), so typing yields two events per push. Fine at today's
+  scale. The log is never thinned (it refuses every `DELETE`), so the answer
+  to its size is fewer events per push, not compaction. Folding a whole log
+  for `/at` is O(events) — checkpoints when that starts to matter.
 - **`base_seq` is recorded, not enforced.** Enforcing it is how an offline
   device's week-old edit would be flagged rather than win.
 - **Undo** could become inverse events — durable across reloads, and the same

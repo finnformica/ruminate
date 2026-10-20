@@ -148,7 +148,9 @@ which would destroy the data being rescued.
   scheduled `DELETE` past a retention window. Note that with the key lists
   gone (below) a purge is no longer something a client can be told about: it
   would need a cache-generation bump, or a retention window long enough that
-  no live client can still be holding the row.
+  no live client can still be holding the row. Such a purge touches only the
+  projection rows: the event log refuses every `DELETE` (migrations/0026,
+  docs/event-sourcing.md), so the log keeps every row's history.
 - **Dropping the since-pull key lists — DONE (2026-09).** Tombstones made
   deletion-by-absence redundant, and the lists were the widest read in the
   system: O(corpus) rows on every pull, on every focus, visibility change and
