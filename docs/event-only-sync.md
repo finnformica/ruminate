@@ -23,8 +23,10 @@ and the app is a fold of it.
    says what a device has pulled, not which write wins.
 4. **The server keeps its projection** (`nodes`, `link`, `views`) for the
    MCP server, search and shares.
-5. **The log is strictly append-only.** A delete and a restore are events.
-   Nothing is ever purged.
+5. **The log is append-only by convention.** The app only appends: a
+   delete and a restore are events, and the app never changes or removes
+   one. No new database trigger enforces this, so Finn can still fix data
+   by hand in the D1 console (revised 2026-10-21; ES-12 is dropped).
 6. **Concurrent writes by agents are out of scope for now.** An agent's
    write resolves by stamp like any other write. There is no lock, lease or
    merge for agents.
@@ -212,16 +214,23 @@ The server keeps the log and its projection:
   event-only client, and `MIN_REPLICA_PROTOCOL` rises to 3 when the old
   bundles are gone.
 
-## Strictly append-only
+## Append-only by convention
 
-The triggers on `events` refuse every `UPDATE` and every `DELETE`. The
-`event_purges` door (`migrations/0023_events.sql`), which lets a tenant's
-events be deleted to erase an account, closes. A delete and a restore are
-events; a block that is deleted is a block whose `alive` field is false.
+Revised 2026-10-21: Finn closed ES-12 (#273), so no new trigger is added.
 
-This has a consequence Finn has to know: an account cannot be erased from
-the log. Erasure, if it is needed later, is a new design (for example, keys
-per tenant that can be destroyed). It is not part of this one.
+- **The app** only appends to `events`. A delete and a restore are events;
+  a block that is deleted is a block whose `alive` field is false. No code
+  path changes or removes an event.
+- **The database** keeps the triggers `migrations/0023_events.sql` made, as
+  they are: `events_no_update` refuses an `UPDATE` on `events`, and
+  `events_no_delete` refuses a `DELETE` unless the tenant is named in
+  `event_purges`. Nothing stricter is added.
+- **`event_purges`** stays as it is. The app does not use it.
+- **A fix by hand** in the D1 console stays possible. The projection tables
+  (`nodes`, `link`, `views`) have no trigger. To remove a tenant's events,
+  name the tenant in `event_purges` first. After a fix by hand,
+  `GET /api/replica/verify` shows whether fold(events) still equals the
+  tables.
 
 ## Agents
 
@@ -372,15 +381,9 @@ changelog file.
     - Tests: `sql-note-store.test.ts`, `corpus-schema.test.ts`: the ladder
       drops the tables; a store from the old shape boots from snapshot 0.
     - Depends on: ES-10.
-12. **ES-12 Strictly append-only.**
-    - Scope: the trigger on `events` refuses every `DELETE`; drop
-      `event_purges`.
-    - Files: `migrations/0026_events_no_purge.sql`,
-      `worker/handlers/event-log.test.ts`.
-    - Tests: a `DELETE` is refused for every tenant; the old purge test
-      becomes a refusal test.
-    - Depends on: nothing. Confirm the erasure consequence with Finn
-      before merge.
+12. **ES-12 Strictly append-only.** **Dropped** (2026-10-21: Finn closed
+    #273, not merged). No trigger and no migration are added, and
+    `event_purges` stays. See "Append-only by convention".
 13. **ES-13 Retire the browser's row endpoints.**
     - Scope: raise `MIN_REPLICA_PROTOCOL` to 3 (a dashboard step first,
       as docs/graph-storage.md describes), then remove the browser's use
@@ -393,19 +396,19 @@ changelog file.
 
 ### Built so far
 
-| plan item | PR              |
-| --------- | --------------- |
-| ES-1      | #271            |
-| ES-2      | #276            |
-| ES-3      | #281            |
-| ES-4      | #275            |
-| ES-5      | #280            |
-| ES-6      | #284            |
-| ES-7      | #285            |
-| ES-8      | in progress     |
-| ES-12     | #273, on `main` |
+| plan item | PR          |
+| --------- | ----------- |
+| ES-1      | #271        |
+| ES-2      | #276        |
+| ES-3      | #281        |
+| ES-4      | #275        |
+| ES-5      | #280        |
+| ES-6      | #284        |
+| ES-7      | #285        |
+| ES-8      | in progress |
+| ES-12     | dropped     |
 
 The PRs are stacked, and merge in this order: ES-1, ES-2, ES-4, ES-3,
 ES-5, ES-6, ES-7, then GW-19 (#286, the view's `stack` field,
-docs/graph-walk.md) and ES-8.
-ES-12 does not depend on the stack and is on `main`.
+docs/graph-walk.md) and ES-8. ES-12 is dropped: #273 was closed, not
+merged.
