@@ -229,10 +229,13 @@ describe("viewChangeToEvent", () => {
     expect(viewChangeToEvent(view, { ...view }, ctx)).toBeNull()
   })
 
-  it("carries the stack: a create names it, and a change to it is an update of it alone", () => {
+  it("carries the stack: a create names one it has, and a change to it is an update of it alone", () => {
     const ctx = context()
-    expect(viewChangeToEvent(undefined, view, ctx)?.patch).toMatchObject({ stack: null })
+    expect(viewChangeToEvent(undefined, view, ctx)?.patch).not.toHaveProperty("stack")
     const stacked = { ...view, stack: "corpus_root:tasks" }
+    expect(viewChangeToEvent(undefined, stacked, ctx)?.patch).toMatchObject({
+      stack: "corpus_root:tasks",
+    })
     expect(viewChangeToEvent(view, stacked, ctx)?.patch).toEqual({ stack: "corpus_root:tasks" })
     expect(viewChangeToEvent(stacked, view, ctx)?.patch).toEqual({ stack: null })
     expect(viewChangeToEvent(stacked, { ...stacked, pinned: true }, ctx)?.patch).toEqual({

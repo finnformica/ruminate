@@ -819,6 +819,9 @@ export function opsToEvents(
  * whoever made it, the projection writes `at` back as `updated_at`, and the
  * two must agree for the atom and the store to hold the same row.
  */
+const withoutNullStack = ({ stack, ...fields }: ViewFields): ViewFields =>
+  stack === null || stack === undefined ? fields : { ...fields, stack }
+
 export function viewChangeToEvent(
   before: ViewRow | undefined,
   after: ViewRow | undefined,
@@ -852,7 +855,8 @@ export function viewChangeToEvent(
           entity: "view",
           entity_id: row.id,
           action: "create",
-          patch: fieldsOf(row),
+          // A create without a stack names none, as every create before 0027.
+          patch: withoutNullStack(fieldsOf(row)),
         }
   }
   if (live(before) && !live(after)) {
