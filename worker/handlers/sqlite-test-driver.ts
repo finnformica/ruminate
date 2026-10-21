@@ -19,6 +19,7 @@ import migration0020 from "../../migrations/0020_board_type.sql?raw"
 import migration0021 from "../../migrations/0021_note_views.sql?raw"
 import migration0023 from "../../migrations/0023_events.sql?raw"
 import migration0024 from "../../migrations/0024_event_hlc.sql?raw"
+import migration0025 from "../../migrations/0025_projection_stamps.sql?raw"
 import migration0003 from "../../migrations/0003_control_plane.sql?raw"
 import migration0010 from "../../migrations/0010_user_email.sql?raw"
 import migration0011 from "../../migrations/0011_user_email_required.sql?raw"
@@ -84,7 +85,8 @@ export function createTestSqlDriver(): SqlDriver {
 
 /**
  * A database in the **exact shape production D1 is in**: the real 0001 + 0002
- * + 0004 files, applied by the shared ladder in its `"columns"` mode. Nothing
+ * + 0004 files, applied by the shared ladder in its `"columns"` mode, then
+ * the D1-only 0025. Nothing
  * in the worker suites hand-writes corpus DDL, so a schema change that would
  * break the deployed database breaks the tests first.
  */
@@ -107,6 +109,9 @@ export async function createTenantTestDriver(): Promise<SqlDriver> {
     },
     "columns",
   )
+  // D1 only: the browser's tables do not resolve by stamp, so the shared
+  // ladder has no local step to pair this one with.
+  await driver.execScript(migration0025)
   return driver
 }
 

@@ -10,6 +10,7 @@ import {
   projectRows,
   type RuminateEvent,
 } from "../../src/data/events"
+import { encodeHlc } from "../../src/data/hlc"
 import type { SqlDriver } from "../../src/data/sql-driver"
 import { ensureTenantMeta, forTenant, type TenantDb } from "../tenancy-db"
 import {
@@ -88,6 +89,12 @@ function writer(device = "tab-1") {
     editView: (id: string, patch: object) => make("view", id, "update", patch),
   }
 }
+
+/** An event as a device of this build stamps it: `ms`, counter 0, its device. */
+const stampedAt = (event: RuminateEvent, ms: number): RuminateEvent => ({
+  ...event,
+  hlc: encodeHlc({ ms, counter: 0, device: event.device }),
+})
 
 const append = (tenant: TenantDb, events: RuminateEvent[], now = 5_000) =>
   appendEvents(tenant, events, { actor: tenant.userId, origin: "replica", now })
@@ -249,7 +256,7 @@ describe("what a push costs", () => {
       w.view("v", "note", true),
       w.editView("v", { pinned: false }),
     ]
-    for (const statement of [planReconcile(ctx), ...planEventAppend(events, ctx)]) {
+    for (const statement of [...planReconcile(ctx), ...planEventAppend(events, ctx)]) {
       const sql = statement.sql.replace(/:tenant\b/g, "111")
       const plan = await driver.exec(`EXPLAIN QUERY PLAN ${sql}`, statement.params ?? [])
       const details = (plan as { detail: string }[]).map((row) => row.detail)
@@ -262,7 +269,7 @@ describe("what a push costs", () => {
       // …and an UPDATE is driven FROM its changes, one seek each — not from
       // the table, re-scanning the JSON for every row it finds (n² reads,
       // which returns the right rows and which D1 bills for).
-      if (/UPDATE (?:nodes|link|views)/.test(sql)) {
+      if (/UPDATE (?:nodes|link|views)\b[\s\S]*\bFROM j\b/.test(sql)) {
         const loops = details.filter((detail) =>
           /^(?:SCAN|SEARCH) (?:j|nodes|link|views)\b/.test(detail),
         )
@@ -410,27 +417,33 @@ describe("a client's own events", () => {
     expect(await verifyLog(alice)).toMatchObject({ ok: true, events: 2 })
   })
 
-  it("drops what is stale — behind the row the replica holds — and keeps a create whatever is held", async () => {
-    const { alice } = await open()
-    const w = writer("dev.tab")
-    await client(alice, [w.block("a", "text", "A")]) // at 1010
-    // Another device edited since: the row is at 2000.
-    await corpusPut(alice, { nodes: [node("a", "text", "A, elsewhere", 2_000)], links: [] })
+  it("drops what is stale by stamp — what would set no field — and keeps what sets one", async () => {
+    const { driver, alice } = await open()
+    const a = writer("dev.a")
+    const b = writer("dev.b")
+    await client(alice, [stampedAt(a.block("a", "text", "A"), 1_000)])
+    // Another device edited the text since, through the row door, at 2000.
+    await corpusPut(alice, { nodes: [node("a", "text", "A, elsewhere", 2_000)], links: [] }, 2_000)
 
-    const stale = { ...w.edit("a", { text: "A, offline" }), at: 1_500 }
-    const fresh = { ...w.edit("a", { text: "A, after" }), at: 2_500 }
-    const again = { ...w.block("a", "text", "A, again"), at: 1_600 } // a create: never stale
-    const landed = await client(alice, [stale, fresh, again])
-    expect(landed.stale).toBe(1)
+    // An offline device's older text: behind the text's stamp.
+    const stale = stampedAt(b.edit("a", { text: "A, offline" }), 1_500)
+    // Its older change to ANOTHER field: that field's stamp is older still.
+    const type = stampedAt(b.edit("a", { type: "h1" }), 1_200)
+    const fresh = stampedAt(b.edit("a", { text: "A, after" }), 2_500)
+    // A create behind every stamp the row holds sets nothing either.
+    const again = stampedAt(b.block("a", "text", "A, again"), 900)
+    const landed = await client(alice, [stale, type, fresh, again])
+    expect(landed.stale).toBe(2)
     expect(landed.appended).toBe(2)
-    expect(landed.seqs.map(([id]) => id)).toEqual([fresh.id, again.id])
-    const log = await readEvents(alice)
-    expect(shape(log)).toEqual([
+    expect(landed.seqs.map(([id]) => id)).toEqual([type.id, fresh.id])
+    expect(shape(await readEvents(alice))).toEqual([
       "1 block.create a",
       "2 block.update a",
       "3 block.update a",
-      "4 block.create a",
+      "4 block.update a",
     ])
+    const [row] = await driver.exec("SELECT type, text FROM nodes WHERE user_id = 111")
+    expect(row).toEqual({ type: "h1", text: "A, after" })
     expect(await verifyLog(alice)).toMatchObject({ ok: true })
   })
 
@@ -726,5 +739,191 @@ describe("the 19 September wipe", () => {
     expect(
       (await restoreSubtree(alice, "call", before, { actor: 111, origin: "system" })).events,
     ).toBe(0)
+  })
+})
+
+describe("by stamp", () => {
+  /** The projections as compared across orders: everything but `seq`, which
+   * is the order the events arrived in, and `legacy`. */
+  const tables = async (driver: SqlDriver) => {
+    const read = async (sql: string) =>
+      (await driver.exec(sql)).map((row): Record<string, unknown> => {
+        const { legacy: _, ...stamps } = JSON.parse(String(row.stamps)) as Record<string, unknown>
+        return { ...row, stamps }
+      })
+    return {
+      nodes: await read(
+        "SELECT id, type, text, props, updated_at, deleted_at, notes_id, stamps FROM nodes " +
+          "WHERE user_id = 111 ORDER BY id",
+      ),
+      links: await read(
+        "SELECT source_id, destination_id, kind, sort_key, updated_at, deleted_at, stamps " +
+          "FROM link WHERE user_id = 111 ORDER BY source_id, destination_id",
+      ),
+      views: await read(
+        "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at, stamps " +
+          "FROM views WHERE user_id = 111 ORDER BY id",
+      ),
+    }
+  }
+
+  it("lands the same events in any order as the same tables", async () => {
+    const a = writer("dev.a")
+    const b = writer("dev.b")
+    const made = [
+      stampedAt(a.block("note", "note", "N", null), 1_000),
+      stampedAt(a.block("a", "text", "A"), 1_000),
+      stampedAt(a.link("note", "a", "a0"), 1_000),
+      stampedAt(a.view("v", "note", true), 1_000),
+    ]
+    const fromA = [
+      stampedAt(a.edit("a", { text: "A, by a" }), 3_000),
+      stampedAt(a.move("note", "a", "a5"), 3_000),
+      stampedAt(a.editView("v", { pinned: false }), 3_000),
+    ]
+    const fromB = [
+      stampedAt(b.edit("a", { text: "A, by b", type: "h1" }), 2_000),
+      stampedAt(b.remove("a"), 2_500),
+      stampedAt(b.unlink("note", "a"), 2_000),
+      stampedAt(b.editView("v", { filter: "type:todo" }), 2_000),
+    ]
+    const orders = [
+      [made, fromA, fromB],
+      [made, fromB, fromA],
+      [made, [...fromA, ...fromB].reverse()],
+    ]
+    const results = []
+    for (const order of orders) {
+      const { driver, alice } = await open()
+      for (const events of order) await append(alice, events)
+      expect(await verifyLog(alice)).toMatchObject({ ok: true, rejected: 0 })
+      results.push(await tables(driver))
+    }
+    expect(results[1]).toEqual(results[0])
+    expect(results[2]).toEqual(results[0])
+
+    const block = results[0].nodes.find((row) => row.id === "a")
+    expect(block).toMatchObject({ type: "h1", text: "A, by a" })
+    expect(block?.deleted_at).not.toBeNull()
+    expect(results[0].links[0]).toMatchObject({ sort_key: "a5" })
+    expect(results[0].links[0].deleted_at).not.toBeNull()
+    expect(results[0].views[0]).toMatchObject({ pinned: 0, filter: "type:todo" })
+  })
+
+  it("keeps both of two devices' changes to two fields of one block", async () => {
+    const { driver, alice } = await open()
+    const a = writer("dev.a")
+    const b = writer("dev.b")
+    await append(alice, [stampedAt(a.block("a", "text", "A"), 1_000)])
+    await append(alice, [stampedAt(a.edit("a", { text: "A, by a" }), 2_000)])
+    // B changed the type before A's edit, and its push arrives after it.
+    await append(alice, [stampedAt(b.edit("a", { type: "h1" }), 1_500)])
+    const [row] = await driver.exec("SELECT type, text, seq FROM nodes WHERE user_id = 111")
+    expect(row).toEqual({ type: "h1", text: "A, by a", seq: 3 })
+    expect(await verifyLog(alice)).toMatchObject({ ok: true })
+  })
+
+  it("changes nothing for a re-sent event", async () => {
+    const { driver, alice } = await open()
+    const a = writer("dev.a")
+    const b = writer("dev.b")
+    const first = [stampedAt(a.block("a", "text", "A"), 1_000)]
+    const edit = [stampedAt(a.edit("a", { text: "A, by a" }), 3_000)]
+    await append(alice, first)
+    await append(alice, edit)
+    await append(alice, [stampedAt(b.edit("a", { type: "h1" }), 2_000)])
+    const before = await driver.exec("SELECT * FROM nodes WHERE user_id = 111")
+    await append(alice, [...first, ...edit])
+    expect(await driver.exec("SELECT * FROM nodes WHERE user_id = 111")).toEqual(before)
+    expect(await readEvents(alice)).toHaveLength(3)
+  })
+
+  it("derives the stamp of an event that holds none as eventStamp does", async () => {
+    const { driver, alice } = await open()
+    const w = writer()
+    const blocks = Array.from({ length: 10 }, (_, i) => w.block(`blk_${i}`, "text", `B${i}`))
+    blocks[9] = { ...blocks[9], at: 1_792_540_800_123 }
+    await append(alice, blocks)
+    const log = await readEvents(alice)
+    expect(log[9].hlc).toBeUndefined()
+    const [row] = await driver.exec("SELECT stamps FROM nodes WHERE user_id = 111 AND id = 'blk_9'")
+    const want = eventStamp(log[9])
+    expect(want).toBe("001792540800123-0000-seq:000000000000010")
+    expect(JSON.parse(String(row.stamps))).toEqual({
+      type: want,
+      text: want,
+      props: want,
+      notes_id: want,
+      alive: want,
+    })
+  })
+
+  it("keeps what the old rule made of a row from before stamps, and resolves by stamp from there", async () => {
+    const { driver, alice } = await open()
+    const w = writer("dev.old")
+    // Folded by seq, as the projection was before 0025: an edit from a clock
+    // that ran behind still landed. By stamp it would not have.
+    const legacy = [
+      { ...w.block("a", "text", "A"), at: 2_000 },
+      { ...w.edit("a", { text: "by the old rule" }), at: 1_000 },
+    ]
+    for (const [i, event] of legacy.entries()) {
+      await driver.exec(
+        "INSERT INTO events (user_id, seq, id, entity, entity_id, action, patch, batch, origin, " +
+          "device, actor, at, received_at, append) " +
+          "VALUES (111, ?1, ?2, ?3, ?4, ?5, ?6, 'b', 'replica', ?7, 111, ?8, ?8, 'old')",
+        [
+          i + 1,
+          event.id,
+          event.entity,
+          event.entity_id,
+          event.action,
+          JSON.stringify(event.patch),
+          event.device,
+          event.at,
+        ],
+      )
+    }
+    await driver.exec(
+      "INSERT INTO nodes (user_id, id, type, text, props, updated_at, notes_id, seq) " +
+        "VALUES (111, 'a', 'text', 'by the old rule', NULL, 1000, 'note', 2)",
+    )
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, events: 2 })
+
+    // Each field of the row resolves by the stamp of its last event: (1000, seq 2).
+    const n = writer("dev.new")
+    await append(alice, [
+      stampedAt(n.edit("a", { type: "h1" }), 1_500),
+      stampedAt(n.edit("a", { text: "behind the row" }), 900),
+    ])
+    const [row] = await driver.exec("SELECT type, text, stamps FROM nodes WHERE user_id = 111")
+    expect(row).toMatchObject({ type: "h1", text: "by the old rule" })
+    const held = eventStamp({ ...legacy[1], seq: 2 })
+    expect(JSON.parse(String(row.stamps))).toEqual({
+      type: encodeHlc({ ms: 1_500, counter: 0, device: "dev.new" }),
+      text: held,
+      props: held,
+      notes_id: held,
+      alive: held,
+      legacy: 2,
+    })
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, events: 4 })
+  })
+
+  it("stamps what the row door derives with the replica's clock, after what the rows held", async () => {
+    const { alice } = await open()
+    const w = writer("dev.fast")
+    // A device whose clock runs ahead of the replica's.
+    await append(alice, [stampedAt(w.block("a", "text", "A"), 9_000_000)])
+    await writeRows(
+      alice,
+      { nodes: [node("a", "text", "A, by an agent", 9_000_100)], links: [] },
+      { actor: 111, origin: "mcp", device: "agent", now: 5_000 },
+    )
+    const log = await readEvents(alice)
+    expect(log[1].hlc).toBe(encodeHlc({ ms: 9_000_000, counter: 1, device: "server:mcp" }))
+    const pulled = await corpusPullSince(alice, 0)
+    expect(pulled.nodes[0].text).toBe("A, by an agent")
+    expect(await verifyLog(alice)).toMatchObject({ ok: true })
   })
 })

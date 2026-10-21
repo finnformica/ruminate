@@ -125,9 +125,10 @@ atom signed out.
 
 ### Conflict semantics: per-row last-writer-wins
 
-Sync is per-row LWW on `updated_at`, decided by push order at the replica —
-there is no merge machinery, but the unit of conflict shrank from a note to a
-row:
+Sync is per-row LWW on `updated_at` in the browser. The replica resolves each
+field of a row by the stamp of the event that set it (docs/event-sourcing.md,
+"The projection resolves by stamp"). There is no merge machinery, but the
+unit of conflict shrank from a note to a row:
 
 - Two devices editing _different blocks_ of the same note now merge cleanly —
   each edit is its own node row. Concurrent sibling inserts are two distinct
