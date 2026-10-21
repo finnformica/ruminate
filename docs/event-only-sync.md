@@ -1,21 +1,24 @@
 # Event-only sync
 
-Status: **Decided 2026-10-20, not built.** Finn decided each rule in
+Status: **Decided 2026-10-20, revised 2026-10-21, not yet all built.** Finn decided each rule in
 "The decisions" below. The rest of this document is how the rules are kept,
 and the plan that builds them (the end of this document).
 
 Today the log is beside the tables (docs/event-sourcing.md): the browser
 pushes events, but it still keeps `nodes`, `link` and `views` tables, pulls
 rows to fill them, and pulls the log a second time for history. This
-document retires the rows on the browser. The browser keeps the log only,
-and the app is a fold of it.
+document retires the row sync. The log is the truth, and the browser's
+tables become an indexed cache of its fold (revised 2026-10-21).
 
 ## The decisions
 
-1. **The client keeps only the event log.** What the app shows is a fold of
-   the log. A **snapshot** of the fold is saved every 1,000 events or every
-   24 hours, whichever comes first, and the last 2 snapshots are kept. The
-   log is never compacted.
+1. **The log is the truth; the client's tables are a cache of its fold.**
+   The browser keeps `nodes` and `link` as an indexed per-entity cache,
+   updated in the same transaction as each local batch and each pulled
+   page. Reads are lazy index lookups: no fold on read and no merge of
+   diffs at read time. The log is never compacted. (Revised 2026-10-21. It
+   replaces "the client keeps only the log, with a snapshot every 1,000
+   events or 24 hours".)
 2. **Sync pushes and pulls events only.** There is no row pull and no row
    push from the browser.
 3. **Each event carries a hybrid logical clock (HLC) stamp.** A conflict
@@ -23,14 +26,16 @@ and the app is a fold of it.
    says what a device has pulled, not which write wins.
 4. **The server keeps its projection** (`nodes`, `link`, `views`) for the
    MCP server, search and shares.
-5. **The log is strictly append-only.** A delete and a restore are events.
-   Nothing is ever purged.
+5. **The log is append-only by convention.** The app only appends: a
+   delete and a restore are events, and the app never changes or removes
+   one. No new database trigger enforces this, so Finn can still fix data
+   by hand in the D1 console (revised 2026-10-21; ES-12 is dropped).
 6. **Concurrent writes by agents are out of scope for now.** An agent's
    write resolves by stamp like any other write. There is no lock, lease or
    merge for agents.
 7. **The migration is a one-time fold from today's tables.**
-8. **The client search index rebuilds from the fold.** Nothing about search
-   is stored.
+8. **Search reads the cache tables by index.** (Revised 2026-10-21. It
+   replaces "the search index rebuilds from the fold".)
 
 ## The stamp
 
@@ -98,8 +103,8 @@ So the fold is:
   stamp wins.
 
 These properties are what make the rest simple. A device applies a pulled
-event when it arrives, without a reorder. A snapshot plus any events after
-it, in any order, is the state. The server and every device reach the same
+event when it arrives, without a reorder. A cache row plus any events for
+its entity after it, in any order, is the state. The server and every device reach the same
 state from the same set of events.
 
 The fold extends the one the calendar reads today (`fold`,
@@ -115,76 +120,78 @@ keeps for a row too, so the two agree (ES-5, commit `0b50d46`).
 
 ## The client
 
-The browser's store (`src/data/sql-note-store.ts`, OPFS) holds three
-tables:
+The browser's store (`src/data/sql-note-store.ts`, OPFS) holds:
 
-| table       | what                                                                   |
-| ----------- | ---------------------------------------------------------------------- |
-| `events`    | The log: this device's events and every pulled event. Never compacted. |
-| `snapshots` | The last 2 snapshots of the fold.                                      |
-| `meta`      | The pull cursor, the owner, the device's last stamp.                   |
+| table                    | what                                                                   |
+| ------------------------ | ---------------------------------------------------------------------- |
+| `events`                 | The log: this device's events and every pulled event. Never compacted. |
+| `nodes`, `link`, `views` | The cache of the fold: one row per entity, with field stamps.          |
+| `meta`                   | The pull cursor, the owner, the device's last stamp.                   |
 
-`nodes`, `link` and `views` go from the browser.
+### The cache
 
-### Snapshots
+Revised 2026-10-21. The log stays the truth. The browser keeps `nodes` and
+`link` (and `views`, the same way) as an **indexed per-entity cache of the
+fold**: each row is the fold of one entity's events, every field with its
+stamp (a `stamps` column, as on the server) and its `seq` (the highest
+applied, `foldByStamp`). The snapshot blob goes: the cache tables replace
+it.
 
-A snapshot is the fold, every field with its stamp, and the **log
-position** it covers: the highest local row id of the `events` table that
-the fold includes.
+- **Same transaction.** Each local batch of events and each pulled page
+  appends to `events` and updates the cache rows of the entities it names,
+  in one transaction. Each event is resolved against its one row, field by
+  field, by stamp. No other row is read and nothing is folded again.
+- **Lazy reads.** A read is an index lookup, never a fold, and never a
+  merge of diffs at read time. To expand a block, read its `link` rows by
+  source (`link_source`: `source_id`, `kind`, `sort_key`), then the child
+  `nodes` rows by id (the primary key). An up pivot reads `link` by
+  destination (`link_destination`). Only what is on screen is read, which
+  keeps the walk lazy (docs/graph-walk.md).
+- **The fold check** compares only the rows each batch touched: for each,
+  the fold of that entity's events in the log against its cache row. The
+  rework adds an index on `events (entity, entity_id)` for this. A full
+  check of every row is a manual button in Settings → Storage diagnostics.
+- **Boot** opens the store and reads. There is no load step: the cache is
+  already the state.
 
-- **When.** After a batch is applied, if 1,000 events have been added since
-  the last snapshot, or 24 hours have passed. Also at boot, when the newest
-  snapshot is over either bound.
-- **Keep 2.** Write the new snapshot, then delete all but the 2 newest. A
-  snapshot is a cache of the log, not history, so a delete of a snapshot is
-  not a purge.
-- **Boot.** Read the newest snapshot that parses. If it does not parse, read
-  the one before. Then apply every event after its log position. With no
-  snapshot, fold the whole log.
-- **Cost.** A snapshot holds every live and dead entity: about the size of
-  today's three tables. Two of them, plus the log (about 1.5 times the
-  tables, docs/event-sourcing.md), is about 3.5 times today's tables.
-- **The first open, measured** (ES-7, #285; `node:sqlite`, and the
-  browser's OPFS store is slower). A device with a long log and no snapshot
-  folds the whole log before the store is ready. A later open reads the
-  newest snapshot and its tail (`loadFold`). "Check" is one comparison of
-  the fold with the tables, at most once in 10 seconds while the tables
-  stay.
+**What it replaces.** The snapshot design (ES-5 to ES-7, #280, #284, #285)
+loaded the whole fold at boot. Its measured cost (`node:sqlite`; OPFS is
+slower), kept for comparison:
 
-  | events  | nodes  | first open | `loadFold` | read-out | check  | snapshot |
-  | ------- | ------ | ---------- | ---------- | -------- | ------ | -------- |
-  | 10,000  | 3,379  | 157 ms     | 27 ms      | 8 ms     | 70 ms  | 3.6 MB   |
-  | 50,000  | 16,892 | 811 ms     | 129 ms     | 50 ms    | 280 ms | 18 MB    |
-  | 100,000 | 33,784 | 1.7 s      | 328 ms     | 101 ms   | 777 ms | 36 MB    |
-  | 200,000 | 67,568 | 4.3 s      | 640 ms     | 223 ms   | 1.4 s  | 72 MB    |
+| events  | nodes  | first open | `loadFold` | read-out | check  | snapshot |
+| ------- | ------ | ---------- | ---------- | -------- | ------ | -------- |
+| 10,000  | 3,379  | 157 ms     | 27 ms      | 8 ms     | 70 ms  | 3.6 MB   |
+| 50,000  | 16,892 | 811 ms     | 129 ms     | 50 ms    | 280 ms | 18 MB    |
+| 100,000 | 33,784 | 1.7 s      | 328 ms     | 101 ms   | 777 ms | 36 MB    |
+| 200,000 | 67,568 | 4.3 s      | 640 ms     | 223 ms   | 1.4 s  | 72 MB    |
 
-  Production held 3,711 rows, so it is near the first line.
+Production held 3,711 rows, so it is near the first line.
 
 ### Write, push, pull
 
 1. **Write.** A batch of the editor's ops becomes events (`opsToEvents`),
-   each stamped. They append to `events` and apply to the in-memory fold in
-   one step. The UI never waits.
+   each stamped. They append to `events` and update the cache rows in one
+   transaction. The UI never waits.
 2. **Push.** The push loop sends the unpushed tail (`seq IS NULL`) in the
    order made (`PUT /api/replica/events`) and stamps each event with the
    `seq` the server answers. A re-sent event gets the `seq` it already has.
 3. **Pull.** The pull asks for the log past the device's cursor
-   (`GET /api/replica/events?since=`, in pages). Each event appends to
-   `events` and applies to the fold. The cursor moves to the highest `seq`
-   received.
-4. **A fresh device** pulls the whole log from `seq` 0, in pages, then
-   writes its first snapshot.
+   (`GET /api/replica/events?since=`, in pages). Each page appends to
+   `events` and updates the cache rows in one transaction. The cursor moves
+   to the highest `seq` received.
+4. **A fresh device** pulls the whole log from `seq` 0, in pages. Each page
+   fills the cache as it lands.
 
-There is no **full push** and no repair from rows. A device whose store
-fails rebuilds its fold from the log (or from the last good snapshot), then
-sends its unpushed tail.
+There is no **full push** and no repair from rows. A device whose cache
+fails a check rebuilds the cache from the log, then sends its unpushed
+tail.
 
 ### Search
 
-The block index (`blockIndexAtom`) and the note list (`notesAtom`) derive
-from `graphSnapshotAtom`, which the fold now feeds. At boot they build from
-the fold once it is loaded. Nothing about search is stored, so there is
-nothing to migrate or repair.
+Search reads the same cache tables by index: the note list by type
+(`nodes_type`), and a block's text and place by id and by link. Nothing
+about search is stored apart from the cache, so there is nothing else to
+migrate or repair. (Revised 2026-10-21.)
 
 ## The server
 
@@ -212,16 +219,23 @@ The server keeps the log and its projection:
   event-only client, and `MIN_REPLICA_PROTOCOL` rises to 3 when the old
   bundles are gone.
 
-## Strictly append-only
+## Append-only by convention
 
-The triggers on `events` refuse every `UPDATE` and every `DELETE`. The
-`event_purges` door (`migrations/0023_events.sql`), which lets a tenant's
-events be deleted to erase an account, closes. A delete and a restore are
-events; a block that is deleted is a block whose `alive` field is false.
+Revised 2026-10-21: Finn closed ES-12 (#273), so no new trigger is added.
 
-This has a consequence Finn has to know: an account cannot be erased from
-the log. Erasure, if it is needed later, is a new design (for example, keys
-per tenant that can be destroyed). It is not part of this one.
+- **The app** only appends to `events`. A delete and a restore are events;
+  a block that is deleted is a block whose `alive` field is false. No code
+  path changes or removes an event.
+- **The database** keeps the triggers `migrations/0023_events.sql` made, as
+  they are: `events_no_update` refuses an `UPDATE` on `events`, and
+  `events_no_delete` refuses a `DELETE` unless the tenant is named in
+  `event_purges`. Nothing stricter is added.
+- **`event_purges`** stays as it is. The app does not use it.
+- **A fix by hand** in the D1 console stays possible. The projection tables
+  (`nodes`, `link`, `views`) have no trigger. To remove a tenant's events,
+  name the tenant in `event_purges` first. After a fix by hand,
+  `GET /api/replica/verify` shows whether fold(events) still equals the
+  tables.
 
 ## Agents
 
@@ -235,19 +249,13 @@ lock, lease or merge for agents for now.
 
 A one-time fold from today's tables.
 
-- **On the browser.** The first boot of the new build writes snapshot 0
-  from its `nodes`, `link` and `views` rows, tombstones too
-  (`snapshotZero`, `src/data/snapshot.ts`). Each row becomes the `create`
-  it amounts to (`rowsToEvents` against no rows), with no stamp, the row's
-  `updated_at` as its `at` and the row's `seq`. So each field takes the
-  stamp `eventStamp` derives for an old event: the row's `updated_at`,
-  counter 0 and `seq:<seq>`. That is the stamp the row's own last event
-  derives, so that event applied again changes nothing. Its log position
-  is the highest row id in `events` at that moment. A `meta` flag
-  (`snapshot_zero`) records that snapshot 0 is written, and it alone
-  decides whether to write it, because a snapshot from the log can exist
-  before it. So the fold from the tables runs once (ES-6). From then on the fold is the state. The tables
-  stay, written and compared, until a later step removes them.
+- **On the browser.** Today's `nodes`, `link` and `views` tables become the
+  cache. A one-time step fills each row's `stamps` by the `eventStamp` rule
+  for an old event: the row's `updated_at`, counter 0 and `seq:<seq>`. That
+  is the stamp the row's own last event derives, so that event applied
+  again changes nothing. A `meta` flag records that the step has run, and
+  it alone decides whether to run it. (Revised 2026-10-21. Snapshot 0,
+  `snapshotZero` in ES-6, did the same fold into a blob.)
 - **On the server.** No data moves. The new `hlc` and `stamps` columns start
   empty. An empty `hlc` derives its stamp at read time (above). An empty
   `stamps` derives each field's stamp from the row's `updated_at`.
@@ -309,79 +317,62 @@ changelog file.
      for an in-order log, the fold equals the store's tables on the
      existing fixtures; `stateAt` still answers by `seq`.
    - Depends on: ES-1.
-5. **ES-5 Snapshots.**
-   - Scope: the `snapshots` table; write after 1,000 events or 24 hours;
-     keep 2; read the newest that parses at boot, then the tail.
+5. **ES-5 to ES-7 (rework) Indexed fold cache with lazy reads.** One item
+   (revised 2026-10-21). It reworks #280, #284 and #285, which built a
+   snapshot blob and a whole fold at boot.
+   - Scope: drop the `snapshots` table and `loadFold`. Add `stamps` to the
+     client's `nodes`, `link` and `views`. Each local batch and each pulled
+     page updates the cache rows it names, per field by stamp, in the same
+     transaction as its append to `events`. Fill the stamps of today's rows
+     once, by the `eventStamp` rule, under a `meta` flag. The walk reads
+     through the store by index: `link` by source, then `nodes` by id, and
+     `link` by destination for an up pivot. Add an index on `events
+(entity, entity_id)`. The fold check compares only the rows a batch
+     touched; a full check is a button in Settings → Storage diagnostics.
    - Files: `src/data/corpus-schema.ts`, `src/data/sql-note-store.ts`,
-     `src/data/snapshot.ts`, `src/data/snapshot.test.ts`.
-   - Tests: a snapshot round-trips; the 1,000-event and 24-hour bounds;
-     only 2 remain; a corrupt newest snapshot falls back to the one before;
-     no snapshot folds the whole log.
-   - Depends on: ES-4.
-6. **ES-6 Snapshot 0 from the tables.**
-   - Scope: the one-time fold of today's tables into the first snapshot,
-     with derived stamps, run once (a `meta` flag).
-   - Files: `src/data/snapshot.ts`, `src/data/sql-note-store.ts`.
-   - Tests: snapshot 0 equals `getGraph()` of the tables; it runs once; a
-     reload keeps it.
-   - Depends on: ES-5.
-7. **ES-7 The app reads the fold.**
-   - Scope: the database runtime feeds `databaseGraphAtom` from the
-     snapshot and the log. The tables are still written. After each batch
-     a check compares the fold with the tables and records a difference
-     in Settings → Storage diagnostics.
-   - Files: `src/data/database-mode.ts`, `src/data/note-store.ts`,
-     `src/data/sql-note-store.ts`.
-   - Tests: `database-mode.test.ts`: boot from a snapshot and a tail; an
-     edit; a pulled event; the check finds a planted difference.
-   - Depends on: ES-2, ES-6.
-8. **ES-8 Search from the fold.**
-   - Scope: confirm and pin that the block index and the note list build
-     from the fold at boot, with nothing stored.
-   - Files: `src/global-state.ts` (only if a change is needed), the block
-     index tests.
-   - Tests: the index after a boot from a snapshot equals the index after
-     a full fold.
-   - Depends on: ES-7.
-9. **ES-9 Pull events only.**
+     `src/data/note-store.ts`, `src/data/database-mode.ts`,
+     `src/data/graph.ts` (the walk's reads), `src/data/fold-check.ts`,
+     `src/data/snapshot.ts` (removed), the Settings storage card.
+   - Tests: a batch updates exactly the rows it names, and a failure rolls
+     back the append and the rows together; a page out of order gives the
+     same rows; a re-sent event changes nothing; expanding a block reads
+     only its links and its children; an up pivot reads by destination;
+     the stamp fill runs once; the per-batch check finds a planted
+     difference in a touched row and reads no other row; the full check
+     finds one anywhere.
+   - Depends on: ES-2, ES-4.
+6. **ES-8 Search reads the cache.**
+   - Scope: the note list and the block index read the cache tables by
+     index, not a whole-graph snapshot.
+   - Files: `src/global-state.ts`, `src/data/note-meta.ts`,
+     `src/utils/block-search.ts`, their tests.
+   - Tests: the existing search tests give the same results; a search
+     reads by index (no scan of every row).
+   - Depends on: the ES-5 to ES-7 rework.
+7. **ES-9 Pull events only.**
    - Scope: boot and the since-pull stop pulling rows. A fresh device
      pulls the whole log in pages. `REPLICA_PROTOCOL` becomes 3.
    - Files: `src/data/database-mode.ts`, `src/data/d1-note-source.ts`,
      `worker/handlers/replica-payload.ts`, `worker/handlers/replica.ts`.
    - Tests: a fresh device boots from events alone; a quiet pull is one
      request; a version 2 client is still served.
-   - Depends on: ES-3, ES-7. Soak ES-7 for a week with no fold difference
-     first.
-10. **ES-10 Push events only.**
-    - Scope: the row push, the full push and the "Push full copy" action
-      go. A repair rebuilds the fold from the log and re-sends the
-      unpushed tail.
-    - Files: `src/data/replica-sync.ts`, `src/data/database-mode.ts`, the
-      Settings storage card in `src/components/settings/`.
-    - Tests: `replica-sync.test.ts`: no row request is made; a repair
-      sends only unpushed events.
-    - Depends on: ES-9.
-11. **ES-11 No client tables.**
-    - Scope: stop writing `nodes`, `link` and `views` on the browser and
-      drop them from the client's schema ladder. `NoteStore` loses
-      `getAllRows` and `applyPull`. Update `CLAUDE.md` (the store's
-      methods) and docs/graph-storage.md.
-    - Files: `src/data/note-store.ts`, `src/data/sql-note-store.ts`,
-      `src/data/corpus-schema.ts`, `src/data/database-mode.ts`
-      (`CACHE_GENERATION`), `CLAUDE.md`.
-    - Tests: `sql-note-store.test.ts`, `corpus-schema.test.ts`: the ladder
-      drops the tables; a store from the old shape boots from snapshot 0.
-    - Depends on: ES-10.
-12. **ES-12 Strictly append-only.**
-    - Scope: the trigger on `events` refuses every `DELETE`; drop
-      `event_purges`.
-    - Files: `migrations/0026_events_no_purge.sql`,
-      `worker/handlers/event-log.test.ts`.
-    - Tests: a `DELETE` is refused for every tenant; the old purge test
-      becomes a refusal test.
-    - Depends on: nothing. Confirm the erasure consequence with Finn
-      before merge.
-13. **ES-13 Retire the browser's row endpoints.**
+   - Depends on: ES-3, the ES-5 to ES-7 rework. Soak the rework for a week
+     with no fold difference first.
+8. **ES-10 Push events only.**
+   - Scope: the row push, the full push and the "Push full copy" action
+     go. A repair rebuilds the cache from the log and re-sends the
+     unpushed tail.
+   - Files: `src/data/replica-sync.ts`, `src/data/database-mode.ts`, the
+     Settings storage card in `src/components/settings/`.
+   - Tests: `replica-sync.test.ts`: no row request is made; a repair
+     sends only unpushed events.
+   - Depends on: ES-9.
+9. **ES-11 No client tables.** **Dropped** (2026-10-21). The client keeps
+   `nodes`, `link` and `views` as the cache of the fold.
+10. **ES-12 Strictly append-only.** **Dropped** (2026-10-21: Finn closed
+    #273, not merged). No trigger and no migration are added, and
+    `event_purges` stays. See "Append-only by convention".
+11. **ES-13 Retire the browser's row endpoints.**
     - Scope: raise `MIN_REPLICA_PROTOCOL` to 3 (a dashboard step first,
       as docs/graph-storage.md describes), then remove the browser's use
       of `PUT` and `GET /api/replica/notes`. `writeRows` stays for MCP and
@@ -389,23 +380,22 @@ changelog file.
     - Files: `worker/handlers/replica.ts`, `worker/handlers/replica-corpus.ts`.
     - Tests: a version 2 client is refused with the update notice; MCP and
       share writes still land.
-    - Depends on: ES-11, and the old bundles gone from use.
+    - Depends on: ES-10, and the old bundles gone from use.
 
 ### Built so far
 
-| plan item | PR              |
-| --------- | --------------- |
-| ES-1      | #271            |
-| ES-2      | #276            |
-| ES-3      | #281            |
-| ES-4      | #275            |
-| ES-5      | #280            |
-| ES-6      | #284            |
-| ES-7      | #285            |
-| ES-8      | in progress     |
-| ES-12     | #273, on `main` |
+| plan item    | PR                                   |
+| ------------ | ------------------------------------ |
+| ES-1         | #271                                 |
+| ES-2         | #276                                 |
+| ES-3         | #281                                 |
+| ES-4         | #275                                 |
+| ES-5 to ES-7 | #280, #284, #285: to rework into one |
+| ES-8         | in progress                          |
+| ES-11        | dropped                              |
+| ES-12        | dropped                              |
 
-The PRs are stacked, and merge in this order: ES-1, ES-2, ES-4, ES-3,
-ES-5, ES-6, ES-7, then GW-19 (#286, the view's `stack` field,
-docs/graph-walk.md) and ES-8.
-ES-12 does not depend on the stack and is on `main`.
+The PRs are stacked, and merge in this order: ES-1, ES-2, ES-4, ES-3, the
+ES-5 to ES-7 rework, then GW-19 (#286, the view's `stack` field,
+docs/graph-walk.md) and ES-8. ES-11 and ES-12 are dropped; #273 was closed,
+not merged.

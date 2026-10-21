@@ -12,12 +12,13 @@ from there — and the replica takes them in as made. Code: `src/data/events.ts`
 `src/data/replica-sync.ts` (the push), `migrations/0023_events.sql`.
 
 **Decided 2026-10-20: event-only sync** ([event-only-sync.md](./event-only-sync.md)).
-The browser keeps only its log, folds the app from it, and saves a snapshot
-every 1,000 events or 24 hours, keeping 2. Sync pushes and pulls events
+The log is the truth; the browser keeps `nodes`, `link` and `views` as an
+indexed cache of its fold, updated in the same transaction as each batch
+(revised 2026-10-21). Sync pushes and pulls events
 only. Each event carries a hybrid logical clock stamp (`hlc`); conflicts
 resolve per field by that stamp, and `seq` is only the sync cursor. The
 server keeps its tables as projections for MCP, search and shares. The log
-is strictly append-only: nothing is ever purged. The sections below describe
+is append-only by convention. The sections below describe
 the app until then, with each change marked.
 
 ## Why
@@ -120,7 +121,7 @@ in `writeRows`:
 ### The client speaks events
 
 **Decided 2026-10-20.** The pull of rows goes: the events pull below becomes
-the only pull, and the device's log becomes the only thing the device keeps
+the only pull, and the device's tables become a cache of the fold of its log
 ([event-only-sync.md](./event-only-sync.md), "Write, push, pull").
 
 The browser is the one writer that knows what it did, so it says so. In the
@@ -327,11 +328,11 @@ and the page says so (`earliest`).
 
 ## Append-only, structurally
 
-**Decided 2026-10-20: strictly append-only.** The `event_purges` door closes:
-the triggers refuse every `DELETE`, for every tenant. A delete and a restore
-are events, and nothing is ever purged. An account can then not be erased
-from the log; erasure, if it is needed, is a new design
-([event-only-sync.md](./event-only-sync.md), "Strictly append-only").
+**Revised 2026-10-21: append-only by convention.** The app only appends: a
+delete and a restore are events. No new trigger is added, and the triggers
+below stay as they are, `event_purges` with them, unused by the app. A fix
+by hand in the D1 console stays possible
+([event-only-sync.md](./event-only-sync.md), "Append-only by convention").
 
 Triggers refuse `UPDATE` on `events`, and refuse `DELETE` unless the tenant is
 named in `event_purges` — the one door, for erasing an account.
@@ -346,8 +347,8 @@ first write after this Worker returns reconciles it. Nothing needs undoing.
 
 **Decided 2026-10-20** for four of the items below
 ([event-only-sync.md](./event-only-sync.md)): **two pulls** become one, the
-events pull; **per-block erasure** is not done, because nothing is purged;
-**compaction** is not done, and snapshots bound the cost of a fold instead;
+events pull; **per-block erasure** is not done;
+**compaction** is not done, and the cache means a read never folds the log;
 and the hybrid logical clock stamp answers what **`base_seq`** was kept for,
 so an offline device's old edit does not win over a newer one.
 

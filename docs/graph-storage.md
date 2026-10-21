@@ -9,9 +9,10 @@ app runs on it.
 
 ## The architecture: database-authoritative, blocks-first
 
-**Decided 2026-10-20: event-only sync.** Once it lands, the browser keeps
-only the event log and two snapshots; it has no `nodes`, `link` or `views`
-tables, and it pushes and pulls events only. A conflict resolves by a hybrid
+**Decided 2026-10-20: event-only sync.** Once it lands, the browser pushes
+and pulls events only. The log is the truth, and the browser's `nodes`,
+`link` and `views` become an indexed cache of its fold, updated in the same
+transaction as each batch and read lazily by index (revised 2026-10-21). A conflict resolves by a hybrid
 logical clock stamp, and `seq` is only the sync cursor. The server keeps
 its tables as projections for MCP, search and shares. This section
 describes the app until then. See [event-only-sync.md](./event-only-sync.md).
@@ -90,9 +91,10 @@ atom signed out.
 
 ### Boot, saves, and sync
 
-**Decided 2026-10-20.** With event-only sync, boot reads the newest
-snapshot and the log after it; a save appends events; the pull and the push
-carry events only, and there is no row pull, row push or full push
+**Decided 2026-10-20.** With event-only sync, boot opens the store and
+reads the cache by index; a save appends events and updates the cache in
+one transaction; the pull and the push carry events only, and there is no
+row pull, row push or full push (revised 2026-10-21)
 ([event-only-sync.md](./event-only-sync.md)). The text below is the app
 until then.
 
