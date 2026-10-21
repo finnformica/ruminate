@@ -229,6 +229,17 @@ describe("viewChangeToEvent", () => {
     expect(viewChangeToEvent(view, { ...view }, ctx)).toBeNull()
   })
 
+  it("carries the stack: a create names it, and a change to it is an update of it alone", () => {
+    const ctx = context()
+    expect(viewChangeToEvent(undefined, view, ctx)?.patch).toMatchObject({ stack: null })
+    const stacked = { ...view, stack: "corpus_root:tasks" }
+    expect(viewChangeToEvent(view, stacked, ctx)?.patch).toEqual({ stack: "corpus_root:tasks" })
+    expect(viewChangeToEvent(stacked, view, ctx)?.patch).toEqual({ stack: null })
+    expect(viewChangeToEvent(stacked, { ...stacked, pinned: true }, ctx)?.patch).toEqual({
+      pinned: true,
+    })
+  })
+
   it("stamps the event with the row's own clock, so the projection lands the row as it was", () => {
     const ctx = context("tab", 99_999)
     const later = { ...view, pinned: true, updated_at: 42 }
@@ -384,6 +395,21 @@ describe("parseEvent", () => {
     }
     expect(parseEvent(link)).not.toBeNull()
     expect(parseEvent({ ...link, entity_id: linkEntityId("a", "c") })).toBeNull()
+  })
+
+  it("lets a view's create leave out the stack, which came later, and checks it when named", () => {
+    const create = {
+      ...good,
+      entity: "view",
+      action: "create",
+      patch: { root_id: "n", filter: null, sort: null, pinned: true, sort_key: null },
+    }
+    expect(parseEvent(create)).not.toBeNull()
+    expect(parseEvent({ ...create, patch: { ...create.patch, stack: "a.b" } })).not.toBeNull()
+    expect(parseEvent({ ...create, patch: { ...create.patch, stack: 5 } })).toBeNull()
+    const { pinned: _, ...unpinned } = create.patch
+    expect(parseEvent({ ...create, patch: unpinned })).toBeNull()
+    expect(parseEvent({ ...good, entity: "view", patch: { stack: null } })).not.toBeNull()
   })
 
   it("refuses an envelope it cannot store: a wrong version, a zone no clock has, a restore with no reference", () => {

@@ -56,11 +56,11 @@ reads it yet: `stateAt`, a history and the calendar use the fold by `seq`.
 The replica's projection resolves the same way (0025, `planEventAppend`).
 Each row keeps the stamp of each of its registers in a `stamps` column:
 
-| entity | registers                                                  |
-| ------ | ---------------------------------------------------------- |
-| block  | `type`, `text`, `props`, `notes_id`, `alive`               |
-| link   | `sort_key`, `alive` (the key never changes)                |
-| view   | `root_id`, `filter`, `sort`, `pinned`, `sort_key`, `alive` |
+| entity | registers                                                           |
+| ------ | ------------------------------------------------------------------- |
+| block  | `type`, `text`, `props`, `notes_id`, `alive`                        |
+| link   | `sort_key`, `alive` (the key never changes)                         |
+| view   | `root_id`, `filter`, `sort`, `pinned`, `sort_key`, `stack`, `alive` |
 
 - An append sets a register only when its stamp is higher than the one the
   row holds. A run of events rolls up to the highest-stamp value of each
@@ -76,6 +76,11 @@ Each row keeps the stamp of each of its registers in a `stamps` column:
   resolves by the stamp its last event derives (`updated_at`, `seq`), and the
   first append that touches it writes them all, with `legacy`: the `seq` the
   old rule projected it up to. The tables are never rewritten for this.
+- **A field added later** (`stack`, 0027) has no stamp on a row whose
+  `stamps` were written before it, and on a row whose create did not name
+  it. Such a register holds the empty stamp, so any event that names it
+  wins. `heldStamp` (SQL) and `heldStampOf` (TypeScript) spell this rule;
+  `projectLog` and `foldByStamp` apply it as `""`.
 - `verify` folds each row's log up to `legacy` by `seq`, as it was projected,
   and by stamp after (`projectLog`, `worker/handlers/event-log.ts`). It
   compares every field and every stamp. The SQL spells `eventStamp`'s
@@ -89,6 +94,13 @@ Each row keeps the stamp of each of its registers in a `stamps` column:
 | **block** | type, text, props, notes_id             | any of those         | tombstone | fields to set back + `ref_seq`; live again |
 | **link**  | source, destination, kind, sort_key     | sort_key (= reorder) | unlink    | sort_key + live again                      |
 | **view**  | root_id, filter, sort, pinned, sort_key | any of those         | tombstone | fields + live again                        |
+
+A view's `stack` (migrations/0027; docs/graph-walk.md, "Views save stacks")
+is a field like the others, with one difference: a `create` may leave it out,
+because every client before it writes creates without it. An `update` that
+does not name it leaves it as it is, so an older client that edits another
+field of the row keeps the stack. A row pushed without `stack` says nothing
+about it (`rowsToEvents`); a row that says `null` clears it.
 
 **Patches are absolute values, never relative diffs** — "text is now X", not
 "insert X at 4". An event means the same thing wherever it is replayed, and a

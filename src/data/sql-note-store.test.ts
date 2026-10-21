@@ -884,7 +884,11 @@ describe("the device's log", () => {
     await store.applyEvents([viewChangeToEvent(view, stacked, ctx(20))!])
     expect(await store.getViews()).toEqual([stacked])
     // An older client's update names only the field it changed.
-    const older = viewChangeToEvent(view, { ...view, filter: "type:todo", updated_at: 30 }, ctx(30))!
+    const older = viewChangeToEvent(
+      view,
+      { ...view, filter: "type:todo", updated_at: 30 },
+      ctx(30),
+    )!
     expect(older.patch).toEqual({ filter: "type:todo" })
     await store.applyEvents([older])
     expect(await store.getViews()).toEqual([{ ...stacked, filter: "type:todo", updated_at: 30 }])

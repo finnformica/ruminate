@@ -70,6 +70,18 @@ describe("patchedView", () => {
     expect(kept.pinned).toBe(false)
   })
 
+  it("keeps the stack through another patch, keeps a row that saves only a stack, and clears it", () => {
+    const stacked = view({ stack: "corpus_root:tasks" })
+    expect(patchedView(stacked, "blk_a", { filter: "type:todo" }, 500)).toMatchObject({
+      filter: "type:todo",
+      stack: "corpus_root:tasks",
+    })
+    expect(patchedView(stacked, "blk_a", { pinned: false }, 500).deleted_at).toBeUndefined()
+    const cleared = patchedView(stacked, "blk_a", { stack: "" }, 500)
+    expect(cleared).not.toHaveProperty("stack")
+    expect(cleared.deleted_at).toBeUndefined()
+  })
+
   it("always moves updated_at past the current row's — LWW reads >=, and a stuck clock must not draw", () => {
     expect(patchedView(view({ updated_at: 900 }), "blk_a", { sort: "text" }, 500).updated_at).toBe(
       901,

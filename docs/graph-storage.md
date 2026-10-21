@@ -294,14 +294,16 @@ unrepresentable by the primary key. `kind` reserves the slot for other edge
 kinds. (Wikilinks and tags were removed as features; `[[...]]` and `#word` in
 text are plain text.)
 
-### `views` (id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at)
+### `views` (id, root_id, filter, sort, pinned, sort_key, stack, updated_at, deleted_at)
 
 The entrypoints into the graph (docs/metadata.md, "Views"; `migrations/0015`):
 a node to start at, what of its subgraph to keep, how to lay it out, whether
 it is in the Views list (`pinned` — the list IS the rows that say so, for a
 note, a board and a block alike; every note and board is created with one,
 `migrations/0021` gave the existing ones theirs) and where it sits in it
-(`sort_key`). Not part of the graph and not derivable from it — a
+(`sort_key`). `stack` (`migrations/0027`) holds the frames a View saves
+below its top frame (docs/graph-walk.md, "Views save stacks"); NULL is a
+one-frame View. Not part of the graph and not derivable from it — a
 view may name a node another tenant owns (a share), which no prop on that
 node could record — so a table of its own, replicated exactly as the other
 two are: per-row last-writer-wins on `updated_at`, a delete as a row carrying
