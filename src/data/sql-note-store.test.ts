@@ -10,9 +10,17 @@ import { rollup } from "./graph"
 import type { NoteStore } from "./note-store"
 import { deleteBlockOps, deleteNoteOps, docToOps, type Op } from "./ops"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
-import { openSqlNoteStore } from "./sql-note-store"
+import { CACHE_STAMPS_KEY, openSqlNoteStore } from "./sql-note-store"
 import { applyOpsToStore, testEventContext } from "./store-test-support"
 import type { ViewRow } from "./views"
+
+/** Undo the v13 step on a current store, to build an older one by hand. */
+/** What step v14 adds, taken away: a store as it was at v13. */
+const UNDO_V14 = "ALTER TABLE views DROP COLUMN stack;"
+const UNDO_V13 =
+  "DROP INDEX events_entity; ALTER TABLE nodes DROP COLUMN stamps; " +
+  "ALTER TABLE link DROP COLUMN stamps; ALTER TABLE views DROP COLUMN stamps; " +
+  "DELETE FROM meta WHERE key = 'cache_stamps';"
 
 async function makeStoreWithDriver() {
   const driver = createNodeSqlDriver()
@@ -204,7 +212,7 @@ describe("openSqlNoteStore", () => {
     const store = await openSqlNoteStore(driver)
     expect((await store.getGraph()).nodes.size).toBe(0)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "13" },
+      { value: "14" },
     ])
     expect(
       await driver.exec("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"),
@@ -215,7 +223,6 @@ describe("openSqlNoteStore", () => {
       { name: "link" },
       { name: "meta" },
       { name: "nodes" },
-      { name: "snapshots" },
       { name: "views" },
     ])
   })
@@ -236,7 +243,7 @@ describe("openSqlNoteStore", () => {
     // columns, it never rewrites rows.
     expect(await noteOf(store, "a")).toBe("\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "13" },
+      { value: "14" },
     ])
     // The row is live: a nullable column means NULL = never deleted.
     expect(await driver.exec("SELECT deleted_at FROM nodes WHERE id = ?", ["a"])).toEqual([
@@ -262,7 +269,7 @@ describe("openSqlNoteStore", () => {
     const store = await openSqlNoteStore(driver)
     expect(await noteOf(store, "a")).toBe("\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "13" },
+      { value: "14" },
     ])
     // No note id until a pull brings the replica's backfill down.
     expect(await driver.exec("SELECT notes_id FROM nodes WHERE id = ?", ["a"])).toEqual([
@@ -289,7 +296,9 @@ describe("openSqlNoteStore", () => {
     // device that opened the app between the two deploys of 2026-10-10 holds.
     await openSqlNoteStore(driver)
     await driver.execScript(
-      "ALTER TABLE views DROP COLUMN stack; DROP TABLE snapshots; DROP TABLE events;" +
+      UNDO_V14 +
+        UNDO_V13 +
+        "DROP TABLE events;" +
         "CREATE TABLE events (id TEXT PRIMARY KEY, seq INTEGER, entity TEXT NOT NULL, " +
         "entity_id TEXT NOT NULL, action TEXT NOT NULL, patch TEXT NOT NULL, v INTEGER NOT NULL, " +
         "batch TEXT NOT NULL, device TEXT NOT NULL, cause TEXT, base_seq INTEGER, ref_seq INTEGER, " +
@@ -319,7 +328,7 @@ describe("openSqlNoteStore", () => {
 
     const store = await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "13" },
+      { value: "14" },
     ])
     // The unpushed event is still queued, and a pulled event can now be placed.
     expect(await driver.exec("SELECT id, seq, origin FROM events")).toEqual([
@@ -353,7 +362,9 @@ describe("openSqlNoteStore", () => {
     const driver = createNodeSqlDriver()
     await openSqlNoteStore(driver)
     await driver.execScript(
-      "ALTER TABLE views DROP COLUMN stack; DROP TABLE snapshots; DROP INDEX events_position; ALTER TABLE events DROP COLUMN hlc;" +
+      UNDO_V14 +
+        UNDO_V13 +
+        "DROP INDEX events_position; ALTER TABLE events DROP COLUMN hlc;" +
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '10');" +
         "INSERT INTO events (id, seq, entity, entity_id, action, patch, v, batch, device, " +
         "at, position) VALUES ('evt_1', NULL, 'block', 'blk_aaaaaaaaaa', 'update', " +
@@ -361,7 +372,7 @@ describe("openSqlNoteStore", () => {
     )
     const store = await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "13" },
+      { value: "14" },
     ])
     // An event made before stamps is never given one in place.
     expect(await driver.exec("SELECT id, hlc FROM events")).toEqual([{ id: "evt_1", hlc: null }])
@@ -370,11 +381,13 @@ describe("openSqlNoteStore", () => {
     expect("hlc" in queued).toBe(false)
   })
 
-  it("adds the snapshots table to a v11 store, keeping its log", async () => {
+  it("climbs a v11 store to the cache, keeping its log", async () => {
     const driver = createNodeSqlDriver()
     await openSqlNoteStore(driver)
     await driver.execScript(
-      "ALTER TABLE views DROP COLUMN stack; DROP TABLE snapshots; DROP INDEX events_position;" +
+      UNDO_V14 +
+        UNDO_V13 +
+        "DROP INDEX events_position;" +
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '11');" +
         "INSERT INTO events (id, seq, entity, entity_id, action, patch, v, batch, device, " +
         "at, position) VALUES ('evt_1', NULL, 'block', 'blk_aaaaaaaaaa', 'create', " +
@@ -383,14 +396,38 @@ describe("openSqlNoteStore", () => {
     )
     const store = await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "13" },
+      { value: "14" },
     ])
     expect((await store.unpushedEvents()).map((event) => event.id)).toEqual(["evt_1"])
-    // The first open with a log and no snapshot writes one.
-    expect(await driver.exec("SELECT position FROM snapshots")).toEqual([{ position: 1 }])
+    // v12 made snapshots and v13 took them away: the cache replaces them.
+    expect(
+      await driver.exec(
+        "SELECT name FROM sqlite_master WHERE name IN ('snapshots', 'events_entity')",
+      ),
+    ).toEqual([{ name: "events_entity" }])
   })
 
-  it("adds the stack column to a v12 store, keeping its views", async () => {
+  it("turns a v12 store's rows into the cache: stamps filled once, snapshots gone", async () => {
+    const { driver, store } = await makeStoreWithDriver()
+    await seed(store, "a", "- kept\n  id:: blk_aaaaaaaaaa\n")
+    // Back to v12: no stamps, a snapshot table with a snapshot in it.
+    await driver.execScript(
+      UNDO_V14 +
+        UNDO_V13 +
+        "CREATE TABLE snapshots (id INTEGER PRIMARY KEY, position INTEGER NOT NULL, " +
+        "taken_at INTEGER NOT NULL, state TEXT NOT NULL);" +
+        "INSERT INTO snapshots (position, taken_at, state) VALUES (1, 1, '{}');" +
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '12');",
+    )
+    const reopened = await openSqlNoteStore(driver)
+    expect(await noteOf(reopened, "a")).toBe("- kept\n  id:: blk_aaaaaaaaaa\n")
+    expect(await driver.exec("SELECT name FROM sqlite_master WHERE name = 'snapshots'")).toEqual([])
+    const stamps = await driver.exec("SELECT stamps FROM nodes WHERE stamps IS NULL")
+    expect(stamps).toEqual([])
+    expect(await reopened.getMeta(CACHE_STAMPS_KEY)).not.toBeNull()
+  })
+
+  it("adds the stack column to a v13 store, keeping its views", async () => {
     const driver = createNodeSqlDriver()
     const store = await openSqlNoteStore(driver)
     const view: ViewRow = {
@@ -405,12 +442,11 @@ describe("openSqlNoteStore", () => {
     const event = viewChangeToEvent(undefined, view, testEventContext({ at: 10, device: "d" }))
     await store.applyEvents([event!])
     await driver.execScript(
-      "ALTER TABLE views DROP COLUMN stack;" +
-        "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '12');",
+      UNDO_V14 + "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '13');",
     )
     const reopened = await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "13" },
+      { value: "14" },
     ])
     // A row from before the column is a one-frame View: it holds no stack.
     expect(await reopened.getViews()).toEqual([view])
@@ -425,7 +461,7 @@ describe("openSqlNoteStore", () => {
     const reopened = await openSqlNoteStore(driver)
     expect((await reopened.getGraph()).nodes.size).toBe(0)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "13" },
+      { value: "14" },
     ])
   })
 
@@ -454,7 +490,7 @@ describe("openSqlNoteStore", () => {
     )
   })
 
-  it("clear wipes every row, the log and its snapshots, and keeps meta", async () => {
+  it("clear wipes every row and the log, and keeps meta", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "old", "- gone\n  id:: blk_aaaaaaaaaa\n")
     await store.setMeta("d1_pull_cursor", "123")
@@ -462,7 +498,6 @@ describe("openSqlNoteStore", () => {
     expect(await driver.exec("SELECT COUNT(*) AS n FROM nodes")).toEqual([{ n: 0 }])
     expect(await driver.exec("SELECT COUNT(*) AS n FROM link")).toEqual([{ n: 0 }])
     expect(await driver.exec("SELECT COUNT(*) AS n FROM events")).toEqual([{ n: 0 }])
-    expect(await driver.exec("SELECT COUNT(*) AS n FROM snapshots")).toEqual([{ n: 0 }])
     expect(await store.getMeta("d1_pull_cursor")).toBe("123")
   })
 
@@ -471,7 +506,9 @@ describe("openSqlNoteStore", () => {
     await seed(store, "a", "- kept\n  id:: blk_aaaaaaaaaa\n")
     // Back to v8: no log, no seq. The ladder must add both without a reset.
     await driver.execScript(
-      "ALTER TABLE views DROP COLUMN stack; DROP TABLE snapshots; DROP TABLE events;" +
+      UNDO_V14 +
+        UNDO_V13 +
+        "DROP TABLE events;" +
         "ALTER TABLE nodes DROP COLUMN seq; ALTER TABLE link DROP COLUMN seq;" +
         "ALTER TABLE views DROP COLUMN seq;" +
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '8');",
@@ -479,7 +516,7 @@ describe("openSqlNoteStore", () => {
     const reopened = await openSqlNoteStore(driver)
     expect(await noteOf(reopened, "a")).toBe("- kept\n  id:: blk_aaaaaaaaaa\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "13" },
+      { value: "14" },
     ])
     expect(await driver.exec("SELECT seq FROM nodes WHERE id = 'a'")).toEqual([{ seq: null }])
     expect(await reopened.unpushedEvents()).toEqual([])
@@ -815,8 +852,8 @@ describe("the device's log", () => {
     await store.applyPulledEvents(pulled)
     // Nothing left to push: the pull placed them.
     expect(await store.unpushedEvents()).toEqual([])
-    // The rows are untouched by the log: `b` arrives by the pull of rows.
-    expect(await driver.exec("SELECT COUNT(*) AS n FROM nodes WHERE id = 'b'")).toEqual([{ n: 0 }])
+    // The cache takes the pulled events in the same write: `b` is a row now.
+    expect(await driver.exec("SELECT COUNT(*) AS n FROM nodes WHERE id = 'b'")).toEqual([{ n: 1 }])
 
     // A new edit, not yet pushed, reads after everything placed.
     const typed = await applyOpsToStore(

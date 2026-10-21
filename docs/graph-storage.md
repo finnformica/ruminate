@@ -9,6 +9,14 @@ app runs on it.
 
 ## The architecture: database-authoritative, blocks-first
 
+**Decided 2026-10-20: event-only sync.** Once it lands, the browser pushes
+and pulls events only. The log is the truth, and the browser's `nodes`,
+`link` and `views` become an indexed cache of its fold, updated in the same
+transaction as each batch and read lazily by index (revised 2026-10-21). A conflict resolves by a hybrid
+logical clock stamp, and `seq` is only the sync cursor. The server keeps
+its tables as projections for MCP, search and shares. This section
+describes the app until then. See [event-only-sync.md](./event-only-sync.md).
+
 **Database storage is THE app.** After GitHub sign-in — which is identity for
 the Worker API and, since the multi-tenant cutover, names the tenant — data
 loads from the user's server corpus (the authoritative cross-device copy), the
@@ -60,8 +68,9 @@ Everything above `src/data` reads one atom: `graphSnapshotAtom`, the
 `GraphSnapshot` of every live row (`nodes` by id, `childLinks` by parent, and
 the same link rows again as `parentLinks` by child — the reverse index, a
 by-product of building the snapshot rather than a scan of it).
-`src/data/database-mode.ts` serves the fold of the device's event log into
-`databaseGraphAtom` (docs/event-sourcing.md, The app reads the fold), and
+`src/data/database-mode.ts` serves the store's cache of the fold of its
+event log into `databaseGraphAtom` (docs/event-sourcing.md, "The client's
+tables are a cache of the fold"), and
 `graphSnapshotAtom` reads it whenever a user is
 signed in. `notesAtom` is derived from it per page (`src/data/note-meta.ts`:
 title, props, tasks, headings, memoized
@@ -84,11 +93,19 @@ atom signed out.
 
 ### Boot, saves, and sync
 
+**Decided 2026-10-20.** With event-only sync, boot opens the store and
+reads the cache by index; a save appends events and updates the cache in
+one transaction; the pull and the push carry events only, and there is no
+row pull, row push or full push (revised 2026-10-21)
+([event-only-sync.md](./event-only-sync.md)). The text below is the app
+until then.
+
 - **Boot:** open the SQL store (OPFS; per-tab fallback to memory) → serve
-  the fold of the local log (`loadFold`) into the atoms immediately → pull
-  rows from D1 (full corpus on first boot; `?since=<cursor>` after) into the
-  store, then the events past the events cursor into the store and the fold,
-  and from it into the atoms. The
+  the cache's live rows into the atoms immediately, with nothing to fold →
+  pull rows from D1 (full corpus on first boot; `?since=<cursor>` after), kept
+  only for the fold check → pull the events past the events cursor into the
+  log and the cache, in one transaction per page, and from it into the
+  atoms. The
   pull cursor persists in the store's `meta` table (`d1_pull_cursor`), so it
   can never outlive the data it describes. Two bindings are checked before any
   local row is read: the store's `store_owner` (a different signed-in identity
@@ -108,7 +125,7 @@ atom signed out.
   per-row last-writer-wins at the replica makes concurrent tab pushes safe.
 - **Cross-device sync:** visibility change, window focus, and coming back
   online (plus a retry timer after a failed pull) re-run the since-cursor
-  pull. Pulled events flow through the fold into the graph atom (pending
+  pull. Pulled events flow through the cache into the graph atom (pending
   local ops re-applied on top); the open editor re-walks its page from the
   new snapshot, so another device's edit shows the moment it lands.
 - **Offline:** the OPFS store serves everything. While the browser says it
@@ -127,6 +144,11 @@ atom signed out.
   Web Lock the owning tab holds.
 
 ### Conflict semantics: per-row last-writer-wins
+
+**Decided 2026-10-20.** Per-row last-writer-wins on `updated_at` gives way
+to per-field last-writer-wins on each event's hybrid logical clock stamp,
+on the browser and in the server's projection alike
+([event-only-sync.md](./event-only-sync.md), "The fold").
 
 Sync is per-row LWW on `updated_at` in the browser. The replica resolves each
 field of a row by the stamp of the event that set it (docs/event-sourcing.md,
@@ -296,6 +318,15 @@ text are plain text.)
 
 ### `views` (id, root_id, filter, sort, pinned, sort_key, stack, updated_at, deleted_at)
 
+**Decided 2026-10-20: a View saves a stack.** `root_id` is the root of the
+**top** frame, the one on screen when the View opens, so a View is still
+one per root and minted under that root's id. A new `stack` field holds the
+frames below it, each with its root, filter and pivots, and the top frame's
+own pivots and sections-only. The view event gains the same field. Opening
+a View restores the whole stack; a path that no longer holds drops the
+frames below the break and keeps the top. See
+[graph-walk.md](./graph-walk.md), "Views save stacks".
+
 The entrypoints into the graph (docs/metadata.md, "Views"; `migrations/0015`):
 a node to start at, what of its subgraph to keep, how to lay it out, whether
 it is in the Views list (`pinned` — the list IS the rows that say so, for a
@@ -380,6 +411,12 @@ are transformed next time. Tombstoned rows are skipped — a deleted row has
 nothing to normalize.
 
 ### No view_state table
+
+**Decided 2026-10-20.** Folds move off localStorage. They are frame state,
+held in the URL as differences from the depth rule and keyed by the row's
+path of block ids; a pushed frame starts with none and a pop restores them
+([graph-walk.md](./graph-walk.md), "Folds"). The text below is the app until
+then.
 
 Collapse state is per-device ephemera. The default-expansion policy is a
 standing rule by depth (`expandedByDepth`, `src/blocks/default-collapsed.ts`):
@@ -505,6 +542,11 @@ retired along with the D1 corpus seeding path.)
 
 ## Worker replica API (`/api/replica/*`)
 
+**Decided 2026-10-20.** The browser's row endpoints (`PUT` and
+`GET /api/replica/notes`) retire with event-only sync; the row door
+(`writeRows`) stays for MCP and shares
+([event-only-sync.md](./event-only-sync.md), "The server").
+
 `worker/handlers/replica.ts`, routed like every other API route via
 `run_worker_first` in wrangler.jsonc. The handler is auth + dispatch: it
 verifies the session, resolves the verified id against the control plane
@@ -585,6 +627,10 @@ session)` is the only mint on the request path, and it takes the
   bans `env.DB` outside that module.
 
 ## Replication to D1 (`src/data/replica-sync.ts`)
+
+**Decided 2026-10-20.** With event-only sync the push is the device's
+unpushed events only. Row diffs, full pushes and the "Push full copy"
+action go ([event-only-sync.md](./event-only-sync.md)).
 
 The push half. **Write-behind, always:** the local write happens first and
 never waits on the network; the push is queued afterwards and a push failure

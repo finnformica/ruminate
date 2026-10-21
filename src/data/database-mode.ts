@@ -1,32 +1,30 @@
 import { atom, getDefaultStore } from "jotai"
 import {
   LEGACY_TIMESTAMP_CURSOR_FLOOR,
+  type LinkRow,
+  type NodeRow,
   type ReplicaChangesBody,
   type ViewRow,
 } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import { SessionExpiredError } from "../utils/github-token"
-import {
-  createD1NoteSource,
-  expandPendingNodeIds,
-  planPullApplication,
-  type D1NoteSource,
-} from "./d1-note-source"
+import { createD1NoteSource, type D1NoteSource } from "./d1-note-source"
 import {
   coalesceTyping,
   eventStamp,
-  foldByStamp,
+  linkEntityId,
   opsToEvents,
+  readOutEntities,
   toGraphSnapshot,
   toViewRows,
   viewChangeToEvent,
   type Entity,
+  type EntityKeys,
   type EventContext,
   type LoggedEvent,
   type RuminateEvent,
-  type StampedState,
 } from "./events"
-import { FOLD_CHECK_SAMPLE, foldDifferences } from "./fold-check"
+import { FOLD_CHECK_SAMPLE, foldCheckKey, foldDifferences, rowsOfGraph } from "./fold-check"
 import { buildGraphSnapshot, isNoteType, type GraphSnapshot } from "./graph"
 import { decodeHlc, encodeHlc, receiveHlc, tickHlc, type Hlc } from "./hlc"
 import { applyOps, notesTouchedBy, type Op } from "./ops"
@@ -77,16 +75,17 @@ import {
  *          browser says it is offline neither pulls nor pushes are attempted
  *          — they wait for the `online` event, and nothing is an error
  *
- * **How the UI is fed.** This module publishes the fold of the device's log
- * (`foldByStamp`, docs/event-only-sync.md) as `databaseGraphAtom`, served as
- * `graphSnapshotAtom` whenever a user is signed in (see global-state.ts). The
- * fold loads at boot from the newest snapshot and the log after it
- * (`NoteStore.loadFold`), and is held here: each batch of this device's
- * events and each page of pulled events applies to it. Everything above
- * reads that graph: the note page walks its doc out of it, and note metadata
- * and search are derived from it (`src/data/note-meta.ts`). The rows are
- * still written and pulled; after a batch the fold check compares them with
- * the fold (`fold-check.ts`) for Settings → Storage.
+ * **How the UI is fed.** The store's tables are a cache of the fold of the
+ * device's log (docs/event-only-sync.md, "The cache"): each batch of this
+ * device's events and each page of pulled events updates them in the same
+ * transaction as its append. This module publishes the cache's live graph
+ * as `databaseGraphAtom`, served as `graphSnapshotAtom` whenever a user is
+ * signed in (see global-state.ts). Boot reads it; there is no load step.
+ * Everything above reads that graph: the note page walks its doc out of it,
+ * and note metadata and search are derived from it (`src/data/note-meta.ts`).
+ * Rows are still pulled, but they no longer write the cache: the fold check
+ * compares them with it, and compares each touched cache row with the fold
+ * of its entity's events (`fold-check.ts`), for Settings → Storage.
  *
  * **Conflicts are last-writer-wins per row**, decided by push order at the
  * replica. Pulls never touch rows of notes with queued/in-flight local pushes
@@ -217,7 +216,8 @@ const PULL_RETRY_MS = 60_000
 const OPS_FLUSH_MS = 150
 /** Minimum gap between automatic repair rebuilds after a SQL write failure. */
 const REPAIR_COOLDOWN_MS = 30_000
-/** At most one fold check in this gap: the check reads every row. */
+/** At most one fold check of a batch in this gap: the touched keys gather
+ * meanwhile, so a typing run is one check. */
 const FOLD_CHECK_MS = 10_000
 
 /** The graph with nothing in it — what the atom holds before the store opens
@@ -317,13 +317,19 @@ interface DatabaseModeRuntime {
   /** The highest stamp this device has made or pulled: the next event's is
    * after it (`tickHlc`). Held here, saved under `HLC_KEY`. */
   lastStamp: Hlc | null
-  /** The fold of the store's log: what the graph and views atoms read out.
-   * Null until the store has opened. */
-  fold: StampedState | null
   /** The last events pull stopped at its page bound: the log is behind the
    * replica's, and the next pages are queued. The fold check waits. */
   logBehind: boolean
   foldCheckTimer: ReturnType<typeof setTimeout> | null
+  /** The entities batches and pulls touched since the last fold check. */
+  foldCheckKeys: { blocks: Set<string>; links: Set<string>; views: Set<string> }
+  /** The replica's rows the pulls brought since the last fold check, by key
+   * (`foldCheckKey`): the check compares each with its cache row. */
+  replicaRows: { nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }
+  /** Every difference the checks have found and not yet seen resolved, by
+   * key (`foldCheckKey`). A check of a batch replaces only the keys it
+   * read; a full check replaces all. */
+  foldDifferences: Map<string, string>
 }
 
 let runtime: DatabaseModeRuntime | null = null
@@ -427,9 +433,11 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     opsFlushTimer: null,
     pendingViews: [],
     lastStamp: null,
-    fold: null,
     logBehind: false,
     foldCheckTimer: null,
+    foldCheckKeys: noKeys(),
+    foldDifferences: new Map(),
+    replicaRows: noRows(),
   }
   runtime = activation
   // The sample corpus's views are the signed-out screen's; signed in, the
@@ -491,15 +499,11 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
       const saved = decodeHlc((await opened.store.getMeta(HLC_KEY)) ?? "")
       if (saved !== null) activation.lastStamp = receiveHlc(activation.lastStamp, saved)
 
-      // The app reads the fold of the log: the newest snapshot, then the
-      // events after it.
-      const fold = await opened.store.loadFold()
+      // The cache is the state: boot reads it, with nothing to fold.
+      await refreshGraph(activation)
       if (runtime !== activation) return
-      activation.fold = fold
-      refreshGraph(activation)
       patchStatus({ status: "ready" })
       patchDiagnostics({ status: "ready", notes: noteCount(jotai().get(databaseGraphAtom)) })
-      scheduleFoldCheck(activation)
 
       // Start the push loop before the first pull, so the pull can consult
       // `pendingNoteIds` (edits made while the pull is in flight are safe).
@@ -782,9 +786,7 @@ async function flushOps(activation: DatabaseModeRuntime) {
   activation.pendingOps = []
   activation.pendingEvents = []
   activation.pendingNoteIds = new Set()
-  // The fold takes the batch first: it is what the screen shows already. A
-  // store write that fails is repaired from the atom.
-  if (activation.fold) foldByStamp(events, activation.fold)
+  touchEvents(activation, events)
   try {
     if (events.length > 0) {
       await activation.store.applyEvents(events, {
@@ -808,71 +810,179 @@ async function flushOps(activation: DatabaseModeRuntime) {
   }
 }
 
-/** Read the graph and views atoms out of the fold (at boot, after a pull),
- * with any ops that arrived meanwhile re-applied on top — they are applied
- * on screen already and will land in the fold on their own flush. */
-function refreshGraph(activation: DatabaseModeRuntime) {
-  if (runtime !== activation || !activation.fold) return
-  const graph = toGraphSnapshot(activation.fold)
-  const views = viewMapOf(toViewRows(activation.fold))
+/** Re-read the graph and views atoms from the cache (at boot, after a pull or
+ * a repair), with any ops that arrived meanwhile re-applied on top — they are
+ * applied on screen already and will land in the cache on their own flush. */
+async function refreshGraph(activation: DatabaseModeRuntime) {
+  if (runtime !== activation || !activation.store) return
+  const graph = await activation.store.getGraph()
+  const views = await activation.store.getViews()
+  if (runtime !== activation) return
   jotai().set(databaseGraphAtom, applyOps(graph, activation.pendingOps, Date.now()))
-  jotai().set(viewsAtom, applyViewRows(views, activation.pendingViews))
+  jotai().set(viewsAtom, applyViewRows(viewMapOf(views), activation.pendingViews))
 }
 
-/** Queue a fold check, at most one per `FOLD_CHECK_MS`. Called after each
- * batch: an edit, a pull, the boot. */
+const noRows = () => ({ nodes: [] as NodeRow[], links: [] as LinkRow[], views: [] as ViewRow[] })
+
+const noKeys = () => ({
+  blocks: new Set<string>(),
+  links: new Set<string>(),
+  views: new Set<string>(),
+})
+
+/** Note the entities a batch of events names, for the next fold check. */
+function touchEvents(activation: DatabaseModeRuntime, events: readonly RuminateEvent[]) {
+  const keys = activation.foldCheckKeys
+  for (const event of events) {
+    const table =
+      event.entity === "block" ? keys.blocks : event.entity === "link" ? keys.links : keys.views
+    table.add(event.entity_id)
+  }
+}
+
+/** Keep the rows a pull brought, for the next fold check to compare. */
+function holdReplicaRows(activation: DatabaseModeRuntime, body: ReplicaChangesBody) {
+  const held = activation.replicaRows
+  held.nodes.push(...body.nodes)
+  held.links.push(...body.links)
+  held.views.push(...body.views)
+}
+
+/** Queue a fold check of what batches touched, at most one per
+ * `FOLD_CHECK_MS`. Called after each batch: an edit, a pull. */
 function scheduleFoldCheck(activation: DatabaseModeRuntime) {
   if (activation.foldCheckTimer !== null) return
   activation.foldCheckTimer = setTimeout(() => {
     activation.foldCheckTimer = null
-    if (runtime === activation) enqueue(() => checkFold(activation))
+    if (runtime === activation) enqueue(() => checkFold(activation, false))
   }, activation.options.foldCheckMs ?? FOLD_CHECK_MS)
 }
 
 /**
- * Compare the fold with the tables, as the app reads each (`fold-check.ts`),
- * and record the result for Settings → Storage. Runs on the queue, so no
- * write lands between the two reads. An entity the fold holds past the row
- * cursor is left out: the events pull runs after the row pull, so another
- * device's write can reach the fold first, and its row comes with the next
- * pull. While the events pull is behind, there is no check.
+ * Settings action: compare the whole fold with the whole tables now, and
+ * resolve once it has run. The checks after a batch read only what the
+ * batch touched; this one reads every row.
  */
-async function checkFold(activation: DatabaseModeRuntime) {
-  if (runtime !== activation || !activation.store || !activation.fold) return
+export function requestFullFoldCheck(): Promise<void> {
+  const activation = runtime
+  if (!activation) return Promise.resolve()
+  return enqueue(() => checkFold(activation, true))
+}
+
+/**
+ * The fold check (`fold-check.ts`): record for Settings → Storage where the
+ * cache differs from the truth. Runs on the queue, so no write lands
+ * between its reads. Two comparisons:
+ *
+ * - **The log.** Each entity batches touched since the last check: its
+ *   cache row against the fold of its events in the log (`foldOfLog`, by
+ *   the `events_entity` index). `full` compares every row with the fold of
+ *   the whole log instead.
+ * - **The replica.** Each row the pulls brought: against its cache row,
+ *   tombstones too. It leaves out an entity with an unpushed event (the
+ *   replica has not seen it yet) and one the cache holds past the row
+ *   cursor (the events pull runs after the row pull, so another device's
+ *   write can reach the cache first; the next pull brings its row).
+ *
+ * While the events pull is behind, there is no check: what it needs waits.
+ */
+async function checkFold(activation: DatabaseModeRuntime, full: boolean) {
+  if (runtime !== activation || !activation.store) return
   if (activation.logBehind) return
   const store = activation.store
+  const keys: EntityKeys = activation.foldCheckKeys
+  const pulled = activation.replicaRows
+  activation.foldCheckKeys = noKeys()
+  activation.replicaRows = noRows()
+  const touched = keys.blocks.size + keys.links.size + keys.views.size
+  const brought = pulled.nodes.length + pulled.links.length + pulled.views.length
+  if (!full && touched + brought === 0) return
   try {
-    const [graph, views, cursor] = await Promise.all([
-      store.getGraph(),
-      store.getViews(),
-      store.getMeta(PULL_CURSOR_KEY),
-    ])
-    if (runtime !== activation || !activation.fold) return
-    const fold = activation.fold
-    const pulledTo = cursor !== null && /^\d+$/.test(cursor) ? Number(cursor) : Infinity
-    const ahead = (entity: Entity, id: string) => {
-      const table = entity === "block" ? fold.blocks : entity === "link" ? fold.links : fold.views
-      return (table.get(id)?.seq ?? 0) > pulledTo
+    const differences = activation.foldDifferences
+    let compared = touched
+
+    // The log against the cache.
+    if (full) {
+      const fold = await store.foldOfLog()
+      const [graph, views] = await Promise.all([store.getGraph(), store.getViews()])
+      const folded = rowsOfGraph(toGraphSnapshot(fold), [...viewMapOf(toViewRows(fold)).values()])
+      const found = foldDifferences(folded, rowsOfGraph(graph, views), LOG_SIDES)
+      for (const key of [...differences.keys()]) if (!isReplicaKey(key)) differences.delete(key)
+      for (const [key, line] of found) differences.set(key, line)
+      compared = folded.nodes.length + folded.links.length + folded.views.length
+    } else if (touched > 0) {
+      const fold = await store.foldOfLog(keys)
+      const found = foldDifferences(
+        readOutEntities(fold, keys),
+        await store.getLiveRows(keys),
+        LOG_SIDES,
+      )
+      for (const id of keys.blocks) differences.delete(foldCheckKey("block", id))
+      for (const id of keys.links) differences.delete(foldCheckKey("link", id))
+      for (const id of keys.views) differences.delete(foldCheckKey("view", id))
+      for (const [key, line] of found) differences.set(key, line)
     }
-    const differences = foldDifferences(
-      { graph: toGraphSnapshot(fold), views: [...viewMapOf(toViewRows(fold)).values()] },
-      { graph, views },
-      ahead,
-    )
-    if (differences.length > 0) {
-      console.warn("[ruminate] the fold differs from the tables:", differences)
+
+    // The replica's rows against the cache.
+    if (brought > 0) {
+      const replicaKeys: EntityKeys = {
+        blocks: new Set(pulled.nodes.map((row) => row.id)),
+        links: new Set(
+          pulled.links.map((row) => linkEntityId(row.source_id, row.destination_id, row.kind)),
+        ),
+        views: new Set(pulled.views.map((row) => row.id)),
+      }
+      const [cached, unpushed, cursor] = await Promise.all([
+        store.getRowsOf(replicaKeys),
+        store.unpushedEvents(),
+        store.getMeta(PULL_CURSOR_KEY),
+      ])
+      const waiting = new Set(unpushed.map((event) => foldCheckKey(event.entity, event.entity_id)))
+      const pulledTo = cursor !== null && /^\d+$/.test(cursor) ? Number(cursor) : Infinity
+      const seqOf = new Map<string, number>()
+      for (const row of cached.nodes) seqOf.set(foldCheckKey("block", row.id), row.seq ?? 0)
+      for (const row of cached.views) seqOf.set(foldCheckKey("view", row.id), row.seq ?? 0)
+      for (const row of cached.links) {
+        const id = linkEntityId(row.source_id, row.destination_id, row.kind)
+        seqOf.set(foldCheckKey("link", id), row.seq ?? 0)
+      }
+      const skip = (entity: Entity, id: string) => {
+        const key = foldCheckKey(entity, id)
+        return waiting.has(key) || (seqOf.get(key) ?? 0) > pulledTo
+      }
+      const found = foldDifferences(cached, pulled, REPLICA_SIDES, skip)
+      for (const id of replicaKeys.blocks) differences.delete(replicaKey(foldCheckKey("block", id)))
+      for (const id of replicaKeys.links) differences.delete(replicaKey(foldCheckKey("link", id)))
+      for (const id of replicaKeys.views) differences.delete(replicaKey(foldCheckKey("view", id)))
+      for (const [key, line] of found) differences.set(replicaKey(key), replicaKey(line))
+      compared += brought
+    }
+    if (runtime !== activation) return
+
+    if (differences.size > 0) {
+      console.warn("[ruminate] the cache differs from the truth:", [...differences.values()])
     }
     patchDiagnostics({
       foldCheck: {
         at: Date.now(),
-        differences: differences.length,
-        sample: differences.slice(0, FOLD_CHECK_SAMPLE),
+        full,
+        compared,
+        differences: differences.size,
+        sample: [...differences.values()].slice(0, FOLD_CHECK_SAMPLE),
       },
     })
   } catch (error) {
     console.warn("[ruminate] fold check failed", error)
   }
 }
+
+const LOG_SIDES = ["the log", "the cache"] as const
+const REPLICA_SIDES = ["the cache", "the replica"] as const
+
+/** A replica difference is keyed apart from the log's, so a check of one
+ * never clears the other: `replica block blk_1`. */
+const replicaKey = (key: string) => `replica ${key}`
+const isReplicaKey = (key: string) => key.startsWith("replica ")
 
 /** Settings action: replicate the full corpus to D1 now. No-op unless the
  * runtime (and its push loop) is up. */
@@ -915,7 +1025,7 @@ function scheduleRepair(activation: DatabaseModeRuntime) {
     // The wipe took the log as well. The fold here still holds it, and the
     // next pull brings it back from the start, so the next boot has it.
     await activation.store.setMeta(EVENTS_CURSOR_KEY, "")
-    refreshGraph(activation)
+    await refreshGraph(activation)
     activation.replica?.requestFullPush()
   })
 }
@@ -1031,8 +1141,7 @@ function runPull(activation: DatabaseModeRuntime) {
       if (replicaIdentityChanged(await store.getMeta(REPLICA_ID_KEY), body.replica_id)) {
         await store.clear()
         await resetCursors(store)
-        // The fold of the old log goes with it; the new log refills it.
-        activation.fold = foldByStamp([])
+        activation.foldDifferences = new Map()
         if (useSince) body = await activation.source.pullFull()
         if (runtime !== activation) return
       }
@@ -1040,33 +1149,9 @@ function runPull(activation: DatabaseModeRuntime) {
         await store.setMeta(REPLICA_ID_KEY, body.replica_id)
       }
 
-      const local = await store.getAllRows()
-      const pendingNoteIds = activation.replica?.pendingNoteIds?.() ?? new Set<string>()
-      const pendingViewIds = new Set([
-        ...(activation.replica?.pendingViewIds?.() ?? []),
-        ...activation.pendingViews.map((row) => row.id),
-      ])
-      const plan = planPullApplication({
-        localNodes: local.nodes,
-        localLinks: local.links,
-        localViews: local.views,
-        remoteNodes: body.nodes,
-        remoteLinks: body.links,
-        remoteViews: body.views,
-        pendingNodeIds: expandPendingNodeIds(pendingNoteIds, local.links),
-        pendingViewIds,
-      })
-
-      // Views count too: a pull that changed only a pin must still be applied.
-      const planSize =
-        plan.nodes.length +
-        plan.links.length +
-        plan.views.length +
-        plan.deleteNodes.length +
-        plan.deleteLinks.length
-      // The rows still land in the tables, for the fold check. The screen
-      // reads the fold, which the events pull below brings up to date.
-      if (planSize > 0) await store.applyPull(plan)
+      // The rows no longer write the cache: the events pull below brings the
+      // same changes, and the fold check compares the two.
+      holdReplicaRows(activation, body)
       if (body.cursor !== null) await store.setMeta(PULL_CURSOR_KEY, body.cursor)
       await pullEventLog(activation, store)
 
@@ -1106,7 +1191,7 @@ function runPull(activation: DatabaseModeRuntime) {
 
 /**
  * Bring the device's log up to the replica's: every event past the events
- * cursor, in pages, into the store (`applyPulledEvents`) and the fold — this
+ * cursor, in pages, into the store's log and cache (`applyPulledEvents`) — this
  * device's own among them, placed. Only the log is written; the rows came
  * with the pull of rows just before. A long log (a first pull) is read a
  * bounded number of pages at a time, the screen refreshed after each run of
@@ -1122,7 +1207,7 @@ async function pullEventLog(activation: DatabaseModeRuntime, store: NoteStore) {
     if (runtime !== activation) return
     if (events.length > 0) {
       await store.applyPulledEvents(events)
-      if (activation.fold) foldByStamp(events, activation.fold)
+      touchEvents(activation, events)
       // A device that has seen an edit stamps after it, whatever its clock
       // says. An event from before stamps moves it by the stamp it derives.
       for (const event of events) {
@@ -1140,7 +1225,7 @@ async function pullEventLog(activation: DatabaseModeRuntime, store: NoteStore) {
   }
   activation.logBehind = behind
   if (changed) {
-    refreshGraph(activation)
+    await refreshGraph(activation)
     bumpEventLog()
   }
   if (behind) {

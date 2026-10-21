@@ -27,7 +27,7 @@ export function createNodeSqlDriver(): SqlDriver {
   return {
     exec: (sql, params = []) => {
       const statement = db.prepare(sql)
-      if (/^\s*select/i.test(sql)) {
+      if (/^\s*(select|explain)/i.test(sql)) {
         return Promise.resolve(statement.all(...params) as Record<string, SqlValue>[])
       }
       statement.run(...params)

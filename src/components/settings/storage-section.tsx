@@ -4,6 +4,7 @@ import {
   databaseModeStatusAtom,
   refreshDatabaseReplicaStatus,
   requestDatabaseFullPush,
+  requestFullFoldCheck,
   type DatabaseModeStatus,
 } from "../../data/database-mode"
 import {
@@ -12,6 +13,7 @@ import {
   type StorageDiagnostics,
 } from "../../data/storage-diagnostics"
 import { githubUserAtom } from "../../global-state"
+import { AsyncButton } from "../ui/async-button"
 import { Button } from "../ui/button"
 import { SettingsSection } from "../settings-section"
 
@@ -89,7 +91,9 @@ function StorageDiagnosticsPanel({
                   : foldCheck.differences === 1
                     ? "1 difference"
                     : `${foldCheck.differences} differences`
-              } (${formatDiagnosticTime(foldCheck.at)})`}
+              } (${formatDiagnosticTime(foldCheck.at)}, ${
+                foldCheck.full ? `all ${foldCheck.compared} rows` : `${foldCheck.compared} rows`
+              })`}
         </dd>
       </dl>
       {foldCheck && foldCheck.sample.length > 0 ? (
@@ -98,6 +102,13 @@ function StorageDiagnosticsPanel({
             <li key={difference}>{difference}</li>
           ))}
         </DiagnosticList>
+      ) : null}
+      {/* After each batch, only the rows it touched are checked; this reads
+          every row of both. */}
+      {status === "ready" ? (
+        <AsyncButton className="self-start" onClick={() => requestFullFoldCheck()}>
+          Check every row
+        </AsyncButton>
       ) : null}
       {/* A failed pull can leave the note list empty with no other symptom, so
           the reason is shown rather than only kept in state. */}

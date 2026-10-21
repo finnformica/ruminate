@@ -73,14 +73,14 @@ export interface CorpusMigrations {
    * `"columns"` mode. The local store adds the same column (`LOCAL_V11_SQL`). */
   eventHlc?: string
   /** migrations/0027: a View's saved stack — required in `"columns"` mode. The
-   * local store adds the same column (`LOCAL_V13_SQL`). */
+   * local store adds the same column (`LOCAL_V14_SQL`). */
   viewStack?: string
 }
 
 /** Which v3 shape the ladder should produce (see the module header). */
 export type CorpusTenancy = "single" | "columns"
 
-const CORPUS_SCHEMA_VERSION = 13
+const CORPUS_SCHEMA_VERSION = 14
 
 /**
  * The single-tenant v5 step: the `views` table (migrations/0015) — the
@@ -214,8 +214,8 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '11');
 `
 
 /**
- * The single-tenant v12 step: snapshots of the fold by stamp
- * (`src/data/snapshot.ts`, docs/event-sourcing.md). Each row is the encoded
+ * The single-tenant v12 step: snapshots of the fold by stamp, which v13
+ * drops again (the cache replaced them, docs/event-sourcing.md). Each row was the encoded
  * state and the log `position` it covers; the store keeps the 2 newest, and
  * `id` orders them. The index serves the tail past a snapshot's position, and
  * the next position an append takes. The D1 shape has no snapshots: the
@@ -233,13 +233,31 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '12');
 `
 
 /**
- * The single-tenant v13 step: a View's saved stack (migrations/0027,
+ * The single-tenant v13 step: the tables become a cache of the fold
+ * (docs/event-only-sync.md, "The cache"). Each row keeps the stamp of each
+ * field (`stamps`, as the server's migrations/0025 does), and the fold check
+ * reads one entity's events by the new index. The snapshots go: the cache
+ * replaces them. The rows keep their values; the store fills their stamps
+ * once (`fillStampsStatements`, a `meta` flag), since this ladder is DDL
+ * only. The D1 shape has its own `stamps` (0025) and no snapshots.
+ */
+const LOCAL_V13_SQL = `
+ALTER TABLE nodes ADD COLUMN stamps TEXT;
+ALTER TABLE link ADD COLUMN stamps TEXT;
+ALTER TABLE views ADD COLUMN stamps TEXT;
+DROP TABLE IF EXISTS snapshots;
+CREATE INDEX events_entity ON events (entity, entity_id);
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '13');
+`
+
+/**
+ * The single-tenant v14 step: a View's saved stack (migrations/0027,
  * docs/graph-walk.md, "Views save stacks"). One nullable column: NULL is a
  * one-frame View, which is every row the store holds before it.
  */
-const LOCAL_V13_SQL = `
+const LOCAL_V14_SQL = `
 ALTER TABLE views ADD COLUMN stack TEXT;
-INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '13');
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '14');
 `
 
 /**
@@ -411,13 +429,17 @@ async function applyV12(driver: SqlDriver, tenancy: CorpusTenancy): Promise<void
   if (tenancy === "single") await driver.execScript(LOCAL_V12_SQL)
 }
 
-async function applyV13(
+async function applyV13(driver: SqlDriver, tenancy: CorpusTenancy): Promise<void> {
+  if (tenancy === "single") await driver.execScript(LOCAL_V13_SQL)
+}
+
+async function applyV14(
   driver: SqlDriver,
   migrations: CorpusMigrations,
   tenancy: CorpusTenancy,
 ): Promise<void> {
   if (tenancy === "single") {
-    await driver.execScript(LOCAL_V13_SQL)
+    await driver.execScript(LOCAL_V14_SQL)
     return
   }
   if (!migrations.viewStack) {
@@ -444,6 +466,7 @@ export const SHIPPED_LOCAL_STEPS: Readonly<Record<number, string>> = {
   11: LOCAL_V11_SQL,
   12: LOCAL_V12_SQL,
   13: LOCAL_V13_SQL,
+  14: LOCAL_V14_SQL,
 }
 
 type Step = (
@@ -466,7 +489,8 @@ const STEPS: readonly [number, Step][] = [
   [10, (driver, _migrations, tenancy) => applyV10(driver, tenancy)],
   [11, applyV11],
   [12, (driver, _migrations, tenancy) => applyV12(driver, tenancy)],
-  [13, applyV13],
+  [13, (driver, _migrations, tenancy) => applyV13(driver, tenancy)],
+  [14, applyV14],
 ]
 
 /**

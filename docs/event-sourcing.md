@@ -10,8 +10,18 @@ from there — and the replica takes them in as made. Code: `src/data/events.ts`
 `worker/handlers/event-log.ts` (append, reconcile, reading the past),
 `src/data/sql-note-store.ts` (the device's log and its projection),
 `src/data/replica-sync.ts` (the push), `src/data/hlc.ts` (the stamp),
-`src/data/snapshot.ts` (snapshots of the fold),
+`src/data/fold-cache.ts` (the client's tables as a cache of the fold),
 `migrations/0023_events.sql`, `migrations/0024_event_hlc.sql`.
+
+**Decided 2026-10-20: event-only sync** ([event-only-sync.md](./event-only-sync.md)).
+The log is the truth; the browser keeps `nodes`, `link` and `views` as an
+indexed cache of its fold, updated in the same transaction as each batch
+(revised 2026-10-21). Sync pushes and pulls events
+only. Each event carries a hybrid logical clock stamp (`hlc`); conflicts
+resolve per field by that stamp, and `seq` is only the sync cursor. The
+server keeps its tables as projections for MCP, search and shares. The log
+is append-only by convention. The sections below describe
+the app until then, with each change marked.
 
 ## Why
 
@@ -48,8 +58,9 @@ docs/event-only-sync.md): every field of an entity, and its liveness, is a
 last-writer-wins register. Its state does not depend on the order of the
 events, and an event applied twice changes nothing. An event without a stamp
 gets the derived one (`eventStamp`, below), the same as every other reader.
-`toGraphSnapshot` and `toViewRows` read its state out. Nothing in the app
-reads it yet: `stateAt`, a history and the calendar use the fold by `seq`.
+`toGraphSnapshot` and `toViewRows` read its state out. The client's cache
+rows are this fold, one entity at a time (below); `stateAt`, a history and
+the calendar use the fold by `seq`.
 
 ### The projection resolves by stamp
 
@@ -80,7 +91,8 @@ Each row keeps the stamp of each of its registers in a `stamps` column:
   `stamps` were written before it, and on a row whose create did not name
   it. Such a register holds the empty stamp, so any event that names it
   wins. `heldStamp` (SQL) and `heldStampOf` (TypeScript) spell this rule;
-  `projectLog` and `foldByStamp` apply it as `""`.
+  `projectLog` and `foldByStamp` apply it as `""`, and the client's cache
+  reads a field with no stamp as not set (`fold-cache.ts`).
 - `verify` folds each row's log up to `legacy` by `seq`, as it was projected,
   and by stamp after (`projectLog`, `worker/handlers/event-log.ts`). It
   compares every field and every stamp. The SQL spells `eventStamp`'s
@@ -94,6 +106,12 @@ Each row keeps the stamp of each of its registers in a `stamps` column:
 | **block** | type, text, props, notes_id             | any of those         | tombstone | fields to set back + `ref_seq`; live again |
 | **link**  | source, destination, kind, sort_key     | sort_key (= reorder) | unlink    | sort_key + live again                      |
 | **view**  | root_id, filter, sort, pinned, sort_key | any of those         | tombstone | fields + live again                        |
+
+**Decided 2026-10-20.** A view event gains `stack`, the frames below a
+View's top frame ([graph-walk.md](./graph-walk.md), "Views save stacks").
+Every event gains `hlc`, the writer's hybrid logical clock stamp; an event
+written before it has one derived at read time
+([event-only-sync.md](./event-only-sync.md), "The stamp").
 
 A view's `stack` (migrations/0027; docs/graph-walk.md, "Views save stacks")
 is a field like the others, with one difference: a `create` may leave it out,
@@ -160,6 +178,10 @@ in `writeRows`:
 3. reconcile + append + project, in one atomic batch.
 
 ### The client speaks events
+
+**Decided 2026-10-20.** The pull of rows goes: the events pull below becomes
+the only pull, and the device's tables become a cache of the fold of its log
+([event-only-sync.md](./event-only-sync.md), "Write, push, pull").
 
 The browser is the one writer that knows what it did, so it says so. In the
 database runtime (`src/data/database-mode.ts`) each batch of the editor's ops
@@ -250,90 +272,93 @@ row both derive against the same held row and the higher **stamp** wins each
 field, where the later `updated_at` used to. The fold and the tables agree
 either way.
 
-### Snapshots
+### The client's tables are a cache of the fold
 
-The store keeps snapshots of the fold by stamp (`src/data/snapshot.ts`,
-docs/event-only-sync.md, item 5) in its `snapshots` table (schema v12). A
-snapshot is the encoded `StampedState`, every field with its stamp and
-tombstones too, and the **log position** it covers.
+Decided 2026-10-21 (docs/event-only-sync.md, "The cache"). The log is the
+truth. The browser's `nodes`, `link` and `views` are an indexed cache of its
+fold by stamp (`foldByStamp`): each row is the fold of one entity's events
+(`src/data/fold-cache.ts`, `src/data/sql-note-store.ts`).
 
-- **Position.** `events.position` is the log's append order. Every event
-  takes the next position: one this device makes, and one it pulls. An event
-  the replica places (`markEventsPushed`, or a pull that brings back one of
-  this device's own) moves to the next position. So the tail past a snapshot
-  that took an event unpushed holds it again, with its `seq`.
-- **When.** After each batch (`applyEvents`, `applyPulledEvents`) and at
-  open, the store writes a snapshot when 1,000 events are past the newest one,
-  or when the newest is 24 hours old and any event is past it. With no
-  snapshot, the first event writes one.
-- **Keep 2.** One write adds the new snapshot and deletes all but the 2
-  newest. A snapshot is a cache of the log, so this is not a purge. A
-  snapshot that fails to write does not fail the batch: the next batch tries
-  again.
-- **Read.** `loadFold` reads the newest snapshot that parses, then applies
-  every event past its position. When the newest does not parse, it reads the
-  one before. With none that parses, it folds the whole log. The fold does
-  not depend on order and applies an event twice as once, so the result is
-  the fold of the whole log.
-- **Snapshot 0** (`snapshotZero`, docs/event-only-sync.md, item 6). The first
-  open of this build folds the `nodes`, `link` and `views` rows, tombstones
-  too, into a snapshot at the last position in `events`. So the fold holds
-  every row the tables hold, also one whose events this device never had.
-  Each row is the `create` it amounts to (`rowsToEvents`), with no stamp, the
-  row's `updated_at` as `at` and the row's `seq`. So each field takes the
-  stamp `eventStamp` derives for an old event: `updated_at`, counter 0,
-  `seq:<seq>`. It runs once: the same write sets the `snapshot_zero` flag in
-  `meta`. A snapshot of the log can be there already, so "no snapshot" does
-  not say it has run. A store with no row sets the flag and writes nothing.
-  `clear` keeps the flag: the pull after it brings the whole log again.
+- **Stamps.** Each row keeps the stamp of each field and of `alive` in a
+  `stamps` column, a JSON object, as the server's rows do (migrations/0025).
+  The client's schema step v13 adds the column, an index on
+  `events (entity, entity_id)`, and drops the `snapshots` table of v12.
+- **Same transaction.** Each local batch (`applyEvents`) and each pulled page
+  (`applyPulledEvents`) appends to `events` and writes the cache rows of the
+  entities it names in one batch: each row is read by its key, the events are
+  applied to it by stamp, and the row is written back (one multi-row upsert
+  per table). No other row is read, and nothing is folded again. A failed
+  batch writes neither. The events can come in any order, and an event that
+  comes again changes nothing.
+- **Held before created.** An entity an update reaches before its create is
+  held: its row has no `alive` stamp and a `deleted_at`, so no read of live
+  rows sees it, and `getAllRows` leaves it out. The create, when it comes,
+  makes it live with every field at its highest stamp.
+- **`seq`.** A row's `seq` is the highest `seq` of its events, as the server
+  keeps it. It stays NULL until one of its events is placed, and it never
+  goes back.
+- **The stamp fill.** Rows from before v13 have no stamps. The first open of
+  this build gives each row the stamp its last event derives (`eventStamp`:
+  `updated_at`, counter 0, `seq:<seq>`), for every field and `alive`, in one
+  transaction that also sets the `cache_stamps` flag in `meta`. The flag
+  alone decides whether the fill runs.
+- **Lazy reads.** A read is an index lookup: the live child links of a node
+  by `link_source` (`childLinksOf`), the links into a node by
+  `link_destination` (`parentLinksOf`, an up pivot), and nodes by id
+  (`nodesOf`). The app does not use them yet: its graph atom still reads all
+  live rows at boot (`getGraph`), with nothing to fold.
+- **The row pull** still runs (ES-9 waits), but its rows no longer write the
+  cache. The fold check compares them with it.
+- **The two read-outs agree** (the two ES-4 differences): a row never placed
+  has no `seq` in the cache, in `getGraph` and in `toGraphSnapshot`; and a
+  live link with a tombstoned end is in no read (`getGraph` and the lazy
+  reads leave it out in SQL, `buildGraphSnapshot` and `readOutEntities` when
+  they see the tombstone).
 
-`clear` deletes the snapshots with the log.
+### The fold check
 
-### The app reads the fold
+`src/data/fold-check.ts`, run by the runtime (`src/data/database-mode.ts`)
+after a batch, at most once in 10 seconds. It compares every field of each
+row except `seq`, and lists where two sides differ, in Settings → Storage.
 
-The runtime (`src/data/database-mode.ts`, docs/event-only-sync.md, item 7)
-feeds `databaseGraphAtom` and `viewsAtom` from the fold by stamp, not from
-the tables. The tables are still written and still pulled.
+- **The log against the cache.** For each entity the batches touched since
+  the last check (a flush, a pulled page): the fold of that entity's events
+  (`foldOfLog`, by the `events_entity` index) against its cache row
+  (`getLiveRows`). No other row is read.
+- **The replica against the cache.** Each row the row pull brought, against
+  its cache row, tombstones too. It leaves out an entity with an unpushed
+  event (the replica has not seen it) and one the cache holds past the row
+  cursor (the events pull runs after the row pull, so another device's write
+  can reach the cache first; the next pull brings its row). These lines start
+  with `replica`. A week with none lets the row pull go (ES-9).
+- **Every row**, only from the "Check every row" button
+  (`requestFullFoldCheck`): the fold of the whole log against the whole
+  cache.
+- The runtime keeps each difference until a later check of that entity
+  finds it resolved. While the events pull is behind (a long log, pulled 10
+  pages at a time), there is no check.
 
-- **Boot.** `loadFold` reads the newest snapshot and the events after it.
-  The runtime holds that fold, and reads the atoms out of it
-  (`toGraphSnapshot`, `toViewRows`).
-- **Edit.** Each flushed batch of this device's events applies to the fold
-  (`foldByStamp`) and lands in the store. The atom took the ops already.
-- **Pull.** The pull of rows writes only the tables. The events pull applies
-  each page to the store and the fold, and then reads the atoms out of the
-  fold. When a pull stops at its page bound (10 pages of 2,000), the next run
-  of pages is queued at once, until the log is caught up.
-- **Repair.** A repair rebuilds the tables and wipes the log. The fold in
-  memory keeps it, and the events cursor goes back to 0, so the next pull
-  brings the log back.
-- **The fold check** (`src/data/fold-check.ts`). After a batch (an edit, a
-  pull, the boot), at most once in 10 seconds, the runtime compares the fold
-  with the tables (`getGraph`, `getViews`). It compares every field of each
-  live node, child link and view, but not `seq`: the app does not read it,
-  and a push sets it on the tables before the fold sees the event placed. It
-  skips an entity the fold holds past the row cursor: the events pull runs
-  after the row pull, so another device's write can reach the fold first.
-  While the events pull is behind, there is no check. Settings → Storage
-  shows the result and the first 20 differences. A week with no difference
-  lets the row pull go (ES-9).
-- **The two read-outs agree.** A row never placed has no `seq` in either.
-  A live link with a tombstoned end is in neither: `getGraph` reads only
-  live nodes, so it leaves out such a link in SQL, as `buildGraphSnapshot`
-  does when it sees the tombstone.
-- **Cost** (`node:sqlite`, a log of block creates, links and text edits; the
-  browser's OPFS store is slower). The first open of a device with a long
-  log and no snapshot folds the whole log once, before the store is ready.
+### Cost
 
-  | events  | nodes  | first open | `loadFold` | read-out | check  | snapshot |
-  | ------- | ------ | ---------- | ---------- | -------- | ------ | -------- |
-  | 10,000  | 3,379  | 157 ms     | 27 ms      | 8 ms     | 70 ms  | 3.6 MB   |
-  | 50,000  | 16,892 | 811 ms     | 129 ms     | 50 ms    | 280 ms | 18 MB    |
-  | 100,000 | 33,784 | 1.7 s      | 328 ms     | 101 ms   | 777 ms | 36 MB    |
-  | 200,000 | 67,568 | 4.3 s      | 640 ms     | 223 ms   | 1.4 s  | 72 MB    |
+`node:sqlite`, a log of block creates, links and text edits; the browser's
+OPFS store is slower.
 
-  Production held 3,711 rows (above), so its first open is near the first
-  line. Each later open reads a snapshot (`loadFold`).
+| events  | nodes  | page of 2,000 | stamp fill | later open | expand | local batch | batch check | full check |
+| ------- | ------ | ------------- | ---------- | ---------- | ------ | ----------- | ----------- | ---------- |
+| 10,000  | 3,379  | 166 ms        | 26 ms      | 51 ms      | 1 ms   | 2 ms        | 4 ms        | 198 ms     |
+| 100,000 | 33,784 | 171 ms        | 260 ms     | 400 ms     | 1 ms   | 1 ms        | 1 ms        | 2.3 s      |
+| 200,000 | 67,568 | 175 ms        | 546 ms     | 915 ms     | 1 ms   | 1 ms        | 2 ms        | 5.4 s      |
+
+- **Page of 2,000:** one pulled page into the log and the cache.
+- **Stamp fill:** the first open of this build on an upgraded device, once.
+- **Later open:** the open, then the whole live graph the app reads at boot.
+- **Expand:** the lazy read of one block's links and children.
+- **Local batch:** 3 events.
+- **Batch check:** 10 entities.
+
+The snapshot design this replaces (ES-5 to ES-7) took 654 ms for a later open
+at 100,000 events, and 1.8 s for the first. Production held 3,711 rows, so
+it is near the first line.
 
 ### Cost, by construction
 
@@ -475,6 +500,12 @@ and the page says so (`earliest`).
 
 ## Append-only, structurally
 
+**Revised 2026-10-21: append-only by convention.** The app only appends: a
+delete and a restore are events. No new trigger is added, and the triggers
+below stay as they are, `event_purges` with them, unused by the app. A fix
+by hand in the D1 console stays possible
+([event-only-sync.md](./event-only-sync.md), "Append-only by convention").
+
 Triggers refuse `UPDATE` on `events`, and refuse `DELETE` unless the tenant is
 named in `event_purges` — the one door, for erasing an account.
 
@@ -485,6 +516,13 @@ beside it untouched; whatever it writes meanwhile goes around the log, and the
 first write after this Worker returns reconciles it. Nothing needs undoing.
 
 ## Open
+
+**Decided 2026-10-20** for four of the items below
+([event-only-sync.md](./event-only-sync.md)): **two pulls** become one, the
+events pull; **per-block erasure** is not done;
+**compaction** is not done, and the cache means a read never folds the log;
+and the hybrid logical clock stamp answers what **`base_seq`** was kept for,
+so an offline device's old edit does not win over a newer one.
 
 - **A restore UI**, and a note's own history. The calendar is the first
   reader of the log; a block's version history and "put this back" from a

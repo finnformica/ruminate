@@ -7,7 +7,7 @@
 -- which is every View before this migration.
 --
 -- One nullable column and no backfill, on both shapes: the local store's
--- schema ladder adds the same column (`LOCAL_V13_SQL`,
+-- schema ladder adds the same column (`LOCAL_V14_SQL`,
 -- src/data/corpus-schema.ts). `stack` is a field of the view entity like the
 -- others: an event may set it, and it resolves by stamp (`stamps.stack`). A
 -- row's `stamps` without a `stack` key is a row no event has set it on yet,
