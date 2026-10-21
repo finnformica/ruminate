@@ -18,6 +18,7 @@ import {
   subtreeIds,
   updateBlock,
   updateText,
+  updateType,
 } from "./ops"
 import { parse } from "./parse"
 import type { Block, BlockDoc } from "./types"
@@ -707,5 +708,88 @@ describe("upstream rows (parents beneath a block)", () => {
     // Removing x leaves the parent rows, which the roots reach upstream.
     const { doc } = removeBlock(graphed(), "r/x")
     expect(Object.keys(doc.blocks).sort()).toEqual(["p", "q", "r"])
+  })
+})
+
+/**
+ * GW-5 (docs/graph-walk.md, 3.8, decision 6): "editing inside an up pivot
+ * behaves as editing does today" on an up row, which the "upstream" setting
+ * already draws exactly as an up pivot would (3.8, first paragraph). These
+ * tests pin the doc maths (`src/blocks/ops.ts`) each table row relies on,
+ * using the two-holder doc above and a two-block cycle. No behaviour here
+ * changes — only the tests are new.
+ */
+describe("the doc maths behind the 3.8 table (docs/graph-walk.md)", () => {
+  it("a parent row's own text and type change by id, wherever it is shown", () => {
+    // "Type, change type": the block's own text and type, as everywhere —
+    // addressed by id, not by the occurrence key that shows it as a holder.
+    const doc = graphed()
+    const text = updateText(doc, "p", "P!")
+    expect(text.blocks.p.text).toBe("P!")
+    const typed = updateType(doc, "q", "h1")
+    expect(typed.blocks.q.type).toBe("h1")
+  })
+
+  it("a paste after a parent row adds each pasted block as a new holder", () => {
+    // "Paste in select mode": each pasted block becomes a new holder of the
+    // pivoted block, via insertBlocksAfter.
+    const doc = graphed()
+    const sub = parse("new1\nnew2")
+    const result = insertBlocksAfter(doc, "r/^p", sub)!
+    expect(result.doc.blocks.r.upstream).toEqual(["p", ...sub.rootBlockIds, "q"])
+    for (const id of sub.rootBlockIds) {
+      expect(result.doc.blocks[id].children).toEqual(["r"])
+    }
+  })
+
+  /**
+   * Two blocks that hold each other: c is the note's one root, and the
+   * cycle closes between c and d (docs/graph-walk.md, 3.3 and 3.7).
+   *   c   children: [d]   upstream: [d]
+   *   d   children: [c]   upstream: [c]
+   */
+  function cycleFixture(): BlockDoc {
+    return {
+      props: null,
+      rootBlockIds: ["c"],
+      blocks: {
+        c: { id: "c", type: "text", text: "C", children: ["d"], upstream: ["d"] },
+        d: { id: "d", type: "text", text: "D", children: ["c"], upstream: ["c"] },
+      },
+    }
+  }
+
+  it("unlinking one edge of a two-block cycle leaves the other edge intact", () => {
+    // "⌫ on an empty row, Cut, Unlink": the one edge is removed, the block
+    // lives on wherever else it is held — here, the cycle's other edge.
+    const { doc, focusKey } = removeBlock(cycleFixture(), "c/^d")
+    expect(doc.blocks.c.upstream).toEqual([])
+    expect(doc.blocks.d.children).toEqual([])
+    // The other edge (c holds d) still stands, both ways.
+    expect(doc.blocks.c.children).toEqual(["d"])
+    expect(doc.blocks.d.upstream).toEqual(["c"])
+    expect(doc.blocks.d).toBeDefined()
+    expect(focusKey).toBe("c")
+  })
+
+  it("refuses to duplicate or reorder a holder row in a cycle, without looping forever", () => {
+    // "Duplicate" and "Move up or down" are refused, as for any holder row
+    // (3.8) — and a cycle elsewhere in the doc must not hang either check.
+    expect(duplicateBlocks(cycleFixture(), ["c/^d"], "below")).toBe(null)
+    const doc = cycleFixture()
+    expect(moveBlocks(doc, ["c/^d"], "up")).toBe(doc)
+  })
+
+  it("duplicating the down side of a cycle duplicates the loop among the copies", () => {
+    // A copy's subtree is cloned once per block, however many paths reach it
+    // (`cloneSubtree`'s `cloned` map) — a loop in the original is a loop
+    // among the copies, not unrolled, and carries no parents of its own.
+    const { doc, copies } = duplicateBlocks(cycleFixture(), ["c"], "below")!
+    const copyId = copies[0]
+    expect(doc.blocks[copyId].upstream).toBeUndefined()
+    const copyOfD = doc.blocks[copyId].children[0]
+    expect(copyOfD).not.toBe("d")
+    // The copy of d (c's child) loops back to the copy of c, not the original.
+    expect(doc.blocks[copyOfD].children).toEqual([copyId])
   })
 })

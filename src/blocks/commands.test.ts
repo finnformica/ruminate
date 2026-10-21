@@ -1651,3 +1651,97 @@ describe("the rows beneath a row read the pivots (docs/graph-walk.md, 3.8)", () 
     ).toEqual({ mode: "select", key: "a/x/y" })
   })
 })
+
+/**
+ * GW-5 (docs/graph-walk.md, 3.8, decision 6): "editing inside an up pivot
+ * behaves as editing does today" on an up row — the rows an up pivot draws
+ * are up occurrences, keyed with `^`, exactly as the "upstream" setting
+ * draws them today. These tests pin each remaining row of the 3.8 table
+ * that the "parent rows" and "pivots" describes above do not already cover.
+ * No behaviour here changes — only the tests are new.
+ */
+describe("GW-5: more of the 3.8 table", () => {
+  /** r holds x; r is held by p and q, shown beneath it as up rows — exactly
+   * what an up pivot on r would draw. The note n is the root. */
+  function graphed(): BlockDoc {
+    return {
+      props: null,
+      rootBlockIds: ["r"],
+      upstream: [],
+      blocks: {
+        r: { id: "r", type: "text", text: "R", children: ["x"], upstream: ["p", "q"] },
+        x: { id: "x", type: "text", text: "X", children: [], upstream: ["r"] },
+        p: { id: "p", type: "text", text: "P", children: ["r"], upstream: ["n"] },
+        q: { id: "q", type: "text", text: "Q", children: ["r"], upstream: [] },
+      },
+    }
+  }
+  const order = ["r", "r/x", "r/^p", "r/^q"]
+
+  it("Enter with text after the caret is refused when the holder has more than one place", () => {
+    const doc = graphed()
+    const result = runCommand(
+      "splitContinuingList",
+      input(doc, "r/^p", {
+        mode: "edit",
+        rootId: "n",
+        visibleOrder: order,
+        caret: caret("P and more", 1),
+        placesOf: (id) => (id === "p" ? 2 : 1),
+      }),
+    )
+    expect(result.doc).toBeUndefined()
+    expect(result.notice).toMatch(/2 places/)
+  })
+
+  it("refuses to move or duplicate a holder row", () => {
+    const doc = graphed()
+    const moved = runCommand(
+      "moveBlockUp",
+      input(doc, "r/^q", { rootId: "n", visibleOrder: order }),
+    )
+    expect(moved.doc).toBeUndefined()
+    const duplicated = runCommand(
+      "duplicateBelow",
+      input(doc, "r/^p", { rootId: "n", visibleOrder: order }),
+    )
+    expect(duplicated.doc).toBeUndefined()
+    expect(duplicated.handled).toBe(true)
+  })
+
+  it("Enter on a heading still nests a child, which an up pivot on the heading hides", () => {
+    // insertBelow nests the new block under the heading with indentBlock, in
+    // the heading's own key direction, so it is a child. An up pivot on the
+    // heading hides that child (decision 6) — this is what the "upstream"
+    // setting already does today, which GW-5 pins with this test.
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["h"],
+      blocks: {
+        h: { id: "h", type: "h1", text: "Heading", children: [], upstream: ["m"] },
+        m: { id: "m", type: "text", text: "M", children: ["h"] },
+      },
+    }
+    const entered = runCommand(
+      "insertBelow",
+      input(doc, "h", { mode: "edit", visibleOrder: ["h"], directions: "downstream" }),
+    )
+    const childId = newBlockId(doc, entered.doc!)
+    expect(entered.doc!.blocks.h.children).toEqual([childId])
+
+    // With no pivot, the new child shows beneath h.
+    expect(
+      runCommand("selectFirstChild", input(entered.doc!, "h", { directions: "downstream" })).focus,
+    ).toEqual({ mode: "select", key: `h/${childId}` })
+
+    // With an up pivot on h, the pivot hides the child: the only row beneath
+    // h is its holder m, exactly as the "upstream" setting draws it today.
+    const up = new Map([["h", "up" as const]])
+    expect(
+      runCommand(
+        "selectFirstChild",
+        input(entered.doc!, "h", { directions: "downstream", pivots: up }),
+      ).focus,
+    ).toEqual({ mode: "select", key: "h/^m" })
+  })
+})
