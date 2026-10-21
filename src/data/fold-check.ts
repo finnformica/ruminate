@@ -3,16 +3,17 @@ import { linkEntityId, type Entity } from "./events"
 import type { GraphSnapshot } from "./graph"
 
 /**
- * The fold check (docs/event-only-sync.md, item 7): the app reads the fold
- * of the log, and the tables are still written beside it. The runtime reads
- * both out as the app would read them and lists where they differ, for
- * Settings → Storage. After a batch it reads only the entities the batch
- * touched (`readOutEntities`, `NoteStore.getLiveRows`); the whole of both is
- * read only when asked (`requestFullFoldCheck`). A week of checks with no
- * difference is what lets the row pull go (ES-9).
+ * The fold check (docs/event-only-sync.md, "The cache"): the client's tables
+ * are a cache of the fold of its log. The runtime compares, as the app
+ * would read each, the cache with the fold of the log, and the cache with
+ * the replica's pulled rows, and lists where they differ, for Settings →
+ * Storage. After a batch it reads only the entities the batch touched
+ * (`foldOfLog`, `readOutEntities`, `NoteStore.getLiveRows`); the whole of
+ * both is read only when asked (`requestFullFoldCheck`). A week of checks
+ * with no difference is what lets the row pull go (ES-9).
  */
 
-/** One side of the check: live rows, as the app reads them. */
+/** One side of the check: rows, as the app reads them. */
 export interface FoldCheckRows {
   nodes: readonly NodeRow[]
   links: readonly LinkRow[]
@@ -31,8 +32,8 @@ export function rowsOfGraph(graph: GraphSnapshot, views: readonly ViewRow[]): Fo
 /**
  * Every field the app reads is compared, so a new field is compared without
  * a change here. `seq` is not: it is the pull cursor's measure, the app does
- * not read it, and the push moves it on the tables outside the runtime's
- * queue (`markEventsPushed`), before the fold sees the event placed.
+ * not read it, and the push moves it on the cache outside the runtime's
+ * queue (`markEventsPushed`), before the log's copy of the replica's does.
  */
 const IGNORED = new Set(["seq"])
 
@@ -51,20 +52,24 @@ function differingFields(fold: object, tables: object): string[] {
 /** The key of an entity in the check's result: `block blk_1`. */
 export const foldCheckKey = (entity: Entity, id: string) => `${entity} ${id}`
 
+/** What each side of a check is called in its lines. */
+export type FoldCheckSides = readonly [first: string, second: string]
+
 function compare<R extends object>(
   entity: Entity,
-  fold: ReadonlyMap<string, R>,
-  tables: ReadonlyMap<string, R>,
+  first: ReadonlyMap<string, R>,
+  second: ReadonlyMap<string, R>,
   skip: (entity: Entity, id: string) => boolean,
+  sides: FoldCheckSides,
   out: Map<string, string>,
 ) {
-  for (const id of new Set([...fold.keys(), ...tables.keys()])) {
+  for (const id of new Set([...first.keys(), ...second.keys()])) {
     if (skip(entity, id)) continue
     const key = foldCheckKey(entity, id)
-    const a = fold.get(id)
-    const b = tables.get(id)
-    if (!b) out.set(key, `${key}: only in the fold`)
-    else if (!a) out.set(key, `${key}: only in the tables`)
+    const a = first.get(id)
+    const b = second.get(id)
+    if (!b) out.set(key, `${key}: only in ${sides[0]}`)
+    else if (!a) out.set(key, `${key}: only in ${sides[1]}`)
     else {
       const fields = differingFields(a, b)
       if (fields.length > 0) out.set(key, `${key}: ${fields.join(", ")}`)
@@ -73,14 +78,14 @@ function compare<R extends object>(
 }
 
 /**
- * Where the fold and the tables differ, one line per entity, by its key:
- * `block blk_1: text, updated_at`, or `link a|b|child: only in the tables`.
- * `skip` leaves out an entity the check cannot judge yet: one the fold holds
- * past the rows the last pull brought.
+ * Where two sides differ, one line per entity, by its key:
+ * `block blk_1: text, updated_at`, or `link a|b|child: only in the cache`.
+ * `skip` leaves out an entity the check cannot judge yet.
  */
 export function foldDifferences(
-  fold: FoldCheckRows,
-  tables: FoldCheckRows,
+  first: FoldCheckRows,
+  second: FoldCheckRows,
+  sides: FoldCheckSides,
   skip: (entity: Entity, id: string) => boolean = () => false,
 ): Map<string, string> {
   const out = new Map<string, string>()
@@ -88,8 +93,8 @@ export function foldDifferences(
     new Map(rows.map((row) => [row.id, row]))
   const byLink = (rows: readonly LinkRow[]) =>
     new Map(rows.map((row) => [linkEntityId(row.source_id, row.destination_id, row.kind), row]))
-  compare("block", byId(fold.nodes), byId(tables.nodes), skip, out)
-  compare("link", byLink(fold.links), byLink(tables.links), skip, out)
-  compare("view", byId(fold.views), byId(tables.views), skip, out)
+  compare("block", byId(first.nodes), byId(second.nodes), skip, sides, out)
+  compare("link", byLink(first.links), byLink(second.links), skip, sides, out)
+  compare("view", byId(first.views), byId(second.views), skip, sides, out)
   return out
 }

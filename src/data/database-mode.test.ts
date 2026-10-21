@@ -605,18 +605,10 @@ describe("database mode reads the fold", () => {
     cursor,
   })
 
-  it("boots from the newest snapshot and the log after it, not from the tables", async () => {
-    const driver = createNodeSqlDriver()
-    const clock = { now: 1_000 }
-    await seedNotes(await openSqlNoteStore(driver, { now: () => clock.now }), {
-      "note-a": NOTE_A,
-    })
-    // A day on, the open writes a snapshot of that log; note-b is the tail.
-    clock.now += 25 * 60 * 60 * 1_000
-    const store = await openSqlNoteStore(driver, { now: () => clock.now })
-    expect(await driver.exec("SELECT position FROM snapshots")).toHaveLength(1)
-    await seedNotes(store, { "note-b": NOTE_B })
-    // A row only the tables hold: the screen does not read it.
+  it("boots from the cache with nothing to fold, and the full check finds a row the log lacks", async () => {
+    const store = await openSqlNoteStore(createNodeSqlDriver())
+    await seedNotes(store, { "note-a": NOTE_A, "note-b": NOTE_B })
+    // A row only the cache holds: no event made it.
     await store.applyPull({
       nodes: [{ id: "blk_x", type: "paragraph", text: "x", props: null, updated_at: 1 }],
       links: [],
@@ -630,7 +622,7 @@ describe("database mode reads the fold", () => {
     const { source } = stubSource({ since: nothingSince("500") })
     await boot({ store, source, foldCheckMs: 0 })
     expect(files()).toEqual({ "note-a.md": NOTE_A, "note-b.md": NOTE_B })
-    expect(graph().nodes.has("blk_x")).toBe(false)
+    expect(graph().nodes.has("blk_x")).toBe(true)
 
     // Nothing was touched, so no check ran. The full check finds the row.
     await checked()
@@ -639,7 +631,7 @@ describe("database mode reads the fold", () => {
     expect(foldCheck()).toMatchObject({
       full: true,
       differences: 1,
-      sample: ["block blk_x: only in the tables"],
+      sample: ["block blk_x: only in the cache"],
     })
   })
 
@@ -647,16 +639,17 @@ describe("database mode reads the fold", () => {
     const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }, 1, "100") })
     const store = await boot({ source, foldCheckMs: 0 })
     await checked()
-    // The full pull touched the note's node, its block and the link.
-    expect(foldCheck()).toMatchObject({ full: false, compared: 3, differences: 0 })
+    // The pull touched the note's node, its block and the link: their
+    // events against the cache, and their replica rows against it.
+    expect(foldCheck()).toMatchObject({ full: false, compared: 6, differences: 0 })
 
-    // A row only the tables hold: no batch touches it.
+    // A row only the cache holds: no batch touches it.
     const plant = (nodes: NodeRow[]) =>
       store.applyPull({ nodes, links: [], views: [], deleteNodes: [], deleteLinks: [] })
     await plant([{ id: "blk_x", type: "paragraph", text: "x", props: null, updated_at: 1 }])
     writeNote("note-b", NOTE_B)
     await flushDatabaseMode()
-    // A row a batch touched, changed under the fold.
+    // A row a batch touched, changed under the log.
     const block = graph().nodes.get("blk_b000000000")!
     await plant([{ ...block, text: "planted" }])
     await checked()
@@ -677,7 +670,7 @@ describe("database mode reads the fold", () => {
     await requestFullFoldCheck()
     expect(foldCheck()?.sample.sort()).toEqual([
       "block blk_b000000000: text",
-      "block blk_x: only in the tables",
+      "block blk_x: only in the cache",
     ])
   })
 
@@ -703,15 +696,38 @@ describe("database mode reads the fold", () => {
     expect(foldCheck()).toMatchObject({ differences: 0 })
   })
 
+  it("a pulled row that differs from the cache is a replica difference", async () => {
+    const { source } = stubSource({
+      full: {
+        nodes: [{ id: "note-d", type: "note", text: "other", props: null, updated_at: 1, seq: 1 }],
+        links: [],
+        views: [],
+        cursor: "1",
+      },
+      events: [placed(1, "note-d", "D")],
+    })
+    await boot({ source, foldCheckMs: 0 })
+    expect(graph().nodes.get("note-d")?.text).toBe("D")
+    await checked()
+    expect(foldCheck()?.sample).toContain("replica block note-d: text, updated_at")
+  })
+
   it("an event past the rows the pull brought is not a difference", async () => {
     // Another device wrote between the pull of rows and the pull of events.
     const { source } = stubSource({
-      full: { nodes: [], links: [], views: [], cursor: "0" },
-      events: [placed(1, "note-c", "C")],
+      full: {
+        nodes: [{ id: "note-c", type: "note", text: "C", props: null, updated_at: 1_000, seq: 1 }],
+        links: [],
+        views: [],
+        cursor: "1",
+      },
+      events: [
+        placed(1, "note-c", "C"),
+        { ...placed(2, "note-c", "C2"), action: "update", patch: { text: "C2" } } as LoggedEvent,
+      ],
     })
-    const store = await boot({ source, foldCheckMs: 0 })
-    expect(graph().nodes.get("note-c")?.text).toBe("C")
-    expect((await store.getGraph()).nodes.has("note-c")).toBe(false)
+    await boot({ source, foldCheckMs: 0 })
+    expect(graph().nodes.get("note-c")?.text).toBe("C2")
     await checked()
     expect(foldCheck()).toMatchObject({ differences: 0 })
   })
@@ -753,9 +769,9 @@ describe("database mode event log", () => {
         [2, "replica", 111],
       ],
     )
-    // Only the rows the pull brings are written: the log is history, not
-    // the cache.
-    expect(await noteOf(store, "note-b")).toBeNull()
+    // The pulled events are the cache: note-b is there, though no row of
+    // it was pulled.
+    expect(await noteOf(store, "note-b")).not.toBeNull()
 
     requestDatabasePull()
     await flushDatabaseMode()
@@ -1066,9 +1082,12 @@ describe("database mode stamps", () => {
     await store.setMeta("hlc_last", AHEAD)
     const { source } = stubSource({ since: () => remoteChanges({}, 200, "600") })
     await boot({ store, source, replica: stubReplica().handle })
+    // The seeded events are the test's own; only the session's are judged.
+    const seeded = (await store.unpushedEvents()).length
     writeNote("note-c", "- C\n  id:: blk_c000000000\n")
     await flushDatabaseMode()
     const stamps = (await store.unpushedEvents())
+      .slice(seeded)
       .map((event) => event.hlc)
       .filter((stamp) => stamp !== undefined)
     expect(stamps.length).toBeGreaterThan(0)
@@ -1161,6 +1180,8 @@ describe("database mode views", () => {
   // The atom reads the fold, whose rows carry their events' `seq`: the pull
   // cursor's measure, not what these tests are about.
   const views = () => [...jotai.get(viewsAtom).values()].map(({ seq: _, ...row }) => row)
+  const stored = async (store: NoteStore) =>
+    (await store.getViews()).map(({ seq: _, ...row }) => row)
 
   it("boots with the store's views, and a pull brings the replica's", async () => {
     const { source } = stubSource({
@@ -1168,7 +1189,7 @@ describe("database mode views", () => {
     })
     const store = await boot({ source, replica: stubReplica().handle })
     expect(views()).toEqual([viewRow()])
-    expect(await store.getViews()).toEqual([viewRow()])
+    expect(await stored(store)).toEqual([viewRow()])
     expect([...jotai.get(viewRootIdsAtom)]).toEqual(["note-a"])
   })
 
@@ -1226,7 +1247,7 @@ describe("database mode views", () => {
     requestDatabasePull()
     await flushDatabaseMode()
 
-    expect(await store.getViews()).toEqual([viewRow({ updated_at: 500 })])
+    expect(await stored(store)).toEqual([viewRow({ updated_at: 500 })])
     expect(views()).toEqual([viewRow({ updated_at: 500 })])
   })
 
@@ -1249,7 +1270,7 @@ describe("database mode views", () => {
     requestDatabasePull()
     await flushDatabaseMode()
 
-    expect(await store.getViews()).toEqual([viewRow({ updated_at: 60 })])
+    expect(await stored(store)).toEqual([viewRow({ updated_at: 60 })])
     expect(views()).toEqual([viewRow({ updated_at: 60 })])
   })
 

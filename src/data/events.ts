@@ -360,7 +360,7 @@ function upcast(event: RuminateEvent): RuminateEvent {
  * `alive` is a register as well. An event sets a field only when its stamp is
  * higher than the field's, so a field it does not name keeps its value.
  */
-interface StampedEntity<F> {
+export interface StampedEntity<F> {
   fields: Partial<F>
   stamps: Partial<Record<keyof F | "alive", string>>
   alive: boolean

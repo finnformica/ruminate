@@ -9,9 +9,10 @@ app runs on it.
 
 ## The architecture: database-authoritative, blocks-first
 
-**Decided 2026-10-20: event-only sync.** Once it lands, the browser keeps
-only the event log and two snapshots; it has no `nodes`, `link` or `views`
-tables, and it pushes and pulls events only. A conflict resolves by a hybrid
+**Decided 2026-10-20: event-only sync.** Once it lands, the browser pushes
+and pulls events only. The log is the truth, and the browser's `nodes`,
+`link` and `views` become an indexed cache of its fold, updated in the same
+transaction as each batch and read lazily by index (revised 2026-10-21). A conflict resolves by a hybrid
 logical clock stamp, and `seq` is only the sync cursor. The server keeps
 its tables as projections for MCP, search and shares. This section
 describes the app until then. See [event-only-sync.md](./event-only-sync.md).
@@ -67,8 +68,9 @@ Everything above `src/data` reads one atom: `graphSnapshotAtom`, the
 `GraphSnapshot` of every live row (`nodes` by id, `childLinks` by parent, and
 the same link rows again as `parentLinks` by child — the reverse index, a
 by-product of building the snapshot rather than a scan of it).
-`src/data/database-mode.ts` serves the fold of the device's event log into
-`databaseGraphAtom` (docs/event-sourcing.md, The app reads the fold), and
+`src/data/database-mode.ts` serves the store's cache of the fold of its
+event log into `databaseGraphAtom` (docs/event-sourcing.md, "The client's
+tables are a cache of the fold"), and
 `graphSnapshotAtom` reads it whenever a user is
 signed in. `notesAtom` is derived from it per page (`src/data/note-meta.ts`:
 title, props, tasks, headings, memoized
@@ -91,17 +93,19 @@ atom signed out.
 
 ### Boot, saves, and sync
 
-**Decided 2026-10-20.** With event-only sync, boot reads the newest
-snapshot and the log after it; a save appends events; the pull and the push
-carry events only, and there is no row pull, row push or full push
+**Decided 2026-10-20.** With event-only sync, boot opens the store and
+reads the cache by index; a save appends events and updates the cache in
+one transaction; the pull and the push carry events only, and there is no
+row pull, row push or full push (revised 2026-10-21)
 ([event-only-sync.md](./event-only-sync.md)). The text below is the app
 until then.
 
 - **Boot:** open the SQL store (OPFS; per-tab fallback to memory) → serve
-  the fold of the local log (`loadFold`) into the atoms immediately → pull
-  rows from D1 (full corpus on first boot; `?since=<cursor>` after) into the
-  store, then the events past the events cursor into the store and the fold,
-  and from it into the atoms. The
+  the cache's live rows into the atoms immediately, with nothing to fold →
+  pull rows from D1 (full corpus on first boot; `?since=<cursor>` after), kept
+  only for the fold check → pull the events past the events cursor into the
+  log and the cache, in one transaction per page, and from it into the
+  atoms. The
   pull cursor persists in the store's `meta` table (`d1_pull_cursor`), so it
   can never outlive the data it describes. Two bindings are checked before any
   local row is read: the store's `store_owner` (a different signed-in identity
@@ -121,7 +125,7 @@ until then.
   per-row last-writer-wins at the replica makes concurrent tab pushes safe.
 - **Cross-device sync:** visibility change, window focus, and coming back
   online (plus a retry timer after a failed pull) re-run the since-cursor
-  pull. Pulled events flow through the fold into the graph atom (pending
+  pull. Pulled events flow through the cache into the graph atom (pending
   local ops re-applied on top); the open editor re-walks its page from the
   new snapshot, so another device's edit shows the moment it lands.
 - **Offline:** the OPFS store serves everything. While the browser says it
