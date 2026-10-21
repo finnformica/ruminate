@@ -35,12 +35,15 @@ import {
 export const imagesEnabled: boolean = import.meta.env.VITE_IMAGES_ENABLED === "true"
 
 export type ImageUploadErrorCode =
-  "signed_out" | "unsupported" | "too_large" | "disabled" | "failed"
+  "signed_out" | "unsupported" | "too_large" | "disabled" | "failed" | "offline"
 
 export class ImageUploadError extends Error {
   constructor(
     public readonly code: ImageUploadErrorCode,
     message: string,
+    /** For `offline`: the picture as it would have gone up (fitted), to keep
+     * on the device until it can (`image-queue.ts`). */
+    public readonly file?: File,
   ) {
     super(message)
     this.name = "ImageUploadError"
@@ -120,6 +123,9 @@ async function measure(file: File): Promise<Measured | null> {
 
 const signedOut = () => new ImageUploadError("signed_out", "Sign in to add images")
 
+/** Whether the browser says it has no network. */
+const browserOffline = () => typeof navigator !== "undefined" && navigator.onLine === false
+
 /**
  * Upload one picture; resolves to what the block should remember.
  *
@@ -133,18 +139,29 @@ const signedOut = () => new ImageUploadError("signed_out", "Sign in to add image
  * makes a reader of the thumbnail, never asks for one that is not there
  * yet. A thumbnail that cannot be made or will not go up costs nothing:
  * the tile draws the picture itself and makes one on first view.
+ *
+ * A request that never reaches the server (no network, or a session that
+ * cannot be refreshed while offline) throws `offline`, carrying the fitted
+ * file, for the caller to keep on the device and send later
+ * (`image-queue.ts`). Everything that can be checked without the network —
+ * the format, the size — is checked first, so a picture that is kept is
+ * one the server will take.
  */
 export async function uploadImage(picked: File): Promise<UploadedImage> {
   const file = (await fitImage(picked)) ?? picked
   const rejected = rejectImage(file)
   if (rejected) throw rejected
+  const posted = sessionFetch(
+    "/api/images",
+    { method: "POST", headers: { "Content-Type": file.type }, body: file },
+    signedOut,
+  ).catch((error: unknown) => {
+    if (error instanceof ImageUploadError && !browserOffline()) throw error
+    throw new ImageUploadError("offline", "You are offline", file)
+  })
   const [size, response, thumb] = await Promise.all([
     measure(file),
-    sessionFetch(
-      "/api/images",
-      { method: "POST", headers: { "Content-Type": file.type }, body: file },
-      signedOut,
-    ),
+    posted,
     thumbnailCopy(file).catch(() => null),
   ])
   if (response.status === 501) {
@@ -186,8 +203,17 @@ async function putThumbnail(id: string, thumb: Blob): Promise<boolean> {
  * behind it. The block's `props` stay empty until the asset id arrives, so
  * nothing provisional is ever written to the graph; this map is the only
  * place the preview exists, and it lives no longer than the upload.
+ *
+ * A picture added offline stays here, `queued`, for as long as it waits on
+ * the device (`image-queue.ts`), and is put back here from the device when
+ * the app starts again.
  */
-const pendingPreviews = new Map<string, string>()
+interface PendingPreview {
+  url: string
+  /** Kept on the device, waiting for the network, rather than going up. */
+  queued: boolean
+}
+const pendingPreviews = new Map<string, PendingPreview>()
 const pendingSubscribers = new Set<() => void>()
 
 const emitPending = () => {
@@ -195,20 +221,39 @@ const emitPending = () => {
 }
 
 /** Draw `file` for `blockId` until its upload finishes. */
-export function beginPendingImage(blockId: string, file: File): void {
+export function beginPendingImage(blockId: string, file: Blob): void {
   releasePendingImage(blockId)
   if (typeof URL.createObjectURL !== "function") return
-  pendingPreviews.set(blockId, URL.createObjectURL(file))
+  pendingPreviews.set(blockId, { url: URL.createObjectURL(file), queued: false })
+  emitPending()
+}
+
+/** Draw `file` for `blockId` as waiting for the network: the preview it
+ * already has, marked queued, or a new one (the app started again). */
+export function queuePendingImage(blockId: string, file: Blob): void {
+  const known = pendingPreviews.get(blockId)
+  if (known?.queued) return
+  if (known) pendingPreviews.set(blockId, { ...known, queued: true })
+  else if (typeof URL.createObjectURL === "function") {
+    pendingPreviews.set(blockId, { url: URL.createObjectURL(file), queued: true })
+  } else return
   emitPending()
 }
 
 /** Forget a preview — the upload landed, or it failed and the row is going. */
 export function releasePendingImage(blockId: string): void {
-  const url = pendingPreviews.get(blockId)
-  if (url === undefined) return
+  const preview = pendingPreviews.get(blockId)
+  if (preview === undefined) return
   pendingPreviews.delete(blockId)
-  URL.revokeObjectURL(url)
+  URL.revokeObjectURL(preview.url)
   emitPending()
+}
+
+/** Forget every queued preview (signing out: they are one account's). */
+export function releaseQueuedImages(): void {
+  for (const [blockId, preview] of [...pendingPreviews]) {
+    if (preview.queued) releasePendingImage(blockId)
+  }
 }
 
 function subscribePending(notify: () => void): () => void {
@@ -219,7 +264,7 @@ function subscribePending(notify: () => void): () => void {
 }
 
 /** The local preview for a block whose picture has not landed yet. */
-function usePendingImage(blockId: string): string | null {
+function usePendingImage(blockId: string): PendingPreview | null {
   return useSyncExternalStore(
     subscribePending,
     () => pendingPreviews.get(blockId) ?? null,
@@ -342,6 +387,8 @@ function useOnlineRetry(active: boolean): number {
 export interface ImageSource {
   src: string | null
   uploading: boolean
+  /** Uploading, but kept on the device until the network returns. */
+  queued: boolean
   failure: ImageFetchFailure | null
 }
 
@@ -399,11 +446,11 @@ export function useImageSrc(
       live = false
     }
   }, [image, variant, hold, attempt])
-  if (pending) return { src: pending, uploading: true, failure: null }
-  if (hold) return { src: null, uploading: false, failure: null }
-  if (src) return { src, uploading: false, failure: null }
-  if (!image) return { src: null, uploading: false, failure: "missing" }
-  return { ...state, uploading: false }
+  if (pending) return { src: pending.url, uploading: true, queued: pending.queued, failure: null }
+  if (hold) return { src: null, uploading: false, queued: false, failure: null }
+  if (src) return { src, uploading: false, queued: false, failure: null }
+  if (!image) return { src: null, uploading: false, queued: false, failure: "missing" }
+  return { ...state, uploading: false, queued: false }
 }
 
 /**
@@ -431,6 +478,7 @@ export function usePicture(
   return {
     src,
     uploading: thumb.uploading || picture.uploading,
+    queued: thumb.queued || picture.queued,
     failure: src ? null : (thumb.failure ?? picture.failure),
   }
 }

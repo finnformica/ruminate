@@ -41,6 +41,7 @@ import { requestDatabaseFlush } from "../data/database-mode"
 import { devicePosition } from "../data/device-position"
 import { readExifLocation } from "../data/exif-location"
 import { visionCopy } from "../data/image-fit"
+import { queueUpload } from "../data/image-queue"
 import {
   ImageUploadError,
   beginPendingImage,
@@ -577,18 +578,39 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
           : null
       void positioned
       void (async () => {
+        let toldOffline = false
         for (const { id, file } of queued) {
+          // Kept on the device to go up later: the row and its preview stay.
+          let kept = false
+          let exif: ImageLocation | null = null
           try {
-            const exif = source === "photos" ? await readExifLocation(file) : null
+            exif = source === "photos" ? await readExifLocation(file) : null
             const asset = await uploadImage(file)
             primeImageObjectUrl(asset.id, file)
             apply(imageUploadedOps(id, asset, exif ?? position))
             landed.add(id)
           } catch (error) {
+            // Offline: the picture waits on the device (src/data/image-queue.ts)
+            // and its row keeps what is known of it now — where it was
+            // taken, and a position that answers later — for the asset to
+            // join when it goes up.
+            if (error instanceof ImageUploadError && error.code === "offline") {
+              kept = await queueUpload(id, error.file ?? file)
+              if (kept) {
+                const location = exif ?? position
+                if (location) apply(imageLocationOps(store.get(graphSnapshotAtom), id, location))
+                landed.add(id)
+                if (!toldOffline) {
+                  toast("You are offline. The images upload when you are back online")
+                }
+                toldOffline = true
+                continue
+              }
+            }
             apply(deleteBlockOps(id, store.get(graphSnapshotAtom)))
             toast.error(error instanceof ImageUploadError ? error.message : "Image upload failed")
           } finally {
-            releasePendingImage(id)
+            if (!kept) releasePendingImage(id)
           }
         }
         void requestDatabaseFlush()

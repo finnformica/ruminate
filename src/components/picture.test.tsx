@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { fetchImageBlob } from "../data/image-cache"
-import { beginPendingImage, releasePendingImage } from "../data/images"
+import { beginPendingImage, queuePendingImage, releasePendingImage } from "../data/images"
 import { Picture } from "./picture"
 
 vi.mock("../data/image-cache", async (importOriginal) => {
@@ -239,6 +239,26 @@ describe("Picture", () => {
         />,
       )
       expect(screen.getByTestId("board-image-uploading")).toBeTruthy()
+      expect(fetched).not.toHaveBeenCalled()
+    } finally {
+      releasePendingImage(id)
+    }
+  })
+
+  it("says a picture added offline is waiting to upload, with no spinner", () => {
+    const id = "blk_queued000000"
+    queuePendingImage(id, new File(["png"], "a.png", { type: "image/png" }))
+    try {
+      render(
+        <Picture
+          block={{ id, text: "", props: null }}
+          name="block-image"
+          fit="natural"
+          detail="auto"
+        />,
+      )
+      expect(screen.getByTestId("block-image-queued").textContent).toBe("Waiting to upload")
+      expect(screen.queryByTestId("block-image-uploading")).toBeNull()
       expect(fetched).not.toHaveBeenCalled()
     } finally {
       releasePendingImage(id)

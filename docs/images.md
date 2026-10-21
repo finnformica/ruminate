@@ -255,6 +255,41 @@ clears a site's stored data after seven days without a visit, and has its
 own storage allowance. There is no dependable background work on iOS, so a
 picture is only ever kept by being seen in the app.
 
+## Uploading offline
+
+A picture added with no network is kept on the device and goes up later
+(`src/data/image-queue.ts`). `uploadImage` checks everything it can without
+the network first — the format, the size, the fitting — so a picture that
+is kept is one the server will take. When the request then cannot reach
+the server, it throws `offline` with the fitted file, and the caller (the
+editor's `insertImages`, a board's `addImages`) keeps the row instead of
+taking it out. A plain toast says so once for the batch.
+
+The bytes go in the Cache API, in one cache per signed-in identity
+(`ruminate-uploads-<github id>`), bound as the picture cache is. It is a
+cache of its own, not the picture cache: that one lets its oldest pictures
+go to stay under its cap, and a picture here is the only copy there is.
+
+While it waits, the row draws the picture from the device with a small
+**Waiting to upload** badge in place of the spinner (`Picture`, `-queued`).
+The preview is put back from the device when the app starts again, so a
+reload or a closed app loses nothing.
+
+The queue drains (`useUploadQueue`, mounted at the app root) once the
+notes have loaded, when the browser comes back online, and when the app
+comes back to the front. Each picture is sent; its asset id, size and
+ThumbHash are added to the props its row has by then (its layout, a
+board's `lat`/`lon`), as one `setProps`. A row that has gone — deleted,
+or undone — lets its picture go unsent. One the server refuses is taken
+out with a toast, as a failed upload is; one that still cannot reach the
+server waits for the next drain.
+
+Nothing provisional reaches the graph: the row has no asset until the
+picture lands, as during any upload. Other devices see no longer gap than
+before, because the row itself only syncs when this device is online, and
+the drain runs at that same time. iOS has no dependable background work,
+so a waiting picture goes up only while the app is open.
+
 ## Reading through MCP
 
 An agent (docs/mcp-server.md) sees an image block as its row: the caption
@@ -310,10 +345,6 @@ thousand screenshots stays inside the free allowance. Check Cloudflare's
 pricing page for the current figures.
 
 ## Not yet
-
-- **Uploading offline.** An upload still needs the network: a picture pasted
-  offline fails and its row is taken back out. Queuing the bytes on the
-  device and sending them when the network returns is future work.
 
 - **Deleting bytes.** Deleting an image block (or its note) leaves the asset
   in the bucket: a block delete is undoable, and the bytes must outlive the
