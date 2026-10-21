@@ -68,8 +68,10 @@ edit carries a week-old stamp, so it does not win over a newer one.
 Events are never rewritten, and the events already in the log have no
 stamp. An event without one gets a stamp derived at read time, the same on
 every reader: `ms` from its `at`, `counter` 0, and `seq:<seq>` in place of
-the device. The upcast (`src/data/events.ts`) does this, beside the other
-shape changes.
+the device, with `seq` padded to 15 digits (`seq:000000000000042`), so two
+derived stamps in the same ms compare in `seq` order. One function,
+`eventStamp`, gives an event's stamp, its own or derived. The client and
+the Worker both call it (ES-2, ES-4), so they cannot disagree.
 
 ## The fold
 
@@ -105,6 +107,11 @@ The fold extends the one the calendar reads today (`fold`,
 `stateAt` and the calendar's own order (`byPlace`) do not change: they read
 the log by `seq` for history, which is a different question from "what is
 the state now".
+
+**A row's `seq`.** The fold by stamp (`foldByStamp`) keeps the highest
+applied `seq` as the row's `seq`, whichever event won each field. That
+`seq` is the pull cursor's measure, and it is what the server's projection
+keeps for a row too, so the two agree (ES-5, commit `0b50d46`).
 
 ## The client
 
@@ -177,6 +184,10 @@ The server keeps the log and its projection:
   `planEventAppend` (`worker/handlers/event-log.ts`) sets a field only when
   the event's stamp is higher. **fold(events) == tables** still holds, and
   `GET /api/replica/verify` still checks it.
+- **No Worker rollback past migration 0025** (ES-3). From `0025` on, the
+  projection resolves by the `stamps` column. A Worker from before it does
+  not write that column, so the stamps go out of step with the rows it
+  writes. Once `0025` is applied, roll the Worker forward only.
 - **The row door** (`writeRows`) stays for the writers that cannot speak
   events: the MCP server and shares. The events it derives carry a server
   stamp: the server's clock, a counter for the position in the append, and
@@ -213,7 +224,9 @@ A one-time fold from today's tables.
   writes snapshot 0 from its `nodes`, `link` and `views` rows. Each field
   takes a stamp derived from the row's `updated_at` (`ms`), counter 0, and
   `migration` as the device. Its log position is the highest row id in
-  `events` at that moment. From then on the fold is the state. The tables
+  `events` at that moment. A `meta` flag records that snapshot 0 is
+  written, and it alone decides whether to write it, so the fold from the
+  tables runs once (ES-6). From then on the fold is the state. The tables
   stay, written and compared, until a later step removes them.
 - **On the server.** No data moves. The new `hlc` and `stamps` columns start
   empty. An empty `hlc` derives its stamp at read time (above). An empty
