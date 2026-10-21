@@ -1,15 +1,22 @@
 // tenant-guard: exempt — these tests read and plant raw snapshot rows on purpose.
 import { describe, expect, it } from "vitest"
+import type { LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
 import { parse } from "../blocks/parse"
+import { createBlockIndexer, type BlockHit } from "../utils/block-search"
 import {
   eventStamp,
   foldByStamp,
+  linkEntityId,
+  rowsToEvents,
   toGraphSnapshot,
   toViewRows,
   type LoggedEvent,
+  type RowWrite,
   type RuminateEvent,
 } from "./events"
+import { docToGraph } from "./graph"
 import { encodeHlc } from "./hlc"
+import { createNotesBuilder } from "./note-meta"
 import { docToOps } from "./ops"
 import {
   encodeSnapshot,
@@ -165,6 +172,81 @@ describe("the store's snapshots", () => {
     expect(await store.loadFold()).toEqual(whole)
     await driver.exec("DELETE FROM snapshots")
     expect(await store.loadFold()).toEqual(whole)
+  })
+
+  /** A device's log as a sequence of row-pushes becomes (`rowsToEvents`),
+   * each batch placed with the next `seq` — how a real replica's log is
+   * built, used here to fold the one log two ways: from a snapshot and
+   * tail, and whole. */
+  function logBuilder() {
+    const held = {
+      nodes: new Map<string, NodeRow>(),
+      links: new Map<string, LinkRow>(),
+      views: new Map<string, ViewRow>(),
+    }
+    const log: LoggedEvent[] = []
+    return {
+      push(write: RowWrite) {
+        const events = rowsToEvents(held, write, {
+          batch: `bat_${log.length}`,
+          device: "dev.tab",
+          now: 0,
+        })
+        const placed = events.map((event, i) => ({ ...event, seq: log.length + i + 1 }))
+        log.push(...placed)
+        for (const node of write.nodes) held.nodes.set(node.id, node)
+        for (const view of write.views ?? []) held.views.set(view.id, view)
+        for (const link of write.links)
+          held.links.set(linkEntityId(link.source_id, link.destination_id, link.kind), link)
+        return placed
+      },
+      get log() {
+        return log
+      },
+    }
+  }
+
+  it("the note list and the block index after a boot from a snapshot equal those after a full fold (ES-8)", async () => {
+    const { store, clock } = await open()
+    const builder = logBuilder()
+
+    const NOTE_A = [
+      "- [ ] buy milk",
+      "  id:: blk_aaaaaaaaaa",
+      "- grocery run",
+      "  id:: blk_bbbbbbbbbb",
+      "",
+    ].join("\n")
+    await store.applyPulledEvents(builder.push(docToGraph("note-a", NOTE_A, clock.now)))
+
+    // A day on: a snapshot is written for note-a, and what follows is the
+    // tail `loadFold` must apply on top of it.
+    clock.now += DAY
+
+    const NOTE_B = ["- [ ] walk the dog", "  id:: blk_cccccccccc", ""].join("\n")
+    await store.applyPulledEvents(builder.push(docToGraph("note-b", NOTE_B, clock.now)))
+
+    const NOTE_A_EDITED = NOTE_A.replace("buy milk", "buy oat milk")
+    await store.applyPulledEvents(builder.push(docToGraph("note-a", NOTE_A_EDITED, clock.now)))
+
+    const fromSnapshot = toGraphSnapshot(await store.loadFold())
+    const fromWholeLog = toGraphSnapshot(foldByStamp(builder.log))
+    expect(fromSnapshot).toEqual(fromWholeLog)
+
+    // Nothing about search is stored: the note list and the block index are
+    // read straight off each graph, and the two graphs (one booted from a
+    // snapshot plus its tail, the other folded from the whole log) agree.
+    const notesFromSnapshot = createNotesBuilder()(fromSnapshot)
+    const notesFromWholeLog = createNotesBuilder()(fromWholeLog)
+    expect(notesFromSnapshot).toEqual(notesFromWholeLog)
+    expect(notesFromSnapshot.size).toBe(2)
+
+    const byBlockId = (hits: readonly BlockHit[]) =>
+      [...hits].sort((a, b) => a.blockId.localeCompare(b.blockId))
+    const indexFromSnapshot = createBlockIndexer()([...notesFromSnapshot.values()], fromSnapshot)
+    const indexFromWholeLog = createBlockIndexer()([...notesFromWholeLog.values()], fromWholeLog)
+    expect(byBlockId(indexFromSnapshot.hits)).toEqual(byBlockId(indexFromWholeLog.hits))
+    expect(indexFromSnapshot.hits.map((hit) => hit.text)).toContain("buy oat milk")
   })
 
   it("keeps a keystroke that coalesces away an event the newest snapshot took", async () => {
