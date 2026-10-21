@@ -144,6 +144,21 @@ the fold includes.
 - **Cost.** A snapshot holds every live and dead entity: about the size of
   today's three tables. Two of them, plus the log (about 1.5 times the
   tables, docs/event-sourcing.md), is about 3.5 times today's tables.
+- **The first open, measured** (ES-7, #285; `node:sqlite`, and the
+  browser's OPFS store is slower). A device with a long log and no snapshot
+  folds the whole log before the store is ready. A later open reads the
+  newest snapshot and its tail (`loadFold`). "Check" is one comparison of
+  the fold with the tables, at most once in 10 seconds while the tables
+  stay.
+
+  | events  | nodes  | first open | `loadFold` | read-out | check  | snapshot |
+  | ------- | ------ | ---------- | ---------- | -------- | ------ | -------- |
+  | 10,000  | 3,379  | 157 ms     | 27 ms      | 8 ms     | 70 ms  | 3.6 MB   |
+  | 50,000  | 16,892 | 811 ms     | 129 ms     | 50 ms    | 280 ms | 18 MB    |
+  | 100,000 | 33,784 | 1.7 s      | 328 ms     | 101 ms   | 777 ms | 36 MB    |
+  | 200,000 | 67,568 | 4.3 s      | 640 ms     | 223 ms   | 1.4 s  | 72 MB    |
+
+  Production held 3,711 rows, so it is near the first line.
 
 ### Write, push, pull
 
@@ -220,13 +235,18 @@ lock, lease or merge for agents for now.
 
 A one-time fold from today's tables.
 
-- **On the browser.** The first boot of the new build, with no snapshot,
-  writes snapshot 0 from its `nodes`, `link` and `views` rows. Each field
-  takes a stamp derived from the row's `updated_at` (`ms`), counter 0, and
-  `migration` as the device. Its log position is the highest row id in
-  `events` at that moment. A `meta` flag records that snapshot 0 is
-  written, and it alone decides whether to write it, so the fold from the
-  tables runs once (ES-6). From then on the fold is the state. The tables
+- **On the browser.** The first boot of the new build writes snapshot 0
+  from its `nodes`, `link` and `views` rows, tombstones too
+  (`snapshotZero`, `src/data/snapshot.ts`). Each row becomes the `create`
+  it amounts to (`rowsToEvents` against no rows), with no stamp, the row's
+  `updated_at` as its `at` and the row's `seq`. So each field takes the
+  stamp `eventStamp` derives for an old event: the row's `updated_at`,
+  counter 0 and `seq:<seq>`. That is the stamp the row's own last event
+  derives, so that event applied again changes nothing. Its log position
+  is the highest row id in `events` at that moment. A `meta` flag
+  (`snapshot_zero`) records that snapshot 0 is written, and it alone
+  decides whether to write it, because a snapshot from the log can exist
+  before it. So the fold from the tables runs once (ES-6). From then on the fold is the state. The tables
   stay, written and compared, until a later step removes them.
 - **On the server.** No data moves. The new `hlc` and `stamps` columns start
   empty. An empty `hlc` derives its stamp at read time (above). An empty
@@ -370,3 +390,22 @@ changelog file.
     - Tests: a version 2 client is refused with the update notice; MCP and
       share writes still land.
     - Depends on: ES-11, and the old bundles gone from use.
+
+### Built so far
+
+| plan item | PR              |
+| --------- | --------------- |
+| ES-1      | #271            |
+| ES-2      | #276            |
+| ES-3      | #281            |
+| ES-4      | #275            |
+| ES-5      | #280            |
+| ES-6      | #284            |
+| ES-7      | #285            |
+| ES-8      | in progress     |
+| ES-12     | #273, on `main` |
+
+The PRs are stacked, and merge in this order: ES-1, ES-2, ES-4, ES-3,
+ES-5, ES-6, ES-7, then GW-19 (#286, the view's `stack` field,
+docs/graph-walk.md) and ES-8.
+ES-12 does not depend on the stack and is on `main`.

@@ -989,6 +989,24 @@ on `main` first. A PR marked **blocked** waits for Finn.
 GW-1 to GW-7 and GW-19 can run before SV is on `main`. Run GW-8 to GW-17
 and GW-20 to GW-22 after it.
 
+### Built so far
+
+| plan item | PR   |
+| --------- | ---- |
+| GW-1      | #272 |
+| GW-2      | #274 |
+| GW-3      | #278 |
+| GW-4      | #279 |
+| GW-5      | #282 |
+| GW-6      | #277 |
+| GW-7      | #283 |
+| GW-19     | #286 |
+
+The walk PRs are stacked, and merge in this order: GW-1, GW-2, GW-3, GW-4,
+GW-6, GW-7. GW-5 is stacked on GW-4. GW-19 is stacked on the sync stack,
+after ES-7 (docs/event-only-sync.md, "Built so far"). GW-8 and the PRs after
+it wait for SV.
+
 ## Appendix A. Ruminate's walk before this design
 
 ### The pieces
