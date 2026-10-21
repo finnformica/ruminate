@@ -372,8 +372,8 @@ interface StampedEntity<F> {
    * by `seq` rejects such an event, and the two must agree on an in-order log.
    */
   created: boolean
-  /** The highest stamp applied, with that event's `seq` and `at`: the row's
-   * `seq` and `updated_at`. */
+  /** The highest stamp applied, with that event's `at`: the row's
+   * `updated_at`. `seq` is the highest `seq` applied: the row's `seq`. */
   stamp: string
   seq: number
   at: number
@@ -435,13 +435,13 @@ function applyByStamp(state: StampedState, raw: RuminateEvent): void {
   if (event.action === "create") entity.created = true
   if (stamp > entity.stamp) {
     entity.stamp = stamp
-    entity.seq = event.seq ?? 0
     entity.at = event.at
-  } else if (stamp === entity.stamp && (event.seq ?? 0) > entity.seq) {
-    // The same event, placed since it was first applied (a snapshot took it
-    // unpushed): it now has the `seq` the replica gave it.
-    entity.seq = event.seq ?? 0
   }
+  // `seq` is the pull cursor: the last event that touched the entity, not the
+  // highest stamp, as the replica's row holds it (`projectLog`,
+  // worker/handlers/event-log.ts). An event placed since it was first applied
+  // (a snapshot took it unpushed) brings its `seq` when it comes again.
+  entity.seq = Math.max(entity.seq, event.seq ?? 0)
   table.set(event.entity_id, entity)
 }
 

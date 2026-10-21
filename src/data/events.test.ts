@@ -688,7 +688,9 @@ describe("the fold by stamp", () => {
       expect(toGraphSnapshot(foldByStamp(order)).nodes.get("x")).toMatchObject({
         type: "h1",
         text: "from the phone",
-        seq: 3,
+        // The pull cursor: the last event that touched it, as the replica's
+        // row has it, though that event's stamp lost.
+        seq: 4,
       })
     }
     // The fold by seq is unchanged: the last event in seq order still wins.

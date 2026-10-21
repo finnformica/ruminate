@@ -67,7 +67,8 @@ Each row keeps the stamp of each of its registers in a `stamps` column:
   register, so the tables do not depend on the order the events arrive in.
 - A row takes the `at` of the event with the highest stamp as its
   `updated_at`, as `foldByStamp` does. Its `seq` is the last event that
-  touched it, not the highest stamp: `seq` is the pull cursor.
+  touched it, not the highest stamp: `seq` is the pull cursor. `foldByStamp`
+  keeps the same `seq`, the highest it has applied.
 - An event on an entity the replica does not hold is rejected unless it
   creates it, as the fold by `seq` does: an update cannot land before its
   create.
