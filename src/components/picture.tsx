@@ -65,7 +65,9 @@ export interface PictureState {
  * likeness once decoded; the picture itself, where `detail` asks for it,
  * is swapped in only once the browser has decoded it, so nothing paints
  * across the box as its bytes arrive. A picture still uploading draws its
- * local preview at once, under a spinner. One that is not on this device
+ * local preview at once, under a spinner — or, added offline and kept on
+ * the device until the network returns, under a "Waiting to upload" badge
+ * rather than a spinner, as nothing is moving. One that is not on this device
  * and cannot be fetched keeps its likeness with a small badge saying why,
  * and loads when the network comes back; only one the server has not got
  * is "Image unavailable".
@@ -77,8 +79,8 @@ export interface PictureState {
  * taller than `maxHeight`, the shape kept; in `cover` fit the caller's
  * `className` sizes it (a tile's `h-full w-full`). A picture of unknown
  * size (an external URL) is laid out as it loads. Test ids are `<name>`
- * on the `<img>`, and `<name>-placeholder`, `-uploading`, `-unreachable`
- * and `-missing` on the rest.
+ * on the `<img>`, and `<name>-placeholder`, `-uploading`, `-queued`,
+ * `-unreachable` and `-missing` on the rest.
  */
 export function Picture({
   block,
@@ -114,7 +116,7 @@ export function Picture({
   const likeness = thumbhash ? thumbHashDataUrl(thumbhash) : null
   const { ref: observe, near } = useNearView<HTMLElement>(NEAR_MARGIN, lazy)
   const { ref: measure, wantsFull } = useWantsFull(detail === "auto", width, height)
-  const { src, uploading, failure } = usePicture(block, {
+  const { src, uploading, queued, failure } = usePicture(block, {
     full: detail === "full" || (detail === "auto" && wantsFull),
     hold: lazy && !near,
   })
@@ -248,7 +250,9 @@ export function Picture({
           }}
         />
       ) : null}
-      {uploading ? (
+      {queued ? (
+        <QueuedBadge name={name} />
+      ) : uploading ? (
         <span
           aria-hidden
           data-testid={`${name}-uploading`}
@@ -292,15 +296,27 @@ function useWantsFull(
   return { ref: setElement, wantsFull: boxWidth !== null && boxWidth * ratio > thumbWidth }
 }
 
+/** A small note in a picture's corner, over the picture or its likeness. */
+const BADGE =
+  "absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full bg-bg-overlay-backdrop px-2 py-0.5 text-xs text-text-secondary backdrop-blur-lg"
+
+/** A picture added offline, kept on this device until it can go up
+ * (src/data/image-queue.ts). */
+function QueuedBadge({ name }: { name: string }) {
+  return (
+    <span data-testid={`${name}-queued`} className={BADGE}>
+      <OfflineIcon16 aria-hidden className="size-3" />
+      Waiting to upload
+    </span>
+  )
+}
+
 /** Why a picture that is surely there is not showing: this device has no
  * copy, and the server cannot be reached to fetch one. */
 function UnreachableBadge({ name }: { name: string }) {
   const { online } = useNetworkState()
   return (
-    <span
-      data-testid={`${name}-unreachable`}
-      className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full bg-bg-overlay-backdrop px-2 py-0.5 text-xs text-text-secondary backdrop-blur-lg"
-    >
+    <span data-testid={`${name}-unreachable`} className={BADGE}>
       <OfflineIcon16 aria-hidden className="size-3" />
       {online === false ? "Offline" : "Couldn’t load image"}
     </span>

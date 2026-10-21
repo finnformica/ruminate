@@ -19,6 +19,19 @@ The filter and sort a note opens with, and its place in the Views list, are **no
 
 A **view** is a way into the graph: a node to start at, what of its subgraph to keep (a filter), how to lay that out (a sort), and where it sits in the list. Views are rows in a table of their own (`views`, docs/graph-storage.md), one per node, keyed by the user rather than by the node's owner: the view is _your_ row about a node, which is what lets a block in a note someone shared with you be a view from your side, and what lets a view outlive a block's every move — a moved block keeps its id, so it keeps its view; a duplicated one has a new id, so the copy has none. Deleting a node deletes its view with it.
 
+**Decided 2026-10-20: a View saves a stack.** A View is a bookmark of a
+pane's stack of frames, and a View with one frame is the simple case. Its
+row's `root_id` is the top frame's root, and a `stack` field holds the
+frames below it, each with its root, filter and pivots. Opening a View
+restores the whole stack, so the breadcrumb shows the path it was saved
+with, and that path picks the parent of a block held in more than one
+place. A path that no longer holds drops the frames below the break and
+keeps the top. In the Views list a View's name is followed by its path as
+a hint (for example "Todos" with "Ruminate › Tasks"). A note with no View
+shows only in the frame rooted at the hidden root: the list of all notes.
+See [graph-walk.md](./graph-walk.md), "Views save stacks" and
+"Decisions".
+
 **The Views list is the view rows.** A node is in the list exactly when its row says so (`pinned`), and that holds for a note, a board and a block alike: a note is not special, a row is what makes a node an entry point into the graph, and the node's type only says how it draws — a note as its outline, a board as its wall, a block as a focused view of that block and what is beneath it. Every note and every board is created with such a row, written in the same stroke as the node, and the ones from before `migrations/0021` were given theirs; a block gets one when you make it a view (**Add to Views** in its right-click menu). The row holds how the node opens and where it sits beside the listing itself, so a listed note's row says at least "listed", and more once a view is saved on it or it is dragged.
 
 **Remove from Views** takes a node off the list and nothing else. On a note it clears the listing alone: the saved filter and sort stay, since the note still opens — from search, **Recent**, a link, its address, the calendar — and should open the way it was left, and its place in the order stays, so **Add to Views** puts it back where it was. On a block the row goes whole, filter and sort included, because away from the list a block is just a block in its note. (A note that saved nothing and was never dragged has nothing in its row but the listing, and that row goes the same way; on the wire the two are one tombstone.) Only your own notes have the pair: a note shared with you is listed under **Shared**, by the share, and has no place in your list to give up.
@@ -36,6 +49,12 @@ A block view's row opens its note focused on that block, and the row's **⋯** m
 **The list is yours to order.** The sort menu over the heading — **Name**, **Recently updated**, **Manual** — orders notes and block views together, by the name on the row or by when it was last edited. In **Manual**, drag a row, or use **Move up** and **Move down** in its menu, and it stays where you put it: the order is the views' `sort_key`, the same fractional index a block's child link carries, so a move rewrites one row — every row in the list has one, since the row is what lists it. Nothing is keyed until the first drag — until then the list is the notes in their order (docs/graph-storage.md, "Ordering notes"), then the block views in index order — and a view added later joins the end of what has been ordered rather than jumping the queue. Notes and blocks are one list and one order: a block can sit between two notes.
 
 ## Saved views
+
+**Decided 2026-10-20.** **Save as view** saves the pane's stack, up to the
+frame on screen, into the View of the top frame's root. **Add to Views**
+still lists the root alone. Until the `stack` field is built, a save writes
+the filter and the sort, as below ([graph-walk.md](./graph-walk.md), "Views
+save stacks").
 
 Any note, and any block, can save a **filter** and a **sort** — the narrowing a note's header applies (see [query-language.md](./query-language.md), "Filtering a note in place"). With them the thing is not just a place but a view in the fuller sense: "the open to-dos under this heading" rather than "this heading". Saving one does not put a note in the Views list or take it out — the listing is the row's own field — and a block that saves one has a row, and joins the list by it. The fields are one row: the filter, the sort, the listing and the place of a node are fields of the same view.
 

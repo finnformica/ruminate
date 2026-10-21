@@ -7,6 +7,7 @@ import { emptyBlock, indentBlock, insertAfter, removeBlock } from "../blocks/ops
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
+import type { ExpandedRule } from "../blocks/view"
 import { buildGraphSnapshot, childIdsOf, docToGraph } from "../data/graph"
 import { viewByRootAtom, viewsAtom } from "../data/views"
 import {
@@ -350,6 +351,53 @@ describe("useNoteDoc, filtered", () => {
     // Unfiltered, a removed row is a removed row (an unlink — the block
     // itself survives in the note's Unassigned basket).
     expect(childIdsOf(store.get(graphSnapshotAtom), NOTE_ID)).toEqual(["blk_shop000000"])
+    unsubscribe()
+  })
+})
+
+/**
+ * **Focusing a folded heading shows what is beneath it.** A heading leads
+ * its focus as the view's title, always open (`buildRows`), so the walk
+ * must load its children whatever the reader's fold on it says — the fold
+ * a top-level heading has in the note is keyed by its bare id, the very key
+ * the focus walk gives the root. Untitled roots keep their fold: they are a
+ * row with a chevron of their own.
+ */
+describe("useNoteDoc, in focus", () => {
+  const HEADED = `# Plans
+  id:: blk_plans00000
+  - first
+    id:: blk_first00000
+- Loose
+  id:: blk_loose00000
+  - inside
+    id:: blk_inside0000
+`
+  const closedOn =
+    (id: string): ExpandedRule =>
+    (key) =>
+      key !== id
+
+  function renderFocus(wrapper: Wrapper, focusBlockId: string, expanded: ExpandedRule) {
+    return renderHook(
+      () => useNoteDoc({ noteId: NOTE_ID, defaultDoc: EMPTY_DOC, focusBlockId, expanded }),
+      { wrapper },
+    )
+  }
+
+  it("walks a folded heading's children, the heading drawn open", async () => {
+    const { wrapper, unsubscribe } = await signedOutStore(HEADED)
+    const { result } = renderFocus(wrapper, "blk_plans00000", closedOn("blk_plans00000"))
+    expect(rows(result.current.doc, result.current.context)).toEqual(["Plans", "  first"])
+    expect(result.current.collapsed.has("blk_plans00000")).toBe(false)
+    unsubscribe()
+  })
+
+  it("keeps the fold on a focused block that is not a heading", async () => {
+    const { wrapper, unsubscribe } = await signedOutStore(HEADED)
+    const { result } = renderFocus(wrapper, "blk_loose00000", closedOn("blk_loose00000"))
+    expect(rows(result.current.doc, result.current.context)).toEqual(["Loose"])
+    expect(result.current.collapsed.has("blk_loose00000")).toBe(true)
     unsubscribe()
   })
 })

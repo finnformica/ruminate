@@ -2,8 +2,9 @@ import { useAtomValue, useStore } from "jotai"
 import { useCallback, useMemo, useRef } from "react"
 import { isEmptyDoc } from "../blocks/ops"
 import type { LinkPivots } from "../blocks/query"
-import type { BlockDoc, ChangeHint } from "../blocks/types"
+import { asBlockType, type BlockDoc, type ChangeHint } from "../blocks/types"
 import type { ExpandedRule } from "../blocks/view"
+import { titlesFocus } from "../blocks/markers"
 import { basketDoc, basketToOps } from "../data/basket"
 import { filteredView, filterReach, type FilteredView } from "../data/filter-view"
 import { isNoteType, type LinkDirections } from "../data/graph"
@@ -110,11 +111,21 @@ export function useNoteDoc({
   )
   const view = useMemo<FilteredView | null>(() => {
     if (noteId === undefined) return null
+    // A heading in focus is the view's title, always open (`titlesFocus`,
+    // src/blocks/view.ts), so the walk opens it whatever the reader's fold
+    // on it says: a top-level heading folded in the note has its fold under
+    // its bare id, the very key the focus walk gives the root, and the walk
+    // would stop there with nothing beneath the title.
+    const focusType = focusBlockId ? snapshot.nodes.get(focusBlockId)?.type : undefined
+    const viewRule: ExpandedRule | undefined =
+      expanded && focusBlockId && focusType && titlesFocus(asBlockType(focusType))
+        ? (key, level, type) => key === focusBlockId || expanded(key, level, type)
+        : expanded
     // Narrowed or not, the walk is the lazy one, by the view's fold rule: a
     // narrowed walk tells a branch's fate from `reach`, not from a walk
     // beneath it, and sorts each row's children as it builds the row.
     return filteredView(snapshot, noteId, focusBlockId, narrowing, {
-      expanded,
+      expanded: viewRule,
       keep,
       pivots,
       directions,
