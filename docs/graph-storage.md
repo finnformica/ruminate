@@ -60,8 +60,9 @@ Everything above `src/data` reads one atom: `graphSnapshotAtom`, the
 `GraphSnapshot` of every live row (`nodes` by id, `childLinks` by parent, and
 the same link rows again as `parentLinks` by child — the reverse index, a
 by-product of building the snapshot rather than a scan of it).
-`src/data/database-mode.ts` serves the SQL store's rows into
-`databaseGraphAtom`, and `graphSnapshotAtom` reads it whenever a user is
+`src/data/database-mode.ts` serves the fold of the device's event log into
+`databaseGraphAtom` (docs/event-sourcing.md, The app reads the fold), and
+`graphSnapshotAtom` reads it whenever a user is
 signed in. `notesAtom` is derived from it per page (`src/data/note-meta.ts`:
 title, props, tasks, headings, memoized
 by the page's row identities), search and the block index read those notes,
@@ -84,8 +85,10 @@ atom signed out.
 ### Boot, saves, and sync
 
 - **Boot:** open the SQL store (OPFS; per-tab fallback to memory) → serve
-  local rollups into the atoms immediately → pull rows from D1 (full corpus on
-  first boot; `?since=<cursor>` after) → apply into the store and atoms. The
+  the fold of the local log (`loadFold`) into the atoms immediately → pull
+  rows from D1 (full corpus on first boot; `?since=<cursor>` after) into the
+  store, then the events past the events cursor into the store and the fold,
+  and from it into the atoms. The
   pull cursor persists in the store's `meta` table (`d1_pull_cursor`), so it
   can never outlive the data it describes. Two bindings are checked before any
   local row is read: the store's `store_owner` (a different signed-in identity
@@ -105,7 +108,7 @@ atom signed out.
   per-row last-writer-wins at the replica makes concurrent tab pushes safe.
 - **Cross-device sync:** visibility change, window focus, and coming back
   online (plus a retry timer after a failed pull) re-run the since-cursor
-  pull. Applied rows flow through the store into the graph atom (pending
+  pull. Pulled events flow through the fold into the graph atom (pending
   local ops re-applied on top); the open editor re-walks its page from the
   new snapshot, so another device's edit shows the moment it lands.
 - **Offline:** the OPFS store serves everything. While the browser says it

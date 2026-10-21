@@ -50,6 +50,9 @@ export interface StorageDiagnostics {
   writeErrorCount: number
   /** D1 replication state; null until the push loop has started. */
   replica: ReplicaDiagnostics | null
+  /** The last check of the fold against the tables (`fold-check.ts`); null
+   * until the first. `sample` is the first few of `differences`. */
+  foldCheck: { at: number; differences: number; sample: string[] } | null
 }
 
 export const OFF_STORAGE_DIAGNOSTICS: StorageDiagnostics = {
@@ -60,6 +63,7 @@ export const OFF_STORAGE_DIAGNOSTICS: StorageDiagnostics = {
   writeErrors: [],
   writeErrorCount: 0,
   replica: null,
+  foldCheck: null,
 }
 
 export const storageDiagnosticsAtom = atom<StorageDiagnostics>(OFF_STORAGE_DIAGNOSTICS)

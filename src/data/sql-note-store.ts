@@ -67,7 +67,7 @@ import type { SqlDriver, SqlStatement, SqlValue } from "./sql-driver"
  * is the log's append order: every event, made here or pulled, takes the next
  * one, and an event the replica places moves to the next one, so the tail past
  * a snapshot carries its `seq`. `loadFold` reads the newest snapshot that
- * parses, then the tail. Nothing in the app reads the fold yet.
+ * parses, then the tail. The runtime reads it at boot, and the app shows it.
  *
  * **Snapshot 0** (`snapshotZero`): the first open of this build folds the
  * tables into a snapshot at the last position, once (a `meta` flag). From
@@ -271,9 +271,14 @@ async function loadMemGraph(driver: SqlDriver): Promise<{ nodes: NodeRow[]; link
     driver.exec(
       "SELECT id, type, text, props, updated_at, notes_id, seq FROM nodes WHERE deleted_at IS NULL",
     ),
+    // A live link with a tombstoned end is not read: `buildGraphSnapshot`
+    // drops it when it sees the tombstone, and only the live nodes are read
+    // here. The fold reads out the same graph (`toGraphSnapshot`).
     driver.exec(
       "SELECT source_id, destination_id, kind, sort_key, updated_at, seq FROM link " +
-        "WHERE deleted_at IS NULL",
+        "WHERE deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM nodes " +
+        "WHERE nodes.id IN (link.source_id, link.destination_id) " +
+        "AND nodes.deleted_at IS NOT NULL)",
     ),
   ])
   return { nodes: nodeRows.map(toNodeRow), links: linkRows.map(toLinkRow) }

@@ -20,8 +20,10 @@ import type { GraphSnapshot } from "./graph"
  * without changing callers.
  */
 export interface NoteStore {
-  /** The live graph — every non-tombstoned node and child link — indexed for
-   * walking (`docFromGraph`, `noteDoc`). What the app renders from. */
+  /** The live graph of the tables — every non-tombstoned node, and every
+   * child link whose ends are live — indexed for walking (`docFromGraph`,
+   * `noteDoc`). The app renders from the fold (`loadFold`); the fold check
+   * compares the two (`src/data/fold-check.ts`). */
   getGraph(): Promise<GraphSnapshot>
   /**
    * Record a batch of events this device made and apply them to the rows, in
@@ -63,7 +65,8 @@ export interface NoteStore {
    * The fold by stamp of the whole log (`foldByStamp`): the newest snapshot
    * that parses, then every event after the position it covers
    * (`src/data/snapshot.ts`). The store writes the snapshots itself, after a
-   * batch and at open. Nothing in the app reads this yet.
+   * batch and at open. The runtime reads it once, at boot, and holds the fold
+   * from then on (`database-mode.ts`).
    */
   loadFold(): Promise<StampedState>
   /** Every row of every corpus table, **tombstones included** — the replica

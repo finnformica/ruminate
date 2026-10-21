@@ -49,7 +49,7 @@ function StorageDiagnosticsPanel({
   diagnostics: StorageDiagnostics
   status: DatabaseModeStatus
 }) {
-  const { status, persistence, notes, writeErrors, writeErrorCount } = diagnostics
+  const { status, persistence, notes, writeErrors, writeErrorCount, foldCheck } = diagnostics
 
   return (
     <div className="flex flex-col gap-2 border-t border-border-secondary pt-4 text-sm leading-5">
@@ -77,7 +77,28 @@ function StorageDiagnosticsPanel({
                 ? new Date(modeStatus.lastPullAt).toLocaleTimeString()
                 : "Never"}
         </dd>
+        {/* The app reads the fold of the log; the tables are still written
+            beside it. A difference here is what keeps the row pull. */}
+        <dt>Fold check</dt>
+        <dd className={foldCheck && foldCheck.differences > 0 ? "!text-text-danger" : ""}>
+          {foldCheck === null
+            ? "Not run"
+            : `${
+                foldCheck.differences === 0
+                  ? "Matches"
+                  : foldCheck.differences === 1
+                    ? "1 difference"
+                    : `${foldCheck.differences} differences`
+              } (${formatDiagnosticTime(foldCheck.at)})`}
+        </dd>
       </dl>
+      {foldCheck && foldCheck.sample.length > 0 ? (
+        <DiagnosticList label={`Fold differences (${foldCheck.differences})`}>
+          {foldCheck.sample.map((difference) => (
+            <li key={difference}>{difference}</li>
+          ))}
+        </DiagnosticList>
+      ) : null}
       {/* A failed pull can leave the note list empty with no other symptom, so
           the reason is shown rather than only kept in state. */}
       {modeStatus.lastPullError ? (

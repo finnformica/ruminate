@@ -460,7 +460,9 @@ export function foldByStamp(
 }
 
 /** The rows the fold by stamp projects to: every created entity, with its
- * tombstones, as `projectRows` gives them for the fold by `seq`. */
+ * tombstones, as `projectRows` gives them for the fold by `seq`. An entity
+ * no placed event has touched has no `seq`, as its row in the store has none
+ * until the push lands (`markEventsPushed`). */
 function stampedRows(state: StampedState) {
   const created = <F>(table: Map<string, StampedEntity<F>>) => {
     const out = new Map<string, Projected<F>>()
@@ -471,11 +473,15 @@ function stampedRows(state: StampedState) {
     }
     return out
   }
-  return projectRows({
+  const rows = projectRows({
     blocks: created(state.blocks),
     links: created(state.links),
     views: created(state.views),
   })
+  for (const row of [...rows.nodes, ...rows.links, ...rows.views]) {
+    if (row.seq === 0) delete row.seq
+  }
+  return rows
 }
 
 /** The live graph the fold by stamp holds. */

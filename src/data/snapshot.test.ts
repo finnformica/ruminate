@@ -228,6 +228,8 @@ describe("snapshot 0", () => {
           deleted_at: 30,
           seq: 6,
         },
+        // Never placed: no seq.
+        { id: "e", type: "paragraph", text: "e", props: null, updated_at: 25 },
       ],
       links: [
         {
@@ -238,15 +240,16 @@ describe("snapshot 0", () => {
           updated_at: 20,
           seq: 4,
         },
+        // Live, to a tombstone: a delete on one device, a move on another.
         {
           source_id: "a",
           destination_id: "c",
           kind: "child",
           sort_key: "a1",
           updated_at: 30,
-          deleted_at: 30,
           seq: 6,
         },
+        { source_id: "a", destination_id: "e", kind: "child", sort_key: "a2", updated_at: 25 },
       ],
       views: [
         {
@@ -302,6 +305,12 @@ describe("snapshot 0", () => {
     expect(zero.views.get("vw_a")?.stamps.pinned).toBe(derived(10, 5))
     // A tombstone is held, dead, from its deleted_at.
     expect(zero.blocks.get("c")).toMatchObject({ alive: false, deleted_at: 30, created: true })
+    // Both read-outs drop the live link to the tombstone, and give a row
+    // never placed no seq.
+    const graph = await store.getGraph()
+    expect(graph.childLinks.get("a")?.map((link) => link.destination_id)).toEqual(["b", "e"])
+    expect(graph.nodes.get("e")).not.toHaveProperty("seq")
+    expect(toGraphSnapshot(zero).nodes.get("e")).not.toHaveProperty("seq")
   })
 
   it("runs once, though a snapshot of the log was already there", async () => {

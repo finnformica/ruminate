@@ -19,8 +19,8 @@ import {
  *
  * A snapshot is a cache of the log, not history: the log is never compacted,
  * and a snapshot that is lost or does not parse costs only a longer fold.
- * The store writes them (`sql-note-store.ts`); nothing in the app reads the
- * fold yet.
+ * The store writes them (`sql-note-store.ts`); the runtime reads the newest
+ * at boot (`loadFold`, `database-mode.ts`).
  *
  * **Snapshot 0** (docs/event-only-sync.md, item 6) is the one-time fold of
  * the store's tables into a snapshot (`snapshotZero`), so the fold holds
