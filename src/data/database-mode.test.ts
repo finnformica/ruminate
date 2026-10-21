@@ -23,6 +23,7 @@ import {
   flushDatabaseMode,
   isDatabaseModeActive,
   requestAmbientDatabasePull,
+  requestFullFoldCheck,
   requestDatabasePull,
   startDatabaseMode,
   stopDatabaseMode,
@@ -631,12 +632,53 @@ describe("database mode reads the fold", () => {
     expect(files()).toEqual({ "note-a.md": NOTE_A, "note-b.md": NOTE_B })
     expect(graph().nodes.has("blk_x")).toBe(false)
 
-    // The check finds the planted row.
+    // Nothing was touched, so no check ran. The full check finds the row.
     await checked()
+    expect(foldCheck()).toBeNull()
+    await requestFullFoldCheck()
     expect(foldCheck()).toMatchObject({
+      full: true,
       differences: 1,
       sample: ["block blk_x: only in the tables"],
     })
+  })
+
+  it("a check after a batch reads only what it touched, and keeps a difference until resolved", async () => {
+    const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }, 1, "100") })
+    const store = await boot({ source, foldCheckMs: 0 })
+    await checked()
+    // The full pull touched the note's node, its block and the link.
+    expect(foldCheck()).toMatchObject({ full: false, compared: 3, differences: 0 })
+
+    // A row only the tables hold: no batch touches it.
+    const plant = (nodes: NodeRow[]) =>
+      store.applyPull({ nodes, links: [], views: [], deleteNodes: [], deleteLinks: [] })
+    await plant([{ id: "blk_x", type: "paragraph", text: "x", props: null, updated_at: 1 }])
+    writeNote("note-b", NOTE_B)
+    await flushDatabaseMode()
+    // A row a batch touched, changed under the fold.
+    const block = graph().nodes.get("blk_b000000000")!
+    await plant([{ ...block, text: "planted" }])
+    await checked()
+    expect(foldCheck()).toMatchObject({
+      full: false,
+      differences: 1,
+      sample: ["block blk_b000000000: text"],
+    })
+    expect(foldCheck()!.compared).toBeLessThan(5)
+
+    // A later batch elsewhere keeps it.
+    writeNote("note-a", "- A again\n  id:: blk_a000000000\n")
+    await flushDatabaseMode()
+    await checked()
+    expect(foldCheck()).toMatchObject({ differences: 1 })
+
+    // The full check finds both.
+    await requestFullFoldCheck()
+    expect(foldCheck()?.sample.sort()).toEqual([
+      "block blk_b000000000: text",
+      "block blk_x: only in the tables",
+    ])
   })
 
   it("an edit and a pulled event both reach the fold, and the check finds no difference", async () => {

@@ -51,8 +51,16 @@ export interface StorageDiagnostics {
   /** D1 replication state; null until the push loop has started. */
   replica: ReplicaDiagnostics | null
   /** The last check of the fold against the tables (`fold-check.ts`); null
-   * until the first. `sample` is the first few of `differences`. */
-  foldCheck: { at: number; differences: number; sample: string[] } | null
+   * until the first. `full` when it read every row, else only what batches
+   * touched; `compared` is how many entities it read. `differences` counts
+   * every difference not yet seen resolved, and `sample` is the first few. */
+  foldCheck: {
+    at: number
+    full: boolean
+    compared: number
+    differences: number
+    sample: string[]
+  } | null
 }
 
 export const OFF_STORAGE_DIAGNOSTICS: StorageDiagnostics = {

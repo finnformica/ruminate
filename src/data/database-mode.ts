@@ -1,6 +1,7 @@
 import { atom, getDefaultStore } from "jotai"
 import {
   LEGACY_TIMESTAMP_CURSOR_FLOOR,
+  type GraphDiff,
   type ReplicaChangesBody,
   type ViewRow,
 } from "../../worker/handlers/replica-payload"
@@ -16,17 +17,26 @@ import {
   coalesceTyping,
   eventStamp,
   foldByStamp,
+  linkEntityId,
   opsToEvents,
+  readOutEntities,
   toGraphSnapshot,
   toViewRows,
   viewChangeToEvent,
   type Entity,
+  type EntityKeys,
   type EventContext,
   type LoggedEvent,
   type RuminateEvent,
   type StampedState,
 } from "./events"
-import { FOLD_CHECK_SAMPLE, foldDifferences } from "./fold-check"
+import {
+  FOLD_CHECK_SAMPLE,
+  foldCheckKey,
+  foldDifferences,
+  rowsOfGraph,
+  type FoldCheckRows,
+} from "./fold-check"
 import { buildGraphSnapshot, isNoteType, type GraphSnapshot } from "./graph"
 import { decodeHlc, encodeHlc, receiveHlc, tickHlc, type Hlc } from "./hlc"
 import { applyOps, notesTouchedBy, type Op } from "./ops"
@@ -217,7 +227,8 @@ const PULL_RETRY_MS = 60_000
 const OPS_FLUSH_MS = 150
 /** Minimum gap between automatic repair rebuilds after a SQL write failure. */
 const REPAIR_COOLDOWN_MS = 30_000
-/** At most one fold check in this gap: the check reads every row. */
+/** At most one fold check of a batch in this gap: the touched keys gather
+ * meanwhile, so a typing run is one check. */
 const FOLD_CHECK_MS = 10_000
 
 /** The graph with nothing in it — what the atom holds before the store opens
@@ -324,6 +335,12 @@ interface DatabaseModeRuntime {
    * replica's, and the next pages are queued. The fold check waits. */
   logBehind: boolean
   foldCheckTimer: ReturnType<typeof setTimeout> | null
+  /** The entities batches and pulls touched since the last fold check. */
+  foldCheckKeys: { blocks: Set<string>; links: Set<string>; views: Set<string> }
+  /** Every difference the checks have found and not yet seen resolved, by
+   * key (`foldCheckKey`). A check of a batch replaces only the keys it
+   * read; a full check replaces all. */
+  foldDifferences: Map<string, string>
 }
 
 let runtime: DatabaseModeRuntime | null = null
@@ -430,6 +447,8 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     fold: null,
     logBehind: false,
     foldCheckTimer: null,
+    foldCheckKeys: noKeys(),
+    foldDifferences: new Map(),
   }
   runtime = activation
   // The sample corpus's views are the signed-out screen's; signed in, the
@@ -499,7 +518,6 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
       refreshGraph(activation)
       patchStatus({ status: "ready" })
       patchDiagnostics({ status: "ready", notes: noteCount(jotai().get(databaseGraphAtom)) })
-      scheduleFoldCheck(activation)
 
       // Start the push loop before the first pull, so the pull can consult
       // `pendingNoteIds` (edits made while the pull is in flight are safe).
@@ -785,6 +803,7 @@ async function flushOps(activation: DatabaseModeRuntime) {
   // The fold takes the batch first: it is what the screen shows already. A
   // store write that fails is repaired from the atom.
   if (activation.fold) foldByStamp(events, activation.fold)
+  touchEvents(activation, events)
   try {
     if (events.length > 0) {
       await activation.store.applyEvents(events, {
@@ -819,54 +838,115 @@ function refreshGraph(activation: DatabaseModeRuntime) {
   jotai().set(viewsAtom, applyViewRows(views, activation.pendingViews))
 }
 
-/** Queue a fold check, at most one per `FOLD_CHECK_MS`. Called after each
- * batch: an edit, a pull, the boot. */
+const noKeys = () => ({
+  blocks: new Set<string>(),
+  links: new Set<string>(),
+  views: new Set<string>(),
+})
+
+/** Note the entities a batch of events names, for the next fold check. */
+function touchEvents(activation: DatabaseModeRuntime, events: readonly RuminateEvent[]) {
+  const keys = activation.foldCheckKeys
+  for (const event of events) {
+    const table =
+      event.entity === "block" ? keys.blocks : event.entity === "link" ? keys.links : keys.views
+    table.add(event.entity_id)
+  }
+}
+
+/** Note the rows a pull wrote to the tables, for the next fold check. */
+function touchRows(activation: DatabaseModeRuntime, plan: GraphDiff) {
+  const keys = activation.foldCheckKeys
+  for (const node of plan.nodes) keys.blocks.add(node.id)
+  for (const id of plan.deleteNodes) keys.blocks.add(id)
+  for (const link of plan.links) {
+    keys.links.add(linkEntityId(link.source_id, link.destination_id, link.kind))
+  }
+  for (const [source, destination, kind] of plan.deleteLinks) {
+    keys.links.add(linkEntityId(source, destination, kind))
+  }
+  for (const view of plan.views) keys.views.add(view.id)
+}
+
+/** Queue a fold check of what batches touched, at most one per
+ * `FOLD_CHECK_MS`. Called after each batch: an edit, a pull. */
 function scheduleFoldCheck(activation: DatabaseModeRuntime) {
   if (activation.foldCheckTimer !== null) return
   activation.foldCheckTimer = setTimeout(() => {
     activation.foldCheckTimer = null
-    if (runtime === activation) enqueue(() => checkFold(activation))
+    if (runtime === activation) enqueue(() => checkFold(activation, false))
   }, activation.options.foldCheckMs ?? FOLD_CHECK_MS)
+}
+
+/**
+ * Settings action: compare the whole fold with the whole tables now, and
+ * resolve once it has run. The checks after a batch read only what the
+ * batch touched; this one reads every row.
+ */
+export function requestFullFoldCheck(): Promise<void> {
+  const activation = runtime
+  if (!activation) return Promise.resolve()
+  return enqueue(() => checkFold(activation, true))
 }
 
 /**
  * Compare the fold with the tables, as the app reads each (`fold-check.ts`),
  * and record the result for Settings → Storage. Runs on the queue, so no
- * write lands between the two reads. An entity the fold holds past the row
- * cursor is left out: the events pull runs after the row pull, so another
- * device's write can reach the fold first, and its row comes with the next
- * pull. While the events pull is behind, there is no check.
+ * write lands between the two reads. A check of a batch reads only the
+ * entities batches touched since the last check; `full` reads all.
+ *
+ * An entity the fold holds past the row cursor is left out: the events pull
+ * runs after the row pull, so another device's write can reach the fold
+ * first, and the next pull brings its row (and touches it again). While the
+ * events pull is behind, there is no check: the touched keys wait.
  */
-async function checkFold(activation: DatabaseModeRuntime) {
+async function checkFold(activation: DatabaseModeRuntime, full: boolean) {
   if (runtime !== activation || !activation.store || !activation.fold) return
   if (activation.logBehind) return
   const store = activation.store
+  const keys: EntityKeys = activation.foldCheckKeys
+  activation.foldCheckKeys = noKeys()
+  const compared = keys.blocks.size + keys.links.size + keys.views.size
+  if (!full && compared === 0) return
   try {
-    const [graph, views, cursor] = await Promise.all([
-      store.getGraph(),
-      store.getViews(),
-      store.getMeta(PULL_CURSOR_KEY),
-    ])
-    if (runtime !== activation || !activation.fold) return
     const fold = activation.fold
+    let tables: FoldCheckRows
+    let folded: FoldCheckRows
+    if (full) {
+      const [graph, views] = await Promise.all([store.getGraph(), store.getViews()])
+      tables = rowsOfGraph(graph, views)
+      folded = rowsOfGraph(toGraphSnapshot(fold), [...viewMapOf(toViewRows(fold)).values()])
+    } else {
+      tables = await store.getLiveRows(keys)
+      folded = readOutEntities(fold, keys)
+    }
+    const cursor = await store.getMeta(PULL_CURSOR_KEY)
+    if (runtime !== activation) return
     const pulledTo = cursor !== null && /^\d+$/.test(cursor) ? Number(cursor) : Infinity
     const ahead = (entity: Entity, id: string) => {
       const table = entity === "block" ? fold.blocks : entity === "link" ? fold.links : fold.views
       return (table.get(id)?.seq ?? 0) > pulledTo
     }
-    const differences = foldDifferences(
-      { graph: toGraphSnapshot(fold), views: [...viewMapOf(toViewRows(fold)).values()] },
-      { graph, views },
-      ahead,
-    )
-    if (differences.length > 0) {
-      console.warn("[ruminate] the fold differs from the tables:", differences)
+    const found = foldDifferences(folded, tables, ahead)
+
+    const differences = full ? new Map<string, string>() : activation.foldDifferences
+    if (!full) {
+      for (const id of keys.blocks) differences.delete(foldCheckKey("block", id))
+      for (const id of keys.links) differences.delete(foldCheckKey("link", id))
+      for (const id of keys.views) differences.delete(foldCheckKey("view", id))
+    }
+    for (const [key, line] of found) differences.set(key, line)
+    activation.foldDifferences = differences
+    if (found.size > 0) {
+      console.warn("[ruminate] the fold differs from the tables:", [...found.values()])
     }
     patchDiagnostics({
       foldCheck: {
         at: Date.now(),
-        differences: differences.length,
-        sample: differences.slice(0, FOLD_CHECK_SAMPLE),
+        full,
+        compared: full ? folded.nodes.length + folded.links.length + folded.views.length : compared,
+        differences: differences.size,
+        sample: [...differences.values()].slice(0, FOLD_CHECK_SAMPLE),
       },
     })
   } catch (error) {
@@ -1033,6 +1113,7 @@ function runPull(activation: DatabaseModeRuntime) {
         await resetCursors(store)
         // The fold of the old log goes with it; the new log refills it.
         activation.fold = foldByStamp([])
+        activation.foldDifferences = new Map()
         if (useSince) body = await activation.source.pullFull()
         if (runtime !== activation) return
       }
@@ -1066,7 +1147,10 @@ function runPull(activation: DatabaseModeRuntime) {
         plan.deleteLinks.length
       // The rows still land in the tables, for the fold check. The screen
       // reads the fold, which the events pull below brings up to date.
-      if (planSize > 0) await store.applyPull(plan)
+      if (planSize > 0) {
+        await store.applyPull(plan)
+        touchRows(activation, plan)
+      }
       if (body.cursor !== null) await store.setMeta(PULL_CURSOR_KEY, body.cursor)
       await pullEventLog(activation, store)
 
@@ -1123,6 +1207,7 @@ async function pullEventLog(activation: DatabaseModeRuntime, store: NoteStore) {
     if (events.length > 0) {
       await store.applyPulledEvents(events)
       if (activation.fold) foldByStamp(events, activation.fold)
+      touchEvents(activation, events)
       // A device that has seen an edit stamps after it, whatever its clock
       // says. An event from before stamps moves it by the stamp it derives.
       for (const event of events) {

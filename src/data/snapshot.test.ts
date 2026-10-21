@@ -8,6 +8,7 @@ import {
   foldByStamp,
   linkEntityId,
   rowsToEvents,
+  readOutEntities,
   toGraphSnapshot,
   toViewRows,
   type LoggedEvent,
@@ -393,6 +394,26 @@ describe("snapshot 0", () => {
     expect(graph.childLinks.get("a")?.map((link) => link.destination_id)).toEqual(["b", "e"])
     expect(graph.nodes.get("e")).not.toHaveProperty("seq")
     expect(toGraphSnapshot(zero).nodes.get("e")).not.toHaveProperty("seq")
+
+    // The read-outs of named entities agree too, by the same rules.
+    const keys = {
+      blocks: new Set(["a", "b", "c", "e"]),
+      links: new Set(["a|b|child", "a|c|child", "a|e|child"]),
+      views: new Set(["vw_a"]),
+    }
+    const fold = readOutEntities(zero, keys)
+    const tables = await store.getLiveRows(keys)
+    const ids = (rows: { nodes: { id: string }[]; links: { destination_id: string }[] }) => [
+      rows.nodes.map((row) => row.id).sort(),
+      rows.links.map((row) => row.destination_id).sort(),
+    ]
+    expect(ids(fold)).toEqual([
+      ["a", "b", "e"],
+      ["b", "e"],
+    ])
+    expect(ids(tables)).toEqual(ids(fold))
+    expect(fold.views.map((row) => row.id)).toEqual(["vw_a"])
+    expect(tables.views.map((row) => row.id)).toEqual(["vw_a"])
   })
 
   it("runs once, though a snapshot of the log was already there", async () => {

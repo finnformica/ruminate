@@ -12,11 +12,12 @@ import { ensureCorpusSchema } from "./corpus-schema"
 import {
   coalesceTyping,
   netChanges,
+  type EntityKeys,
   type LoggedEvent,
   type NetChange,
   type RuminateEvent,
 } from "./events"
-import { buildGraphSnapshot } from "./graph"
+import { CHILD_KIND, buildGraphSnapshot } from "./graph"
 import type { NoteStore } from "./note-store"
 import {
   encodeSnapshot,
@@ -222,6 +223,8 @@ export async function openSqlNoteStore(
 
     getViews: () => loadViews(driver),
 
+    getLiveRows: (keys) => loadLiveRows(driver, keys),
+
     clear: async () => {
       await driver.batch([
         // tenant-exempt: a cache reset discards the local database wholesale —
@@ -267,21 +270,62 @@ export async function openSqlNoteStore(
 /** The LIVE graph — what the snapshot is built from. `seq` rides along: it is
  * what an edit of the row says it believed it was changing (`base_seq`). */
 async function loadMemGraph(driver: SqlDriver): Promise<{ nodes: NodeRow[]; links: LinkRow[] }> {
-  const [nodeRows, linkRows] = await Promise.all([
-    driver.exec(
-      "SELECT id, type, text, props, updated_at, notes_id, seq FROM nodes WHERE deleted_at IS NULL",
-    ),
-    // A live link with a tombstoned end is not read: `buildGraphSnapshot`
-    // drops it when it sees the tombstone, and only the live nodes are read
-    // here. The fold reads out the same graph (`toGraphSnapshot`).
-    driver.exec(
-      "SELECT source_id, destination_id, kind, sort_key, updated_at, seq FROM link " +
-        "WHERE deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM nodes " +
-        "WHERE nodes.id IN (link.source_id, link.destination_id) " +
-        "AND nodes.deleted_at IS NOT NULL)",
-    ),
-  ])
+  const [nodeRows, linkRows] = await Promise.all([driver.exec(LIVE_NODES), driver.exec(LIVE_LINKS)])
   return { nodes: nodeRows.map(toNodeRow), links: linkRows.map(toLinkRow) }
+}
+
+const LIVE_NODES =
+  "SELECT id, type, text, props, updated_at, notes_id, seq FROM nodes WHERE deleted_at IS NULL"
+// A live link with a tombstoned end is not read: `buildGraphSnapshot` drops
+// it when it sees the tombstone, and only the live nodes are read here. The
+// fold reads out the same graph (`toGraphSnapshot`, `readOutEntities`).
+const LIVE_LINKS =
+  "SELECT source_id, destination_id, kind, sort_key, updated_at, seq FROM link " +
+  "WHERE deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM nodes " +
+  "WHERE nodes.id IN (link.source_id, link.destination_id) " +
+  "AND nodes.deleted_at IS NOT NULL)"
+const LIVE_VIEWS =
+  "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, seq FROM views " +
+  "WHERE deleted_at IS NULL"
+
+/** Keys in one statement: well under SQLite's bound on parameters. */
+const KEYS_PER_READ = 300
+
+const inChunks = <T>(items: readonly T[]) =>
+  Array.from({ length: Math.ceil(items.length / KEYS_PER_READ) }, (_, i) =>
+    items.slice(i * KEYS_PER_READ, (i + 1) * KEYS_PER_READ),
+  )
+
+/** The live rows of the named entities, by the rules `loadMemGraph` and
+ * `loadViews` read the whole tables with (`NoteStore.getLiveRows`). */
+async function loadLiveRows(
+  driver: SqlDriver,
+  keys: EntityKeys,
+): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }> {
+  const marks = (n: number) => Array(n).fill("?").join(", ")
+  const nodes: NodeRow[] = []
+  for (const ids of inChunks([...keys.blocks])) {
+    const rows = await driver.exec(`${LIVE_NODES} AND id IN (${marks(ids.length)})`, ids)
+    nodes.push(...rows.map(toNodeRow))
+  }
+  const links: LinkRow[] = []
+  const linkKeys = [...keys.links].map((id) => id.split("|"))
+  for (const chunk of inChunks(linkKeys)) {
+    const rows = await driver.exec(
+      `${LIVE_LINKS} AND (${chunk
+        .map(() => "(source_id = ? AND destination_id = ? AND kind = ?)")
+        .join(" OR ")})`,
+      chunk.flat(),
+    )
+    // The graph holds child links only (`buildGraphSnapshot`).
+    links.push(...rows.map(toLinkRow).filter((link) => link.kind === CHILD_KIND))
+  }
+  const views: ViewRow[] = []
+  for (const ids of inChunks([...keys.views])) {
+    const rows = await driver.exec(`${LIVE_VIEWS} AND id IN (${marks(ids.length)})`, ids)
+    views.push(...rows.map(toViewRow))
+  }
+  return { nodes, links, views }
 }
 
 /** Every row, tombstones included — what replication has to carry. */
@@ -313,10 +357,7 @@ async function loadAllRows(
 /** Every LIVE view row — the entrypoints the sidebar and the note page read
  * (migrations/0015). Tombstones are for replication, not for reading. */
 async function loadViews(driver: SqlDriver): Promise<ViewRow[]> {
-  const rows = await driver.exec(
-    "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, seq FROM views " +
-      "WHERE deleted_at IS NULL",
-  )
+  const rows = await driver.exec(LIVE_VIEWS)
   return rows.map(toViewRow)
 }
 

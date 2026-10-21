@@ -295,33 +295,60 @@ the tables. The tables are still written and still pulled.
 - **Repair.** A repair rebuilds the tables and wipes the log. The fold in
   memory keeps it, and the events cursor goes back to 0, so the next pull
   brings the log back.
-- **The fold check** (`src/data/fold-check.ts`). After a batch (an edit, a
-  pull, the boot), at most once in 10 seconds, the runtime compares the fold
-  with the tables (`getGraph`, `getViews`). It compares every field of each
-  live node, child link and view, but not `seq`: the app does not read it,
-  and a push sets it on the tables before the fold sees the event placed. It
-  skips an entity the fold holds past the row cursor: the events pull runs
-  after the row pull, so another device's write can reach the fold first.
-  While the events pull is behind, there is no check. Settings → Storage
-  shows the result and the first 20 differences. A week with no difference
-  lets the row pull go (ES-9).
+- **The fold check** (`src/data/fold-check.ts`). It compares every field of
+  each live node, child link and view, but not `seq`: the app does not read
+  it, and a push sets it on the tables before the fold sees the event placed.
+  - **After a batch** (an edit, a pull), at most once in 10 seconds, it
+    compares only the entities the batches touched since the last check: the
+    events a flush wrote, the events a pull brought, and the rows the row
+    pull wrote. The fold side is `readOutEntities`, the tables side
+    `getLiveRows`, by the same rules as the whole read-outs.
+  - **Every row**, only from the "Check every row" button in Settings →
+    Storage (`requestFullFoldCheck`): `toGraphSnapshot` against `getGraph`.
+  - The runtime keeps every difference found until a later check of that
+    entity finds it resolved. A check of a batch replaces only the keys it
+    read; a full check replaces all.
+  - It skips an entity the fold holds past the row cursor: the events pull
+    runs after the row pull, so another device's write can reach the fold
+    first. While the events pull is behind, there is no check.
+  - Settings → Storage shows the result and the first 20 differences. A week
+    with no difference lets the row pull go (ES-9).
 - **The two read-outs agree.** A row never placed has no `seq` in either.
   A live link with a tombstoned end is in neither: `getGraph` reads only
   live nodes, so it leaves out such a link in SQL, as `buildGraphSnapshot`
   does when it sees the tombstone.
-- **Cost** (`node:sqlite`, a log of block creates, links and text edits; the
-  browser's OPFS store is slower). The first open of a device with a long
-  log and no snapshot folds the whole log once, before the store is ready.
+- **Cost** (`node:sqlite`, a log of block creates, links and text edits, and
+  a tail of 999 events past the snapshot; the browser's OPFS store is
+  slower). The first open of a device with a long log and no snapshot folds
+  the whole log once, before the store is ready. A later open is the open,
+  `loadFold` and the atoms. A batch check reads 10 entities.
 
-  | events  | nodes  | first open | `loadFold` | read-out | check  | snapshot |
-  | ------- | ------ | ---------- | ---------- | -------- | ------ | -------- |
-  | 10,000  | 3,379  | 157 ms     | 27 ms      | 8 ms     | 70 ms  | 3.6 MB   |
-  | 50,000  | 16,892 | 811 ms     | 129 ms     | 50 ms    | 280 ms | 18 MB    |
-  | 100,000 | 33,784 | 1.7 s      | 328 ms     | 101 ms   | 777 ms | 36 MB    |
-  | 200,000 | 67,568 | 4.3 s      | 640 ms     | 223 ms   | 1.4 s  | 72 MB    |
+  | events  | nodes  | first open | later open | full check | batch check |
+  | ------- | ------ | ---------- | ---------- | ---------- | ----------- |
+  | 10,000  | 3,379  | 128 ms     | 72 ms      | 55 ms      | 1.6 ms      |
+  | 100,000 | 33,784 | 1.8 s      | 654 ms     | 634 ms     | 2.1 ms      |
+  | 200,000 | 67,568 | 4.3 s      | 1.4 s      | 1.5 s      | 2.1 ms      |
 
   Production held 3,711 rows (above), so its first open is near the first
-  line. Each later open reads a snapshot (`loadFold`).
+  line.
+
+  Where a later open spends its time at 100,000 events (a 36 MB snapshot):
+
+  | step                                 | time   |
+  | ------------------------------------ | ------ |
+  | read the snapshot row (SQL)          | 59 ms  |
+  | `JSON.parse` of the snapshot         | 185 ms |
+  | the rest of `parseSnapshot` (checks) | 52 ms  |
+  | read the 999-event tail (SQL)        | 3 ms   |
+  | fold the tail (`foldByStamp`)        | 4 ms   |
+  | `loadFold` in all                    | 306 ms |
+  | `toGraphSnapshot` (the graph atom)   | 91 ms  |
+  | `toViewRows` + `viewMapOf` (views)   | 60 ms  |
+
+  The snapshot parse is most of `loadFold`; the tail is almost free. Two
+  more costs are not in the format: the store reads the `state` of both
+  kept snapshots (`loadSnapshots`), where it parses one; and `toViewRows`
+  reads out every block and link to keep the views.
 
 ### Cost, by construction
 

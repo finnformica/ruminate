@@ -1,5 +1,5 @@
 import type { GraphDiff, LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
-import type { LoggedEvent, RuminateEvent, StampedState } from "./events"
+import type { EntityKeys, LoggedEvent, RuminateEvent, StampedState } from "./events"
 import type { GraphSnapshot } from "./graph"
 
 /**
@@ -79,6 +79,10 @@ export interface NoteStore {
    * name a node somebody else owns, which is the whole reason it is a table.
    */
   getViews(): Promise<ViewRow[]>
+  /** The live rows of the named entities, by the rules `getGraph` and
+   * `getViews` read the whole tables with. The fold check after a batch
+   * reads only what the batch touched (`src/data/fold-check.ts`). */
+  getLiveRows(keys: EntityKeys): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }>
   /** Apply a planned pull (row upserts + deletes) in one transaction. Rows
    * land verbatim — remote `updated_at` and `deleted_at` are preserved. */
   applyPull(plan: GraphDiff): Promise<void>
