@@ -299,8 +299,8 @@ async function loadAllRows(
         "/* includes-deleted: as above */",
     ),
     driver.exec(
-      "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at, seq FROM views " +
-        "/* includes-deleted: as above */",
+      "SELECT id, root_id, filter, sort, pinned, sort_key, stack, updated_at, deleted_at, seq " +
+        "FROM views /* includes-deleted: as above */",
     ),
   ])
   return {
@@ -314,7 +314,7 @@ async function loadAllRows(
  * (migrations/0015). Tombstones are for replication, not for reading. */
 async function loadViews(driver: SqlDriver): Promise<ViewRow[]> {
   const rows = await driver.exec(
-    "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, seq FROM views " +
+    "SELECT id, root_id, filter, sort, pinned, sort_key, stack, updated_at, seq FROM views " +
       "WHERE deleted_at IS NULL",
   )
   return rows.map(toViewRow)
@@ -547,7 +547,7 @@ const insertEventStatement = (event: RuminateEvent): SqlStatement => ({
 const COLUMNS = {
   nodes: ["type", "text", "props", "notes_id"],
   link: ["sort_key"],
-  views: ["root_id", "filter", "sort", "pinned", "sort_key"],
+  views: ["root_id", "filter", "sort", "pinned", "sort_key", "stack"],
 } as const
 
 type Table = keyof typeof COLUMNS
@@ -642,10 +642,11 @@ function upsertViewStatement(view: ViewRow): SqlStatement {
     // tenant-exempt: the local store is one user per browser profile; there is
     // no second tenant in an OPFS database (src/data/corpus-schema.ts).
     sql:
-      "INSERT INTO views (id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at, seq) " +
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+      "INSERT INTO views (id, root_id, filter, sort, pinned, sort_key, stack, updated_at, " +
+      "deleted_at, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
       "ON CONFLICT (id) DO UPDATE SET root_id = excluded.root_id, filter = excluded.filter, " +
       "sort = excluded.sort, pinned = excluded.pinned, sort_key = excluded.sort_key, " +
+      "stack = excluded.stack, " +
       "updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, seq = excluded.seq " +
       "WHERE excluded.updated_at >= views.updated_at",
     params: [
@@ -655,6 +656,7 @@ function upsertViewStatement(view: ViewRow): SqlStatement {
       view.sort,
       view.pinned ? 1 : 0,
       view.sort_key,
+      view.stack ?? null,
       view.updated_at,
       view.deleted_at ?? null,
       view.seq ?? null,

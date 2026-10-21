@@ -191,8 +191,8 @@ export function planReconcile(ctx: { now: number; appendId: string }): SqlStatem
         "SELECT :tenant, seq, 'snap_view_' || id || '_' || seq, 'view', id, 'create', " +
         "json_object('root_id', root_id, 'filter', filter, 'sort', sort, " +
         "'pinned', json(CASE pinned WHEN 1 THEN 'true' ELSE 'false' END), " +
-        `'sort_key', sort_key, 'deleted_at', deleted_at), ${tail}, updated_at, NULL, ?1, ?2 ` +
-        `FROM views WHERE user_id = :tenant AND ${above} ` +
+        `'sort_key', sort_key, 'stack', stack, 'deleted_at', deleted_at), ${tail}, ` +
+        `updated_at, NULL, ?1, ?2 FROM views WHERE user_id = :tenant AND ${above} ` +
         "ON CONFLICT DO NOTHING " +
         "/* includes-deleted: a snapshot records tombstones as it finds them */",
       params: [ctx.now, ctx.appendId],
@@ -229,7 +229,7 @@ const INSERTED_BY_THIS_APPEND =
 const RESOLVED: Record<Entity, readonly string[]> = {
   block: ["type", "text", "props", "notes_id"],
   link: ["sort_key"],
-  view: ["root_id", "filter", "sort", "pinned", "sort_key"],
+  view: ["root_id", "filter", "sort", "pinned", "sort_key", "stack"],
 }
 const registersOf = (entity: Entity) => [...RESOLVED[entity], "alive"]
 
@@ -248,10 +248,14 @@ const stampOf = (eventId: string) =>
   `(SELECT COALESCE(e.hlc, ${derivedStamp("e.at", "e.seq")}) FROM events e ` +
   `WHERE e.user_id = :tenant AND e.id = ${eventId})`
 /** The stamp a row holds for a register: its own, or — on a row no append
- * has touched since 0025 — the one derived from its last event. */
+ * has touched since 0025 — the one derived from its last event. A row with
+ * stamps that has none for a register holds the empty stamp, which any event
+ * that names it beats: a field added since the row was created (`stack`,
+ * 0027) that no event has set. `heldStampOf` is the same rule in TypeScript. */
 const heldStamp = (table: string, name: string) =>
-  `COALESCE(json_extract(${table}.stamps, '$.${name}'), ` +
-  `${derivedStamp(`${table}.updated_at`, `${table}.seq`)})`
+  `CASE WHEN ${table}.stamps IS NULL ` +
+  `THEN ${derivedStamp(`${table}.updated_at`, `${table}.seq`)} ` +
+  `ELSE COALESCE(json_extract(${table}.stamps, '$.${name}'), '') END`
 /** Does the change's stamp for a register beat the row's? False when the
  * change does not name it (its stamp is NULL). */
 const wins = (table: string, name: string) => `j.s_${name} > ${heldStamp(table, name)}`
@@ -271,8 +275,8 @@ const stampsAfter = (table: string, entity: Entity) =>
   registersOf(entity)
     .map(
       (name) =>
-        `'${name}', CASE WHEN ${wins(table, name)} THEN j.s_${name} ` +
-        `ELSE ${heldStamp(table, name)} END`,
+        `'${name}', NULLIF(CASE WHEN ${wins(table, name)} THEN j.s_${name} ` +
+        `ELSE ${heldStamp(table, name)} END, '')`,
     )
     .join(", ") +
   `, 'legacy', CASE WHEN ${table}.stamps IS NULL THEN ${table}.seq ` +
@@ -345,6 +349,13 @@ const unplacedStamp = (event: RuminateEvent, rank = 0) =>
  * last event derives (`eventStamp`). */
 const rowStamp = (at: number, seq: number | undefined) =>
   eventStamp({ at, seq } as unknown as RuminateEvent)
+
+/** `heldStamp` in TypeScript: the stamp a held row has for a register. */
+const heldStampOf = (
+  stamps: Record<string, string> | null,
+  name: string,
+  row: { updated_at: number; seq?: number },
+) => (stamps === null ? rowStamp(row.updated_at, row.seq) : (stamps[name] ?? ""))
 
 /** The value a register ends a run with, and the event that set it. */
 interface Winner {
@@ -589,10 +600,12 @@ function planChunk(
     // Views → views
     {
       sql:
-        "INSERT INTO views (user_id, id, root_id, filter, sort, pinned, sort_key, updated_at, " +
-        "deleted_at, seq, stamps) SELECT :tenant, json_extract(j.value, '$.entity_id'), " +
+        "INSERT INTO views (user_id, id, root_id, filter, sort, pinned, sort_key, stack, " +
+        "updated_at, deleted_at, seq, stamps) SELECT :tenant, " +
+        "json_extract(j.value, '$.entity_id'), " +
         `${createdField("root_id")}, ${createdField("filter")}, ${createdField("sort")}, ` +
         `COALESCE(${createdField("pinned")}, 0), ${createdField("sort_key")}, ` +
+        `${createdField("stack")}, ` +
         "json_extract(j.value, '$.created.top.at'), " +
         "json_extract(j.value, '$.created.alive.deleted_at'), " +
         `${SEQ_OF_LAST_EVENT}, ${createdStamps("view")} FROM json_each(?1) AS j ` +
@@ -653,7 +666,7 @@ function staleEvents(current: HeldRows, events: readonly RuminateEvent[]): Set<R
           : current.views.get(event.entity_id)
     if (row === undefined) continue
     const stamps = current.stamps.get(`${event.entity}\x1f${event.entity_id}`) ?? null
-    const held = (name: string) => stamps?.[name] ?? rowStamp(row.updated_at, row.seq)
+    const held = (name: string) => heldStampOf(stamps, name, row)
     const patch = event.patch as Record<string, unknown>
     const named = RESOLVED[event.entity].filter((name) => patch[name] !== undefined)
     if (event.action !== "update") named.push("alive")
@@ -786,8 +799,8 @@ async function readCurrent(tenant: TenantDb, write: RowWrite): Promise<HeldRows>
   const views = new Map<string, ViewRow>()
   if (viewIds.length > 0) {
     const rows = await all.exec(
-      "SELECT v.id, v.root_id, v.filter, v.sort, v.pinned, v.sort_key, v.updated_at, " +
-        "v.deleted_at, v.seq, v.stamps " +
+      "SELECT v.id, v.root_id, v.filter, v.sort, v.pinned, v.sort_key, v.stack, " +
+        "v.updated_at, v.deleted_at, v.seq, v.stamps " +
         "FROM json_each(?1) AS j JOIN views v ON v.user_id = :tenant AND v.id = j.value",
       [JSON.stringify(viewIds)],
     )
@@ -819,8 +832,8 @@ function highestHeld(current: HeldRows): string | null {
   const see = (key: string, row: { updated_at: number; seq?: number }, entity: Entity) => {
     const stamps = current.stamps.get(key) ?? null
     for (const name of registersOf(entity)) {
-      const stamp = stamps?.[name] ?? rowStamp(row.updated_at, row.seq)
-      if (highest === null || stamp > highest) highest = stamp
+      const stamp = heldStampOf(stamps, name, row)
+      if (stamp !== "" && (highest === null || stamp > highest)) highest = stamp
     }
   }
   for (const [id, row] of current.nodes) see(`block\x1f${id}`, row, "block")
@@ -1176,8 +1189,8 @@ export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
       "FROM link WHERE user_id = :tenant /* includes-deleted: the fold holds tombstones too */",
   )
   const viewRows = await all.exec(
-    "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at, seq, stamps " +
-      "FROM views WHERE user_id = :tenant",
+    "SELECT id, root_id, filter, sort, pinned, sort_key, stack, updated_at, deleted_at, seq, " +
+      "stamps FROM views WHERE user_id = :tenant",
   )
   const nodes = nodeRows.map(toNodeRow)
   const links = linkRows.map(toLinkRow)

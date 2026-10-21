@@ -33,7 +33,13 @@ export function useWriteView() {
 
 /** What "Remove from Views" on a block writes: the whole row cleared, so it
  * goes (`patchedView` tombstones a row with nothing left in it). */
-export const REMOVE_VIEW: ViewPatch = { pinned: false, filter: null, sort: null, sort_key: null }
+export const REMOVE_VIEW: ViewPatch = {
+  pinned: false,
+  filter: null,
+  sort: null,
+  sort_key: null,
+  stack: null,
+}
 
 /**
  * What "Remove from Views" on a NOTE writes: `pinned` alone cleared. The

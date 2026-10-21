@@ -20,6 +20,7 @@ import migration0021 from "../../migrations/0021_note_views.sql?raw"
 import migration0023 from "../../migrations/0023_events.sql?raw"
 import migration0024 from "../../migrations/0024_event_hlc.sql?raw"
 import migration0025 from "../../migrations/0025_projection_stamps.sql?raw"
+import migration0027 from "../../migrations/0027_view_stack.sql?raw"
 import migration0003 from "../../migrations/0003_control_plane.sql?raw"
 import migration0010 from "../../migrations/0010_user_email.sql?raw"
 import migration0011 from "../../migrations/0011_user_email_required.sql?raw"
@@ -106,6 +107,7 @@ export async function createTenantTestDriver(): Promise<SqlDriver> {
       noteViews: migration0021,
       events: migration0023,
       eventHlc: migration0024,
+      viewStack: migration0027,
     },
     "columns",
   )

@@ -72,12 +72,15 @@ export interface CorpusMigrations {
   /** migrations/0024: the stamp column on the event log — required in
    * `"columns"` mode. The local store adds the same column (`LOCAL_V11_SQL`). */
   eventHlc?: string
+  /** migrations/0027: a View's saved stack — required in `"columns"` mode. The
+   * local store adds the same column (`LOCAL_V13_SQL`). */
+  viewStack?: string
 }
 
 /** Which v3 shape the ladder should produce (see the module header). */
 export type CorpusTenancy = "single" | "columns"
 
-const CORPUS_SCHEMA_VERSION = 12
+const CORPUS_SCHEMA_VERSION = 13
 
 /**
  * The single-tenant v5 step: the `views` table (migrations/0015) — the
@@ -227,6 +230,16 @@ CREATE TABLE snapshots (
 );
 CREATE INDEX events_position ON events (position);
 INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '12');
+`
+
+/**
+ * The single-tenant v13 step: a View's saved stack (migrations/0027,
+ * docs/graph-walk.md, "Views save stacks"). One nullable column: NULL is a
+ * one-frame View, which is every row the store holds before it.
+ */
+const LOCAL_V13_SQL = `
+ALTER TABLE views ADD COLUMN stack TEXT;
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '13');
 `
 
 /**
@@ -398,6 +411,21 @@ async function applyV12(driver: SqlDriver, tenancy: CorpusTenancy): Promise<void
   if (tenancy === "single") await driver.execScript(LOCAL_V12_SQL)
 }
 
+async function applyV13(
+  driver: SqlDriver,
+  migrations: CorpusMigrations,
+  tenancy: CorpusTenancy,
+): Promise<void> {
+  if (tenancy === "single") {
+    await driver.execScript(LOCAL_V13_SQL)
+    return
+  }
+  if (!migrations.viewStack) {
+    throw new Error('ensureCorpusSchema: "columns" tenancy needs migrations.viewStack (0027)')
+  }
+  await driver.execScript(migrations.viewStack)
+}
+
 /**
  * Every local step that has shipped, by the version it leaves behind — for
  * `corpus-schema.test.ts`, which pins a hash of each. A step that has reached
@@ -415,6 +443,7 @@ export const SHIPPED_LOCAL_STEPS: Readonly<Record<number, string>> = {
   10: LOCAL_V10_SQL,
   11: LOCAL_V11_SQL,
   12: LOCAL_V12_SQL,
+  13: LOCAL_V13_SQL,
 }
 
 type Step = (
@@ -437,6 +466,7 @@ const STEPS: readonly [number, Step][] = [
   [10, (driver, _migrations, tenancy) => applyV10(driver, tenancy)],
   [11, applyV11],
   [12, (driver, _migrations, tenancy) => applyV12(driver, tenancy)],
+  [13, applyV13],
 ]
 
 /**
