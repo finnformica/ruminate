@@ -203,6 +203,11 @@ belt-and-braces. Markdown is a tree, so a loop is written to where it closes
 and no further, and does not survive a markdown round trip (`parse` re-mints
 the repeated `id::`): the graph, not the markdown, holds it.
 
+**Decided 2026-10-20: pivots replace "Show links".** The direction a walk
+follows becomes a per-row choice, a **pivot** held in the frame, and the
+device setting goes. Rows beneath an up pivot are the up occurrences below,
+and they edit as below. See [graph-walk.md](./graph-walk.md), "Pivots".
+
 **Upstream: the graph, not just the tree.** A walk from a root can follow
 links the other way as well (Settings → Editor, "Show links": downstream —
 the default, the outline as it has always read — upstream, or both). Walked
@@ -288,6 +293,11 @@ Consequence: nothing is ever collected implicitly, and no orphan is ever
 invisible — each has a basket to be shown in. A block whose note is later
 deleted, but that another note holds, keeps a dead `notes_id`; it only
 matters if it is later orphaned, which a global "no note" view can cover.
+
+**Decided 2026-10-20: folds per frame.** The depth rule stays the default.
+The reader's folds move from localStorage to the frame, in the URL, keyed by
+path; a pushed frame starts with none ([graph-walk.md](./graph-walk.md),
+"Folds"). The walk stays lazy, with no budget.
 
 **Default expansion, and the lazy walk.** Expand **n=2** levels beneath the
 top of the view by default (Settings → Editor moves n), counting every block
