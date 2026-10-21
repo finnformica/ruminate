@@ -6,6 +6,7 @@ import { sessionStatusAtom } from "../utils/github-session"
 import { requestAmbientDatabasePull, startDatabaseMode, stopDatabaseMode } from "./database-mode"
 import { refreshFeatures, resetFeatures, seedFeatures } from "./features"
 import { startImageCache, stopImageCache } from "./image-cache"
+import { startUploadQueue, stopUploadQueue } from "./image-queue"
 import { imagesEnabled, resetImageObjectUrls } from "./images"
 import { refreshPreferences, resetPreferences } from "./account-preferences"
 import { resetAnthropicKey } from "./anthropic-key"
@@ -63,9 +64,14 @@ export function useDatabaseMode() {
     // is kept on the device, so until it answers the defaults stand.
     void refreshPreferences()
     // The user's pictures, kept on the device for offline (image-cache.ts),
-    // bound to the same identity as the store.
-    if (imagesEnabled) startImageCache(owner)
+    // bound to the same identity as the store — and the pictures added
+    // offline, waiting on the device to go up (image-queue.ts).
+    if (imagesEnabled) {
+      startImageCache(owner)
+      startUploadQueue(owner)
+    }
     return () => {
+      stopUploadQueue()
       stopImageCache()
       resetImageObjectUrls()
       resetPreferences()

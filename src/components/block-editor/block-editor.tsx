@@ -20,6 +20,7 @@ import {
   releasePendingImage,
   type UploadedImage,
 } from "../../data/images"
+import { queueUpload } from "../../data/image-queue"
 import {
   figureAlignOf,
   figureLayoutOf,
@@ -1878,7 +1879,11 @@ export function BlockEditor({
       queued.push({ id: imageId, key: nextKey, file, restore })
     }
 
+    // Told once for the batch: the pictures added offline (below).
+    let toldOffline = false
     for (const { id, key: rowKey, file, restore } of queued) {
+      // Kept on the device to go up later: the row and its preview stay.
+      let kept = false
       try {
         const asset = await onImageUpload(file)
         // The bytes are already in hand — draw them rather than fetching the
@@ -1908,6 +1913,17 @@ export function BlockEditor({
         docRef.current = next
         onChange(next)
       } catch (error) {
+        // Offline: the picture waits on the device and goes up when the
+        // network returns (src/data/image-queue.ts), its row drawn as
+        // waiting. Only where it cannot be kept is the row taken out.
+        if (error instanceof ImageUploadError && error.code === "offline") {
+          kept = await queueUpload(id, error.file ?? file)
+          if (kept) {
+            if (!toldOffline) toast("You are offline. The image uploads when you are back online")
+            toldOffline = true
+            continue
+          }
+        }
         const doc = docRef.current
         let next: BlockDoc | null = null
         if (restore) {
@@ -1922,7 +1938,7 @@ export function BlockEditor({
         }
         toast.error(error instanceof ImageUploadError ? error.message : "Image upload failed")
       } finally {
-        releasePendingImage(id)
+        if (!kept) releasePendingImage(id)
       }
     }
   }
