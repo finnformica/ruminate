@@ -263,6 +263,17 @@ tombstones too, and the **log position** it covers.
   one before. With none that parses, it folds the whole log. The fold does
   not depend on order and applies an event twice as once, so the result is
   the fold of the whole log.
+- **Snapshot 0** (`snapshotZero`, docs/event-only-sync.md, item 6). The first
+  open of this build folds the `nodes`, `link` and `views` rows, tombstones
+  too, into a snapshot at the last position in `events`. So the fold holds
+  every row the tables hold, also one whose events this device never had.
+  Each row is the `create` it amounts to (`rowsToEvents`), with no stamp, the
+  row's `updated_at` as `at` and the row's `seq`. So each field takes the
+  stamp `eventStamp` derives for an old event: `updated_at`, counter 0,
+  `seq:<seq>`. It runs once: the same write sets the `snapshot_zero` flag in
+  `meta`. A snapshot of the log can be there already, so "no snapshot" does
+  not say it has run. A store with no row sets the flag and writes nothing.
+  `clear` keeps the flag: the pull after it brings the whole log again.
 
 Nothing in the app reads the fold yet (item 7 of docs/event-only-sync.md).
 `clear` deletes the snapshots with the log.

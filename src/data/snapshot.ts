@@ -1,4 +1,12 @@
-import { foldByStamp, type RuminateEvent, type StampedState } from "./events"
+import type { LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
+import {
+  foldByStamp,
+  linkEntityId,
+  rowsToEvents,
+  type CurrentRows,
+  type RuminateEvent,
+  type StampedState,
+} from "./events"
 
 /**
  * Snapshots of the fold by stamp (docs/event-sourcing.md, Snapshots;
@@ -13,6 +21,12 @@ import { foldByStamp, type RuminateEvent, type StampedState } from "./events"
  * and a snapshot that is lost or does not parse costs only a longer fold.
  * The store writes them (`sql-note-store.ts`); nothing in the app reads the
  * fold yet.
+ *
+ * **Snapshot 0** (docs/event-only-sync.md, item 6) is the one-time fold of
+ * the store's tables into a snapshot (`snapshotZero`), so the fold holds
+ * every row the tables hold, even one whose events this device never had.
+ * The `meta` flag `SNAPSHOT_ZERO_KEY` says it has run: a snapshot from the
+ * log may already exist, so "no snapshot" does not say it.
  */
 
 /** Write a snapshot once the tail past the newest holds this many events. */
@@ -25,6 +39,9 @@ export const SNAPSHOTS_KEPT = 2
 /** The shape of the encoded state. A snapshot of another version does not
  * parse, and the boot folds from the one before it, or from the log. */
 const SNAPSHOT_VERSION = 1
+
+/** The `meta` key set once snapshot 0 has run, in the batch that writes it. */
+export const SNAPSHOT_ZERO_KEY = "snapshot_zero"
 
 /** A snapshot as the store holds it: the state still encoded. */
 export interface StoredSnapshot {
@@ -113,4 +130,35 @@ export async function foldFromSnapshots(
       }
   }
   return { state: foldByStamp(await tailAfter(0)), from: 0 }
+}
+
+/**
+ * Snapshot 0: the fold of the store's rows, tombstones too. Each row is the
+ * `create` it amounts to (`rowsToEvents` against no rows), with no stamp, the
+ * row's `updated_at` as its `at` and the row's `seq`. So every field takes
+ * the stamp `eventStamp` derives for an old event: the row's `updated_at`,
+ * counter 0, `seq:<seq>`. That is the stamp the row's own last event derives
+ * when it has none, so that event applied again changes nothing.
+ */
+export function snapshotZero(rows: {
+  nodes: readonly NodeRow[]
+  links: readonly LinkRow[]
+  views: readonly ViewRow[]
+}): StampedState {
+  const seqs = new Map<string, number | undefined>([
+    ...rows.nodes.map((row) => [`block:${row.id}`, row.seq] as const),
+    ...rows.views.map((row) => [`view:${row.id}`, row.seq] as const),
+    ...rows.links.map(
+      (row) =>
+        [`link:${linkEntityId(row.source_id, row.destination_id, row.kind)}`, row.seq] as const,
+    ),
+  ])
+  const none: CurrentRows = { nodes: new Map(), links: new Map(), views: new Map() }
+  const creates = rowsToEvents(none, rows, { batch: "snapshot_zero", device: "", now: 0 })
+  return foldByStamp(
+    creates.map((event) => {
+      const seq = seqs.get(`${event.entity}:${event.entity_id}`)
+      return seq === undefined ? event : { ...event, seq }
+    }),
+  )
 }

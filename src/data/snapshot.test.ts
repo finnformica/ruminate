@@ -1,7 +1,14 @@
 // tenant-guard: exempt — these tests read and plant raw snapshot rows on purpose.
 import { describe, expect, it } from "vitest"
 import { parse } from "../blocks/parse"
-import { foldByStamp, toGraphSnapshot, type LoggedEvent, type RuminateEvent } from "./events"
+import {
+  eventStamp,
+  foldByStamp,
+  toGraphSnapshot,
+  toViewRows,
+  type LoggedEvent,
+  type RuminateEvent,
+} from "./events"
 import { encodeHlc } from "./hlc"
 import { docToOps } from "./ops"
 import {
@@ -10,6 +17,7 @@ import {
   snapshotDue,
   SNAPSHOT_EVERY_EVENTS,
   SNAPSHOT_EVERY_MS,
+  SNAPSHOT_ZERO_KEY,
 } from "./snapshot"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import { openSqlNoteStore } from "./sql-note-store"
@@ -197,5 +205,139 @@ describe("the store's snapshots", () => {
     expect(fold).toEqual(foldByStamp(log))
     expect(fold.blocks.get("a")?.seq).toBeGreaterThanOrEqual(50)
     expect(toGraphSnapshot(fold).nodes.get("blk_aaaaaaaaaa")?.text).toBe("two")
+  })
+})
+
+describe("snapshot 0", () => {
+  /** A store as an older build left it: rows the log does not hold (pulled
+   * as rows), an edit that is in the log, a snapshot of that log, and no
+   * snapshot 0 flag. Then the open of this build. */
+  async function upgraded() {
+    const opened = await open()
+    const { driver, store, clock } = opened
+    await store.applyPull({
+      nodes: [
+        { id: "a", type: "note", text: "A", props: null, updated_at: 10, seq: 3 },
+        { id: "b", type: "paragraph", text: "b", props: null, updated_at: 20, seq: 4 },
+        {
+          id: "c",
+          type: "paragraph",
+          text: "c",
+          props: null,
+          updated_at: 30,
+          deleted_at: 30,
+          seq: 6,
+        },
+      ],
+      links: [
+        {
+          source_id: "a",
+          destination_id: "b",
+          kind: "child",
+          sort_key: "a0",
+          updated_at: 20,
+          seq: 4,
+        },
+        {
+          source_id: "a",
+          destination_id: "c",
+          kind: "child",
+          sort_key: "a1",
+          updated_at: 30,
+          deleted_at: 30,
+          seq: 6,
+        },
+      ],
+      views: [
+        {
+          id: "vw_a",
+          root_id: "a",
+          filter: null,
+          sort: null,
+          pinned: true,
+          sort_key: "a0",
+          updated_at: 10,
+          seq: 5,
+        },
+      ],
+      deleteNodes: [],
+      deleteLinks: [],
+    })
+    await applyOpsToStore(store, [{ op: "setText", id: "b", text: "bee" }], testEventContext())
+    expect(await opened.snapshots()).toHaveLength(1)
+    await driver.exec("DELETE FROM meta WHERE key = ?", [SNAPSHOT_ZERO_KEY])
+    clock.now += 1
+    const reopened = await openSqlNoteStore(driver, { now: () => clock.now })
+    return { ...opened, store: reopened }
+  }
+
+  const newest = async (driver: Awaited<ReturnType<typeof open>>["driver"]) => {
+    const [row] = await driver.exec("SELECT state FROM snapshots ORDER BY id DESC LIMIT 1")
+    const state = parseSnapshot(String(row.state))
+    if (!state) throw new Error("the newest snapshot does not parse")
+    return state
+  }
+
+  it("equals getGraph() of the tables, every field stamped from its row", async () => {
+    const { driver, store, snapshots } = await upgraded()
+    // Written beside the snapshot of the log, at the last position.
+    expect(await snapshots()).toEqual([
+      { position: 1, taken_at: 100 * DAY },
+      { position: 1, taken_at: 100 * DAY + 1 },
+    ])
+    const zero = await newest(driver)
+    expect(toGraphSnapshot(zero)).toEqual(await store.getGraph())
+    expect(toViewRows(zero)).toEqual((await store.getAllRows()).views)
+    expect(toGraphSnapshot(await store.loadFold())).toEqual(await store.getGraph())
+
+    // The stamp an old event at the row's updated_at and seq derives.
+    const derived = (at: number, seq?: number) => eventStamp({ at, seq } as RuminateEvent)
+    expect(zero.blocks.get("a")?.stamps).toEqual({
+      type: derived(10, 3),
+      text: derived(10, 3),
+      props: derived(10, 3),
+      notes_id: derived(10, 3),
+      alive: derived(10, 3),
+    })
+    expect(zero.views.get("vw_a")?.stamps.pinned).toBe(derived(10, 5))
+    // A tombstone is held, dead, from its deleted_at.
+    expect(zero.blocks.get("c")).toMatchObject({ alive: false, deleted_at: 30, created: true })
+  })
+
+  it("runs once, though a snapshot of the log was already there", async () => {
+    const { driver, store, clock, snapshots } = await upgraded()
+    const flag = await store.getMeta(SNAPSHOT_ZERO_KEY)
+    expect(flag).toBe(String(100 * DAY + 1))
+    // A row the log does not hold lands, and the next open does not fold it.
+    await store.applyPull({
+      nodes: [{ id: "d", type: "paragraph", text: "d", props: null, updated_at: 40 }],
+      links: [],
+      views: [],
+      deleteNodes: [],
+      deleteLinks: [],
+    })
+    const before = await snapshots()
+    clock.now += 1
+    const reopened = await openSqlNoteStore(driver, { now: () => clock.now })
+    expect(await snapshots()).toEqual(before)
+    expect(await reopened.getMeta(SNAPSHOT_ZERO_KEY)).toBe(flag)
+    expect((await newest(driver)).blocks.has("d")).toBe(false)
+  })
+
+  it("sets the flag and writes nothing for an empty store", async () => {
+    const { store, snapshots } = await open()
+    expect(await store.getMeta(SNAPSHOT_ZERO_KEY)).toBe(String(100 * DAY))
+    expect(await snapshots()).toEqual([])
+  })
+
+  it("is kept by a reload, and the events after it apply", async () => {
+    const { driver, store, clock } = await upgraded()
+    await applyOpsToStore(store, [{ op: "setText", id: "a", text: "Ay" }], testEventContext())
+    clock.now += 1
+    const reopened = await openSqlNoteStore(driver, { now: () => clock.now })
+    const fold = toGraphSnapshot(await reopened.loadFold())
+    expect(fold).toEqual(await reopened.getGraph())
+    expect(fold.nodes.get("a")?.text).toBe("Ay")
+    expect(fold.nodes.get("b")?.text).toBe("bee")
   })
 })

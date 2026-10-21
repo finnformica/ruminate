@@ -22,6 +22,8 @@ import {
   encodeSnapshot,
   foldFromSnapshots,
   snapshotDue,
+  snapshotZero,
+  SNAPSHOT_ZERO_KEY,
   SNAPSHOTS_KEPT,
   type StoredSnapshot,
 } from "./snapshot"
@@ -66,6 +68,10 @@ import type { SqlDriver, SqlStatement, SqlValue } from "./sql-driver"
  * one, and an event the replica places moves to the next one, so the tail past
  * a snapshot carries its `seq`. `loadFold` reads the newest snapshot that
  * parses, then the tail. Nothing in the app reads the fold yet.
+ *
+ * **Snapshot 0** (`snapshotZero`): the first open of this build folds the
+ * tables into a snapshot at the last position, once (a `meta` flag). From
+ * then on the snapshots continue from it.
  */
 
 /**
@@ -95,6 +101,12 @@ export async function openSqlNoteStore(
     } finally {
       snapshotting = false
     }
+  }
+  try {
+    await writeSnapshotZeroOnce(driver, now())
+  } catch (error) {
+    // The flag is not set, so the next open tries again.
+    console.warn("[ruminate-sql] snapshot 0 failed", error)
   }
   await snapshotIfDue()
 
@@ -400,6 +412,37 @@ async function writeSnapshotIfDue(driver: SqlDriver, now: number): Promise<void>
       params: [SNAPSHOTS_KEPT],
     },
   ])
+}
+
+/**
+ * Snapshot 0: once per store, fold the tables into a snapshot at the last
+ * position in `events`, and set the flag in the same write. The tables hold
+ * every event up to that position, so the tail past it is the rest. With no
+ * row there is nothing to fold: the flag is set, and the log's own snapshots
+ * start as before.
+ */
+async function writeSnapshotZeroOnce(driver: SqlDriver, now: number): Promise<void> {
+  const [flag] = await driver.exec("SELECT value FROM meta WHERE key = ?", [SNAPSHOT_ZERO_KEY])
+  if (flag) return
+  const rows = await loadAllRows(driver)
+  const statements: SqlStatement[] = []
+  if (rows.nodes.length + rows.links.length + rows.views.length > 0) {
+    statements.push(
+      {
+        sql: "INSERT INTO snapshots (position, taken_at, state) VALUES (?, ?, ?)",
+        params: [await lastPosition(driver), now, encodeSnapshot(snapshotZero(rows))],
+      },
+      {
+        sql: "DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY id DESC LIMIT ?)",
+        params: [SNAPSHOTS_KEPT],
+      },
+    )
+  }
+  statements.push({
+    sql: "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING",
+    params: [SNAPSHOT_ZERO_KEY, String(now)],
+  })
+  await driver.batch(statements)
 }
 
 async function lastPosition(driver: SqlDriver): Promise<number> {
