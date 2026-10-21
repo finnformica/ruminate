@@ -321,7 +321,10 @@ complete list of children's ids — the graph's, exactly, which is what draws
 the fold chevron and keeps a save diff to nothing — but the children
 themselves are walked in only beneath an occurrence the rule opens. A closed
 row is a row with a chevron and nothing beneath it; opening it walks one more
-level. So the doc is O(what is on screen), however large the graph, and a
+level. A view narrowed by a filter or a sort (docs/query-language.md) is the
+same lazy walk: a block's list is then the children that reach a match, read
+off the filter's ancestor closure (`ancestorClosure`), in the sort's order,
+so a closed row is still not walked (docs/graph-walk.md, 4.5). So the doc is O(what is on screen), however large the graph, and a
 view from any root is the same walk: a note (its children as the roots, level
 
 1. and a focused block (the block as the doc's one root, at level 0, its

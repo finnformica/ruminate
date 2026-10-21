@@ -6,8 +6,10 @@ import type { BlockDoc } from "../blocks/types"
 import { sampleGraph } from "./sample-graph"
 import {
   BOARD_TYPE,
+  CORPUS_ROOT_ID,
   NOTE_TYPE,
   NOTE_TYPES,
+  ancestorClosure,
   blockRollup,
   blockView,
   buildGraphSnapshot,
@@ -22,6 +24,7 @@ import {
   pathToBlock,
   reconcileSortKeys,
   rollup,
+  sectionReach,
   sortKeyBetween,
   walkGraph,
 } from "./graph"
@@ -1169,6 +1172,65 @@ describe("walkGraph: one guard in both directions (docs/graph-walk.md, 3.3)", ()
     noteView("n", graph(), rule, "downstream", new Map([["blk_x", "up"]]))
     // Up from X: A only, the row X came from. Nothing beneath X.
     expect(asked).not.toContain("blk_a/blk_x")
+  })
+})
+
+describe("the narrowing indexes (docs/graph-walk.md, 4.5)", () => {
+  // N > A > H (a heading) > B, and N > C > D. M > A, so A has two holders.
+  const graph = () =>
+    buildGraphSnapshot(
+      [
+        row("n", "note", "N"),
+        row("m", "note", "M"),
+        row("blk_a", "ul", "a"),
+        row("blk_h", "h2", "h"),
+        row("blk_b", "ul", "b"),
+        row("blk_c", "ul", "c"),
+        row("blk_d", "h1", "d"),
+        row("blk_e", "ul", "e"),
+        row(CORPUS_ROOT_ID, "corpus_root", ""),
+      ],
+      [
+        edge(CORPUS_ROOT_ID, "n", "a0"),
+        edge("n", "blk_a", "a0"),
+        edge("n", "blk_c", "a1"),
+        edge("blk_a", "blk_h", "a0"),
+        edge("blk_h", "blk_b", "a0"),
+        edge("blk_c", "blk_d", "a0"),
+        edge("m", "blk_a", "a0"),
+        edge("m", "blk_e", "a1"),
+      ],
+    )
+
+  it("closes the ids over their holders, up to the view's root", () => {
+    expect([...ancestorClosure(graph(), ["blk_b"], "n")].sort()).toEqual(
+      ["blk_a", "blk_b", "blk_h", "m", "n"].sort(),
+    )
+    // Past the root nothing is climbed, and never into the corpus root.
+    expect([...ancestorClosure(graph(), ["blk_b"])]).not.toContain(CORPUS_ROOT_ID)
+    expect(ancestorClosure(graph(), ["blk_b"], "blk_h")).toEqual(new Set(["blk_b", "blk_h"]))
+    // A missing id adds nothing.
+    expect(ancestorClosure(graph(), ["gone"]).size).toBe(0)
+  })
+
+  it("ends at a loop", () => {
+    const looped = buildGraphSnapshot(
+      [row("n", "note", "N"), row("blk_a", "ul", "a"), row("blk_b", "ul", "b")],
+      [edge("n", "blk_a", "a0"), edge("blk_a", "blk_b", "a0"), edge("blk_b", "blk_a", "a0")],
+    )
+    expect(ancestorClosure(looped, ["blk_b"])).toEqual(new Set(["blk_b", "blk_a", "n"]))
+  })
+
+  it("reaches a section from the sections and everything above them", () => {
+    const snapshot = graph()
+    const reach = sectionReach(snapshot)
+    expect([...reach].sort()).toEqual(["blk_a", "blk_c", "blk_d", "blk_h", "m", "n"].sort())
+    // A block with no section beneath it is not in the set.
+    expect(reach.has("blk_b")).toBe(false)
+    expect(reach.has("blk_e")).toBe(false)
+    // Built once per snapshot.
+    expect(sectionReach(snapshot)).toBe(reach)
+    expect(sectionReach(graph())).not.toBe(reach)
   })
 })
 
