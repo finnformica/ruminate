@@ -488,12 +488,13 @@ describe("the sidebar while Settings is open", () => {
     expect(screen.queryByTestId("view-rows")).toBeNull()
     expect(screen.queryByText("Theirs")).toBeNull()
     expect(screen.queryByText("Back to notes")).toBeNull()
-    for (const page of ["Account", "Preferences", "Data", "About"]) {
+    for (const page of ["Account", "Preferences", "About"]) {
       expect(screen.getByRole("link", { name: page })).toBeTruthy()
     }
-    // Not this reader's: Sharing (signed out), MCP access (no feature is on
-    // here) and Admin.
+    // Not this reader's: Sharing and Data (signed out), MCP access (no
+    // feature is on here) and Admin.
     expect(screen.queryByRole("link", { name: "Sharing" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Data" })).toBeNull()
     expect(screen.queryByRole("link", { name: "Admin" })).toBeNull()
   })
 
