@@ -1,9 +1,11 @@
 import { Link } from "@tanstack/react-router"
-import { useAtomValue } from "jotai"
+import { useAtomValue, useStore } from "jotai"
 import React from "react"
-import { orderedNoteIds } from "../data/note-order"
+import { moveNoteOps, orderedNoteIds } from "../data/note-order"
 import { ROOT_LABEL, rootFrameNotes } from "../data/root-frame"
+import { useApplyOps } from "../data/store"
 import { graphSnapshotAtom, ownSortedNotesAtom } from "../global-state"
+import { useDragReorder } from "../hooks/drag-reorder"
 import type { Note } from "../schema"
 import { cx } from "../utils/cx"
 import { GridIcon16 } from "./icons"
@@ -20,6 +22,9 @@ import { listRow } from "./ui/list"
  * Each row is a link to its note, so it opens in a new tab like any link.
  * A plain click opens the note in this pane instead (`onOpen`): a push onto
  * the pane's stack, so Back and Shift+F come back here and land on the row.
+ *
+ * A drag of a row puts the note in a new place: it writes the root's `child`
+ * link to it (`moveNoteOps`, docs/graph-walk.md, decision 5).
  */
 export function RootFramePage({
   landing,
@@ -42,6 +47,19 @@ export function RootFramePage({
   const graph = useAtomValue(graphSnapshotAtom)
   const rows = React.useMemo(() => rootFrameNotes(notes, orderedNoteIds(graph)), [notes, graph])
   const listRef = React.useRef<HTMLUListElement>(null)
+
+  // A drag writes the order onto the root's links, as one batch of ops.
+  const applyOps = useApplyOps()
+  const store = useStore()
+  const ids = React.useMemo(() => rows.map((note) => note.id), [rows])
+  const onMove = React.useCallback(
+    (id: string, next: string[]) => {
+      const ops = moveNoteOps(id, next, store.get(graphSnapshotAtom))
+      if (ops.length > 0) applyOps(ops, { cause: "root:move-note" })
+    },
+    [applyOps, store],
+  )
+  const reorder = useDragReorder({ ids, onMove })
 
   // Back down to Root: the row left takes the keyboard.
   React.useEffect(() => {
@@ -82,9 +100,21 @@ export function RootFramePage({
                 aria-label={ROOT_LABEL}
                 className="flex flex-col"
                 onKeyDown={onKeyDown}
+                {...reorder.listProps}
               >
-                {rows.map((note) => (
-                  <li key={note.id}>
+                {rows.map((note, index) => (
+                  <li
+                    key={note.id}
+                    className={cx(
+                      "relative data-[dragging]:opacity-40",
+                      reorder.dropBefore === note.id &&
+                        "before:absolute before:-top-0.5 before:inset-x-0 before:h-0.5 before:rounded-full before:bg-border-focus",
+                      reorder.dropBefore === "end" &&
+                        index === rows.length - 1 &&
+                        "after:absolute after:-bottom-0.5 after:inset-x-0 after:h-0.5 after:rounded-full after:bg-border-focus",
+                    )}
+                    {...reorder.rowProps(note.id)}
+                  >
                     <Link
                       to={note.type === "board" ? "/boards/$" : "/views/$"}
                       params={{ _splat: note.id }}

@@ -753,7 +753,8 @@ stack as it is then.
 text, as today. After the name it shows the path as a hint: the roots of
 the frames below, from Root, for example "Todos" with "Root › Tasks", in the
 secondary colour and clipped to fit. A one-frame View has no hint. The
-palette draws the same list (`viewEntriesAtom`) without the hint.
+palette draws the same list (`viewEntriesAtom`) with the same hint
+(`viewPathHint`, `useViewHints`).
 
 **Manage a View** in the sidebar: a right-click (or a press and hold) on its
 row opens the same menu as its ⋯ button: Rename, Move up and Move down in
@@ -1076,13 +1077,14 @@ SV; G built what was missing:
 
 - **GW-16.** The Root frame is `src/data/root-frame.ts` and its page
   `src/components/root-frame-page.tsx`, a list of note rows rather than
-  the block editor. A drag of a row there does not write the root's links
-  yet. The Views page is gone: `/` opens Root, `g v` goes to Root, and ↵ on
+  the block editor. A drag of a row there writes the root's `child` link
+  (`moveNoteOps`, `src/data/note-order.ts`). The Views page is gone: `/` opens Root, `g v` goes to Root, and ↵ on
   a typed query in the palette opens its top result.
 - **GW-20.** `src/data/view-stack.ts` writes and reads the field, and
   applies the broken-path rule. The sidebar's View rows link to the
   restored stack.
-- **GW-21.** The hint is the sidebar's alone.
+- **GW-21.** The sidebar and the palette's Views list show the same hint
+  (`viewPathHint`).
 
 ## Appendix A. Ruminate's walk before this design
 

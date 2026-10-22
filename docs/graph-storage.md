@@ -481,7 +481,8 @@ climbed to the top of the sidebar while you were looking at it.
 
 A **corpus root** supplies the missing edge. It is one node per corpus, typed
 `corpus_root` at the fixed id `corpus_root`, whose `child` links hold the
-notes the user has dragged into an order. Nothing about the mechanism is
+notes the user has dragged into an order: a drag of a row in the Root frame
+(docs/graph-walk.md, decision 5). Nothing about the mechanism is
 note-specific: the keys are the same fractional indices from the same
 `sortKeyBetween`, so moving a note rewrites one link row exactly as moving a
 block does (`src/data/note-order.ts`).

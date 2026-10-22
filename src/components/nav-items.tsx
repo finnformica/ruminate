@@ -5,7 +5,7 @@ import { requestDatabasePull } from "../data/database-mode"
 import { CORPUS_ROOT_ID } from "../data/graph"
 import { layoutToSearch, type FocusFrame, type PaneSearch } from "../data/panes"
 import { ROOT_LABEL, rootFrame } from "../data/root-frame"
-import { restoreViewFrames } from "../data/view-stack"
+import { restoreViewFrames, viewPathHint } from "../data/view-stack"
 import { viewByRootAtom } from "../data/views"
 import {
   graphSnapshotAtom,
@@ -560,14 +560,11 @@ function useViewTarget(entry: ViewEntry): ViewTarget {
     const said = Object.fromEntries(
       Object.entries(search).filter(([, value]) => value !== undefined),
     ) as PaneSearch
-    const lower = frames.slice(1, -1)
-    const labelOf = (frame: FocusFrame) =>
-      inlineText(graph.nodes.get(frame.root ?? frame.noteId)?.text ?? "") || "Untitled"
     return {
       frames,
       params: { _splat: path },
       search: { ...said, query: undefined },
-      hint: lower.length > 0 ? [ROOT_LABEL, ...lower.map(labelOf)].join(" › ") : "",
+      hint: viewPathHint(frames, graph),
     }
   }, [entry.id, entry.noteId, row?.stack, graph])
 }

@@ -32,6 +32,10 @@ vi.mock("./page-layout", () => ({
   ),
 }))
 vi.mock("./note-favicon", () => ({ NoteFavicon: () => null }))
+const applied = vi.hoisted(() => ({ ops: [] as unknown[] }))
+vi.mock("../data/store", () => ({
+  useApplyOps: () => (ops: unknown[]) => applied.ops.push(...ops),
+}))
 vi.mock("../global-state", async () => {
   const { atom } = await import("jotai")
   const { buildGraphSnapshot } = await import("../data/graph")
@@ -121,5 +125,23 @@ describe("the Root frame page", () => {
     expect(document.activeElement?.textContent).toBe("Apple")
     fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" })
     expect(document.activeElement?.textContent).toBe("Cherry")
+  })
+
+  it("writes the root's link for a note dragged to a new place", () => {
+    applied.ops.length = 0
+    renderRoot()
+    const row = (name: string) => screen.getByText(name).closest("li")!
+    const data = { effectAllowed: "", dropEffect: "", setData: vi.fn(), getData: () => "" }
+    // Banana, above Apple.
+    fireEvent.dragStart(row("Banana"), { dataTransfer: data })
+    fireEvent.dragOver(row("Apple"), { dataTransfer: data, clientY: 0 })
+    fireEvent.drop(row("Apple"), { dataTransfer: data, clientY: 0 })
+    // The first drag keys every row, in the order now on screen.
+    const links = applied.ops.filter((op) => (op as { op: string }).op === "link") as {
+      destination: string
+      sortKey: string
+    }[]
+    const order = [...links].sort((a, b) => (a.sortKey < b.sortKey ? -1 : 1))
+    expect(order.map((link) => link.destination)).toEqual(["c", "b", "a"])
   })
 })

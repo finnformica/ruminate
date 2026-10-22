@@ -1,7 +1,8 @@
 import { keyOf } from "../blocks/view"
 import { pathToBlock, type GraphSnapshot } from "./graph"
 import { formatFrame, parseFrame, pathOfKey, type FocusFrame } from "./panes"
-import { isRootFrame, rootFrame } from "./root-frame"
+import { inlineText } from "../utils/inline-text"
+import { ROOT_LABEL, isRootFrame, rootFrame } from "./root-frame"
 
 /**
  * **A View saves a whole stack** (docs/graph-walk.md, section 7): the
@@ -138,4 +139,19 @@ export function restoreViewFrames(view: ViewToOpen, graph: GraphSnapshot): Focus
     above = frame
   }
   return [rootFrame(), ...kept, top]
+}
+
+/**
+ * The path hint a View row shows after its name (section 7): the roots of
+ * the frames between Root and the top, from Root — "Root › Tasks". Empty for
+ * a one-frame View. Read from the frames the View opens with
+ * (`restoreViewFrames`), so a broken path shows what is left of it. The
+ * sidebar and the palette show the same hint.
+ */
+export function viewPathHint(frames: readonly FocusFrame[], graph: GraphSnapshot): string {
+  const lower = frames.slice(1, -1)
+  if (lower.length === 0) return ""
+  const labelOf = (frame: FocusFrame) =>
+    inlineText(graph.nodes.get(rootIdOf(frame))?.text ?? "") || "Untitled"
+  return [ROOT_LABEL, ...lower.map(labelOf)].join(" › ")
 }

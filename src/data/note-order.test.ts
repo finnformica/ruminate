@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { parse } from "../blocks/parse"
 import { unassignedIds } from "./basket"
 import { CORPUS_ROOT_ID, ROOT_TYPE, buildGraphSnapshot, noteDoc, type GraphSnapshot } from "./graph"
-import { orderedNoteIds } from "./note-order"
+import { moveNoteOps, orderedNoteIds } from "./note-order"
 import { applyOps, deleteBlockOps, deleteNoteOps, docToOps, type Op } from "./ops"
 
 const NOW = 1000
@@ -65,6 +65,53 @@ describe("the manual note order the graph holds", () => {
   it("ignores ids that are not notes", () => {
     const next = order(graphOf(THREE), ["a", "blk_nonesuch000", "b"])
     expect(orderedNoteIds(next)).toEqual(["a", "b"])
+  })
+})
+
+/** Move `id` so the Root frame reads `ids`, as a drag there does. */
+const move = (snapshot: GraphSnapshot, id: string, ids: string[], at = NOW + 1) =>
+  applyOps(snapshot, moveNoteOps(id, ids, snapshot), at)
+
+describe("a drag in the Root frame (docs/graph-walk.md, decision 5)", () => {
+  it("keys every row on the first drag, and makes the root", () => {
+    const snapshot = move(graphOf(THREE), "c", ["c", "a", "b"])
+    expect(orderedNoteIds(snapshot)).toEqual(["c", "a", "b"])
+    expect(snapshot.nodes.get(CORPUS_ROOT_ID)?.type).toBe("corpus_root")
+  })
+
+  it("writes one link row for the note that moved, and none for the rest", () => {
+    const placed = order(graphOf(THREE), ["a", "b", "c"])
+    const ops = moveNoteOps("c", ["c", "a", "b"], placed)
+    const links = ops.filter((op) => op.op === "link")
+    expect(links).toHaveLength(1)
+    expect(links[0]).toMatchObject({ source: CORPUS_ROOT_ID, destination: "c" })
+    expect(orderedNoteIds(applyOps(placed, ops, NOW + 2))).toEqual(["c", "a", "b"])
+  })
+
+  it("moves a note into the middle, and to the end", () => {
+    const placed = order(graphOf(THREE), ["a", "b", "c"])
+    expect(orderedNoteIds(move(placed, "a", ["b", "a", "c"], NOW + 2))).toEqual(["b", "a", "c"])
+    expect(orderedNoteIds(move(placed, "a", ["b", "c", "a"], NOW + 2))).toEqual(["b", "c", "a"])
+  })
+
+  it("does nothing for a note that is not in the list", () => {
+    const placed = order(graphOf(THREE), ["a", "b", "c"])
+    expect(moveNoteOps("blk_nonesuch000", ["a", "b", "c"], placed)).toEqual([])
+  })
+
+  it("stamps updated_at on the note that moved, and only that one", () => {
+    const placed = order(graphOf(THREE), ["a", "b", "c"])
+    const moved = move(placed, "c", ["c", "a", "b"], NOW + 2)
+    const stampOf = (id: string) =>
+      (JSON.parse(moved.nodes.get(id)?.props ?? "{}") as { updated_at?: string }).updated_at
+    expect(stampOf("c")).toBeDefined()
+    expect(stampOf("a")).toBeUndefined()
+    expect(stampOf("b")).toBeUndefined()
+  })
+
+  it("places a note the root did not hold yet, among the placed ones", () => {
+    const placed = order(graphOf(THREE), ["a", "b"])
+    expect(orderedNoteIds(move(placed, "c", ["a", "c", "b"], NOW + 2))).toEqual(["a", "c", "b"])
   })
 })
 

@@ -3,7 +3,7 @@ import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import { buildGraphSnapshot, CHILD_KIND, CORPUS_ROOT_ID } from "./graph"
 import type { FocusFrame } from "./panes"
 import { rootFrame } from "./root-frame"
-import { parseViewStack, restoreViewFrames, stackToSave } from "./view-stack"
+import { parseViewStack, restoreViewFrames, stackToSave, viewPathHint } from "./view-stack"
 
 /**
  * Views save a whole stack (docs/graph-walk.md, section 7), above the Root
@@ -197,5 +197,21 @@ describe("open a View", () => {
 
   it("leaves out a View whose top root is gone", () => {
     expect(restoreViewFrames({ rootId: "blk_gone", noteId: "blk_tasks" }, GRAPH)).toBeNull()
+  })
+})
+
+describe("the path hint (docs/graph-walk.md, section 7)", () => {
+  it("names the frames between Root and the top, from Root", () => {
+    const frames = [
+      rootFrame(),
+      frame("blk_tasks", null),
+      frame("blk_tasks", "blk_week"),
+      frame("blk_tasks", "blk_todos"),
+    ]
+    expect(viewPathHint(frames, GRAPH)).toBe("Root › Tasks › Week")
+  })
+
+  it("is empty for a one-frame View", () => {
+    expect(viewPathHint([rootFrame(), frame("blk_tasks", "blk_todos")], GRAPH)).toBe("")
   })
 })

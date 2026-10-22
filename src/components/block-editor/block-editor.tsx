@@ -471,6 +471,7 @@ export function BlockEditor({
   fixedRoots = false,
   emptyable = false,
   context,
+  rootHints,
   diff,
   onEditingChange,
 }: {
@@ -609,6 +610,8 @@ export function BlockEditor({
    * navigates exactly as the note does.
    */
   context?: ReadonlySet<string>
+  /** Quiet text after a listed root's content, by id (`BlockEditorApi.rootHints`). */
+  rootHints?: ReadonlyMap<string, string>
   /** The outline is a diff (`BlockEditorApi.diff`): the calendar's day. */
   diff?: BlockDiff
   /**
@@ -2509,6 +2512,7 @@ export function BlockEditor({
     coarsePointer: coarse,
     fixedRoots,
     context,
+    rootHints,
     diff,
     // Browsing: a click opens the row (BlockItem routes a read-only row's
     // click here).

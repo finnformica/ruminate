@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useDebounce } from "use-debounce"
 import { viewRootsAtom } from "../global-state"
+import { useViewHints } from "../hooks/view-hints"
 import { useRecentRoots } from "../hooks/recent-roots"
 import { useCreateNote } from "../hooks/note"
 import { keepResults, useSearchResults } from "../hooks/search-results"
@@ -77,6 +78,8 @@ export function CommandMenu() {
   // use, Views is everything there is.
   const recentRoots = useRecentRoots()
   const viewRoots = useAtomValue(viewRootsAtom)
+  // Each View's path, after its name, as the sidebar shows it.
+  const viewHints = useViewHints()
   const [isOpen, setIsOpen] = useAtom(isCommandMenuOpenAtom)
 
   // The open note, if any: it leads the `in:` suggestions, and ⌘P searches
@@ -497,6 +500,7 @@ export function CommandMenu() {
                   query=""
                   results={results}
                   browseRoots={viewRoots}
+                  rootHints={viewHints}
                   limit={NUM_VISIBLE_RESULTS}
                   readOnly
                   initialSelection="none"

@@ -67,12 +67,24 @@ const NOTE_ROOTS: ResultRoot[] = [
 
 const onOpen = vi.fn()
 
-async function renderResults(roots: ResultRoot[], { readOnly = true } = {}) {
+async function renderResults(
+  roots: ResultRoot[],
+  {
+    readOnly = true,
+    rootHints,
+  }: { readOnly?: boolean; rootHints?: ReadonlyMap<string, string> } = {},
+) {
   onOpen.mockClear()
   const { store, unsubscribe } = await signedOutStore({ research: RESEARCH, journal: JOURNAL })
   const rendered = render(
     <Provider store={store}>
-      <ResultsEditor roots={roots} resetKey="q" readOnly={readOnly} onOpen={onOpen} />
+      <ResultsEditor
+        roots={roots}
+        resetKey="q"
+        readOnly={readOnly}
+        onOpen={onOpen}
+        rootHints={rootHints}
+      />
     </Provider>,
   )
   return { store, unsubscribe, ...rendered }
@@ -173,6 +185,19 @@ describe("resultsToOps", () => {
 })
 
 describe("ResultsEditor (browsing the notes list)", () => {
+  it("shows a root's hint after its name — a View's path in the palette — and on no other row", async () => {
+    await renderResults(NOTE_ROOTS, { rootHints: new Map([["research", "Root › Projects"]]) })
+    const hints = () =>
+      Array.from(document.querySelectorAll<HTMLElement>('[data-testid="row-hint"]')).map((hint) => [
+        hint.closest("[data-block-row]")?.getAttribute("data-block-row"),
+        hint.textContent,
+      ])
+    expect(hints()).toEqual([["research", "Root › Projects"]])
+    // Opened, the rows beneath it have none.
+    fireEvent.click(screen.getAllByLabelText("Expand")[0])
+    expect(hints()).toEqual([["research", "Root › Projects"]])
+  })
+
   it("lists every note as a closed root with the editor's chevron, and opens one to its blocks", async () => {
     const { store } = await renderResults(NOTE_ROOTS)
     expect(rowIds()).toEqual(["research", "journal"])
