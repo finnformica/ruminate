@@ -3,7 +3,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { cacheImage, fetchImageBlob, ImageFetchError, readCachedImage } from "./image-cache"
 import { thumbnailCopy } from "./image-fit"
-import { useImageSrc, usePicture } from "./images"
+import { ImageUploadError, uploadImage, useImageSrc, usePicture } from "./images"
 import { sessionFetch } from "./session-fetch"
 
 vi.mock("./image-cache", async (importOriginal) => {
@@ -18,7 +18,7 @@ vi.mock("./image-cache", async (importOriginal) => {
 // jsdom has no canvas: the thumbnail a browser would make is stood in for.
 vi.mock("./image-fit", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./image-fit")>()
-  return { ...actual, thumbnailCopy: vi.fn(async () => null) }
+  return { ...actual, fitImage: vi.fn(async () => null), thumbnailCopy: vi.fn(async () => null) }
 })
 vi.mock("./session-fetch", () => ({ sessionFetch: vi.fn() }))
 
@@ -55,7 +55,7 @@ describe("useImageSrc", () => {
   it("draws the device's copy without asking the server", async () => {
     kept.mockResolvedValueOnce(new Blob(["kept"]))
     const { result } = renderHook(() => useImageSrc(block("img_kept000000000")))
-    expect(result.current).toEqual({ src: null, uploading: false, failure: null })
+    expect(result.current).toEqual({ src: null, uploading: false, queued: false, failure: null })
     await waitFor(() => expect(result.current.src).toBe("blob:picture"))
     expect(fetched).not.toHaveBeenCalled()
   })
@@ -160,7 +160,7 @@ describe("usePicture", () => {
         usePicture(picture("img_held00000000"), { full: true, hold }),
       { initialProps: { hold: true } },
     )
-    expect(result.current).toEqual({ src: null, uploading: false, failure: null })
+    expect(result.current).toEqual({ src: null, uploading: false, queued: false, failure: null })
     expect(fetched).not.toHaveBeenCalled()
     rerender({ hold: false })
     await waitFor(() => expect(result.current.src).toBe("blob:picture"))
@@ -177,5 +177,24 @@ describe("usePicture", () => {
     const away = renderHook(() => usePicture(picture("img_paway0000000"), { full: true }))
     await waitFor(() => expect(away.result.current.failure).toBe("unreachable"))
     expect(away.result.current.src).toBeNull()
+  })
+})
+
+describe("uploadImage, offline", () => {
+  it("throws offline, with the file to keep, when the request never reaches the server", async () => {
+    put.mockRejectedValue(new TypeError("Failed to fetch"))
+    const file = new File(["png"], "shot.png", { type: "image/png" })
+    const error = await uploadImage(file).catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(ImageUploadError)
+    expect((error as ImageUploadError).code).toBe("offline")
+    expect((error as ImageUploadError).file).toBe(file)
+  })
+
+  it("still refuses what the device can check without the network", async () => {
+    const error = await uploadImage(new File(["svg"], "a.svg", { type: "image/svg+xml" })).catch(
+      (caught: unknown) => caught,
+    )
+    expect((error as ImageUploadError).code).toBe("unsupported")
+    expect(put).not.toHaveBeenCalled()
   })
 })

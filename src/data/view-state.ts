@@ -177,6 +177,25 @@ export function writeFolds(viewKey: string, folds: Folds) {
   }
 }
 
+/** Record rows as open in a view that is not on screen yet — the folds
+ * down to a block a wider view must show as it opens. */
+export function openFolds(viewKey: string, keys: string[]) {
+  if (keys.length === 0) return
+  let folds = readFolds(viewKey) ?? NO_FOLDS
+  for (const key of keys) folds = withFold(folds, key, true)
+  writeFolds(viewKey, folds)
+}
+
+/**
+ * Folds the caller holds rather than the device: a frame pushed onto a
+ * pane's focus stack keeps its own in the URL (docs/split-view.md). Given,
+ * `useFoldRule` reads and writes these and touches no storage.
+ */
+export interface HeldFolds {
+  folds: Folds
+  onChange: (folds: Folds) => void
+}
+
 /**
  * The rule a view descends by: the reader's explicit folds over the depth
  * rule. A key's own entry wins; failing that an entry naming its block id
@@ -238,6 +257,7 @@ export function useFoldRule(
   noteId: string | undefined,
   narrowing: Narrowing = {},
   held?: ReadonlySet<string>,
+  owned?: HeldFolds,
 ) {
   const levels = useAtomValue(expandedLevelsAtom)
   const { filter = "", sort = "" } = narrowing
@@ -251,15 +271,28 @@ export function useFoldRule(
   // with the old one's folds. Settles in one extra render.
   if (state.viewKey !== viewKey) setState({ viewKey, folds: readFolds(viewKey) ?? NO_FOLDS })
 
+  // Folds the caller holds stand in for the device's.
+  const folds = owned ? owned.folds : state.folds
   const expanded = React.useMemo(() => {
     const byDepth = narrowed ? EVERYTHING_OPEN : expandedByDepth(levels)
     const standing: ExpandedRule = held
       ? (key, level, type) => held.has(idOfKey(key)) || byDepth(key, level, type)
       : byDepth
-    return foldRule(state.folds, standing)
-  }, [state.folds, narrowed, levels, held])
+    return foldRule(folds, standing)
+  }, [folds, narrowed, levels, held])
 
+  // Read through a ref, so two toggles in one event build on each other and
+  // `setFold` keeps one identity.
+  const ownedRef = React.useRef(owned)
+  ownedRef.current = owned
   const setFold = React.useCallback((key: string, open: boolean) => {
+    const held = ownedRef.current
+    if (held) {
+      const next = withFold(held.folds, key, open)
+      held.folds = next
+      held.onChange(next)
+      return
+    }
     setState((prev) => {
       const folds = withFold(prev.folds, key, open)
       if (prev.viewKey) writeFolds(prev.viewKey, folds)
@@ -267,5 +300,5 @@ export function useFoldRule(
     })
   }, [])
 
-  return { expanded, setFold, folds: state.folds }
+  return { expanded, setFold, folds }
 }

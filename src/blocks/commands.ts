@@ -1,3 +1,4 @@
+import type { LinkDirections } from "../data/graph"
 import type { BlockOp } from "./history"
 import { DEFAULT_NEW_BLOCK_TYPE, isHeading, toggleType } from "./markers"
 import { defOf } from "./registry"
@@ -14,6 +15,7 @@ import {
   updateText,
   updateType,
 } from "./ops"
+import type { LinkPivots } from "./query"
 import type { BlockDoc, BlockType } from "./types"
 import {
   ancestorKeys,
@@ -24,7 +26,9 @@ import {
   keyOf,
   parentKeyOf,
   pathIdsOf,
+  queryOfPath,
   rootKeys,
+  rootQueryOf,
   rowsBeneath,
   siblingKey,
 } from "./view"
@@ -115,14 +119,25 @@ export interface CommandInput {
    * either way — nothing leaves the focused subtree. */
   focusTitled?: boolean
   /** The id of the view's own root when it is not a block in the doc (the
-   * note) — on the path above every row, so a row's parent that is the
-   * note is never one of the rows beneath it (`rowsBeneath`). */
+   * note) — the block a root row came from, so a root row's parent that is
+   * the note is never one of the rows beneath it (`rowsBeneath`). */
   rootId?: string | null
+  /** The frame's link pivots (src/blocks/query.ts), as the walk took them:
+   * a command reads the rows beneath a row as the view drew them
+   * (`keysBeneath`). None by default. */
+  pivots?: LinkPivots
+  /** The "Show links" setting, as the walk took it (`RowRule.directions`).
+   * Retires with the setting (GW-18). */
+  directions?: LinkDirections
   /** Where stepping back one level returns to: the previous entry in the focus
    * navigation stack — the path the user actually took, which under the graph
    * model (multi-parent blocks) is the only honest "up". Null/absent when
    * nothing is below on the stack; stepping back then leaves focus entirely. */
   focusBackId?: string | null
+  /** Whether the page keeps a focus stack the view can pop (a pane,
+   * src/data/panes.ts): stepping back then has somewhere to go even with no
+   * block in focus — a view from another note beneath this one. */
+  focusCanPop?: boolean
   /**
    * The type a fresh block starts as when Enter creates one from a block that
    * isn't a list item (those continue their own list), and what an empty list
@@ -193,7 +208,9 @@ export interface CommandResult {
    * `{ id: null }` leaves focus, `{ id }` focuses that block. Absent = no
    * change. The editor navigates (URL state) accordingly. Distinct from
    * `focus` above, which is where the caret or highlight lands. */
-  focusRoot?: { id: string | null }
+  focusRoot?: { id: string | null; back?: boolean }
+  /** Open this block in the pane beside the view (docs/split-view.md). */
+  openBeside?: string
   /** Why the command did nothing, for the reader (a toast). */
   notice?: string
 }
@@ -201,21 +218,31 @@ export interface CommandResult {
 type Command = (input: CommandInput) => CommandResult
 
 const IGNORED: CommandResult = { handled: false }
+const NO_PIVOTS: LinkPivots = new Map()
 const STRUCTURAL: BlockOp = { type: "structural" }
 
 /** The block a row shows. */
 const blockOf = ({ doc, key }: CommandInput) => doc.blocks[idOfKey(key)]
 
 /** The keys of the rows beneath a row, in order: its children, then the
- * parents shown under it (`rowsBeneath`) — what a fold hides or shows. */
-function keysBeneath({ doc, key, rootId, focusRootId }: CommandInput): string[] {
-  const path = new Set(pathIdsOf(key))
-  if (rootId) path.add(rootId)
-  if (focusRootId) path.add(focusRootId)
+ * parents shown under it (`rowsBeneath`) — what a fold hides or shows. The
+ * row's query is the pivots along its path, from the view's root query (in
+ * focus, from the focused block down), so the keys are the rows drawn. */
+function keysBeneath(input: CommandInput): string[] {
+  const { doc, key, rootId, focusRootId, pivots = NO_PIVOTS, directions } = input
+  const ids = pathIdsOf(key)
   const block = doc.blocks[idOfKey(key)] ?? null
-  return rowsBeneath(doc, block, path, directionOfKey(key)).map((row) =>
-    keyOf(key, row.id, row.direction),
-  )
+  const focusAt = focusRootId ? ids.indexOf(focusRootId) : -1
+  const query =
+    focusAt >= 0
+      ? queryOfPath(ids.slice(focusAt), pivots)
+      : queryOfPath(ids, pivots, rootQueryOf(pivots, rootId))
+  // The block the row came from: the one above it on the key, the view's
+  // root for a root row, nothing for the focused block's own row.
+  const from =
+    focusAt === ids.length - 1 ? null : ids.length > 1 ? ids[ids.length - 2] : (rootId ?? null)
+  const rows = rowsBeneath(doc, block, from, directionOfKey(key), query, directions, rootId)
+  return rows.map((row) => keyOf(key, row.id, row.direction))
 }
 
 /** Does `parentKey` name the focused block — i.e. is this row a direct child
@@ -665,6 +692,7 @@ export type CommandName =
   | "focusBlock"
   | "focusBack"
   | "leaveFocus"
+  | "openBeside"
 
 export const COMMANDS: Record<CommandName, Command> = {
   /** Select → edit the highlighted row. */
@@ -1152,14 +1180,18 @@ export const COMMANDS: Record<CommandName, Command> = {
   focusBlock: (input) => ({ handled: true, focusRoot: { id: idOfKey(input.key) } }),
 
   /** Step back one level — to the focus root's parent, or fully at the top. */
-  focusBack: ({ focusRootId, focusBackId }) => {
-    if (!focusRootId) return IGNORED
-    return { handled: true, focusRoot: { id: focusBackId ?? null } }
+  focusBack: ({ focusRootId, focusBackId, focusCanPop }) => {
+    if (!focusRootId && !focusCanPop) return IGNORED
+    return { handled: true, focusRoot: { id: focusBackId ?? null, back: true } }
   },
 
   /** Leave focus entirely, back to the whole note. */
   leaveFocus: ({ focusRootId }) =>
     focusRootId ? { handled: true, focusRoot: { id: null } } : IGNORED,
+
+  /** Open the row's block in the pane beside this one. */
+  openBeside: (input) =>
+    input.key === "" ? IGNORED : { handled: true, openBeside: idOfKey(input.key) },
 }
 
 /** Run a named command. Unknown names are a no-op (defensive). */
@@ -1188,6 +1220,7 @@ export const BROWSE_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>([
   "focusBlock",
   "focusBack",
   "leaveFocus",
+  "openBeside",
 ])
 
 export function runCommand(name: CommandName, input: CommandInput): CommandResult {

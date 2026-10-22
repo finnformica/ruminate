@@ -43,8 +43,10 @@ export const mintWriterId = (prefix: "evt" | "bat"): string => `${prefix}_${mint
 export const writerDevice = (): string => `${deviceId()}.${TAB}`
 
 /** The writer's UTC offset right now, in minutes EAST of UTC
- * (`EventEnvelope.tz`): `Date#getTimezoneOffset` with its sign put right. */
-export const writerTimezone = (): number => -new Date().getTimezoneOffset()
+ * (`EventEnvelope.tz`): `Date#getTimezoneOffset` with its sign put right.
+ * Subtracted from 0 rather than negated, so UTC is 0 and never -0 — the
+ * value a stored event reads back as. */
+export const writerTimezone = (): number => 0 - new Date().getTimezoneOffset()
 
 export const WRITER_DEVICE_HEADER = "X-Ruminate-Device"
 export const WRITER_BUILD_HEADER = "X-Ruminate-Build"

@@ -20,8 +20,9 @@ input method reuses it:
    (the target block, the on-screen order, the caret, the focus root) and
    returns _what should change_ — a new doc + history op, where focus should
    land, whether a block's collapse toggles, whether navigation ran off the
-   top, or a focus change (focus itself is URL state — `?block=` — owned by the
-   note route; the editor only requests it). It never touches React or the DOM.
+   top, or a focus change (focus itself is URL state — `?block=` and the
+   pane's focus stack, docs/split-view.md — owned by the note route; the
+   editor only requests it). It never touches React or the DOM.
    The editor component applies the result.
 
 3. **Bindings — `src/blocks/keymap.ts`.** A declarative table mapping a mode +
@@ -73,6 +74,14 @@ indent, outdent) read the direction off the key and act on the matching list —
 `children` or `upstream` — keeping the two as mirrors of one edge; commands
 address siblings with `siblingKey` and what lies beneath a row with
 `rowsBeneath`, so none of them branch on direction themselves.
+
+Each row also has a **query** (docs/graph-walk.md, 3): the frame's link
+pivot on its block, or the query of the row above. An up row lists its
+holders only. A down row lists what the "Show links" setting names. The
+rows (`buildRows`, `walkDoc`, `occurrenceKeys`) take the pivots and the
+setting as `RowRule`, and a command takes them on `CommandInput`, so
+`rowsBeneath` lists the rows the walk drew. With no pivots, the rows are
+the rows of today.
 
 ## Adding a behaviour
 

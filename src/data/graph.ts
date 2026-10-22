@@ -3,8 +3,16 @@ import { isTombstoned, type LinkRow, type NodeRow } from "../../worker/handlers/
 import { blockId } from "../blocks/id"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
+import { isHeading } from "../blocks/markers"
 import { asBlockType, type Block, type BlockDoc, type BlockProps } from "../blocks/types"
-import { keyOf, type ExpandedRule } from "../blocks/view"
+import {
+  levelBeneath,
+  queryAt,
+  rootDirection,
+  type LinkPivots,
+  type WalkRule,
+} from "../blocks/query"
+import { keyOf, type Direction, type ExpandedRule } from "../blocks/view"
 import type { NoteId } from "../schema"
 import { emittedNoteTitle } from "./note-identity"
 
@@ -489,19 +497,115 @@ export type LinkDirections = "downstream" | "upstream" | "both"
 /** Every occurrence open: the eager walk (export, search, the basket). */
 const EVERYTHING_OPEN: ExpandedRule = () => true
 
+/** No pivots: every row's query is down, the walk of a note today. */
+const NO_PIVOTS: LinkPivots = new Map()
+
 /** The options a walk takes. */
 export interface WalkOptions {
   /** The fold rule; absent = every occurrence open. */
   expanded?: ExpandedRule
   /** The level of the roots (1 for a note's children; 0 for a focused block). */
   startLevel?: number
-  /** Which links to follow; `"downstream"` by default — the tree. */
+  /** Which links a row whose query is down follows; `"downstream"` by
+   * default — the tree. Retires with the "Show links" setting (GW-18). */
   directions?: LinkDirections
+  /** The frame's link pivots (src/blocks/query.ts): block id → the direction
+   * the rows beneath that block's rows walk. None by default, which is the
+   * walk of today. */
+  pivots?: LinkPivots
   /** The id of the view's own root when it is not a block in the doc (the
    * note): on the path from the start, so a root's parent that is the note
    * is never listed beneath it. With `directions` upstream, the root's own
    * parents are the doc's `upstream`, rows after the roots. */
   rootId?: string
+  /** Narrow and sort the rows as the walk goes (docs/graph-walk.md, 4.5).
+   * Absent = every row, in the graph's order. */
+  narrowing?: WalkNarrowing
+}
+
+/**
+ * What a narrowed walk keeps (docs/graph-walk.md, 4.5): a filter's matches,
+ * their ancestors as path, and everything beneath a match; and each down
+ * row's children in the sort's order. The filter is told from an index, not
+ * from a walk beneath the row, so the walk stays lazy: beneath a row it
+ * lists only the children in `reach` (or beneath a match), then asks the
+ * fold rule as usual.
+ */
+export interface WalkNarrowing {
+  /** The ids the filter matched; null when nothing is filtered. */
+  matched: ReadonlySet<string> | null
+  /** The nodes from which a match can be reached down: `ancestorClosure`
+   * of `matched`. Read only when `matched` is not null. */
+  reach: ReadonlySet<string>
+  /** Rows kept whatever the filter says (the row in edit), as a match is
+   * kept: its ancestors as path, its body whole. */
+  keep?: ReadonlySet<string>
+  /** How two sibling rows order, by id; null for the graph's order. */
+  compare: ((a: string, b: string) => number) | null
+  /** Keep the walk's roots when the filter empties them, with nothing
+   * beneath (a focused block is the view's title). */
+  keepRoots?: boolean
+}
+
+/** Where a row sits for a narrowing: under the filter (`narrow`), beneath a
+ * match (`body`, kept whole), or in an up region (`up`, kept whole and in
+ * holder order). */
+type Scope = "narrow" | "body" | "up"
+
+const NOTHING: ReadonlySet<string> = new Set()
+
+/**
+ * `ids` and every node above them over child links: the nodes from which
+ * one of `ids` can be reached down. Built by walking UP over the reverse
+ * index, so the cost is O(ids × their ancestors), not the size of the view.
+ * The walk does not climb past `stopAt` (the view's root), whose holders
+ * are not rows of the view, nor into the corpus root.
+ */
+export function ancestorClosure(
+  graph: GraphSnapshot,
+  ids: Iterable<string>,
+  stopAt?: string,
+): Set<string> {
+  const closure = new Set<string>()
+  const stack: string[] = []
+  for (const id of ids) {
+    if (closure.has(id) || !graph.nodes.has(id)) continue
+    closure.add(id)
+    stack.push(id)
+  }
+  while (stack.length > 0) {
+    const id = stack.pop() as string
+    if (id === stopAt) continue
+    for (const parentId of parentIdsOf(graph, id)) {
+      if (closure.has(parentId)) continue
+      const parent = graph.nodes.get(parentId)
+      if (!parent || isCorpusRoot(parent)) continue
+      closure.add(parentId)
+      stack.push(parentId)
+    }
+  }
+  return closure
+}
+
+const sectionReaches = new WeakMap<GraphSnapshot, ReadonlySet<string>>()
+
+/**
+ * Every node from which a section can be reached down — the sections
+ * themselves included (docs/graph-walk.md, 4.3 and 4.5). A section is a
+ * heading block (`isHeading`). Built once per snapshot by walking up from
+ * each section (`ancestorClosure`), and kept beside the snapshot, so every
+ * pane reads the same set.
+ */
+export function sectionReach(graph: GraphSnapshot): ReadonlySet<string> {
+  const known = sectionReaches.get(graph)
+  if (known) return known
+  const sections: string[] = []
+  for (const node of graph.nodes.values()) {
+    if (isHeading(asBlockType(node.type))) sections.push(node.id)
+  }
+  const reach = ancestorClosure(graph, sections)
+  sectionReaches.set(graph, reach)
+  return reach
 }
 
 /**
@@ -539,11 +643,34 @@ export interface WalkOptions {
  * complete list of its parents' ids (`upstream`), and beneath an open row
  * the walk continues into its parents after its children — each an upstream
  * occurrence (`^` in the key, src/blocks/view.ts), walked on by the same
- * rule in both directions. A parent already on the path above is skipped
- * (a block's own parent is where the row came from, not something beneath
- * it), which is what keeps a single-homed block's rows exactly the tree's
- * and shows only the *other* places a multi-homed block is held. The view
- * is then the graph around the root, as far as the folds open it.
+ * rule in both directions. The guard is one rule both ways
+ * (docs/graph-walk.md, 3.3): the block a row came from (the row above,
+ * reached the other way; the view's root at the top) is not a row beneath
+ * it, which is what keeps a single-homed block's rows exactly the tree's
+ * and shows only the *other* places a multi-homed block is held. Any other
+ * block on the path is a looped row, so an up loop shows where it closes,
+ * as a down loop does. The view is then the graph around the root, as far
+ * as the folds open it.
+ *
+ * **Pivots** (`pivots`, docs/graph-walk.md, 3) set the query of a row by its
+ * block: up, the row's holders are the rows beneath it (less the row it came
+ * from), and nothing it holds; down, what it holds. The rows beneath inherit
+ * the query until the next pivot. A row whose query is down follows the
+ * links `directions` names, so with no pivots the walk is exactly the walk
+ * above. The fold rule still closes a pivot row (`queryAt`: a fold beats a
+ * pivot), and the depth count starts again beneath a pivot row
+ * (`levelBeneath`). A block reached up, or whose row walks up, carries its
+ * `upstream` list. A pivot on `rootId` (the note) is the root query: up,
+ * the note's holders replace its blocks as the rows (`doc.upstream`).
+ *
+ * **Narrowed** (`narrowing`, docs/graph-walk.md, 4.5), the walk is still
+ * lazy. A filter keeps a match, its ancestors and everything beneath it:
+ * beneath a down row the walk lists only the children that reach a match
+ * (the index `narrowing.reach`), or every child beneath a match, and then
+ * asks the fold rule as usual. A closed row carries those lists and is not
+ * walked. The sort orders each down row's list as the walk builds it. An up
+ * region is kept whole, in holder order (3.9). With a filter on, a down
+ * loop is pruned, not shown where it closes.
  */
 export function walkGraph(
   rootIds: string[],
@@ -552,15 +679,36 @@ export function walkGraph(
     expanded = EVERYTHING_OPEN,
     startLevel = 1,
     directions = "downstream",
+    pivots = NO_PIVOTS,
     rootId,
+    narrowing,
   }: WalkOptions = {},
 ): GraphView {
   const down = directions !== "upstream"
   const up = directions !== "downstream"
+  const rule: WalkRule = { pivots, expanded }
   const blocks: Record<string, Block> = {}
   const collapsed = new Set<string>()
   const path = new Set<string>()
   if (rootId) path.add(rootId)
+
+  // The narrowing (docs/graph-walk.md, 4.5). A row is held when it matched
+  // or is kept; `reaches` says a row that stands is beneath a node, from the
+  // indexes and with no walk beneath it. Besides the held rows, a row whose
+  // pivot is up stands, as the place its region hangs from (3.9). The rows
+  // kept and the pivots are few, so their closure is built here.
+  const matched = narrowing?.matched ?? null
+  const filtering = matched !== null
+  const kept = narrowing?.keep ?? NOTHING
+  const reach = narrowing?.reach ?? NOTHING
+  const standing = filtering
+    ? [...kept, ...[...pivots].filter(([, to]) => to === "up").map(([id]) => id)]
+    : []
+  const standReach = standing.length > 0 ? ancestorClosure(graph, standing, rootId) : NOTHING
+  const held = (id: string) => filtering && (matched.has(id) || kept.has(id))
+  const reaches = (id: string) => held(id) || reach.has(id) || standReach.has(id)
+  const compare = narrowing?.compare ?? null
+  const order = (ids: string[]) => (compare && ids.length > 1 ? [...ids].sort(compare) : ids)
 
   // The live ids a node holds, and (upstream) the live ids holding it.
   const childrenOf = (id: string) =>
@@ -576,8 +724,22 @@ export function walkGraph(
       return parentId !== id && parent !== undefined && !isCorpusRoot(parent)
     })
 
-  // A block with its complete lists, built once — never walked here.
-  const blockOf = (id: string): Block | null => {
+  // The children a block lists in a narrowed walk, in the sort's order.
+  // Under the filter, only those that reach a held row; and with a filter
+  // on, a child on the path is not listed, so a down loop ends the walk
+  // with no closing row, as the filter has always pruned it.
+  const narrowedChildren = (id: string, scope: Scope): string[] => {
+    let ids = childrenOf(id)
+    if (filtering) {
+      ids = ids.filter((childId) => !path.has(childId) && (scope !== "narrow" || reaches(childId)))
+    }
+    return scope === "up" ? ids : order(ids)
+  }
+
+  // A block with its complete lists, built once — never walked here. In a
+  // narrowed walk the first row of a block decides its lists, which are the
+  // rows that pass beneath it rather than the graph's.
+  const blockOf = (id: string, scope: Scope): Block | null => {
     const known = blocks[id]
     if (known) return known
     const node = graph.nodes.get(id)
@@ -590,50 +752,122 @@ export function walkGraph(
       type: asBlockType(node.type),
       text: node.text,
       ...(props ? { props } : {}),
-      children: childrenOf(id),
+      children: narrowing ? narrowedChildren(id, scope) : childrenOf(id),
       ...(up ? { upstream: parentsOf(id) } : {}),
     }
     blocks[id] = block
     return block
   }
 
+  /** `direction` is how the row was reached (the key's mark), and `from` the
+   * block it was reached from (the row above; the view's root at the top);
+   * `inherited` is the query of the row above (the root query at the top),
+   * and `scope` where the row above sits for the narrowing. False when the
+   * row is not drawn: its node is missing, or the filter prunes it. */
   const visit = (
     id: string,
     parentKey: string | null,
     level: number,
-    direction: "down" | "up",
+    direction: Direction,
+    inherited: Direction,
+    from: string | null,
+    scope: Scope,
   ): boolean => {
     // Reached again from above (or the view's own root): the loop closes
-    // here, as a leaf — named, not built again, never descended.
-    if (path.has(id)) return graph.nodes.has(id)
-    const block = blockOf(id)
+    // here, as a leaf — named, not built again, never descended. With a
+    // filter on, a down loop is pruned instead.
+    if (path.has(id)) return graph.nodes.has(id) && !(filtering && direction === "down")
+    // The row's query: its block's pivot, or the query of the row above.
+    const query = pivots.get(id) ?? inherited
+    // The filter and the sort apply to down rows only: an up region is kept
+    // whole, in holder order (docs/graph-walk.md, 3.9). Beneath a match,
+    // every row is kept.
+    const own: Scope =
+      direction === "up" || query === "up" ? "up" : scope === "narrow" && held(id) ? "body" : scope
+    const fresh = !(id in blocks)
+    const block = blockOf(id, own)
     if (!block) return false
+    // A row under the filter stands only for a held row beneath it. A
+    // block already in the doc stood at another row, and stands here too.
+    const pruned = filtering && own === "narrow" && fresh
+    const drop = () => {
+      delete blocks[id]
+      return false
+    }
+    if (pruned && (!down || block.children.length === 0)) return drop()
     const key = keyOf(parentKey, id, direction)
-    // Beneath a parent row, the block it was reached up from is not a row.
-    const beneathDown = !down
+    if ((query === "up" || direction === "up") && !block.upstream) block.upstream = parentsOf(id)
+    // A row walking down follows what `directions` names; one walking up
+    // (beneath an up pivot), its holders only.
+    const followsDown = query === "down" && down
+    const followsUp = query === "up" || up
+    // The block the row came from is not a row beneath it, in the other
+    // direction (docs/graph-walk.md, 3.3). Any other block on the path is a
+    // row, and closes its loop there as a leaf. The view's own root is not a
+    // block in the doc, so it is never a row against the row's direction.
+    const skip = (otherId: string) => otherId === from || otherId === rootId
+    const beneathDown = !followsDown
       ? []
       : direction === "up"
-        ? block.children.filter((childId) => !path.has(childId))
+        ? block.children.filter((childId) => !skip(childId))
         : block.children
-    const beneathUp = up ? (block.upstream ?? []).filter((parentId) => !path.has(parentId)) : []
+    const beneathUp = !followsUp
+      ? []
+      : (block.upstream ?? []).filter((parentId) =>
+          direction === "down" ? !skip(parentId) : parentId !== rootId,
+        )
     if (beneathDown.length === 0 && beneathUp.length === 0) return true
-    if (!expanded(key, level, block.type)) {
+    const row = { key, id, level, type: block.type }
+    // A closed row is not walked: under the filter, the index has said a
+    // held row is beneath it.
+    if (queryAt(rule, row, query).type === "collapse") {
       collapsed.add(key)
       return true
     }
+    const next = levelBeneath(rule, row)
     path.add(id)
-    for (const childId of beneathDown) visit(childId, key, level + 1, "down")
-    for (const parentId of beneathUp) visit(parentId, key, level + 1, "up")
+    const shown = beneathDown.filter((childId) => visit(childId, key, next, "down", query, id, own))
+    if (pruned) {
+      // The index says a held row is beneath, but a loop can hide it: the
+      // row then has nothing to stand for.
+      if (shown.length === 0) {
+        path.delete(id)
+        return drop()
+      }
+      block.children = shown
+    }
+    for (const parentId of beneathUp) visit(parentId, key, next, "up", query, id, "up")
     path.delete(id)
     return true
   }
 
-  const rootBlockIds = rootIds.filter((id) => visit(id, null, startLevel, "down"))
+  // A root the filter emptied, kept when the view is rooted on it: its
+  // block, with nothing beneath it.
+  const keepRoot = (id: string): boolean => {
+    if (!narrowing?.keepRoots || !filtering) return false
+    const block = blockOf(id, "narrow")
+    if (!block) return false
+    block.children = []
+    return true
+  }
+
+  // The root query: the pivot on the view's own root (the note), down when
+  // there is none. A focused block is a root row, and reads its own pivot.
+  const rootQuery = rootId ? rootDirection(pivots, rootId) : "down"
+  const rootBlockIds =
+    rootQuery === "up"
+      ? []
+      : order(rootIds).filter(
+          (id) =>
+            visit(id, null, startLevel, "down", "down", rootId ?? null, "narrow") || keepRoot(id),
+        )
   const doc: BlockDoc = { props: null, rootBlockIds, blocks }
-  if (up && rootId) {
+  if ((up || rootQuery === "up") && rootId) {
     // The root's own parents: rows after the roots, at the roots' level.
     const upstream = parentsOf(rootId)
-    doc.upstream = upstream.filter((parentId) => visit(parentId, null, startLevel, "up"))
+    doc.upstream = upstream.filter((parentId) =>
+      visit(parentId, null, startLevel, "up", rootQuery, rootId, "up"),
+    )
   }
   return { doc, collapsed }
 }
@@ -664,6 +898,8 @@ export function noteView(
   graph: GraphSnapshot,
   expanded?: ExpandedRule,
   directions: LinkDirections = "downstream",
+  pivots?: LinkPivots,
+  narrowing?: WalkNarrowing,
 ): GraphView | null {
   const note = graph.nodes.get(noteId)
   if (!note || !isNoteType(note.type)) return null
@@ -675,7 +911,9 @@ export function noteView(
   const { doc, collapsed } = walkGraph(childIdsOf(graph, noteId), graph, {
     expanded,
     directions,
+    pivots,
     rootId: noteId,
+    narrowing,
   })
   return { doc: { ...doc, props }, collapsed }
 }
@@ -692,10 +930,12 @@ export function blockView(
   graph: GraphSnapshot,
   expanded?: ExpandedRule,
   directions: LinkDirections = "downstream",
+  pivots?: LinkPivots,
+  narrowing?: WalkNarrowing,
 ): GraphView | null {
   const node = graph.nodes.get(blockId)
   if (!node || isNoteType(node.type)) return null
-  return walkGraph([blockId], graph, { expanded, startLevel: 0, directions })
+  return walkGraph([blockId], graph, { expanded, startLevel: 0, directions, pivots, narrowing })
 }
 
 /**
