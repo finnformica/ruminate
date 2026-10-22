@@ -96,13 +96,14 @@ describe("a shared note (read-only, browsed)", () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it("the reader's folds are their own, kept per device", () => {
+  it("the reader's folds are their own, and not kept on the device (docs/graph-walk.md, 5)", () => {
     const first = renderShared()
     fireEvent.click(first.container.querySelectorAll('[aria-label="Collapse"]')[0])
     expect(rows(first.container)).toEqual(["one", "five"])
+    expect(Object.keys(localStorage).filter((key) => key.startsWith("collapse:"))).toEqual([])
     cleanup()
     const again = renderShared()
-    expect(rows(again.container)).toEqual(["one", "five"])
+    expect(rows(again.container)).toEqual(["one", "two", "five"])
   })
 })
 
