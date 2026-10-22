@@ -49,6 +49,7 @@ import { rootKeys } from "../../blocks/view"
 import { NoteTitle } from "./note-title"
 import { useCoarsePointer } from "../../hooks/coarse-pointer"
 import { REMOVE_VIEW, useWriteView } from "../../hooks/views"
+import { rekeyFolds, type Folds } from "../../data/view-state"
 import { viewRootIdsAtom } from "../../data/views"
 import { isHeading, leadingMarker, titlesFocus, typeOfMarker } from "../../blocks/markers"
 import {
@@ -429,6 +430,7 @@ export function BlockEditor({
   collapsed: collapsedProp,
   onToggleCollapse,
   onReveal,
+  onMoveFolds,
   onExitTop,
   onExitBottom,
   focusFirstSignal,
@@ -538,6 +540,10 @@ export function BlockEditor({
    * would say (`reveal`). Absent, a reveal falls back to the toggle, which
    * is all transient local state needs. */
   onReveal?: (key: string) => void
+  /** Rows a structural move took to new keys (`CommandResult.moved`): the
+   * caller moves their folds with them. Absent, the editor's own folded
+   * keys move. */
+  onMoveFolds?: (moved: [from: string, to: string][]) => void
   /** Called when the user navigates up past the first block — lets the caller
    * move focus to whatever sits above the editor (e.g. the note title). */
   onExitTop?: () => void
@@ -1516,7 +1522,19 @@ export function BlockEditor({
   }
   const applyResult = (result: CommandResult) => {
     if (result.doc) history.commit(doc, result.doc, result.op ?? { type: "structural" })
-    // Commands name rows, and folds are per row.
+    // Commands name rows, and folds are per row: a row moved to a new key
+    // takes its folds, and the folds beneath it, along.
+    if (result.moved && result.moved.length > 0) {
+      const moved = result.moved
+      if (onMoveFolds) onMoveFolds(moved)
+      else if (!collapsedProp) {
+        setCollapsedInternal((prev) => {
+          const start: Folds = { open: new Set(), closed: prev }
+          const folds = moved.reduce((next, [from, to]) => rekeyFolds(next, from, to), start)
+          return new Set(folds.closed)
+        })
+      }
+    }
     if (result.toggleCollapse) toggleCollapse(result.toggleCollapse)
     // `expand` is a demand ("this row must be open"), not a toggle: only act
     // when the row is actually collapsed (commands can't see collapse state).

@@ -429,7 +429,7 @@ function NotePage({
   // device.
   const narrowed = filter !== "" || sort !== ""
   const levels = useAtomValue(expandedLevelsAtom)
-  const { expanded, setFold } = useFoldRule({
+  const { expanded, setFold, moveFolds } = useFoldRule({
     narrowed,
     depth: frame.depth,
     owned: {
@@ -906,6 +906,7 @@ function NotePage({
                     collapsed,
                     toggle: (key) => setFold(key, collapsed.has(key)),
                     setOpen: (key) => setFold(key, true),
+                    move: moveFolds,
                   }}
                   onToggleCollapse={touch}
                   startEditing={isNewNote && !showsTitle}

@@ -1,7 +1,7 @@
 import { useAtomValue } from "jotai"
 import React from "react"
 import { expandedByDepth } from "../blocks/default-collapsed"
-import { idOfKey, type ExpandedRule } from "../blocks/view"
+import { idOfKey, isWithin, type ExpandedRule } from "../blocks/view"
 import { BOARD_TYPE } from "./graph"
 import { expandedLevelsAtom } from "../global-state"
 
@@ -159,6 +159,19 @@ export function withFold(folds: Folds, key: string, open: boolean, byDefault?: b
   return next
 }
 
+/**
+ * `folds` after a structural move took the row at `from` to `to` (an indent,
+ * an outdent): the row's own fold and every fold beneath it move with it, so
+ * a closed row stays closed and its closed descendants stay closed. Other
+ * paths do not change (docs/graph-walk.md, Appendix D, fix 3).
+ */
+export function rekeyFolds(folds: Folds, from: string, to: string): Folds {
+  if (from === to) return folds
+  const move = (keys: ReadonlySet<string>) =>
+    new Set([...keys].map((key) => (isWithin(key, from) ? to + key.slice(from.length) : key)))
+  return { open: move(folds.open), closed: move(folds.closed) }
+}
+
 /** The standing rule of a narrowed view: every row open. */
 const EVERYTHING_OPEN: ExpandedRule = () => true
 
@@ -226,6 +239,19 @@ export function useFoldRule({
     }
     setOwn((prev) => withFold(prev, key, open, byDefault))
   }, [])
+  /** Rows that a structural move took to new keys: their folds go too. */
+  const moveFolds = React.useCallback((moved: readonly [from: string, to: string][]) => {
+    const apply = (folds: Folds) =>
+      moved.reduce((next, [from, to]) => rekeyFolds(next, from, to), folds)
+    const held = ownedRef.current
+    if (held) {
+      const next = apply(held.folds)
+      held.folds = next
+      held.onChange(next)
+      return
+    }
+    setOwn(apply)
+  }, [])
 
-  return { expanded, setFold, folds }
+  return { expanded, setFold, moveFolds, folds }
 }

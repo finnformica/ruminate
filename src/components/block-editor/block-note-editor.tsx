@@ -125,6 +125,8 @@ export function BlockNoteEditor({
      * would say — a row that is about to become a parent has nothing folded
      * to toggle. */
     setOpen: (key: string) => void
+    /** Rows an indent or an outdent took to new keys: their folds go too. */
+    move?: (moved: [from: string, to: string][]) => void
   }
   /** Told after a block is folded or unfolded — the note page counts it as
    * touching the note. */
@@ -395,6 +397,7 @@ export function BlockNoteEditor({
       collapsed={collapsed as Set<string>}
       onToggleCollapse={toggleCollapse}
       onReveal={revealRow}
+      onMoveFolds={folds ? folds.move : own.moveFolds}
       onExitTop={onExitTop}
       focusFirstSignal={focusFirstSignal}
       focusFirstMode={focusFirstMode}

@@ -5,7 +5,14 @@ import { Provider, createStore } from "jotai"
 import type { ReactNode } from "react"
 import { expandedByDepth } from "../blocks/default-collapsed"
 import { expandedLevelsAtom } from "../global-state"
-import { foldRule, takeStoredFolds, useFoldRule, withFold, type HeldFolds } from "./view-state"
+import {
+  foldRule,
+  rekeyFolds,
+  takeStoredFolds,
+  useFoldRule,
+  withFold,
+  type HeldFolds,
+} from "./view-state"
 
 /** Keys of a four-deep outline: `a`, `a/b`, `a/b/c`, `a/b/c/d`. Levels 1–4. */
 const sorted = (set: ReadonlySet<string>) => [...set].sort()
@@ -238,5 +245,28 @@ describe("folds a frame holds (docs/graph-walk.md, section 5)", () => {
     expect(result.current.expanded("a", 1)).toBe(true)
     expect(result.current.expanded("a/b", 2)).toBe(true)
     expect(Object.keys(localStorage).filter((key) => key.startsWith("collapse:"))).toEqual([])
+  })
+})
+
+describe("rekeyFolds (a fold moves with its row, GW-11)", () => {
+  const folds = {
+    open: new Set(["a/b/c/d", "x"]),
+    closed: new Set(["a/b", "a/b/c", "a/bb"]),
+  }
+
+  it("moves a closed row and its closed descendants to the new path", () => {
+    // Indent: `a/b` nests under its sibling `a/s`.
+    const moved = rekeyFolds(folds, "a/b", "a/s/b")
+    expect(sorted(moved.closed)).toEqual(["a/bb", "a/s/b", "a/s/b/c"])
+    expect(sorted(moved.open)).toEqual(["a/s/b/c/d", "x"])
+    // Outdent back: the same folds as before.
+    const back = rekeyFolds(moved, "a/s/b", "a/b")
+    expect(sorted(back.closed)).toEqual(sorted(folds.closed))
+    expect(sorted(back.open)).toEqual(sorted(folds.open))
+  })
+
+  it("leaves other paths alone, a path that only starts with the same text too", () => {
+    expect(rekeyFolds(folds, "a/b", "a/b")).toBe(folds)
+    expect(rekeyFolds(folds, "q", "r/q")).toEqual(folds)
   })
 })

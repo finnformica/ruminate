@@ -70,6 +70,15 @@ describe("indent / outdent", () => {
     expect(result.focus).toEqual({ mode: "edit", key: "b/c", caret: 1 })
   })
 
+  it("names each row it moved, so its folds move with it (GW-11)", () => {
+    const doc = fixture()
+    expect(runCommand("indent", input(doc, "c", { mode: "select" })).moved).toEqual([["c", "b/c"]])
+    const indented = runCommand("indent", input(doc, "c", { mode: "select" })).doc!
+    expect(runCommand("outdent", input(indented, "b/c", { mode: "select" })).moved).toEqual([
+      ["b/c", "c"],
+    ])
+  })
+
   it("consumes the key but does nothing when it cannot indent", () => {
     const doc = fixture()
     const result = runCommand("indent", input(doc, "a"))

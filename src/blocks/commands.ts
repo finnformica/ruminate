@@ -198,6 +198,9 @@ export interface CommandResult {
    * (nothing beneath them yet, so nothing folded), which the depth rule
    * would otherwise close the instant they gain a child. */
   reveal?: string[]
+  /** Rows a structural move took to new keys (indent, outdent), each as
+   * `[from, to]`: their folds move with them (`rekeyFolds`). */
+  moved?: [from: string, to: string][]
   /** Navigation tried to move above the first block — the caller may hand focus
    * to whatever sits above the editor (e.g. the note title). */
   exitTop?: boolean
@@ -740,6 +743,7 @@ export const COMMANDS: Record<CommandName, Command> = {
       doc: next,
       op: STRUCTURAL,
       reveal,
+      moved,
       focus: keepSelection(input, moved),
     }
   },
@@ -767,7 +771,13 @@ export const COMMANDS: Record<CommandName, Command> = {
       next = result.doc
     }
     if (next === doc) return { handled: true, focus: keepSelection(input) }
-    return { handled: true, doc: next, op: STRUCTURAL, focus: keepSelection(input, moved) }
+    return {
+      handled: true,
+      doc: next,
+      op: STRUCTURAL,
+      moved,
+      focus: keepSelection(input, moved),
+    }
   },
 
   moveSelectionUp: moveSelection("up"),
