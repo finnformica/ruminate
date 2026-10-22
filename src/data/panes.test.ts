@@ -20,9 +20,11 @@ import {
   popTo,
   withPane,
   withPivot,
+  withRootBase,
   type Pane,
   type PaneLayout,
 } from "./panes"
+import { rootFrame } from "./root-frame"
 
 /**
  * The panes and their focus stacks (docs/split-view.md): a push records the
@@ -35,6 +37,14 @@ const B = "blk_noteb"
 
 /** A selection path, written as a key for short (`blk_a/blk_b`). */
 const P = (key: string) => key.split("/")
+
+/** A layout as the URL gives it back: the Root frame under every pane
+ * (`withRootBase`), since the URL never writes it. */
+const rooted = (layout: PaneLayout): PaneLayout => ({
+  ...layout,
+  panes: layout.panes.map((pane) => ({ frames: withRootBase(pane.frames) })),
+})
+const rootedPane = (pane: Pane): Pane => ({ frames: withRootBase(pane.frames) })
 
 /** Push `root` from the pane's current view, with `selected` selected there. */
 const push = (pane: Pane, root: string | null, selected: string | null, noteId = A) =>
@@ -140,7 +150,7 @@ describe("a crumb above the stack's bottom frame (Finn's bug: it pushed a cycle)
     // Through the URL: pane1 holds the one frame, the first pane is as it was.
     const { noteId, search } = layoutToSearch(next)
     expect(search.pane1).toBe(B)
-    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(next)
+    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(rooted(next))
   })
 
   it("pops to the view when it is on the stack, and does nothing on the view on screen", () => {
@@ -180,6 +190,7 @@ describe("a frame's state (Finn's decisions, docs/split-view.md)", () => {
     expect(search.stack).toBe(`${A}::x/b1,${A}:blk_b1:y/b2`)
     const back = layoutFromSearch(noteId, search as Record<string, unknown>)
     expect(back.panes[0].frames.map((f) => f.selected)).toEqual([
+      null,
       ["blk_x", "blk_b1"],
       ["blk_b1", "blk_y", "blk_b2"],
       null,
@@ -200,7 +211,7 @@ describe("a frame's state (Finn's decisions, docs/split-view.md)", () => {
     expect(search.filter).toBe("has:link, text:a;b")
     expect(search.stack).toBe(`${A}::b1;f=type%3Atodo;s=text`)
     expect(search.pane1).toBe(`${B},${B}:2024-01-02;z=-d`)
-    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(layout)
+    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(rooted(layout))
   })
 
   it("is plain data, so a View can store a whole stack", () => {
@@ -220,7 +231,7 @@ describe("a frame's state (Finn's decisions, docs/split-view.md)", () => {
     const { noteId, search } = layoutToSearch(layout)
     expect(search).toMatchObject({ folds: "-x", nfolds: "+y", depth: 3 })
     expect(search.pane1).toBe(`${A};z=-x;n=+y;d=3`)
-    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(layout)
+    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(rooted(layout))
   })
 
   it("drops a malformed depth", () => {
@@ -241,7 +252,7 @@ describe("a frame's pivots (docs/graph-walk.md, 3.4)", () => {
     expect(search.pivots).toBe("^b1")
     expect(search.stack).toBe(`${A}::b1;p=^x.v~2024-01-02`)
     expect(search.pane1).toBe(`${A};p=^x.v~2024-01-02`)
-    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(layout)
+    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(rooted(layout))
   })
 
   it("drops a malformed pivot and keeps the rest", () => {
@@ -341,10 +352,10 @@ describe("the layout", () => {
 describe("the URL", () => {
   it("reads an old ?block= link as one pane focused on the block", () => {
     expect(layoutFromSearch(A, { block: "blk_b1" })).toEqual({
-      panes: [paneOf(A, "blk_b1")],
+      panes: [rootedPane(paneOf(A, "blk_b1"))],
       active: 0,
     })
-    expect(layoutFromSearch(A, {})).toEqual({ panes: [paneOf(A)], active: 0 })
+    expect(layoutFromSearch(A, {})).toEqual({ panes: [rootedPane(paneOf(A))], active: 0 })
   })
 
   it("writes one unfocused pane as the bare address", () => {
@@ -367,7 +378,7 @@ describe("the URL", () => {
       pane1: `${B},${B}:blk_c1`,
       active: 1,
     })
-    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(layout)
+    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(rooted(layout))
   })
 
   it("drops malformed frames and a stray active index", () => {
@@ -377,7 +388,11 @@ describe("the URL", () => {
       active: 3,
     })
     expect(layout).toEqual({
-      panes: [{ frames: [{ noteId: A, root: "blk_b1", selected: null }, ...paneOf(A).frames] }],
+      panes: [
+        {
+          frames: [rootFrame(), { noteId: A, root: "blk_b1", selected: null }, ...paneOf(A).frames],
+        },
+      ],
       active: 0,
     })
   })
@@ -391,5 +406,58 @@ describe("the URL", () => {
     ]) {
       expect(parseFrame(formatFrame(frame))).toEqual(frame)
     }
+  })
+})
+
+describe("the Root frame at the base of every pane (docs/graph-walk.md, decision 5)", () => {
+  it("opens a link to a note as Root › note, and a link to a block as Root › block", () => {
+    expect(layoutFromSearch(A, {}).panes[0].frames).toEqual([rootFrame(), ...paneOf(A).frames])
+    expect(layoutFromSearch(A, { block: "blk_b1" }).panes[0].frames).toEqual([
+      rootFrame(),
+      { noteId: A, root: "blk_b1", selected: null },
+    ])
+  })
+
+  it("never writes Root into the URL, so every old link reads the same", () => {
+    const layout = layoutFromSearch(A, { stack: `${A}`, block: "blk_b1" })
+    const { noteId, search } = layoutToSearch(layout)
+    expect(noteId).toBe(A)
+    expect(search.stack).toBe(A)
+    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(layout)
+  })
+
+  it("opens Root alone at its own address, in either pane", () => {
+    const root = layoutFromSearch("corpus_root", {})
+    expect(root.panes[0].frames).toEqual([rootFrame()])
+    const split: PaneLayout = {
+      panes: [rootedPane(paneOf(A)), { frames: [rootFrame()] }],
+      active: 0,
+    }
+    const { noteId, search } = layoutToSearch(split)
+    expect(search.pane1).toBe("corpus_root")
+    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(split)
+  })
+
+  it("pops a note down to Root, landing on the note left", () => {
+    const pane = rootedPane(paneOf(A))
+    const move = popFrame(pane)!
+    expect(move.pane.frames).toEqual([rootFrame()])
+    expect(move.landing).toEqual([A])
+    expect(move.restored).toBe(true)
+    // Nothing beneath Root.
+    expect(popFrame(move.pane)).toBeNull()
+  })
+
+  it("pops a block opened from a link to its note first, then to Root", () => {
+    const pane = rootedPane(paneOf(A, "blk_b1"))
+    const toNote = popFrame(pane)!
+    expect(toNote.pane.frames).toEqual([rootFrame(), ...paneOf(A).frames])
+    expect(toNote.restored).toBe(false)
+    expect(popFrame(toNote.pane)!.pane.frames).toEqual([rootFrame()])
+  })
+
+  it("pushes a note from Root, recording the row left", () => {
+    const move = goTo({ frames: [rootFrame()] }, { noteId: A, root: null }, [A])!
+    expect(move.pane.frames).toEqual([{ ...rootFrame(), selected: [A] }, ...paneOf(A).frames])
   })
 })
