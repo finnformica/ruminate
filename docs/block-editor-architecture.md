@@ -77,11 +77,14 @@ address siblings with `siblingKey` and what lies beneath a row with
 
 Each row also has a **query** (docs/graph-walk.md, 3): the frame's link
 pivot on its block, or the query of the row above. An up row lists its
-holders only. A down row lists what the "Show links" setting names. The
-rows (`buildRows`, `walkDoc`, `occurrenceKeys`) take the pivots and the
-setting as `RowRule`, and a command takes them on `CommandInput`, so
-`rowsBeneath` lists the rows the walk drew. With no pivots, the rows are
-the rows of today.
+holders only. A down row lists what its block holds. The rows
+(`buildRows`, `walkDoc`, `occurrenceKeys`) take the pivots as `RowRule`,
+and a command takes them on `CommandInput`, so `rowsBeneath` lists the rows
+the walk drew. With no pivots, every row walks down: the tree. A pivot is
+set from the block menu (**Show upstream**, **Show downstream**) or with
+<kbd>p</kbd> (`cyclePivot`); the editor hands it to its host (`onPivot`),
+which keeps it on the frame, and draws an arrow beside the row's chevron
+(`Occurrence.pivot`).
 
 ## Adding a behaviour
 

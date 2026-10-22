@@ -203,18 +203,17 @@ belt-and-braces. Markdown is a tree, so a loop is written to where it closes
 and no further, and does not survive a markdown round trip (`parse` re-mints
 the repeated `id::`): the graph, not the markdown, holds it.
 
-**Decided 2026-10-20: pivots replace "Show links".** The direction a walk
-follows becomes a per-row choice, a **pivot** held in the frame, and the
-device setting goes. Rows beneath an up pivot are the up occurrences below,
-and they edit as below. See [graph-walk.md](./graph-walk.md), "Pivots".
+**Pivots replaced "Show links"** (decided 2026-10-20, built in GW-12 and
+GW-18). The direction a walk follows is a per-row choice, a **pivot** held
+in the frame, and the device setting is gone. See
+[graph-walk.md](./graph-walk.md), "Pivots".
 
 **Upstream: the graph, not just the tree.** A walk from a root can follow
-links the other way as well (Settings → Editor, "Show links": downstream —
-the default, the outline as it has always read — upstream, or both). Walked
-both ways, every block in the
-doc carries its parents' ids beside its children's (`Block.upstream`,
-complete like `children`), and beneath an open row the walk continues into
-its parents after its children. Each is an **upstream occurrence**: a row
+links the other way: beneath a row with an up pivot (the block menu's
+**Show upstream**, or <kbd>p</kbd>), and the rows beneath it until another
+pivot. Walked up, a block in the doc carries its parents' ids beside its
+children's (`Block.upstream`, complete like `children`), and beneath an
+open row the walk continues into its parents. Each is an **upstream occurrence**: a row
 drawn exactly like a child row, keyed by its path with the segment marked
 (`root/child/^parent`, src/blocks/view.ts), so folds, selection and loops
 stay per occurrence and a block that is both above and below another has
@@ -227,9 +226,9 @@ multi-homed block is held — the todos an "In progress" block was copied
 under, when you focus on it. Any other block already on the path is a
 looped row, as in a down loop, so an up loop shows where it closes. The
 view's own root (the note) is on the path from the start. It is not a
-block in the doc, so it is never a row against the row's direction. The
-note's own parents, when it has any, are rows after its blocks
-(`BlockDoc.upstream`).
+block in the doc, so it is never a row against the row's direction. With an
+up pivot on the note itself, the note's own parents replace its blocks as
+the rows (`BlockDoc.upstream`).
 
 A parent row edits as any row does: its text and type are the block's,
 wherever it shows. Structural edits on it move the link the other way
@@ -309,14 +308,13 @@ headers over lists opens as its headers. That policy is a **standing rule**
 (`expandedByDepth`, src/blocks/default-collapsed.ts): it decides every row
 the reader has not folded or unfolded themselves, in every note, every time,
 so moving the setting moves every such row. Over it sit the reader's own
-folds — the rows they closed _and_ the rows they opened, each remembered
-explicitly per occurrence key in localStorage (`src/data/view-state.ts`), so
-a row they opened stays open when the setting moves and a row they closed
-stays closed as the note grows. A device that loses its localStorage is back
-on the rule. The entry is the **view's**: a note's folds are stored under
-its id, and a note narrowed by a filter or a sort (docs/query-language.md)
-keeps folds of its own under the id with the narrowing appended, over a
-standing rule of everything open rather than the depth setting.
+folds — the rows they closed _and_ the rows they opened, each a difference
+from the rule, per occurrence key. They belong to the **frame**, in the URL
+(src/data/panes.ts, docs/graph-walk.md section 5), with the depth they were
+made at, so a fold means the same on every device. A frame narrowed by a
+filter or a sort (docs/query-language.md) keeps folds of its own, over a
+standing rule of everything open rather than the depth setting, and clears
+them when the narrowing changes.
 
 Nesting a row under another is one of those explicit opens (`indent`, the
 command's `reveal`). A leaf becomes a parent the instant something goes under

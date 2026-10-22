@@ -5145,3 +5145,91 @@ describe('a board at a row (docs/boards.md, "A board in a note")', () => {
     expect(onOpenBoard).toHaveBeenCalledWith("blk_kitchen000")
   })
 })
+
+describe("BlockEditor pivots (docs/graph-walk.md, 3.10)", () => {
+  // A held by p as well as by the note: the doc a walk with an up pivot on
+  // a draws (a carries its holders).
+  const held = (): BlockDoc => ({
+    props: null,
+    rootBlockIds: ["a", "b"],
+    blocks: {
+      a: { id: "a", type: "text", text: "A", children: [], upstream: ["n", "p"] },
+      b: { id: "b", type: "text", text: "B", children: [] },
+      p: { id: "p", type: "text", text: "P", children: ["a"] },
+    },
+  })
+
+  async function openMenuOn(container: HTMLElement, index: number): Promise<HTMLElement> {
+    const row = container.querySelectorAll("[data-occurrence]")[index]!
+    await act(async () => {
+      fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })
+    })
+    return screen.getByTestId("block-context-menu")
+  }
+
+  it("offers Show upstream from the menu and from p, on a row walking down", async () => {
+    const onPivot = vi.fn()
+    const { container } = render(
+      <BlockEditor doc={held()} onChange={() => {}} noteId="n" onPivot={onPivot} />,
+    )
+    expect(container.querySelector('[data-testid="pivot-marker"]')).toBeNull()
+    const menu = await openMenuOn(container, 0)
+    expect(menu.textContent).toContain("Show upstream")
+    await act(async () => {
+      fireEvent.click(screen.getByText("Show upstream"))
+    })
+    expect(onPivot).toHaveBeenLastCalledWith("a", "a", "up")
+  })
+
+  it("p on the selected row asks the same", () => {
+    const onPivot = vi.fn()
+    const { container } = render(
+      <BlockEditor
+        doc={parse("A\n  id:: a\nB\n  id:: b")}
+        onChange={() => {}}
+        noteId="n"
+        onPivot={onPivot}
+      />,
+    )
+    const root = editorRoot(container)
+    selectNth(root, 1)
+    fireEvent.keyDown(root, { key: "p" })
+    expect(onPivot).toHaveBeenLastCalledWith("b", "b", "up")
+  })
+
+  it("draws the pivoted row's holders beneath it, with a marker, and offers to clear it", async () => {
+    const onPivot = vi.fn()
+    const { container } = render(
+      <BlockEditor
+        doc={held()}
+        onChange={() => {}}
+        noteId="n"
+        pivots={new Map([["a", "up"]])}
+        onPivot={onPivot}
+      />,
+    )
+    const keys = Array.from(container.querySelectorAll<HTMLElement>("[data-occurrence]")).map(
+      (row) => row.dataset.occurrence,
+    )
+    expect(keys).toEqual(["a", "a/^p", "b"])
+    const marker = container.querySelector('[data-testid="pivot-marker"]')!
+    expect(marker.getAttribute("aria-label")).toBe("Upstream")
+    expect(marker.closest("[data-occurrence]")?.getAttribute("data-occurrence")).toBe("a")
+    // Inside the up region, the row offers downstream.
+    expect((await openMenuOn(container, 1)).textContent).toContain("Show downstream")
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    })
+    // On the pivot row, showing downstream again clears the pivot.
+    await openMenuOn(container, 0)
+    await act(async () => {
+      fireEvent.click(screen.getByText("Show downstream"))
+    })
+    expect(onPivot).toHaveBeenLastCalledWith("a", "a", null)
+  })
+
+  it("offers no pivot where the host keeps no frame", async () => {
+    const { container } = render(<Harness initial={"A\nB"} />)
+    expect((await openMenuOn(container, 0)).textContent).not.toContain("Show upstream")
+  })
+})

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
-import { blockView, buildGraphSnapshot, noteView, type LinkDirections } from "../data/graph"
+import { blockView, buildGraphSnapshot, noteView } from "../data/graph"
+import { keyOfPath, pathOfKey } from "../data/panes"
 import { parse } from "./parse"
 import type { BlockDoc } from "./types"
 import {
@@ -13,6 +14,7 @@ import {
   idOfKey,
   isWithin,
   keyOf,
+  landingRow,
   occurrenceKeys,
   parentKeyOf,
   pathIdsOf,
@@ -239,11 +241,13 @@ describe("buildRows", () => {
 })
 
 /**
- * A doc walked both ways (`walkGraph`, directions "both") from note `n`:
+ * A doc walked from note `n`, every block carrying its parents (as a walk
+ * reached up carries them):
  *   n > a > s        s is also held by p (in another note), and p by q.
  *   n > b
- * Every block carries its parents; `n` itself is the doc's root and is on
- * the path, so it is never listed beneath its own children.
+ * `n` itself is the doc's root and is on the path, so it is never listed
+ * beneath its own children. `S` puts an up pivot on s: its rows show what
+ * holds it.
  */
 const graphed: BlockDoc = {
   props: null,
@@ -258,6 +262,8 @@ const graphed: BlockDoc = {
     q: { id: "q", type: "note", text: "Other", children: ["p"], upstream: [] },
   },
 }
+
+const S: ReadonlyMap<string, "up" | "down"> = new Map([["s", "up"]])
 
 describe("upstream occurrences", () => {
   it("mark the segment, and every helper reads the direction off the key", () => {
@@ -283,8 +289,12 @@ describe("upstream occurrences", () => {
     expect(hasOccurrence({ ...graphed, upstream: ["q"] }, "^q")).toBe(true)
   })
 
-  it("rowsBeneath: children first, then the parents, less the block the row came from", () => {
-    expect(rowsBeneath(graphed, graphed.blocks.s, "a")).toEqual([{ id: "p", direction: "up" }])
+  it("rowsBeneath: the children, or up the parents, less the block the row came from", () => {
+    expect(rowsBeneath(graphed, graphed.blocks.s, "a", "down", "up")).toEqual([
+      { id: "p", direction: "up" },
+    ])
+    // Down, a row lists what it holds only, whatever parents its block carries.
+    expect(rowsBeneath(graphed, graphed.blocks.s, "a")).toEqual([])
     expect(rowsBeneath(graphed, graphed.blocks.a, "n")).toEqual([{ id: "s", direction: "down" }])
     expect(rowsBeneath(graphed, null, "n")).toEqual([
       { id: "a", direction: "down" },
@@ -292,8 +302,8 @@ describe("upstream occurrences", () => {
     ])
   })
 
-  it("buildRows lists a block's other parents beneath its children, with the root on the path", () => {
-    const rows = buildRows(graphed, { folds: NONE, rootId: "n" })
+  it("buildRows lists a pivoted block's other parents beneath it, with the root on the path", () => {
+    const rows = buildRows(graphed, { folds: NONE, rootId: "n", pivots: S })
     expect(summary(rows)).toEqual(["a", "  a/s", "    a/s/^p", "      a/s/^p/^q", "b"])
     const p = rows.find((row) => row.key === "a/s/^p")!
     expect(p.direction).toBe("up")
@@ -302,26 +312,23 @@ describe("upstream occurrences", () => {
     // The parent q, a note, has nothing beneath it here: its child p is on
     // the path, and it has no parents.
     expect(rows.find((row) => row.key === "a/s/^p/^q")!.hasChildren).toBe(false)
-    // Without the root on the path, the note's own parents would be listed
-    // under its children: the view's root must be named.
-    expect(summary(buildRows(graphed, { folds: NONE }))).toContain("  a/^n")
+    // Without the root on the path, the note would be listed under a row
+    // walking up: the view's root must be named.
+    const a = new Map([["a", "up" as const]])
+    expect(summary(buildRows(graphed, { folds: NONE, pivots: a }))).toContain("  a/^n")
+    expect(summary(buildRows(graphed, { folds: NONE, pivots: a, rootId: "n" }))).not.toContain(
+      "  a/^n",
+    )
   })
 
   it("buildRows folds an upstream row like any other, and focused shows the root's parents", () => {
-    const folded = buildRows(graphed, { folds: new Set(["a/s/^p"]), rootId: "n" })
+    const folded = buildRows(graphed, { folds: new Set(["a/s/^p"]), rootId: "n", pivots: S })
     expect(summary(folded)).toEqual(["a", "  a/s", "    a/s/^p ▸", "b"])
-    // Focused on s: its parents are all the rows, a and p alike, each with
-    // its note beneath — a fresh path starts at the focus root. Beneath the
-    // note, the row it was reached up from (a) is not listed, its other
-    // block (b) is: the graph around the block, as far as it is open.
-    const focused = buildRows(graphed, { folds: NONE, focusRootId: "s" })
-    expect(summary(focused)).toEqual([
-      "a/s/^a",
-      "  a/s/^a/^n",
-      "    a/s/^a/^n/b",
-      "a/s/^p",
-      "  a/s/^p/^q",
-    ])
+    // Focused on s, pivoted up: its parents are all the rows, a and p alike,
+    // each with its note beneath — a fresh path starts at the focus root.
+    // The rows stay up: what the notes hold is not listed.
+    const focused = buildRows(graphed, { folds: NONE, focusRootId: "s", pivots: S })
+    expect(summary(focused)).toEqual(["a/s/^a", "  a/s/^a/^n", "a/s/^p", "  a/s/^p/^q"])
   })
 
   it("walkDoc visits upstream occurrences after the children, marked", () => {
@@ -332,10 +339,11 @@ describe("upstream occurrences", () => {
       ({ key, direction }) => {
         seen.push(`${direction === "up" ? "↑" : ""}${key}`)
       },
-      { rootId: "n" },
+      { rootId: "n", pivots: S },
     )
     expect(seen).toEqual(["a", "a/s", "↑a/s/^p", "↑a/s/^p/^q", "b"])
-    expect(occurrenceKeys({ ...graphed, upstream: ["q"] })).toContain("^q")
+    const rootUp = { rootId: "n", pivots: new Map([["n", "up" as const]]) }
+    expect(occurrenceKeys({ ...graphed, upstream: ["q"] }, rootUp)).toEqual(["^q"])
   })
 })
 
@@ -381,7 +389,6 @@ describe("rows read pivots (docs/graph-walk.md, 3)", () => {
    * fold rule about (each row with something beneath it), in order. */
   const view = (
     over: Record<string, "up" | "down">,
-    directions: LinkDirections = "downstream",
     open: (key: string, level: number) => boolean = () => true,
   ) => {
     const asked: string[] = []
@@ -389,8 +396,8 @@ describe("rows read pivots (docs/graph-walk.md, 3)", () => {
       asked.push(key)
       return open(key, level)
     }
-    const { doc, collapsed } = noteView("n", graph, rule, directions, pivots(over))!
-    const rows = buildRows(doc, { folds: collapsed, rootId: "n", pivots: pivots(over), directions })
+    const { doc, collapsed } = noteView("n", graph, rule, pivots(over))!
+    const rows = buildRows(doc, { folds: collapsed, rootId: "n", pivots: pivots(over) })
     return { doc, rows, asked }
   }
 
@@ -402,14 +409,12 @@ describe("rows read pivots (docs/graph-walk.md, 3)", () => {
       (key: string) => key !== "a/x",
     ]
     for (const over of sets) {
-      for (const directions of ["downstream", "upstream", "both"] as const) {
-        for (const open of rules) {
-          const { doc, rows, asked } = view(over, directions, open)
-          // Each walked block is a row, and no other block is.
-          expect(new Set(rows.map((row) => row.id))).toEqual(new Set(Object.keys(doc.blocks)))
-          // A row has a chevron exactly where the walk asked about it.
-          expect(rows.filter((row) => row.hasChildren).map((row) => row.key)).toEqual(asked)
-        }
+      for (const open of rules) {
+        const { doc, rows, asked } = view(over, open)
+        // Each walked block is a row, and no other block is.
+        expect(new Set(rows.map((row) => row.id))).toEqual(new Set(Object.keys(doc.blocks)))
+        // A row has a chevron exactly where the walk asked about it.
+        expect(rows.filter((row) => row.hasChildren).map((row) => row.key)).toEqual(asked)
       }
     }
   })
@@ -435,13 +440,13 @@ describe("rows read pivots (docs/graph-walk.md, 3)", () => {
 
   it("a block walked up in one row lists only what it holds in a down row", () => {
     // P is walked up beneath a/x, so it carries its holders M and N. Its own
-    // row, down, follows the setting: no holders.
+    // row walks down: no holders.
     const { doc, rows } = view({ x: "up" })
     expect(doc.blocks.p.upstream).toEqual(["m", "n"])
     expect(rows.map((row) => row.key)).not.toContain("p/^m")
-    // Without the setting, the rows read what the doc carries (no pivots).
-    const loose = buildRows(doc, { folds: NONE, rootId: "n", pivots: pivots({ x: "up" }) })
-    expect(loose.map((row) => row.key)).toContain("p/^m")
+    // Nor with no pivots at all: a down row lists what the block holds only.
+    const tree = buildRows(doc, { folds: NONE, rootId: "n" })
+    expect(tree.map((row) => row.key)).not.toContain("p/^m")
   })
 
   it("hasChildren follows the row's query", () => {
@@ -456,13 +461,12 @@ describe("rows read pivots (docs/graph-walk.md, 3)", () => {
   })
 
   it("a focused block's query is its own pivot", () => {
-    const { doc } = blockView("x", graph, () => true, "downstream", pivots({ x: "up" }))!
+    const { doc } = blockView("x", graph, () => true, pivots({ x: "up" }))!
     const rows = buildRows(doc, {
       folds: NONE,
       focusRootId: "x",
       focusTitled: false,
       pivots: pivots({ x: "up" }),
-      directions: "downstream",
     })
     expect(summary(rows)).toEqual([
       "x",
@@ -481,8 +485,8 @@ describe("rows read pivots (docs/graph-walk.md, 3)", () => {
 
   it("walkDoc and the occurrence keys read the pivots", () => {
     const over = pivots({ x: "up" })
-    const { doc } = noteView("n", graph, undefined, "downstream", over)!
-    const rule = { pivots: over, directions: "downstream" as const, rootId: "n" }
+    const { doc } = noteView("n", graph, undefined, over)!
+    const rule = { pivots: over, rootId: "n" }
     expect(occurrenceKeys(doc, rule)).toEqual(
       buildRows(doc, { folds: NONE, ...rule }).map((row) => row.key),
     )
@@ -515,12 +519,9 @@ describe("one guard in both directions (docs/graph-walk.md, 3.3)", () => {
     link("a", "x", "a0"),
     link("x", "y", "a0"),
   ])
-  const rowsOf = (
-    pivots: Map<string, "up" | "down">,
-    directions: LinkDirections = "downstream",
-  ) => {
-    const { doc, collapsed } = noteView("n", graph, () => true, directions, pivots)!
-    return buildRows(doc, { folds: collapsed, rootId: "n", pivots, directions })
+  const rowsOf = (pivots: Map<string, "up" | "down">) => {
+    const { doc, collapsed } = noteView("n", graph, () => true, pivots)!
+    return buildRows(doc, { folds: collapsed, rootId: "n", pivots })
   }
   const shown = (rows: Occurrence[]) =>
     rows.map((row) => `${row.key}${row.looped ? " (looped)" : ""}`)
@@ -549,10 +550,30 @@ describe("one guard in both directions (docs/graph-walk.md, 3.3)", () => {
   it("a single-homed block's rows are the tree's", () => {
     const tree = shown(rowsOf(new Map())).filter((key) => key.startsWith("a"))
     expect(tree).toEqual(["a", "a/x", "a/x/y"])
-    expect(shown(rowsOf(new Map(), "both")).filter((key) => key.startsWith("a"))).toEqual(tree)
     // Up from X: A only, the row X came from, so X has nothing beneath it.
     const up = rowsOf(new Map([["x", "up"]]))
     expect(shown(up).filter((key) => key.startsWith("a"))).toEqual(["a", "a/x"])
     expect(up.find((row) => row.key === "a/x")!.hasChildren).toBe(false)
+  })
+})
+
+describe("the selection as a path (docs/graph-walk.md, decision 2)", () => {
+  const keys = ["a", "a/x", "a/x/^p", "b", "b/x"]
+
+  it("crosses from a key to a path and back, in a note, a focus and an up region", () => {
+    for (const key of ["a/x", "F/a/x", "a/x/^p"]) {
+      expect(keyOfPath(pathOfKey(key))).toBe(key)
+    }
+    expect(pathIdsOf("a/x/^p")).toEqual(["a", "x", "p"])
+  })
+
+  it("lands on the row the path names", () => {
+    expect(landingRow(keys, "b/x")).toBe("b/x")
+    expect(landingRow(keys, "a/x/^p")).toBe("a/x/^p")
+  })
+
+  it("lands on the block's first row once it moved, and on nothing once it is gone", () => {
+    expect(landingRow(keys, "c/x")).toBe("a/x")
+    expect(landingRow(keys, "a/gone")).toBeNull()
   })
 })

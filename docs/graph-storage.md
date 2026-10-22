@@ -416,14 +416,12 @@ standing rule by depth (`expandedByDepth`, `src/blocks/default-collapsed.ts`):
 _n_ levels open beneath the top of the view, deeper starts folded, headings
 counted like any other block — _n_ is a preference (Settings → Editor, two by
 default), and it governs every row the reader has not touched, so moving it
-moves every such row at once. Over the rule, localStorage holds the reader's
-own folds per note (`collapse:<noteId>`, `src/data/view-state.ts`): the
-occurrence keys they closed and the ones they opened, each explicit, so a
-row they opened stays open when the setting moves and a row they closed
-stays closed as the note grows. Only notes the reader has folded or unfolded
-are stored, the least recently written fall off past a cap, Settings can
-forget every fold on the device, and losing localStorage is back on the
-rule. Nothing is pruned against the document: the walk is lazy
+moves every such row at once. Over the rule sit the reader's own folds:
+the occurrence keys they closed and the ones they opened, each a difference
+from the rule. They are frame state, in the URL (src/data/panes.ts,
+docs/graph-walk.md section 5), not on the device; the folds a note once
+kept in localStorage (`collapse:<noteId>`) seed its first frame once and
+go. Nothing is pruned against the document: the walk is lazy
 (graph-schema-v2.md, "Default expansion, and the lazy walk"), so the doc
 does not hold the rows beneath a fold, and a fold on a row that has since
 gone is inert. The rollup's hard depth cap doubles as the render guard
