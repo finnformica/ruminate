@@ -68,8 +68,10 @@ Everything above `src/data` reads one atom: `graphSnapshotAtom`, the
 `GraphSnapshot` of every live row (`nodes` by id, `childLinks` by parent, and
 the same link rows again as `parentLinks` by child — the reverse index, a
 by-product of building the snapshot rather than a scan of it).
-`src/data/database-mode.ts` serves the SQL store's rows into
-`databaseGraphAtom`, and `graphSnapshotAtom` reads it whenever a user is
+`src/data/database-mode.ts` serves the store's cache of the fold of its
+event log into `databaseGraphAtom` (docs/event-sourcing.md, "The client's
+tables are a cache of the fold"), and
+`graphSnapshotAtom` reads it whenever a user is
 signed in. `notesAtom` is derived from it per page (`src/data/note-meta.ts`:
 title, props, tasks, headings, memoized
 by the page's row identities), search and the block index read those notes,
@@ -99,8 +101,11 @@ row pull, row push or full push (revised 2026-10-21)
 until then.
 
 - **Boot:** open the SQL store (OPFS; per-tab fallback to memory) → serve
-  local rollups into the atoms immediately → pull rows from D1 (full corpus on
-  first boot; `?since=<cursor>` after) → apply into the store and atoms. The
+  the cache's live rows into the atoms immediately, with nothing to fold →
+  pull rows from D1 (full corpus on first boot; `?since=<cursor>` after), kept
+  only for the fold check → pull the events past the events cursor into the
+  log and the cache, in one transaction per page, and from it into the
+  atoms. The
   pull cursor persists in the store's `meta` table (`d1_pull_cursor`), so it
   can never outlive the data it describes. Two bindings are checked before any
   local row is read: the store's `store_owner` (a different signed-in identity
@@ -120,7 +125,7 @@ until then.
   per-row last-writer-wins at the replica makes concurrent tab pushes safe.
 - **Cross-device sync:** visibility change, window focus, and coming back
   online (plus a retry timer after a failed pull) re-run the since-cursor
-  pull. Applied rows flow through the store into the graph atom (pending
+  pull. Pulled events flow through the cache into the graph atom (pending
   local ops re-applied on top); the open editor re-walks its page from the
   new snapshot, so another device's edit shows the moment it lands.
 - **Offline:** the OPFS store serves everything. While the browser says it

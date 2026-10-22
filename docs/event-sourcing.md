@@ -10,7 +10,7 @@ from there — and the replica takes them in as made. Code: `src/data/events.ts`
 `worker/handlers/event-log.ts` (append, reconcile, reading the past),
 `src/data/sql-note-store.ts` (the device's log and its projection),
 `src/data/replica-sync.ts` (the push), `src/data/hlc.ts` (the stamp),
-`src/data/snapshot.ts` (snapshots of the fold),
+`src/data/fold-cache.ts` (the client's tables as a cache of the fold),
 `migrations/0023_events.sql`, `migrations/0024_event_hlc.sql`.
 
 **Decided 2026-10-20: event-only sync** ([event-only-sync.md](./event-only-sync.md)).
@@ -58,8 +58,9 @@ docs/event-only-sync.md): every field of an entity, and its liveness, is a
 last-writer-wins register. Its state does not depend on the order of the
 events, and an event applied twice changes nothing. An event without a stamp
 gets the derived one (`eventStamp`, below), the same as every other reader.
-`toGraphSnapshot` and `toViewRows` read its state out. Nothing in the app
-reads it yet: `stateAt`, a history and the calendar use the fold by `seq`.
+`toGraphSnapshot` and `toViewRows` read its state out. The client's cache
+rows are this fold, one entity at a time (below); `stateAt`, a history and
+the calendar use the fold by `seq`.
 
 ### The projection resolves by stamp
 
@@ -258,49 +259,93 @@ row both derive against the same held row and the higher **stamp** wins each
 field, where the later `updated_at` used to. The fold and the tables agree
 either way.
 
-### Snapshots
+### The client's tables are a cache of the fold
 
-**Decided 2026-10-21.** The snapshots go: the ES-5 to ES-7 rework keeps the
-tables as an indexed cache of the fold instead
-([event-only-sync.md](./event-only-sync.md), "The cache").
+Decided 2026-10-21 (docs/event-only-sync.md, "The cache"). The log is the
+truth. The browser's `nodes`, `link` and `views` are an indexed cache of its
+fold by stamp (`foldByStamp`): each row is the fold of one entity's events
+(`src/data/fold-cache.ts`, `src/data/sql-note-store.ts`).
 
-The store keeps snapshots of the fold by stamp (`src/data/snapshot.ts`,
-docs/event-only-sync.md, item 5) in its `snapshots` table (schema v12). A
-snapshot is the encoded `StampedState`, every field with its stamp and
-tombstones too, and the **log position** it covers.
+- **Stamps.** Each row keeps the stamp of each field and of `alive` in a
+  `stamps` column, a JSON object, as the server's rows do (migrations/0025).
+  The client's schema step v13 adds the column, an index on
+  `events (entity, entity_id)`, and drops the `snapshots` table of v12.
+- **Same transaction.** Each local batch (`applyEvents`) and each pulled page
+  (`applyPulledEvents`) appends to `events` and writes the cache rows of the
+  entities it names in one batch: each row is read by its key, the events are
+  applied to it by stamp, and the row is written back (one multi-row upsert
+  per table). No other row is read, and nothing is folded again. A failed
+  batch writes neither. The events can come in any order, and an event that
+  comes again changes nothing.
+- **Held before created.** An entity an update reaches before its create is
+  held: its row has no `alive` stamp and a `deleted_at`, so no read of live
+  rows sees it, and `getAllRows` leaves it out. The create, when it comes,
+  makes it live with every field at its highest stamp.
+- **`seq`.** A row's `seq` is the highest `seq` of its events, as the server
+  keeps it. It stays NULL until one of its events is placed, and it never
+  goes back.
+- **The stamp fill.** Rows from before v13 have no stamps. The first open of
+  this build gives each row the stamp its last event derives (`eventStamp`:
+  `updated_at`, counter 0, `seq:<seq>`), for every field and `alive`, in one
+  transaction that also sets the `cache_stamps` flag in `meta`. The flag
+  alone decides whether the fill runs.
+- **Lazy reads.** A read is an index lookup: the live child links of a node
+  by `link_source` (`childLinksOf`), the links into a node by
+  `link_destination` (`parentLinksOf`, an up pivot), and nodes by id
+  (`nodesOf`). The app does not use them yet: its graph atom still reads all
+  live rows at boot (`getGraph`), with nothing to fold.
+- **The row pull** still runs (ES-9 waits), but its rows no longer write the
+  cache. The fold check compares them with it.
+- **The two read-outs agree** (the two ES-4 differences): a row never placed
+  has no `seq` in the cache, in `getGraph` and in `toGraphSnapshot`; and a
+  live link with a tombstoned end is in no read (`getGraph` and the lazy
+  reads leave it out in SQL, `buildGraphSnapshot` and `readOutEntities` when
+  they see the tombstone).
 
-- **Position.** `events.position` is the log's append order. Every event
-  takes the next position: one this device makes, and one it pulls. An event
-  the replica places (`markEventsPushed`, or a pull that brings back one of
-  this device's own) moves to the next position. So the tail past a snapshot
-  that took an event unpushed holds it again, with its `seq`.
-- **When.** After each batch (`applyEvents`, `applyPulledEvents`) and at
-  open, the store writes a snapshot when 1,000 events are past the newest one,
-  or when the newest is 24 hours old and any event is past it. With no
-  snapshot, the first event writes one.
-- **Keep 2.** One write adds the new snapshot and deletes all but the 2
-  newest. A snapshot is a cache of the log, so this is not a purge. A
-  snapshot that fails to write does not fail the batch: the next batch tries
-  again.
-- **Read.** `loadFold` reads the newest snapshot that parses, then applies
-  every event past its position. When the newest does not parse, it reads the
-  one before. With none that parses, it folds the whole log. The fold does
-  not depend on order and applies an event twice as once, so the result is
-  the fold of the whole log.
-- **Snapshot 0** (`snapshotZero`, docs/event-only-sync.md, item 6). The first
-  open of this build folds the `nodes`, `link` and `views` rows, tombstones
-  too, into a snapshot at the last position in `events`. So the fold holds
-  every row the tables hold, also one whose events this device never had.
-  Each row is the `create` it amounts to (`rowsToEvents`), with no stamp, the
-  row's `updated_at` as `at` and the row's `seq`. So each field takes the
-  stamp `eventStamp` derives for an old event: `updated_at`, counter 0,
-  `seq:<seq>`. It runs once: the same write sets the `snapshot_zero` flag in
-  `meta`. A snapshot of the log can be there already, so "no snapshot" does
-  not say it has run. A store with no row sets the flag and writes nothing.
-  `clear` keeps the flag: the pull after it brings the whole log again.
+### The fold check
 
-Nothing in the app reads the fold yet (item 7 of docs/event-only-sync.md).
-`clear` deletes the snapshots with the log.
+`src/data/fold-check.ts`, run by the runtime (`src/data/database-mode.ts`)
+after a batch, at most once in 10 seconds. It compares every field of each
+row except `seq`, and lists where two sides differ, in Settings → Storage.
+
+- **The log against the cache.** For each entity the batches touched since
+  the last check (a flush, a pulled page): the fold of that entity's events
+  (`foldOfLog`, by the `events_entity` index) against its cache row
+  (`getLiveRows`). No other row is read.
+- **The replica against the cache.** Each row the row pull brought, against
+  its cache row, tombstones too. It leaves out an entity with an unpushed
+  event (the replica has not seen it) and one the cache holds past the row
+  cursor (the events pull runs after the row pull, so another device's write
+  can reach the cache first; the next pull brings its row). These lines start
+  with `replica`. A week with none lets the row pull go (ES-9).
+- **Every row**, only from the "Check every row" button
+  (`requestFullFoldCheck`): the fold of the whole log against the whole
+  cache.
+- The runtime keeps each difference until a later check of that entity
+  finds it resolved. While the events pull is behind (a long log, pulled 10
+  pages at a time), there is no check.
+
+### Cost
+
+`node:sqlite`, a log of block creates, links and text edits; the browser's
+OPFS store is slower.
+
+| events  | nodes  | page of 2,000 | stamp fill | later open | expand | local batch | batch check | full check |
+| ------- | ------ | ------------- | ---------- | ---------- | ------ | ----------- | ----------- | ---------- |
+| 10,000  | 3,379  | 166 ms        | 26 ms      | 51 ms      | 1 ms   | 2 ms        | 4 ms        | 198 ms     |
+| 100,000 | 33,784 | 171 ms        | 260 ms     | 400 ms     | 1 ms   | 1 ms        | 1 ms        | 2.3 s      |
+| 200,000 | 67,568 | 175 ms        | 546 ms     | 915 ms     | 1 ms   | 1 ms        | 2 ms        | 5.4 s      |
+
+- **Page of 2,000:** one pulled page into the log and the cache.
+- **Stamp fill:** the first open of this build on an upgraded device, once.
+- **Later open:** the open, then the whole live graph the app reads at boot.
+- **Expand:** the lazy read of one block's links and children.
+- **Local batch:** 3 events.
+- **Batch check:** 10 entities.
+
+The snapshot design this replaces (ES-5 to ES-7) took 654 ms for a later open
+at 100,000 events, and 1.8 s for the first. Production held 3,711 rows, so
+it is near the first line.
 
 ### Cost, by construction
 

@@ -56,7 +56,7 @@
 // history, the calendar and the replica's `verify` read the log that way.
 
 import type { LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
-import { buildGraphSnapshot, type GraphSnapshot } from "./graph"
+import { CHILD_KIND, buildGraphSnapshot, type GraphSnapshot } from "./graph"
 import { decodeHlc, encodeHlc } from "./hlc"
 import type { Op } from "./ops"
 
@@ -360,7 +360,7 @@ function upcast(event: RuminateEvent): RuminateEvent {
  * `alive` is a register as well. An event sets a field only when its stamp is
  * higher than the field's, so a field it does not name keeps its value.
  */
-interface StampedEntity<F> {
+export interface StampedEntity<F> {
   fields: Partial<F>
   stamps: Partial<Record<keyof F | "alive", string>>
   alive: boolean
@@ -459,23 +459,72 @@ export function foldByStamp(
   return into
 }
 
+/** Entities named by kind: block ids, link entity ids (`linkEntityId`) and
+ * view ids. What a batch touched, for the fold check. */
+export interface EntityKeys {
+  blocks: ReadonlySet<string>
+  links: ReadonlySet<string>
+  views: ReadonlySet<string>
+}
+
 /** The rows the fold by stamp projects to: every created entity, with its
- * tombstones, as `projectRows` gives them for the fold by `seq`. */
-function stampedRows(state: StampedState) {
-  const created = <F>(table: Map<string, StampedEntity<F>>) => {
+ * tombstones, as `projectRows` gives them for the fold by `seq`. With
+ * `only`, just the entities it names. An entity no placed event has touched
+ * has no `seq`, as its row in the store has none until the push lands
+ * (`markEventsPushed`). */
+function stampedRows(state: StampedState, only?: EntityKeys) {
+  const created = <F>(table: Map<string, StampedEntity<F>>, ids?: ReadonlySet<string>) => {
     const out = new Map<string, Projected<F>>()
-    for (const [id, entity] of table) {
+    const entries = ids
+      ? [...ids].flatMap((id) => {
+          const entity = table.get(id)
+          return entity ? [[id, entity] as const] : []
+        })
+      : table
+    for (const [id, entity] of entries) {
       if (!entity.created) continue
       const { fields, alive, seq, at, deleted_at } = entity
       out.set(id, { fields: fields as F, deleted: !alive, seq, at, deleted_at })
     }
     return out
   }
-  return projectRows({
-    blocks: created(state.blocks),
-    links: created(state.links),
-    views: created(state.views),
+  const rows = projectRows({
+    blocks: created(state.blocks, only?.blocks),
+    links: created(state.links, only?.links),
+    views: created(state.views, only?.views),
   })
+  for (const row of [...rows.nodes, ...rows.links, ...rows.views]) {
+    if (row.seq === 0) delete row.seq
+  }
+  return rows
+}
+
+/**
+ * The live rows of the named entities, by the rules of the whole read-out
+ * (`toGraphSnapshot`, then `viewMapOf`): a live node; a live child link
+ * whose ends are not tombstoned; a live view. The fold check reads a batch
+ * with this, without the cost of the whole graph.
+ */
+export function readOutEntities(
+  state: StampedState,
+  keys: EntityKeys,
+): { nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] } {
+  const rows = stampedRows(state, keys)
+  const tombstoned = (id: string) => {
+    const node = state.blocks.get(id)
+    return node !== undefined && node.created && !node.alive
+  }
+  return {
+    nodes: rows.nodes.filter((row) => !isTombstoned(row)),
+    links: rows.links.filter(
+      (row) =>
+        row.kind === CHILD_KIND &&
+        !isTombstoned(row) &&
+        !tombstoned(row.source_id) &&
+        !tombstoned(row.destination_id),
+    ),
+    views: rows.views.filter((row) => !isTombstoned(row)),
+  }
 }
 
 /** The live graph the fold by stamp holds. */
