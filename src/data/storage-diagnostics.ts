@@ -1,9 +1,11 @@
 import { atom } from "jotai"
 
 /**
- * Read-only diagnostics for the database storage runtime, shown in the
- * Settings → Storage panel. Written by `database-mode.ts` (the local store
- * lifecycle) and `replica-sync.ts` (the D1 push loop).
+ * Read-only state of the database storage runtime: where the local store
+ * persists (the "open in another tab" notice, `page-layout.tsx`) and the D1
+ * push loop's state (the sidebar's sync status, `sync-status.tsx`). Written
+ * by `database-mode.ts` (the local store lifecycle) and `replica-sync.ts`
+ * (the push loop). There is no Settings panel for it.
  */
 
 /** The D1 replica's row counts + cursor, from `GET /api/replica/status`. */
@@ -35,43 +37,20 @@ export interface ReplicaDiagnostics {
 }
 
 export interface StorageDiagnostics {
-  status: "off" | "opening" | "ready" | "error"
   /** "opfs" = persisted; "memory" = this session only (OPFS unavailable). */
   persistence: "opfs" | "memory" | null
   /** Why persistence degraded to memory: "another-tab" = a second Ruminate
    * tab holds the OPFS database (the banner offers a reload); "unavailable" =
    * OPFS itself is missing (private window, old browser). */
   persistenceReason: "another-tab" | "unavailable" | null
-  /** Notes currently served by the local store. */
-  notes: number
-  /** SQL-side write failures (the files atom and the push queue still carried
-   * the content) (last few). */
-  writeErrors: { message: string; at: number }[]
-  writeErrorCount: number
   /** D1 replication state; null until the push loop has started. */
   replica: ReplicaDiagnostics | null
-  /** The last check of the fold against the tables (`fold-check.ts`); null
-   * until the first. `full` when it read every row, else only what batches
-   * touched; `compared` is how many entities it read. `differences` counts
-   * every difference not yet seen resolved, and `sample` is the first few. */
-  foldCheck: {
-    at: number
-    full: boolean
-    compared: number
-    differences: number
-    sample: string[]
-  } | null
 }
 
 export const OFF_STORAGE_DIAGNOSTICS: StorageDiagnostics = {
-  status: "off",
   persistence: null,
   persistenceReason: null,
-  notes: 0,
-  writeErrors: [],
-  writeErrorCount: 0,
   replica: null,
-  foldCheck: null,
 }
 
 export const storageDiagnosticsAtom = atom<StorageDiagnostics>(OFF_STORAGE_DIAGNOSTICS)

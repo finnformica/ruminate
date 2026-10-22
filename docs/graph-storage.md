@@ -583,8 +583,7 @@ cursor }`: each event's `seq`, which the client stamps on its own copy, and
   **joins** `nodes` twice on its primary key rather than filtering with
   `IN (SELECT …)`, which re-scanned the node table per link row: measured on a
   442-node corpus, 188k rows read became 1.8k. It is diagnostics, so it is
-  read when the Settings → Storage panel asks and once per session — never per
-  save.
+  read once per session — never per save.
 - `POST /api/admin/import-do-corpus` (`worker/handlers/admin.ts`, owner-only)
   — the DO→D1 import for the owner and every id in `users`; `?merge=1` to
   LWW-merge into a non-empty partition, `?force=1` to re-run a marked tenant.
@@ -660,15 +659,16 @@ write.
 - **Cursor.** Each push carries a monotonic ms-timestamp cursor (sent only
   with the final chunk, so it means "the replica reflects local state as of
   this push"), and the push's own response echoes the cursor it committed —
-  the Settings panel shows it as confirmed. No second request.
-- **Remote counts are diagnostics.** `GET /api/replica/status` is fetched when
-  the Settings → Storage panel opens, and once per session after the first
-  successful push; it used to run after _every_ push, which is how ~10 saves
+  the push loop marks it as confirmed. No second request.
+- **Remote counts are diagnostics.** `GET /api/replica/status` is fetched once
+  per session, after the first successful push; it used to run after _every_ push, which is how ~10 saves
   consumed millions of D1 row reads. If the counts show the replica
   drastically behind (empty, or missing >10% of the pages), a full push is
   scheduled automatically (cooldown-guarded) — that is a fact about history,
-  not about the save that just landed, so once a session is enough. The
-  Settings panel also has a manual "Push full copy to the cloud now" action.
+  not about the save that just landed, so once a session is enough. A repair
+  after a failed local write schedules one too. There is no manual action:
+  the "Push full copy to the cloud now" button went with the Settings →
+  Storage section (2026-10-22).
 - **Known gap, accepted:** pending rows live only in memory, so a change made
   while the replica was unreachable can be lost remotely if the tab closes
   before the retry lands (the keepalive flush narrows this to actual network

@@ -14,7 +14,6 @@ import { EditorSection } from "./editor-section"
 import { FeaturesSection } from "./features-section"
 import { InvitesSection } from "./invites-section"
 import type { SettingsPageId } from "./settings-nav"
-import { StorageSection } from "./storage-section"
 
 /**
  * A page's cards, in order (the pages themselves are named in
@@ -50,12 +49,7 @@ export function SettingsPageContent({ id }: { id: SettingsPageId }) {
         </>
       )
     case "data":
-      return (
-        <>
-          <StorageSection />
-          {githubUser ? <DeletedNotesSection /> : null}
-        </>
-      )
+      return githubUser ? <DeletedNotesSection /> : null
     case "about":
       return <AboutSection />
     case "admin":
