@@ -43,8 +43,8 @@ import { useOpenNote } from "../hooks/open-note"
 import { pathToBlock } from "../data/graph"
 import { narrowingParam, resolveNarrowing } from "../utils/view-filter"
 import { FilterMenu, SortMenu } from "../components/view-controls"
-import { takeStoredFolds, useFoldRule, type Folds } from "../data/view-state"
-import { keyOf } from "../blocks/view"
+import { takeStoredFolds, useFoldRule, withFold, type Folds } from "../data/view-state"
+import { keyOf, type Direction } from "../blocks/view"
 import { useNoteShare } from "../hooks/share"
 import { shareOwnerName } from "../data/shares"
 import {
@@ -55,14 +55,17 @@ import {
   goVia,
   layoutFromSearch,
   layoutToSearch,
+  linkPivotsOf,
   nextPaneIndex,
   openBeside,
   popFrame,
+  pivotRoot,
   popTo,
   keyOfPath,
   pathOfKey,
   withCurrent,
   withPane,
+  withPivot,
   type FocusFrame,
   type FocusMove,
   type FrameFolds,
@@ -463,6 +466,9 @@ function NotePage({
     () => (editingBlockId === null ? undefined : new Set([editingBlockId])),
     [editingBlockId],
   )
+  // The frame's link pivots (docs/graph-walk.md, 3.4): the walk and the
+  // editor read them.
+  const pivots = React.useMemo(() => linkPivotsOf(frame.pivots), [frame.pivots])
   const {
     doc: editorDoc,
     collapsed,
@@ -474,6 +480,7 @@ function NotePage({
     defaultDoc,
     focusBlockId: focusBlockId ?? null,
     expanded,
+    pivots,
     directions,
     filter,
     sort,
@@ -711,6 +718,31 @@ function NotePage({
   const focusTo = (id: string | null, selected: string | null) => {
     if (noteId) applyMove(goTo(pane, { noteId, root: id }, selected ? pathOfKey(selected) : null))
   }
+  // A pivot set from a row (`p`, the block menu) is frame state: it
+  // replaces the URL entry, and opens the row so the depth rule cannot hide
+  // what it shows (docs/graph-walk.md, 3.5). On the view's own root it is a
+  // new view, so it pushes a frame and Back returns (`pivotRoot`).
+  const viewRootId = focusBlockId ?? noteId
+  const setPivot = (key: string | null, id: string, direction: Direction | null) => {
+    if (id === viewRootId) {
+      applyMove(pivotRoot(pane, direction, key ? pathOfKey(key) : null))
+      return
+    }
+    const opened =
+      direction !== null && key !== null
+        ? frameFoldsOf(withFold(foldsOf(narrowed ? frame.narrowFolds : frame.folds), key, true))
+        : undefined
+    onUpdate({
+      pivots: withPivot(frame.pivots, id, direction),
+      ...(opened
+        ? {
+            [narrowed ? "narrowFolds" : "folds"]: opened,
+            depth: frame.depth ?? levels,
+          }
+        : {}),
+    })
+  }
+  const rootUpstream = !!viewRootId && frame.pivots?.[viewRootId] === "up"
   const canPop = popFrame(pane) !== null
   const focusBack = () => applyMove(popFrame(pane))
   // The stack drawn as a trail: in focus, where the editor draws its
@@ -824,6 +856,13 @@ function NotePage({
                       : navigate({ to: "/", search: { query: undefined }, replace: true }),
                   focusBlockId: focusBlockId ?? null,
                   filter,
+                  rootPivot:
+                    viewRootId && noteExists
+                      ? {
+                          upstream: rootUpstream,
+                          onToggle: () => setPivot(null, viewRootId, rootUpstream ? null : "up"),
+                        }
+                      : undefined,
                 }}
               />
               {onSplit ? (
@@ -934,6 +973,8 @@ function NotePage({
                   context={context}
                   onOpenBoard={(id) => void openNote(id)}
                   onEditingChange={setEditingBlockId}
+                  pivots={pivots}
+                  onPivot={setPivot}
                   // Narrowed, there is no starter row to type into. A new
                   // row lands in the note as it does anywhere (Enter on a
                   // row, `useNoteDoc`), but a blank one is a plain text row

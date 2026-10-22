@@ -2,7 +2,9 @@ import { useAtomValue, useSetAtom, useStore } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 import { emptyBlock } from "../../blocks/ops"
+import type { LinkPivots } from "../../blocks/query"
 import type { BlockDoc, ChangeHint } from "../../blocks/types"
+import type { Direction } from "../../blocks/view"
 import { imagesEnabled, uploadImage } from "../../data/images"
 import { fetchLinkPreview } from "../../data/link-previews"
 import { childIdsOf, isNoteType } from "../../data/graph"
@@ -108,6 +110,8 @@ export function BlockNoteEditor({
   context,
   onEditingChange,
   onOpenBoard,
+  pivots,
+  onPivot,
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc, hint?: ChangeHint) => void
@@ -186,6 +190,9 @@ export function BlockNoteEditor({
   /** Open a board's page (a board card's "Open board", docs/boards.md).
    * The page's to give: navigation is its business. */
   onOpenBoard?: (id: string) => void
+  /** The frame's link pivots and the way to set one (`BlockEditor`). */
+  pivots?: LinkPivots
+  onPivot?: (key: string, id: string, direction: Direction | null) => void
 }) {
   // A view that may legitimately hold nothing gets no starter: a filter that
   // matched nothing, and the basket, would otherwise show one empty row that
@@ -398,6 +405,8 @@ export function BlockNoteEditor({
       onToggleCollapse={toggleCollapse}
       onReveal={revealRow}
       onMoveFolds={folds ? folds.move : own.moveFolds}
+      pivots={pivots}
+      onPivot={onPivot}
       onExitTop={onExitTop}
       focusFirstSignal={focusFirstSignal}
       focusFirstMode={focusFirstMode}

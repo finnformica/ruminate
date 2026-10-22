@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import {
   linkSelection,
   movesOf,
+  nextPivot,
+  rowPivotOf,
   runCommand,
   surroundSelection,
   wrapSelection,
@@ -1667,6 +1669,45 @@ describe("the rows beneath a row read the pivots (docs/graph-walk.md, 3.8)", () 
       mode: "select",
       key: "a/x/^p/z",
     })
+  })
+
+  it("p cycles a row's pivot: upstream, then none; downstream inside an up region", () => {
+    const next = (key: string, over: Partial<CommandInput> = {}) =>
+      runCommand("cyclePivot", at(key, over)).pivot
+    // A row walking down: show upstream; again, clear it.
+    expect(next("a/x")).toEqual({ key: "a/x", id: "x", direction: "up" })
+    expect(next("a/x", { pivots: up("x") })).toEqual({ key: "a/x", id: "x", direction: null })
+    // A row inside x's up region walks up: show downstream; again, clear it.
+    expect(next("a/x/^p", { pivots: up("x") })?.direction).toBe("down")
+    const down = new Map([
+      ["x", "up" as const],
+      ["p", "down" as const],
+    ])
+    expect(next("a/x/^p", { pivots: down })?.direction).toBeNull()
+    // Under an up pivot on the note, a root row walks up too.
+    expect(next("a", { pivots: up("n") })?.direction).toBe("down")
+  })
+
+  it("reads the row's own pivot and the direction it inherits", () => {
+    expect(rowPivotOf(at("a/x/^p", { pivots: up("x") }))).toEqual({ inherited: "up", pivot: null })
+    expect(rowPivotOf(at("a/x", { pivots: up("x") }))).toEqual({ inherited: "down", pivot: "up" })
+    // In focus, the query starts at the focused block, down.
+    expect(rowPivotOf(at("x", { pivots: up("a"), focusRootId: "x" }))).toEqual({
+      inherited: "down",
+      pivot: null,
+    })
+  })
+
+  it("offers no pivot on a looped row, or with no row", () => {
+    expect(runCommand("cyclePivot", at("a/x/^a")).handled).toBe(false)
+    expect(rowPivotOf(at(""))).toBeNull()
+  })
+
+  it("the cycle passes over a pivot equal to the inherited direction", () => {
+    expect(nextPivot({ inherited: "down", pivot: null })).toBe("up")
+    expect(nextPivot({ inherited: "down", pivot: "up" })).toBeNull()
+    expect(nextPivot({ inherited: "up", pivot: null })).toBe("down")
+    expect(nextPivot({ inherited: "up", pivot: "down" })).toBeNull()
   })
 
   it("in focus, a pivot above the focused block does not apply", () => {
