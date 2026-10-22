@@ -2,14 +2,15 @@ import copy from "copy-to-clipboard"
 import { useAtomValue, useSetAtom, useStore } from "jotai"
 import React from "react"
 import { blockRollup } from "../data/graph"
-import { sharedOriginAtom } from "../data/shared-mode"
+import { receivedSharesAtom, sharePermissions, sharedOriginAtom } from "../data/shared-mode"
+import { useApplyOps } from "../data/store"
 import { viewRootIdsAtom } from "../data/views"
-import { graphSnapshotAtom, isDatabaseModeAtom } from "../global-state"
+import { graphSnapshotAtom, isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
 import { REMOVE_VIEW, useWriteView } from "../hooks/views"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { type MenuEntry } from "./block-editor/block-context-menu"
 import { reorderEntries, type ReorderActions } from "./note-actions-menu"
-import { CopyIcon16, LinkIcon16, PlusIcon16, ShareIcon16, TrashIcon16 } from "./icons"
+import { CopyIcon16, EditIcon16, LinkIcon16, PlusIcon16, ShareIcon16, TrashIcon16 } from "./icons"
 import { shareDialogAtom } from "./share-note-dialog"
 
 /**
@@ -17,7 +18,9 @@ import { shareDialogAtom } from "./share-note-dialog"
  * menu (`block-context-menu.tsx`) cut to what reaches beyond the note and
  * does not edit — Copy, Copy link to block, Share — and then the block's
  * place in Views: **Remove from Views** on a block view, **Add to Views** on
- * a block that is not one yet (a search result in the palette).
+ * a block that is not one yet (a search result in the palette). On a block
+ * view, **Rename** sets the block's text, since a View is named by its
+ * root (docs/graph-walk.md, section 7) — where the reader may edit the note.
  *
  * One list on every surface that meets a block away from its note: the
  * sidebar's ⋯ on a block view (`nav-items.tsx`, with the list's moves ahead
@@ -36,6 +39,8 @@ export function useBlockViewMenuEntries() {
   // them (docs/sharing.md).
   const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const openShare = useSetAtom(shareDialogAtom)
+  const isSignedOut = useAtomValue(isSignedOutAtom)
+  const applyOps = useApplyOps()
 
   return React.useCallback(
     (blockId: string, noteId: string, options: { reorder?: ReorderActions } = {}): MenuEntry[] => {
@@ -44,6 +49,19 @@ export function useBlockViewMenuEntries() {
       const copyBlock = () =>
         copyAsMarkdown(blockRollup(blockId, jotaiStore.get(graphSnapshotAtom)) ?? "")
       const copyLink = () => copy(`${window.location.origin}/views/${noteId}?block=${blockId}`)
+      // A block in a note someone shared is theirs: renamed only with `write`.
+      const shareId = jotaiStore.get(sharedOriginAtom).get(noteId)
+      const share =
+        shareId === undefined
+          ? undefined
+          : jotaiStore.get(receivedSharesAtom).find((entry) => entry.id === shareId)
+      const canRename = !isSignedOut && (!share || sharePermissions(share).write)
+      const rename = () => {
+        const current = jotaiStore.get(graphSnapshotAtom).nodes.get(blockId)?.text ?? ""
+        const raw = window.prompt("Rename view", current)
+        if (raw == null || raw === current) return
+        applyOps([{ op: "setText", id: blockId, text: raw }])
+      }
       return [
         ...(options.reorder ? reorderEntries(options.reorder) : []),
         { kind: "item", label: "Copy", icon: <CopyIcon16 />, onSelect: copyBlock },
@@ -55,6 +73,17 @@ export function useBlockViewMenuEntries() {
           disabled: !canShare,
           onSelect: () => openShare(blockId),
         },
+        ...(inViews
+          ? [
+              {
+                kind: "item",
+                label: "Rename",
+                icon: <EditIcon16 />,
+                disabled: !canRename,
+                onSelect: rename,
+              } satisfies MenuEntry,
+            ]
+          : []),
         { kind: "separator" },
         inViews
           ? {
@@ -71,6 +100,6 @@ export function useBlockViewMenuEntries() {
             },
       ]
     },
-    [jotaiStore, writeView, viewRoots, isDatabaseMode, openShare],
+    [jotaiStore, writeView, viewRoots, isDatabaseMode, openShare, isSignedOut, applyOps],
   )
 }

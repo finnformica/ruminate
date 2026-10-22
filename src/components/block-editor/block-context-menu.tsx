@@ -124,6 +124,33 @@ export function BlockContextMenu({
 }
 
 /**
+ * A list row's right-click (or press-and-hold) menu, away from the editor:
+ * the sidebar's Views rows, whose menu is the same list as their ⋯ button.
+ */
+export function RowContextMenu({
+  entries,
+  children,
+}: {
+  entries: readonly MenuEntry[]
+  children: React.ReactNode
+}) {
+  return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger>{children}</ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Positioner className="z-popup outline-none">
+          <ContextMenu.Popup data-testid="row-context-menu" render={popup} style={{ width: 240 }}>
+            <div className="grid max-h-[45svh] scroll-py-1 overflow-auto p-1 coarse:max-h-[80svh]">
+              <MenuItems entries={entries} />
+            </div>
+          </ContextMenu.Popup>
+        </ContextMenu.Positioner>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
+  )
+}
+
+/**
  * What the menu holds for a row, as data: one list for both renderers — the
  * pointer's popup (`Items`) and the touch screen's sheet (`BlockMenuSheet`).
  * Each entry is an action, a rule between groups, or a group of choices

@@ -2,6 +2,7 @@ import { useAtomValue } from "jotai"
 import { Fragment } from "react"
 import { pathToBlock } from "../data/graph"
 import type { FocusFrame, ViewTarget } from "../data/panes"
+import { ROOT_LABEL, isRootFrame } from "../data/root-frame"
 import { idOfKey } from "../blocks/view"
 import { graphSnapshotAtom } from "../global-state"
 import { cx } from "../utils/cx"
@@ -31,7 +32,9 @@ interface Crumb {
  *   left, else the shortest path from the earlier root. A
  *   click on one pops back to the earlier frame and focuses the block from
  *   there.
- * - Where the stack starts on a block, the note and the path down to the
+ * - The **Root frame** (`src/data/root-frame.ts`) is the first crumb: the
+ *   base of every pane, a click on it pops back to the list of every note.
+ * - Where the stack starts on a block above Root, the note and the path down to the
  *   block lead the trail, so the whole note is always one click away. No
  *   frame is there to pop to: a click on one replaces the stack with that
  *   view (`goAbove`), as Shift+F does on a lone focus, and never pushes it
@@ -61,7 +64,11 @@ export function FocusTrail({
   // A crumb is one plain line: its markdown marks go (`inlineText`).
   const textOf = (id: string) => inlineText(graph.nodes.get(id)?.text ?? "")
   const labelOf = (frame: FocusFrame) =>
-    frame.root === null ? textOf(frame.noteId) || "Untitled" : textOf(frame.root) || "…"
+    isRootFrame(frame)
+      ? ROOT_LABEL
+      : frame.root === null
+        ? textOf(frame.noteId) || "Untitled"
+        : textOf(frame.root) || "…"
   // The blocks strictly between a frame's root and the next frame's. The
   // row the frame recorded as it was left is the way the reader went down
   // (`SelectionPath`: the ids from the frame's root to the row), so it names
@@ -91,8 +98,19 @@ export function FocusTrail({
       })
     }
   }
-  const first = frames[0]
-  if (first.root !== null) {
+  // Root leads the trail; the frames above it start where the note's lead
+  // goes.
+  const firstIndex = isRootFrame(frames[0]) ? 1 : 0
+  if (firstIndex === 1) {
+    crumbs.push({
+      key: "root",
+      label: ROOT_LABEL,
+      kind: "frame",
+      onClick: last > 0 ? () => onPopTo(0) : undefined,
+    })
+  }
+  const first = frames[firstIndex]
+  if (first && first.root !== null) {
     const note: FocusFrame = { noteId: first.noteId, root: null, selected: null }
     crumbs.push({
       key: "note",
@@ -103,7 +121,8 @@ export function FocusTrail({
     pathCrumbs(null, note, first)
   }
   frames.forEach((frame, index) => {
-    if (index > 0) pathCrumbs(index - 1, frames[index - 1], frame)
+    if (index < firstIndex) return
+    if (index > firstIndex) pathCrumbs(index - 1, frames[index - 1], frame)
     crumbs.push({
       key: `${index}:${frame.noteId}:${frame.root}`,
       label: labelOf(frame),

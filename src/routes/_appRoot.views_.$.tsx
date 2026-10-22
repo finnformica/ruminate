@@ -13,6 +13,7 @@ import {
   XIcon16,
 } from "../components/icons"
 import { FocusTrail } from "../components/focus-trail"
+import { RootFramePage } from "../components/root-frame-page"
 import { IconButton } from "../components/ui/icon-button"
 import { Notice } from "../components/notice"
 import { parse } from "../blocks/parse"
@@ -39,7 +40,9 @@ import { useSavedView, useWriteView } from "../hooks/views"
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
 import { useOpenNote } from "../hooks/open-note"
-import { pathToBlock } from "../data/graph"
+import { CORPUS_ROOT_ID, pathToBlock } from "../data/graph"
+import { ROOT_LABEL, isRootFrame } from "../data/root-frame"
+import { stackToSave } from "../data/view-stack"
 import { narrowingParam, resolveNarrowing } from "../utils/view-filter"
 import { FilterMenu, SortMenu } from "../components/view-controls"
 import { takeStoredFolds, useFoldRule, withFold, type Folds } from "../data/view-state"
@@ -280,6 +283,31 @@ function SplitView() {
           landing.pane === index &&
           landing.view.noteId === frame.noteId &&
           landing.view.root === frame.root
+        const onClose = layout.panes.length > 1 ? () => close(index) : undefined
+        const onSplit = wide && !isSplit ? split : undefined
+        if (isRootFrame(frame)) {
+          return (
+            <RootFramePage
+              key={`${index}:${frame.noteId}`}
+              leading={index === shown[0]}
+              landing={lands ? landing.path[0] : null}
+              actions={
+                <PaneButtons active={index === layout.active} onSplit={onSplit} onClose={onClose} />
+              }
+              onOpen={(note) => {
+                if (note.type === "board") {
+                  void navigate({ to: "/boards/$", params: { _splat: note.id } })
+                  return
+                }
+                const next = goTo(pane, { noteId: note.id, root: null }, [note.id])
+                if (next) move(index, next)
+              }}
+              onActivate={() => {
+                if (index !== layout.active) write(activate(layout, index), { replace: true })
+              }}
+            />
+          )
+        }
         return (
           <NotePage
             key={`${index}:${frame.noteId}`}
@@ -296,11 +324,49 @@ function SplitView() {
             onActivate={() => {
               if (index !== layout.active) write(activate(layout, index), { replace: true })
             }}
-            onSplit={wide && !isSplit ? split : undefined}
-            onClose={layout.panes.length > 1 ? () => close(index) : undefined}
+            onSplit={onSplit}
+            onClose={onClose}
           />
         )
       })}
+    </div>
+  )
+}
+
+/** A pane's own buttons in its header: open a second pane, or close this one. */
+function PaneButtons({
+  active,
+  onSplit,
+  onClose,
+}: {
+  active: boolean
+  onSplit?: () => void
+  onClose?: () => void
+}) {
+  return (
+    <div className="flex items-center">
+      {onSplit ? (
+        <IconButton
+          aria-label="Split view"
+          shortcut={formatCombo(APP_SHORTCUTS.toggleSplit)}
+          size="small"
+          tooltipAlign="end"
+          onClick={onSplit}
+        >
+          <SplitIcon16 />
+        </IconButton>
+      ) : null}
+      {onClose ? (
+        <IconButton
+          aria-label="Close pane"
+          shortcut={active ? formatCombo(APP_SHORTCUTS.toggleSplit) : undefined}
+          size="small"
+          tooltipAlign="end"
+          onClick={onClose}
+        >
+          <XIcon16 />
+        </IconButton>
+      ) : null}
     </div>
   )
 }
@@ -652,6 +718,15 @@ function NotePage({
     // The URL has nothing left to say now that the view says it.
     onUpdate({ filter: undefined, sort: undefined })
   }, [focusBlockId, noteId, filter, sort, writeView, onUpdate])
+  // **Save as view** (docs/graph-walk.md, section 7): the pane's stack above
+  // Root, up to the frame on screen, into the View of this frame's root —
+  // its filter and sort as on screen, listed in Views. On a root that has a
+  // View it overwrites that row.
+  const saveAsView = React.useCallback(() => {
+    const { rootId, stack } = stackToSave(pane.frames)
+    writeView(rootId, { filter, sort, stack, pinned: true })
+    onUpdate({ filter: undefined, sort: undefined })
+  }, [pane.frames, filter, sort, writeView, onUpdate])
   const resetToDefaultView = React.useCallback(() => {
     onUpdate({ filter: undefined, sort: undefined })
   }, [onUpdate])
@@ -795,14 +870,15 @@ function NotePage({
             </span>
           </span>
         }
-        // The note's icon leads back to the Views page, the list it was opened
-        // from, on a phone as on a desktop.
+        // The note's icon leads back to Root, the list of every note, on a
+        // phone as on a desktop.
         icon={
           share === null ? (
             <Link
-              to="/"
+              to="/views/$"
+              params={{ _splat: CORPUS_ROOT_ID }}
               search={{ query: undefined }}
-              aria-label="Views"
+              aria-label={ROOT_LABEL}
               className="focus-ring flex rounded-sm"
             >
               {favicon}
@@ -855,6 +931,7 @@ function NotePage({
                       : navigate({ to: "/", search: { query: undefined }, replace: true }),
                   focusBlockId: focusBlockId ?? null,
                   filter,
+                  onSaveView: noteExists && share === null ? saveAsView : undefined,
                   rootPivot:
                     viewRootId && noteExists
                       ? {
@@ -864,28 +941,7 @@ function NotePage({
                       : undefined,
                 }}
               />
-              {onSplit ? (
-                <IconButton
-                  aria-label="Split view"
-                  shortcut={formatCombo(APP_SHORTCUTS.toggleSplit)}
-                  size="small"
-                  tooltipAlign="end"
-                  onClick={onSplit}
-                >
-                  <SplitIcon16 />
-                </IconButton>
-              ) : null}
-              {onClose ? (
-                <IconButton
-                  aria-label="Close pane"
-                  shortcut={active ? formatCombo(APP_SHORTCUTS.toggleSplit) : undefined}
-                  size="small"
-                  tooltipAlign="end"
-                  onClick={onClose}
-                >
-                  <XIcon16 />
-                </IconButton>
-              ) : null}
+              <PaneButtons active={active} onSplit={onSplit} onClose={onClose} />
             </div>
           </div>
         }

@@ -3,6 +3,7 @@ import { useSetAtom, useStore } from "jotai"
 import { useEffect, useRef } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useIsAdmin } from "../data/features"
+import { CORPUS_ROOT_ID } from "../data/graph"
 import { isHelpPanelOpenAtom, otherPaneAtom } from "../global-state"
 import { GChordMachine } from "./chords"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "./registry"
@@ -49,7 +50,12 @@ export function GlobalShortcuts() {
 
   useEffect(() => {
     const machine = new GChordMachine({
-      v: () => navigate({ to: "/", search: { query: undefined } }),
+      v: () =>
+        navigate({
+          to: "/views/$",
+          params: { _splat: CORPUS_ROOT_ID },
+          search: { query: undefined },
+        }),
       s: () => navigate({ to: "/settings", search: { query: undefined } }),
       c: () => navigate({ to: "/changelog", search: { release: undefined } }),
       a: () => {

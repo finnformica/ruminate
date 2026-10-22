@@ -1,44 +1,26 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
-import { GridIcon16 } from "../components/icons"
-import { NoteList } from "../components/note-list"
-import { PageLayout } from "../components/page-layout"
+import { createFileRoute, redirect } from "@tanstack/react-router"
+import { CORPUS_ROOT_ID } from "../data/graph"
 
 type RouteSearch = {
   query: string | undefined
 }
 
+/**
+ * The home page is the Root frame (`src/data/root-frame.ts`): the list of
+ * every note, at the base of every pane. There is no Views page: the Views
+ * list is the sidebar's, and the palette's. `query` is kept so every link
+ * made to `/` still reads; it is not used.
+ */
 export const Route = createFileRoute("/_appRoot/")({
-  validateSearch: (search: Record<string, unknown>): RouteSearch => {
-    return {
-      query: typeof search.query === "string" ? search.query : undefined,
-    }
+  validateSearch: (search: Record<string, unknown>): RouteSearch => ({
+    query: typeof search.query === "string" ? search.query : undefined,
+  }),
+  beforeLoad: () => {
+    throw redirect({
+      to: "/views/$",
+      params: { _splat: CORPUS_ROOT_ID },
+      search: { query: undefined },
+      replace: true,
+    })
   },
-  component: RouteComponent,
 })
-
-function RouteComponent() {
-  const { query } = Route.useSearch()
-  const navigate = Route.useNavigate()
-  // The text as typed, held here so the box shows a keystroke the same
-  // render; the URL follows (and leads on back/forward, or a link in).
-  const [text, setText] = useState(query ?? "")
-  useEffect(() => {
-    setText(query ?? "")
-  }, [query])
-
-  return (
-    <PageLayout title="Views" icon={<GridIcon16 />}>
-      <div className="p-4 pt-0">
-        <NoteList
-          query={text}
-          onQueryChange={(next) => {
-            setText(next)
-            navigate({ search: (prev) => ({ ...prev, query: next }), replace: true })
-          }}
-          enableKeyboardNav
-        />
-      </div>
-    </PageLayout>
-  )
-}

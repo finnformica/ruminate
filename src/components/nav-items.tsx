@@ -1,8 +1,14 @@
-import { Link, LinkComponentProps, useLocation } from "@tanstack/react-router"
+import { Link, LinkComponentProps, useLocation, useNavigate } from "@tanstack/react-router"
 import { useAtom, useAtomValue } from "jotai"
 import React, { createContext, useContext } from "react"
 import { requestDatabasePull } from "../data/database-mode"
+import { CORPUS_ROOT_ID } from "../data/graph"
+import { layoutToSearch, type FocusFrame, type PaneSearch } from "../data/panes"
+import { ROOT_LABEL, rootFrame } from "../data/root-frame"
+import { restoreViewFrames } from "../data/view-stack"
+import { viewByRootAtom } from "../data/views"
 import {
+  graphSnapshotAtom,
   isBootingAtom,
   isHelpPanelOpenAtom,
   noteSortAtom,
@@ -16,7 +22,7 @@ import { appUpdateAtom } from "../hooks/app-update"
 import { usePending } from "../hooks/pending"
 import { useReorderViews } from "../hooks/views"
 import { useDragReorder } from "../hooks/drag-reorder"
-import { useOpenInPane } from "../hooks/open-note"
+import { useOpenFramesInPane, useOpenInPane } from "../hooks/open-note"
 import { shareOwnerName } from "../data/shares"
 import type { Note } from "../schema"
 import { typeGlyph } from "../blocks/registry"
@@ -48,9 +54,14 @@ import {
 } from "./icons"
 import { Keys } from "./ui/keys"
 import { NavListSkeleton } from "./ui/skeleton"
-import { NoteActionsMenu, type ReorderActions } from "./note-actions-menu"
+import {
+  NoteActionsMenu,
+  reorderEntries,
+  useNoteMenuEntries,
+  type ReorderActions,
+} from "./note-actions-menu"
 import { useBlockViewMenuEntries } from "./block-view-menu"
-import { MenuItems } from "./block-editor/block-context-menu"
+import { MenuItems, RowContextMenu } from "./block-editor/block-context-menu"
 import { NoteFavicon } from "./note-favicon"
 import { SettingsNavList } from "./settings/settings-nav"
 import { beginGitHubSignIn } from "./github-auth"
@@ -96,15 +107,18 @@ export function NavItems({
         <div className="flex flex-col gap-2">
           <ul className="flex flex-col gap-1">
             <li>
+              {/* Root first: the list of every note, the base of every pane
+                  (src/data/root-frame.ts). The Views below are bookmarks. */}
               <NavLink
-                to="/"
+                to="/views/$"
+                params={{ _splat: CORPUS_ROOT_ID }}
                 search={{ query: undefined }}
                 activeIcon={<GridFillIcon16 />}
                 icon={<GridIcon16 />}
-                shortcut={formatCombo(APP_SHORTCUTS.goViews)}
+                shortcut={formatCombo(APP_SHORTCUTS.goRoot)}
                 onNavigate={onNavigate}
               >
-                Views
+                {ROOT_LABEL}
               </NavLink>
             </li>
             <li>
@@ -511,35 +525,132 @@ function ViewRows({
             )}
             {...(manual ? reorder.rowProps(entry.id) : {})}
           >
-            {entry.kind === "note" ? (
-              <>
-                <NoteNavItem
-                  note={entry.note}
-                  size={size}
-                  onNavigate={onNavigate}
-                  className="w-full"
-                />
-                <RowActions size={size}>
-                  <NoteActionsMenu noteId={entry.id} reorder={moves} />
-                </RowActions>
-              </>
-            ) : (
-              <>
-                <BlockViewNavItem
-                  block={entry.block}
-                  size={size}
-                  onNavigate={onNavigate}
-                  className="w-full"
-                />
-                <RowActions size={size}>
-                  <BlockViewActionsMenu block={entry.block} reorder={moves} />
-                </RowActions>
-              </>
-            )}
+            <ViewRowBody entry={entry} moves={moves} size={size} onNavigate={onNavigate} />
           </li>
         )
       })}
     </ul>
+  )
+}
+
+/** Where a View row leads (docs/graph-walk.md, section 7): its stack restored
+ * — Root, the saved frames, the top on screen — as a link, and the roots of
+ * the frames beneath the top as the row's hint. */
+interface ViewTarget {
+  frames: FocusFrame[]
+  params: { _splat: string }
+  search: PaneSearch & { query: undefined }
+  /** "Root › Tasks": empty for a one-frame View. */
+  hint: string
+}
+
+function useViewTarget(entry: ViewEntry): ViewTarget {
+  const graph = useAtomValue(graphSnapshotAtom)
+  const row = useAtomValue(viewByRootAtom).get(entry.id)
+  return React.useMemo(() => {
+    const rootId = entry.id
+    const noteId = entry.noteId
+    const frames = restoreViewFrames({ rootId, noteId, stack: row?.stack }, graph) ?? [
+      rootFrame(),
+      { noteId, root: rootId === noteId ? null : rootId, selected: null },
+    ]
+    const { noteId: path, search } = layoutToSearch({ panes: [{ frames }], active: 0 })
+    // Only what the link says: a key left undefined would keep the row from
+    // matching the address it leads to.
+    const said = Object.fromEntries(
+      Object.entries(search).filter(([, value]) => value !== undefined),
+    ) as PaneSearch
+    const lower = frames.slice(1, -1)
+    const labelOf = (frame: FocusFrame) =>
+      inlineText(graph.nodes.get(frame.root ?? frame.noteId)?.text ?? "") || "Untitled"
+    return {
+      frames,
+      params: { _splat: path },
+      search: { ...said, query: undefined },
+      hint: lower.length > 0 ? [ROOT_LABEL, ...lower.map(labelOf)].join(" › ") : "",
+    }
+  }, [entry.id, entry.noteId, row?.stack, graph])
+}
+
+/**
+ * One View row: its link, its ⋯ button, and a right-click (or a
+ * press-and-hold) on it that opens the same menu — rename, the moves, Remove
+ * from Views and the rest — so the list is managed where it is drawn.
+ */
+function ViewRowBody({
+  entry,
+  moves,
+  size,
+  onNavigate,
+}: {
+  entry: ViewEntry
+  moves?: ReorderActions
+  size: "medium" | "large"
+  onNavigate?: () => void
+}) {
+  const target = useViewTarget(entry)
+  const noteEntriesFor = useNoteMenuEntries()
+  const blockEntriesFor = useBlockViewMenuEntries()
+  const navigate = useNavigate()
+  const { pathname } = useLocation()
+  // Deleting the note on screen leads to Root, as the ⋯ menu does.
+  const open = pathname.match(/^\/(?:views|boards)\/(.+)$/)
+  const onDeleted =
+    open && decodeURIComponent(open[1]) === entry.noteId
+      ? () =>
+          void navigate({
+            to: "/views/$",
+            params: { _splat: CORPUS_ROOT_ID },
+            search: { query: undefined },
+            replace: true,
+          })
+      : undefined
+  const menu =
+    entry.kind === "note"
+      ? [...(moves ? reorderEntries(moves) : []), ...noteEntriesFor(entry.id, { onDeleted })]
+      : blockEntriesFor(entry.block.id, entry.block.noteId, { reorder: moves })
+  return (
+    <RowContextMenu entries={menu}>
+      {entry.kind === "note" ? (
+        <NoteNavItem
+          note={entry.note}
+          target={target}
+          size={size}
+          onNavigate={onNavigate}
+          className="w-full"
+        />
+      ) : (
+        <BlockViewNavItem
+          block={entry.block}
+          target={target}
+          size={size}
+          onNavigate={onNavigate}
+          className="w-full"
+        />
+      )}
+      <RowActions size={size}>
+        {entry.kind === "note" ? (
+          <NoteActionsMenu noteId={entry.id} reorder={moves} />
+        ) : (
+          <BlockViewActionsMenu block={entry.block} reorder={moves} />
+        )}
+      </RowActions>
+    </RowContextMenu>
+  )
+}
+
+/** A View row's name, then its path hint in the secondary colour, clipped
+ * to fit: "Todos  Root › Tasks" (docs/graph-walk.md, section 7). */
+function RowName({ name, hint }: { name: string; hint?: string }) {
+  return (
+    <span className="flex min-w-0 items-baseline gap-2">
+      <span className="truncate">{name}</span>
+      {hint ? (
+        <span data-testid="view-hint" className="min-w-0 truncate text-text-secondary">
+          {hint}
+        </span>
+      ) : null}
+    </span>
   )
 }
 
@@ -588,24 +699,27 @@ function BlockGlyph({ type }: { type: BlockType }) {
  * open focused into it — the row's own link, exactly. */
 function BlockViewNavItem({
   block,
+  target,
   size,
   onNavigate,
   className,
 }: {
   block: BlockView
+  /** Where the View leads: its restored stack (`useViewTarget`). */
+  target: ViewTarget
   size: "medium" | "large"
   onNavigate?: () => void
   className?: string
 }) {
   const label = blockViewLabel(block)
-  const openInPane = useOpenInPane()
+  const openFramesInPane = useOpenFramesInPane()
   return (
     <Link
       to="/views/$"
-      params={{ _splat: block.noteId }}
       // The block's own saved view (docs/metadata.md) is applied by the note
-      // page from the block's view row, so the link carries only where to go.
-      search={{ query: undefined, block: block.id }}
+      // page from the block's view row; the link carries the stack.
+      params={target.params}
+      search={target.search}
       activeOptions={{ exact: true, includeSearch: true }}
       data-size={size}
       className={cx("nav-item", className)}
@@ -613,7 +727,7 @@ function BlockViewNavItem({
       onClick={(event) => {
         if (event.defaultPrevented) return
         // A split page opens it in the pane with the keyboard instead.
-        if (isPlainClick(event) && openInPane(block.noteId, block.id)) event.preventDefault()
+        if (isPlainClick(event) && openFramesInPane(target.frames)) event.preventDefault()
         onNavigate?.()
       }}
     >
@@ -623,9 +737,7 @@ function BlockViewNavItem({
       />
       {/* The same wrapper a note row's name sits in, so the two line up to
           the pixel down the list. */}
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="truncate">{label}</span>
-      </span>
+      <RowName name={label} hint={target.hint} />
     </Link>
   )
 }
@@ -738,16 +850,21 @@ const isPlainClick = (event: React.MouseEvent) =>
 function NoteNavItem({
   note,
   title,
+  target,
   size,
   onNavigate,
   className,
 }: {
   note: Note
   title?: string
+  /** Where a View row leads (`useViewTarget`); absent on a shared note's
+   * row, which opens the note. */
+  target?: ViewTarget
   size: "medium" | "large"
   onNavigate?: () => void
   className?: string
 }) {
+  const openFramesInPane = useOpenFramesInPane()
   const openInPane = useOpenInPane()
   // A board's row opens its board page (docs/boards.md), with nothing to
   // say about focus; every other note's its outline.
@@ -777,8 +894,8 @@ function NoteNavItem({
   return (
     <Link
       to="/views/$"
-      params={{ _splat: note.id }}
-      search={{ query: undefined }}
+      params={target?.params ?? { _splat: note.id }}
+      search={target?.search ?? { query: undefined }}
       // Current only at the note's ROOT. Focus is a place of its own — the
       // route calls `?block=` "the block the editor is focused on; absent =
       // outside focus" — and focused in, you are reading that block, not the
@@ -793,17 +910,17 @@ function NoteNavItem({
       onClick={(event) => {
         if (event.defaultPrevented) return
         // A split page opens it in the pane with the keyboard instead.
-        if (isPlainClick(event) && openInPane(note.id)) event.preventDefault()
+        // A View restores its stack there; a shared note is pushed on it.
+        const open = () => (target ? openFramesInPane(target.frames) : openInPane(note.id))
+        if (isPlainClick(event) && open()) event.preventDefault()
         onNavigate?.()
       }}
     >
       <NavRowIcon icon={<NoteFavicon note={note} />} filled={<NoteFavicon note={note} filled />} />
-      <span className="flex min-w-0 items-center gap-1.5">
-        {/* Show the note's name, matching the page header. Ids are minted and
-            opaque now (docs/graph-storage.md), so the name is the
-            title — which is what `displayName` resolves. */}
-        <span className="truncate">{note.displayName}</span>
-      </span>
+      {/* Show the note's name, matching the page header. Ids are minted and
+          opaque now (docs/graph-storage.md), so the name is the title —
+          which is what `displayName` resolves. */}
+      <RowName name={note.displayName} hint={target?.hint} />
     </Link>
   )
 }

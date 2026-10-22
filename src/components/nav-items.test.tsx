@@ -61,7 +61,14 @@ vi.mock("../global-state", async (importOriginal) => {
   }
 })
 
-import { noteSortAtom, sharedNotesAtom, viewEntriesAtom, type NoteSort } from "../global-state"
+import {
+  graphSnapshotAtom,
+  noteSortAtom,
+  sharedNotesAtom,
+  viewEntriesAtom,
+  type NoteSort,
+} from "../global-state"
+import { buildGraphSnapshot, CHILD_KIND, type GraphSnapshot } from "../data/graph"
 import { viewsAtom, viewMapOf } from "../data/views"
 import { NavItems } from "./nav-items"
 
@@ -91,6 +98,8 @@ function renderSidebar({
   sort = "manual",
   blocks = [],
   shared = [],
+  graph,
+  stacks = {},
 }: {
   notes: Note[]
   sort?: NoteSort
@@ -98,9 +107,14 @@ function renderSidebar({
    * until something is dragged. */
   blocks?: BlockViewRow[]
   shared?: Note[]
+  /** The graph the Views are restored over; empty by default. */
+  graph?: GraphSnapshot
+  /** A saved stack per block view (`stack`, docs/graph-walk.md section 7). */
+  stacks?: Record<string, string>
 }) {
   const store = createStore()
   store.set(noteSortAtom, sort)
+  if (graph) store.set(graphSnapshotAtom as never, graph as never)
   store.set(
     viewEntriesAtom as never,
     [
@@ -126,6 +140,7 @@ function renderSidebar({
         pinned: true,
         sort_key: null,
         updated_at: 1,
+        ...(stacks[block.id] ? { stack: stacks[block.id] } : {}),
       })),
     ),
   )
@@ -192,11 +207,13 @@ describe("the sidebar's Views list", () => {
     expect(screen.getByText("Shared one")).toBeTruthy()
   })
 
-  it("names the top link Views, and reaches it by g then v", () => {
+  it("leads with Root, the list of every note, reached by g then v — and no Views page", () => {
     renderSidebar({ notes: THREE })
-    const link = screen.getByRole("link", { name: /^Views/ })
-    expect(link.getAttribute("href")).toBe("/")
-    expect(link.textContent?.toUpperCase()).toContain("V")
+    const links = screen.getAllByRole("link")
+    expect(links[0].textContent).toMatch(/^Root/)
+    expect(links[0].getAttribute("href")).toBe("/views/$")
+    expect(links[0].textContent?.toUpperCase()).toContain("V")
+    expect(screen.queryByRole("link", { name: /^Views/ })).toBeNull()
     expect(screen.queryByRole("link", { name: /^Notes/ })).toBeNull()
   })
 
@@ -326,7 +343,7 @@ describe("the sidebar's Views list", () => {
     expect(store.get(viewsAtom).get("a")?.pinned).toBe(true)
   })
 
-  it("a block view's ⋯ is the block's menu — the list's moves, then Copy, Copy link, Share, Remove from Views", async () => {
+  it("a block view's ⋯ is the block's menu — the list's moves, then Copy, Copy link, Share, Rename, Remove from Views", async () => {
     renderSidebar({ notes: [THREE[0]], blocks: [BLOCK] })
     fireEvent.click(within(viewRows()[1]).getByRole("button", { name: "Block view actions" }))
     await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
@@ -337,17 +354,62 @@ describe("the sidebar's Views list", () => {
       "Copy",
       "Copy link to block",
       "Share",
+      "Rename",
       "Remove from Views",
     ])
     // Every item leads with an icon, as the note's menu does; Remove wears
     // the delete icon, the same one the note's Delete wears.
     expect(items.every((item) => item.querySelector("svg") !== null)).toBe(true)
-    const removeIcon = items[5].querySelector("svg")!.innerHTML
+    const removeIcon = items[6].querySelector("svg")!.innerHTML
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
     fireEvent.click(within(viewRows()[0]).getByRole("button", { name: "Note actions" }))
     await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
     const deleteIcon = screen.getByRole("menuitem", { name: "Delete" }).querySelector("svg")!
     expect(deleteIcon.innerHTML).toBe(removeIcon)
+  })
+
+  it("shows a View's path after its name: the frames below its top, from Root", () => {
+    // Finn's Todos: Root › Tasks › Todos, saved from a note Tasks.
+    const node = (id: string, text: string, type = "text") => ({
+      id,
+      type,
+      text,
+      props: null,
+      updated_at: 0,
+    })
+    const graph = buildGraphSnapshot(
+      [node("a", "Alpha", "note"), node("blk_x", "A block view")],
+      [
+        {
+          source_id: "a",
+          destination_id: "blk_x",
+          kind: CHILD_KIND,
+          sort_key: "a0",
+          updated_at: 0,
+        },
+      ],
+    )
+    renderSidebar({ notes: [THREE[1]], blocks: [BLOCK], graph, stacks: { blk_x: "a,a:blk_x" } })
+    expect(screen.getAllByTestId("view-hint").map((el) => el.textContent)).toEqual(["Root › Alpha"])
+    // The name stays the row's name; a one-frame View has no hint.
+    expect(rowNames()).toEqual(["Bravo", "A block view"])
+  })
+
+  it("shows no hint for a one-frame View", () => {
+    renderSidebar({ notes: THREE, blocks: [BLOCK] })
+    expect(screen.queryByTestId("view-hint")).toBeNull()
+  })
+
+  it("opens the row's menu on a right-click too, so a View is managed where it is listed", async () => {
+    renderSidebar({ notes: [THREE[0]], blocks: [BLOCK] })
+    fireEvent.contextMenu(within(viewRows()[1]).getByRole("link"))
+    const menu = await screen.findByTestId("row-context-menu")
+    const items = within(menu)
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent)
+    expect(items).toContain("Rename")
+    expect(items).toContain("Remove from Views")
+    expect(items).toContain("Move up")
   })
 
   it("a block row opens its note focused on it, at the views address", () => {
@@ -410,7 +472,7 @@ describe("the sidebar while Settings is open", () => {
     mocks.pathname = "/settings/preferences"
     renderSidebar({ notes: THREE, shared: [noteOf("shared", "Theirs")] })
     // The chrome every page has.
-    expect(screen.getByRole("link", { name: /^Views/ })).toBeTruthy()
+    expect(screen.getByRole("link", { name: /^Root/ })).toBeTruthy()
     expect(screen.getByRole("link", { name: /^Calendar/ })).toBeTruthy()
     // Settings is marked on any of its pages, exactly as Help is while
     // open: pressed, not current.
@@ -419,7 +481,7 @@ describe("the sidebar while Settings is open", () => {
     )
     expect(screen.getByRole("link", { name: /^Changelog/ })).toBeTruthy()
     expect(screen.getByRole("button", { name: /^Help/ })).toBeTruthy()
-    // The pages, where the views were — and no way back, since Views is
+    // The pages, where the views were — and no way back, since Root is
     // right there above them.
     const headings = screen.getAllByTestId("section-heading").map((el) => el.textContent)
     expect(headings).toEqual(["Settings"])

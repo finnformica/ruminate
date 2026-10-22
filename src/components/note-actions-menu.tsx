@@ -94,6 +94,12 @@ interface EditorActions {
    * way to switch. Absent where the view keeps no frame.
    */
   rootPivot?: { upstream: boolean; onToggle: () => void }
+  /**
+   * **Save as view** (docs/graph-walk.md, section 7): save the pane's stack
+   * above Root, up to the frame on screen, as the View of this frame's root.
+   * Absent where there is nothing of the reader's own to save.
+   */
+  onSaveView?: () => void
 }
 
 /**
@@ -412,6 +418,14 @@ export function NoteActionsMenu({
                 Full
               </DropdownMenu.Item>
             </DropdownMenu.Group>
+            <DropdownMenu.Separator />
+          </>
+        ) : null}
+        {editor?.onSaveView ? (
+          <>
+            <DropdownMenu.Item icon={<PlusIcon16 />} onClick={editor.onSaveView}>
+              Save as view
+            </DropdownMenu.Item>
             <DropdownMenu.Separator />
           </>
         ) : null}
