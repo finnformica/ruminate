@@ -15,8 +15,6 @@ import {
   linkEntityId,
   opsToEvents,
   readOutEntities,
-  toGraphSnapshot,
-  toViewRows,
   viewChangeToEvent,
   type Entity,
   type EntityKeys,
@@ -24,7 +22,7 @@ import {
   type LoggedEvent,
   type RuminateEvent,
 } from "./events"
-import { FOLD_CHECK_SAMPLE, foldCheckKey, foldDifferences, rowsOfGraph } from "./fold-check"
+import { foldCheckKey, foldDifferences } from "./fold-check"
 import { buildGraphSnapshot, isNoteType, type GraphSnapshot } from "./graph"
 import { decodeHlc, encodeHlc, receiveHlc, tickHlc, type Hlc } from "./hlc"
 import { applyOps, notesTouchedBy, type Op } from "./ops"
@@ -85,7 +83,8 @@ import {
  * and note metadata and search are derived from it (`src/data/note-meta.ts`).
  * Rows are still pulled, but they no longer write the cache: the fold check
  * compares them with it, and compares each touched cache row with the fold
- * of its entity's events (`fold-check.ts`), for Settings → Storage.
+ * of its entity's events (`fold-check.ts`), and reports a difference with
+ * `console.error`.
  *
  * **Conflicts are last-writer-wins per row**, decided by push order at the
  * replica. Pulls never touch rows of notes with queued/in-flight local pushes
@@ -326,10 +325,6 @@ interface DatabaseModeRuntime {
   /** The replica's rows the pulls brought since the last fold check, by key
    * (`foldCheckKey`): the check compares each with its cache row. */
   replicaRows: { nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }
-  /** Every difference the checks have found and not yet seen resolved, by
-   * key (`foldCheckKey`). A check of a batch replaces only the keys it
-   * read; a full check replaces all. */
-  foldDifferences: Map<string, string>
 }
 
 let runtime: DatabaseModeRuntime | null = null
@@ -354,17 +349,10 @@ function patchDiagnostics(patch: Partial<StorageDiagnostics>) {
   store.set(storageDiagnosticsAtom, { ...store.get(storageDiagnosticsAtom), ...patch })
 }
 
+/** A SQL-side write that failed: the atom and the push queue still carry
+ * the content (a repair rebuilds the store from them). */
 function recordWriteError(error: unknown) {
-  const store = jotai()
-  const prev = store.get(storageDiagnosticsAtom)
-  store.set(storageDiagnosticsAtom, {
-    ...prev,
-    writeErrors: [
-      ...prev.writeErrors,
-      { message: error instanceof Error ? error.message : String(error), at: Date.now() },
-    ].slice(-20),
-    writeErrorCount: prev.writeErrorCount + 1,
-  })
+  console.error("[ruminate] store write failed:", error)
 }
 
 /** A wiped cache pulls everything again: the rows, and the log. */
@@ -436,7 +424,6 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     logBehind: false,
     foldCheckTimer: null,
     foldCheckKeys: noKeys(),
-    foldDifferences: new Map(),
     replicaRows: noRows(),
   }
   runtime = activation
@@ -449,7 +436,6 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     document.addEventListener("visibilitychange", onPageHidden)
   }
   jotai().set(databaseModeStatusAtom, { ...OFF_STATUS, status: "opening" })
-  patchDiagnostics({ status: "opening" })
 
   enqueue(async () => {
     try {
@@ -503,7 +489,6 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
       await refreshGraph(activation)
       if (runtime !== activation) return
       patchStatus({ status: "ready" })
-      patchDiagnostics({ status: "ready", notes: noteCount(jotai().get(databaseGraphAtom)) })
 
       // Start the push loop before the first pull, so the pull can consult
       // `pendingNoteIds` (edits made while the pull is in flight are safe).
@@ -530,7 +515,6 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     } catch (error) {
       if (runtime === activation) {
         patchStatus({ status: "error" })
-        patchDiagnostics({ status: "error" })
         recordWriteError(error)
       }
     }
@@ -802,7 +786,6 @@ async function flushOps(activation: DatabaseModeRuntime) {
       )
       bumpEventLog()
     }
-    patchDiagnostics({ notes: noteCount(jotai().get(databaseGraphAtom)) })
     scheduleFoldCheck(activation)
   } catch (error) {
     recordWriteError(error)
@@ -854,30 +837,20 @@ function scheduleFoldCheck(activation: DatabaseModeRuntime) {
   if (activation.foldCheckTimer !== null) return
   activation.foldCheckTimer = setTimeout(() => {
     activation.foldCheckTimer = null
-    if (runtime === activation) enqueue(() => checkFold(activation, false))
+    if (runtime === activation) enqueue(() => checkFold(activation))
   }, activation.options.foldCheckMs ?? FOLD_CHECK_MS)
 }
 
 /**
- * Settings action: compare the whole fold with the whole tables now, and
- * resolve once it has run. The checks after a batch read only what the
- * batch touched; this one reads every row.
- */
-export function requestFullFoldCheck(): Promise<void> {
-  const activation = runtime
-  if (!activation) return Promise.resolve()
-  return enqueue(() => checkFold(activation, true))
-}
-
-/**
- * The fold check (`fold-check.ts`): record for Settings → Storage where the
- * cache differs from the truth. Runs on the queue, so no write lands
- * between its reads. Two comparisons:
+ * The fold check (`fold-check.ts`): find where the cache differs from the
+ * truth, and report it with `console.error`, one line per entity with its
+ * id. There is no reporting path to the Worker, so the report stays in the
+ * browser's console. Runs on the queue, so no write lands between its
+ * reads, and reads only what batches touched since the last check:
  *
- * - **The log.** Each entity batches touched since the last check: its
- *   cache row against the fold of its events in the log (`foldOfLog`, by
- *   the `events_entity` index). `full` compares every row with the fold of
- *   the whole log instead.
+ * - **The log.** Each entity batches touched: its cache row against the
+ *   fold of its events in the log (`foldOfLog`, by the `events_entity`
+ *   index).
  * - **The replica.** Each row the pulls brought: against its cache row,
  *   tombstones too. It leaves out an entity with an unpushed event (the
  *   replica has not seen it yet) and one the cache holds past the row
@@ -886,7 +859,7 @@ export function requestFullFoldCheck(): Promise<void> {
  *
  * While the events pull is behind, there is no check: what it needs waits.
  */
-async function checkFold(activation: DatabaseModeRuntime, full: boolean) {
+async function checkFold(activation: DatabaseModeRuntime) {
   if (runtime !== activation || !activation.store) return
   if (activation.logBehind) return
   const store = activation.store
@@ -896,31 +869,19 @@ async function checkFold(activation: DatabaseModeRuntime, full: boolean) {
   activation.replicaRows = noRows()
   const touched = keys.blocks.size + keys.links.size + keys.views.size
   const brought = pulled.nodes.length + pulled.links.length + pulled.views.length
-  if (!full && touched + brought === 0) return
+  if (touched + brought === 0) return
   try {
-    const differences = activation.foldDifferences
-    let compared = touched
+    const found: string[] = []
 
     // The log against the cache.
-    if (full) {
-      const fold = await store.foldOfLog()
-      const [graph, views] = await Promise.all([store.getGraph(), store.getViews()])
-      const folded = rowsOfGraph(toGraphSnapshot(fold), [...viewMapOf(toViewRows(fold)).values()])
-      const found = foldDifferences(folded, rowsOfGraph(graph, views), LOG_SIDES)
-      for (const key of [...differences.keys()]) if (!isReplicaKey(key)) differences.delete(key)
-      for (const [key, line] of found) differences.set(key, line)
-      compared = folded.nodes.length + folded.links.length + folded.views.length
-    } else if (touched > 0) {
+    if (touched > 0) {
       const fold = await store.foldOfLog(keys)
-      const found = foldDifferences(
+      const differences = foldDifferences(
         readOutEntities(fold, keys),
         await store.getLiveRows(keys),
         LOG_SIDES,
       )
-      for (const id of keys.blocks) differences.delete(foldCheckKey("block", id))
-      for (const id of keys.links) differences.delete(foldCheckKey("link", id))
-      for (const id of keys.views) differences.delete(foldCheckKey("view", id))
-      for (const [key, line] of found) differences.set(key, line)
+      found.push(...differences.values())
     }
 
     // The replica's rows against the cache.
@@ -950,50 +911,21 @@ async function checkFold(activation: DatabaseModeRuntime, full: boolean) {
         const key = foldCheckKey(entity, id)
         return waiting.has(key) || (seqOf.get(key) ?? 0) > pulledTo
       }
-      const found = foldDifferences(cached, pulled, REPLICA_SIDES, skip)
-      for (const id of replicaKeys.blocks) differences.delete(replicaKey(foldCheckKey("block", id)))
-      for (const id of replicaKeys.links) differences.delete(replicaKey(foldCheckKey("link", id)))
-      for (const id of replicaKeys.views) differences.delete(replicaKey(foldCheckKey("view", id)))
-      for (const [key, line] of found) differences.set(replicaKey(key), replicaKey(line))
-      compared += brought
+      const differences = foldDifferences(cached, pulled, REPLICA_SIDES, skip)
+      found.push(...[...differences.values()].map((line) => `replica ${line}`))
     }
     if (runtime !== activation) return
 
-    if (differences.size > 0) {
-      console.warn("[ruminate] the cache differs from the truth:", [...differences.values()])
+    if (found.length > 0) {
+      console.error("[ruminate] fold check: the cache differs from the truth:", found)
     }
-    patchDiagnostics({
-      foldCheck: {
-        at: Date.now(),
-        full,
-        compared,
-        differences: differences.size,
-        sample: [...differences.values()].slice(0, FOLD_CHECK_SAMPLE),
-      },
-    })
   } catch (error) {
-    console.warn("[ruminate] fold check failed", error)
+    console.error("[ruminate] fold check failed", error)
   }
 }
 
 const LOG_SIDES = ["the log", "the cache"] as const
 const REPLICA_SIDES = ["the cache", "the replica"] as const
-
-/** A replica difference is keyed apart from the log's, so a check of one
- * never clears the other: `replica block blk_1`. */
-const replicaKey = (key: string) => `replica ${key}`
-const isReplicaKey = (key: string) => key.startsWith("replica ")
-
-/** Settings action: replicate the full corpus to D1 now. No-op unless the
- * runtime (and its push loop) is up. */
-export function requestDatabaseFullPush() {
-  runtime?.replica?.requestFullPush()
-}
-
-/** Refresh the remote D1 counts shown in the Settings panel. */
-export function refreshDatabaseReplicaStatus() {
-  runtime?.replica?.refreshRemoteStatus()
-}
 
 /** After a SQL-side failure, rebuild the store from the graph atom (the
  * authoritative in-memory copy), cooldown-guarded, then push the full corpus
@@ -1141,7 +1073,6 @@ function runPull(activation: DatabaseModeRuntime) {
       if (replicaIdentityChanged(await store.getMeta(REPLICA_ID_KEY), body.replica_id)) {
         await store.clear()
         await resetCursors(store)
-        activation.foldDifferences = new Map()
         if (useSince) body = await activation.source.pullFull()
         if (runtime !== activation) return
       }
@@ -1161,7 +1092,6 @@ function runPull(activation: DatabaseModeRuntime) {
         lastPullError: null,
         emptyOffline: false,
       })
-      patchDiagnostics({ notes: noteCount(jotai().get(databaseGraphAtom)) })
       scheduleFoldCheck(activation)
     } catch (error) {
       if (runtime !== activation) return
