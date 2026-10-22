@@ -56,11 +56,12 @@ const frame = (root: string | null, selected: string | null = null): FocusFrame 
 function trail(frames: FocusFrame[]) {
   const onPopTo = vi.fn()
   const onGoVia = vi.fn()
-  render(<FocusTrail frames={frames} onPopTo={onPopTo} onGoVia={onGoVia} />)
+  const onGoAbove = vi.fn()
+  render(<FocusTrail frames={frames} onPopTo={onPopTo} onGoVia={onGoVia} onGoAbove={onGoAbove} />)
   const crumbs = Array.from(
     screen.getByTestId("focus-breadcrumb").querySelectorAll<HTMLElement>("[data-crumb]"),
   ).map((el) => `${el.dataset.crumb}:${el.textContent}`)
-  return { crumbs, onPopTo, onGoVia }
+  return { crumbs, onPopTo, onGoVia, onGoAbove }
 }
 
 describe("the focus breadcrumb", () => {
@@ -105,5 +106,19 @@ describe("the focus breadcrumb", () => {
     expect(onGoVia).toHaveBeenCalledWith(0, { noteId: "N", root: "B" })
     // The view on screen is not a button.
     expect(screen.getByText("Gamma").getAttribute("aria-current")).toBe("page")
+  })
+
+  it("goes above the stack on a crumb before its first frame, and never by way of a frame", () => {
+    // Finn's bug: the note's crumb went by way of the bottom frame, so the
+    // note was pushed above it (Beta › Gamma › Note).
+    const { onPopTo, onGoVia, onGoAbove } = trail([frame("B", "B/C"), frame("C")])
+    fireEvent.click(screen.getByText("Note"))
+    expect(onGoAbove).toHaveBeenLastCalledWith({ noteId: "N", root: null })
+    fireEvent.click(screen.getByText("Alpha"))
+    expect(onGoAbove).toHaveBeenLastCalledWith({ noteId: "N", root: "A" })
+    expect(onGoVia).not.toHaveBeenCalled()
+    // A frame up the stack still pops.
+    fireEvent.click(screen.getByText("Beta"))
+    expect(onPopTo).toHaveBeenCalledWith(0)
   })
 })

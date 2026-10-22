@@ -153,6 +153,8 @@ export const KEYMAP: Binding[] = [
   { mode: "select", combo: "Mod+Shift+>", command: "leaveFocus" },
   // o opens the block in the pane beside (docs/split-view.md).
   { mode: "select", combo: "o", command: "openBeside" },
+  // p cycles the block's pivot (docs/graph-walk.md, 3.10).
+  { mode: "select", combo: "p", command: "cyclePivot" },
 
   // ── Edit mode ──────────────────────────────────────────────────────────
   { mode: "edit", combo: "Escape", command: "exitEdit" },

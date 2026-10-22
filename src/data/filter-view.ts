@@ -8,7 +8,6 @@ import {
   noteView,
   type GraphSnapshot,
   type GraphView,
-  type LinkDirections,
   type WalkNarrowing,
 } from "./graph"
 
@@ -101,7 +100,6 @@ export function filteredView(
     expanded,
     keep,
     pivots,
-    directions = "downstream",
     reach,
   }: {
     /** The fold rule the rows are drawn by — the narrowed view's own
@@ -121,8 +119,6 @@ export function filteredView(
     keep?: ReadonlySet<string>
     /** The frame's link pivots; the filter keeps their up regions whole. */
     pivots?: LinkPivots
-    /** Which links the walk follows (Settings → Editor, "Show links"). */
-    directions?: LinkDirections
     /** `filterReach` of the filter's matches, when the caller holds it;
      * built here when absent. */
     reach?: ReadonlySet<string>
@@ -138,16 +134,9 @@ export function filteredView(
       }
     : undefined
   const focused = focusBlockId
-    ? blockView(
-        focusBlockId,
-        graph,
-        expanded,
-        directions,
-        pivots,
-        walk && { ...walk, keepRoots: true },
-      )
+    ? blockView(focusBlockId, graph, expanded, pivots, walk && { ...walk, keepRoots: true })
     : null
-  const view = focused ?? noteView(noteId, graph, expanded, directions, pivots, walk)
+  const view = focused ?? noteView(noteId, graph, expanded, pivots, walk)
   if (!view) return null
   if (matched === null) return { ...view, context: NO_CONTEXT, matches: null }
   // Every row the walk kept is a match, a kept row, or context.

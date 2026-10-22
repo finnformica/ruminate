@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import {
   linkSelection,
   movesOf,
+  nextPivot,
+  rowPivotOf,
   runCommand,
   surroundSelection,
   wrapSelection,
@@ -68,6 +70,15 @@ describe("indent / outdent", () => {
     const result = runCommand("indent", input(doc, "c", { mode: "edit", caret: caret("C", 1) }))
     // The caret rides along with the block rather than jumping to its end.
     expect(result.focus).toEqual({ mode: "edit", key: "b/c", caret: 1 })
+  })
+
+  it("names each row it moved, so its folds move with it (GW-11)", () => {
+    const doc = fixture()
+    expect(runCommand("indent", input(doc, "c", { mode: "select" })).moved).toEqual([["c", "b/c"]])
+    const indented = runCommand("indent", input(doc, "c", { mode: "select" })).doc!
+    expect(runCommand("outdent", input(indented, "b/c", { mode: "select" })).moved).toEqual([
+      ["b/c", "c"],
+    ])
   })
 
   it("consumes the key but does nothing when it cannot indent", () => {
@@ -1389,21 +1400,26 @@ describe("parent rows (upstream occurrences)", () => {
 
   it("folds count the parents beneath a row, with the root never among them", () => {
     const doc = graphed()
-    // r has a child and two parents beneath it; x has none (its only parent
-    // is r, on the path); p's only parent is the note, on the path.
-    expect(runCommand("toggleCollapse", input(doc, "r", { rootId: "n" })).toggleCollapse).toBe("r")
-    expect(
-      runCommand("toggleCollapse", input(doc, "r/x", { rootId: "n" })).toggleCollapse,
-    ).toBeUndefined()
-    expect(
-      runCommand("toggleCollapse", input(doc, "r/^p", { rootId: "n" })).toggleCollapse,
-    ).toBeUndefined()
+    // An up pivot on r: its two parents are beneath it; x, walked up, has
+    // none (its only parent is r, on the path); p's only parent is the note,
+    // on the path.
+    const up = { pivots: new Map([["r", "up" as const]]) }
+    const at = (key: string, over: Partial<CommandInput> = {}) =>
+      input(doc, key, { rootId: "n", ...up, ...over })
+    expect(runCommand("toggleCollapse", at("r")).toggleCollapse).toBe("r")
+    expect(runCommand("toggleCollapse", at("r/x")).toggleCollapse).toBeUndefined()
+    expect(runCommand("toggleCollapse", at("r/^p")).toggleCollapse).toBeUndefined()
     // Without the root named, the note would count as a row beneath p.
-    expect(runCommand("toggleCollapse", input(doc, "r/^p")).toggleCollapse).toBe("r/^p")
-    // → on r steps into its first row beneath: the child before the parents.
-    expect(
-      runCommand("expandOrFirstChild", input(doc, "r", { visibleOrder: order, rootId: "n" })).focus,
-    ).toEqual({ mode: "select", key: "r/x" })
+    expect(runCommand("toggleCollapse", at("r/^p", { rootId: null })).toggleCollapse).toBe("r/^p")
+    // With no pivot, r walks down: its child x is beneath it, its parents not.
+    expect(runCommand("toggleCollapse", input(doc, "r/^p", { rootId: "n" })).toggleCollapse).toBe(
+      undefined,
+    )
+    // → on r steps into its first row beneath: its first holder.
+    expect(runCommand("expandOrFirstChild", at("r", { visibleOrder: order })).focus).toEqual({
+      mode: "select",
+      key: "r/^p",
+    })
   })
 
   it("Enter after a parent row makes a new parent; indent moves which block it holds", () => {
@@ -1627,7 +1643,7 @@ describe("the rows beneath a row read the pivots (docs/graph-walk.md, 3.8)", () 
   }
   const up = (...ids: string[]) => new Map(ids.map((id) => [id, "up" as const]))
   const at = (key: string, over: Partial<CommandInput> = {}) =>
-    input(pivoted(), key, { rootId: "n", directions: "downstream", ...over })
+    input(pivoted(), key, { rootId: "n", ...over })
 
   it("a fold toggle under a pivot acts on the right row", () => {
     // x up: its holder p is beneath it, so it folds.
@@ -1658,6 +1674,45 @@ describe("the rows beneath a row read the pivots (docs/graph-walk.md, 3.8)", () 
       mode: "select",
       key: "a/x/^p/z",
     })
+  })
+
+  it("p cycles a row's pivot: upstream, then none; downstream inside an up region", () => {
+    const next = (key: string, over: Partial<CommandInput> = {}) =>
+      runCommand("cyclePivot", at(key, over)).pivot
+    // A row walking down: show upstream; again, clear it.
+    expect(next("a/x")).toEqual({ key: "a/x", id: "x", direction: "up" })
+    expect(next("a/x", { pivots: up("x") })).toEqual({ key: "a/x", id: "x", direction: null })
+    // A row inside x's up region walks up: show downstream; again, clear it.
+    expect(next("a/x/^p", { pivots: up("x") })?.direction).toBe("down")
+    const down = new Map([
+      ["x", "up" as const],
+      ["p", "down" as const],
+    ])
+    expect(next("a/x/^p", { pivots: down })?.direction).toBeNull()
+    // Under an up pivot on the note, a root row walks up too.
+    expect(next("a", { pivots: up("n") })?.direction).toBe("down")
+  })
+
+  it("reads the row's own pivot and the direction it inherits", () => {
+    expect(rowPivotOf(at("a/x/^p", { pivots: up("x") }))).toEqual({ inherited: "up", pivot: null })
+    expect(rowPivotOf(at("a/x", { pivots: up("x") }))).toEqual({ inherited: "down", pivot: "up" })
+    // In focus, the query starts at the focused block, down.
+    expect(rowPivotOf(at("x", { pivots: up("a"), focusRootId: "x" }))).toEqual({
+      inherited: "down",
+      pivot: null,
+    })
+  })
+
+  it("offers no pivot on a looped row, or with no row", () => {
+    expect(runCommand("cyclePivot", at("a/x/^a")).handled).toBe(false)
+    expect(rowPivotOf(at(""))).toBeNull()
+  })
+
+  it("the cycle passes over a pivot equal to the inherited direction", () => {
+    expect(nextPivot({ inherited: "down", pivot: null })).toBe("up")
+    expect(nextPivot({ inherited: "down", pivot: "up" })).toBeNull()
+    expect(nextPivot({ inherited: "up", pivot: null })).toBe("down")
+    expect(nextPivot({ inherited: "up", pivot: "down" })).toBeNull()
   })
 
   it("in focus, a pivot above the focused block does not apply", () => {
@@ -1740,24 +1795,23 @@ describe("GW-5: more of the 3.8 table", () => {
     }
     const entered = runCommand(
       "insertBelow",
-      input(doc, "h", { mode: "edit", visibleOrder: ["h"], directions: "downstream" }),
+      input(doc, "h", { mode: "edit", visibleOrder: ["h"] }),
     )
     const childId = newBlockId(doc, entered.doc!)
     expect(entered.doc!.blocks.h.children).toEqual([childId])
 
     // With no pivot, the new child shows beneath h.
-    expect(
-      runCommand("selectFirstChild", input(entered.doc!, "h", { directions: "downstream" })).focus,
-    ).toEqual({ mode: "select", key: `h/${childId}` })
+    expect(runCommand("selectFirstChild", input(entered.doc!, "h")).focus).toEqual({
+      mode: "select",
+      key: `h/${childId}`,
+    })
 
     // With an up pivot on h, the pivot hides the child: the only row beneath
     // h is its holder m, exactly as the "upstream" setting draws it today.
     const up = new Map([["h", "up" as const]])
-    expect(
-      runCommand(
-        "selectFirstChild",
-        input(entered.doc!, "h", { directions: "downstream", pivots: up }),
-      ).focus,
-    ).toEqual({ mode: "select", key: "h/^m" })
+    expect(runCommand("selectFirstChild", input(entered.doc!, "h", { pivots: up })).focus).toEqual({
+      mode: "select",
+      key: "h/^m",
+    })
   })
 })

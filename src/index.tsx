@@ -15,6 +15,7 @@ import { RouterProvider, createRouter } from "@tanstack/react-router"
 import "@total-typescript/ts-reset"
 import { StrictMode } from "react"
 import ReactDOM from "react-dom/client"
+import { forgetRetiredSettings } from "./global-state"
 import { routeTree } from "./routeTree.gen"
 import "./styles/index.css"
 
@@ -27,6 +28,8 @@ declare module "@tanstack/react-router" {
     router: typeof router
   }
 }
+
+forgetRetiredSettings(window.localStorage)
 
 // Render the app
 const rootElement = document.getElementById("root")!

@@ -2,7 +2,9 @@ import { useAtomValue, useSetAtom, useStore } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 import { emptyBlock } from "../../blocks/ops"
+import type { LinkPivots } from "../../blocks/query"
 import type { BlockDoc, ChangeHint } from "../../blocks/types"
+import type { Direction } from "../../blocks/view"
 import { imagesEnabled, uploadImage } from "../../data/images"
 import { fetchLinkPreview } from "../../data/link-previews"
 import { childIdsOf, isNoteType } from "../../data/graph"
@@ -101,7 +103,6 @@ export function BlockNoteEditor({
   landing,
   onOpenBeside,
   noteTitle,
-  collapseKey,
   folds,
   onToggleCollapse,
   starter = true,
@@ -109,6 +110,8 @@ export function BlockNoteEditor({
   context,
   onEditingChange,
   onOpenBoard,
+  pivots,
+  onPivot,
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc, hint?: ChangeHint) => void
@@ -126,16 +129,13 @@ export function BlockNoteEditor({
      * would say — a row that is about to become a parent has nothing folded
      * to toggle. */
     setOpen: (key: string) => void
+    /** Rows an indent or an outdent took to new keys: their folds go too. */
+    move?: (moved: [from: string, to: string][]) => void
   }
   /** Told after a block is folded or unfolded — the note page counts it as
    * touching the note. */
   onToggleCollapse?: (key: string) => void
-  /**
-   * The note's id. When provided, the note's folds persist per-device in
-   * localStorage (seeded on first open from the default-expansion policy);
-   * without it, collapse is transient local state (e.g. Storybook /
-   * standalone usage).
-   */
+  /** The note's id: what links, boards and deletes act in. */
   noteId?: string
   /** Start with the first block in edit mode (e.g. a brand-new note). */
   startEditing?: boolean
@@ -170,9 +170,6 @@ export function BlockNoteEditor({
   onOpenBeside?: (id: string) => void
   /** The note's title, shown as the breadcrumb's first crumb while focused. */
   noteTitle?: string
-  /** Where this editor's folds are kept, when not under the note's own id —
-   * a second editor on the page (the Unassigned basket) keeps its own. */
-  collapseKey?: string
   /** Whether an editable doc always keeps a block to type into: an empty
    * one is seeded when it holds none, and the only root cannot be removed.
    * Off for the basket (a blank there would be a new unassigned block, and
@@ -193,6 +190,9 @@ export function BlockNoteEditor({
   /** Open a board's page (a board card's "Open board", docs/boards.md).
    * The page's to give: navigation is its business. */
   onOpenBoard?: (id: string) => void
+  /** The frame's link pivots and the way to set one (`BlockEditor`). */
+  pivots?: LinkPivots
+  onPivot?: (key: string, id: string, direction: Direction | null) => void
 }) {
   // A view that may legitimately hold nothing gets no starter: a filter that
   // matched nothing, and the basket, would otherwise show one empty row that
@@ -216,7 +216,7 @@ export function BlockNoteEditor({
   }
 
   // Folds: the owner's, or this editor's own rule over its whole doc.
-  const own = useFoldRule(folds ? undefined : (collapseKey ?? noteId))
+  const own = useFoldRule()
   const ownCollapsed = useMemo(
     () => (folds ? null : new Set(collapsedKeysOf(doc, own.expanded))),
     [folds, doc, own.expanded],
@@ -404,6 +404,9 @@ export function BlockNoteEditor({
       collapsed={collapsed as Set<string>}
       onToggleCollapse={toggleCollapse}
       onReveal={revealRow}
+      onMoveFolds={folds ? folds.move : own.moveFolds}
+      pivots={pivots}
+      onPivot={onPivot}
       onExitTop={onExitTop}
       focusFirstSignal={focusFirstSignal}
       focusFirstMode={focusFirstMode}

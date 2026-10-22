@@ -812,6 +812,30 @@ export function BlockItem({
   // that folds it. `h-[1lh]` at the row's first-line scale centres the
   // chevron on that line — a heading's scale on a heading, the body's
   // otherwise.
+  //
+  // A row with a pivot (docs/graph-walk.md, 3.10) carries a small arrow in
+  // the gutter beside its chevron: up when the rows beneath are what holds
+  // the block (upstream), down when they are what it holds (downstream).
+  // The rows beneath look like rows.
+  const pivotMarker = occurrence.pivot ? (
+    <span
+      data-testid="pivot-marker"
+      role="img"
+      aria-label={occurrence.pivot === "up" ? "Upstream" : "Downstream"}
+      className="pointer-events-none absolute right-full top-1/2 mr-0.5 flex -translate-y-1/2 text-text-tertiary"
+    >
+      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+        <path
+          d={occurrence.pivot === "up" ? "M5 8.5v-7M2 4.5l3-3 3 3" : "M5 1.5v7M2 5.5l3 3 3-3"}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </span>
+  ) : null
   const chevronColumn = (
     <span
       data-testid="chevron-column"
@@ -820,6 +844,7 @@ export function BlockItem({
         slot === "hash" && headingScale(scaleDepth),
       )}
     >
+      {pivotMarker}
       {toggle}
     </span>
   )

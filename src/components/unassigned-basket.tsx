@@ -25,7 +25,6 @@ export function UnassignedBasket({ noteId }: { noteId: NoteId }) {
         <BlockNoteEditor
           key={`${noteId}:unassigned`}
           noteId={noteId}
-          collapseKey={`${noteId}:unassigned`}
           doc={doc}
           onChange={setDoc}
           noteTitle="Unassigned"

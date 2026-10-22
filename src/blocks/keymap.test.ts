@@ -322,3 +322,12 @@ describe("edit mode arrows leave only from the boundary line", () => {
     ).toBeNull()
   })
 })
+
+describe("the pivot key (docs/graph-walk.md, 3.10)", () => {
+  it("p in select mode cycles the pivot; in edit mode it types", () => {
+    expect(resolveKey("select", key({ key: "p" }), input("Alpha", "select"))).toBe("cyclePivot")
+    expect(resolveKey("edit", key({ key: "p" }), input("Alpha", "edit", caret("Alpha", 1)))).toBe(
+      null,
+    )
+  })
+})
