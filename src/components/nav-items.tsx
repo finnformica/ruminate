@@ -640,18 +640,15 @@ function ViewRowBody({
 }
 
 /** A View row's name, then its path hint in the secondary colour, clipped
- * to fit: "Todos  Root › Tasks" (docs/graph-walk.md, section 7). The hint
- * gives up its room first, so the name is clipped only once the hint is
- * gone. */
+ * to fit: "Todos  Root › Tasks" (docs/graph-walk.md, section 7). The name
+ * takes at most two thirds of the row, so a long name still leaves the
+ * hint some room. */
 function RowName({ name, hint }: { name: string; hint?: string }) {
   return (
     <span className="flex min-w-0 items-baseline gap-2">
-      <span className="min-w-0 truncate">{name}</span>
+      <span className={cx("min-w-0 truncate", hint && "shrink-0 max-w-[65%]")}>{name}</span>
       {hint ? (
-        <span
-          data-testid="view-hint"
-          className="min-w-0 shrink-[1000] truncate text-text-secondary"
-        >
+        <span data-testid="view-hint" className="min-w-0 truncate text-text-secondary">
           {hint}
         </span>
       ) : null}
