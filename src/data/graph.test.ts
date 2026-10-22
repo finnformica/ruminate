@@ -6,8 +6,10 @@ import type { BlockDoc } from "../blocks/types"
 import { sampleGraph } from "./sample-graph"
 import {
   BOARD_TYPE,
+  CORPUS_ROOT_ID,
   NOTE_TYPE,
   NOTE_TYPES,
+  ancestorClosure,
   blockRollup,
   blockView,
   buildGraphSnapshot,
@@ -22,6 +24,7 @@ import {
   pathToBlock,
   reconcileSortKeys,
   rollup,
+  sectionReach,
   sortKeyBetween,
   walkGraph,
 } from "./graph"
@@ -978,6 +981,256 @@ describe("walkGraph upstream (the graph, not the tree)", () => {
     expect(doc.blocks.blk_x.upstream).toEqual(["blk_y", "p"])
     expect(doc.blocks.blk_y.upstream).toEqual(["blk_x"])
     expect(collapsed.size).toBe(0)
+  })
+})
+
+describe("walkGraph pivots (docs/graph-walk.md, 3)", () => {
+  // N > A > X > Y, and N > B; M > P > X (X has two holders), M > P > Z;
+  // M > L > N (L holds the note N).
+  const graph = () =>
+    buildGraphSnapshot(
+      [
+        row("n", "note", "N"),
+        row("m", "note", "M"),
+        row("blk_a", "ul", "a"),
+        row("blk_b", "ul", "b"),
+        row("blk_x", "ul", "x"),
+        row("blk_y", "ul", "y"),
+        row("blk_p", "ul", "p"),
+        row("blk_z", "ul", "z"),
+        row("blk_l", "ul", "l"),
+      ],
+      [
+        edge("n", "blk_a", "a0"),
+        edge("n", "blk_b", "a1"),
+        edge("blk_a", "blk_x", "a0"),
+        edge("blk_x", "blk_y", "a0"),
+        edge("m", "blk_p", "a0"),
+        edge("m", "blk_l", "a1"),
+        edge("blk_p", "blk_x", "a0"),
+        edge("blk_p", "blk_z", "a1"),
+        edge("blk_l", "n", "a0"),
+      ],
+    )
+  const pivots = (entries: Record<string, "up" | "down">) => new Map(Object.entries(entries))
+  // Every row open, and the keys of the rows it was asked about (a row with
+  // something beneath it).
+  const recording = () => {
+    const asked: string[] = []
+    const rule = (key: string) => {
+      asked.push(key)
+      return true
+    }
+    return { asked, rule }
+  }
+  const built = (doc: BlockDoc) => Object.keys(doc.blocks).sort()
+
+  it("no pivots is the walk of today, in each direction setting", () => {
+    const byDepth = (_key: string, level: number) => level < 2
+    for (const directions of ["downstream", "upstream", "both"] as const) {
+      for (const rule of [undefined, byDepth]) {
+        expect(noteView("n", graph(), rule, directions, new Map())).toEqual(
+          noteView("n", graph(), rule, directions),
+        )
+        expect(blockView("blk_x", graph(), rule, directions, new Map())).toEqual(
+          blockView("blk_x", graph(), rule, directions),
+        )
+      }
+    }
+  })
+
+  it("an up pivot lists the holders, less the row it came from, and not what it holds", () => {
+    const { asked, rule } = recording()
+    const { doc, collapsed } = noteView("n", graph(), rule, "downstream", pivots({ blk_x: "up" }))!
+    // Beneath X: P (A is the row X came from). Y, what X holds, is not walked.
+    expect(asked).toContain("blk_a/blk_x/^blk_p")
+    expect(built(doc)).toEqual(["blk_a", "blk_b", "blk_p", "blk_x", "m"])
+    expect(doc.blocks.blk_x.upstream).toEqual(["blk_a", "blk_p"])
+    // The complete list stays, for the chevron and an empty save diff.
+    expect(doc.blocks.blk_x.children).toEqual(["blk_y"])
+    // The rest of the note is as it was.
+    expect(doc.rootBlockIds).toEqual(["blk_a", "blk_b"])
+    expect(doc.blocks.blk_a.upstream).toBeUndefined()
+    expect(collapsed.size).toBe(0)
+  })
+
+  it("the rows beneath an up pivot inherit up", () => {
+    const { asked, rule } = recording()
+    const { doc } = noteView("n", graph(), rule, "downstream", pivots({ blk_x: "up" }))!
+    // Beneath P (still up): its holder M, and not Z, which P holds.
+    expect(doc.blocks.blk_p.upstream).toEqual(["m"])
+    expect(doc.blocks.m.type).toBe("note")
+    expect(doc.blocks.blk_z).toBeUndefined()
+    expect(asked).not.toContain("blk_a/blk_x/^blk_p/blk_z")
+  })
+
+  it("a down pivot inside an up region shows what the row holds, less the row it came from", () => {
+    const { asked, rule } = recording()
+    const { doc } = noteView(
+      "n",
+      graph(),
+      rule,
+      "downstream",
+      pivots({ blk_x: "up", blk_p: "down" }),
+    )!
+    // Beneath P: Z (X is the row P was reached up from). M is not walked.
+    expect(built(doc)).toEqual(["blk_a", "blk_b", "blk_p", "blk_x", "blk_z"])
+    expect(asked).toEqual(["blk_a", "blk_a/blk_x", "blk_a/blk_x/^blk_p"])
+    // P was reached up, so it carries its holders' ids.
+    expect(doc.blocks.blk_p.upstream).toEqual(["m"])
+  })
+
+  it("an up pivot on the note root replaces the note's blocks with its holders", () => {
+    const { doc } = noteView("n", graph(), () => true, "downstream", pivots({ n: "up" }))!
+    expect(doc.rootBlockIds).toEqual([])
+    expect(doc.upstream).toEqual(["blk_l"])
+    // Beneath L (up): M. The note's own blocks are not walked.
+    expect(built(doc)).toEqual(["blk_l", "m"])
+    expect(doc.blocks.blk_l.upstream).toEqual(["m"])
+  })
+
+  it("an up pivot on a focused block is its root query", () => {
+    const { doc } = blockView("blk_x", graph(), () => true, "downstream", pivots({ blk_x: "up" }))!
+    expect(doc.rootBlockIds).toEqual(["blk_x"])
+    // Beneath X: A and P, then their holders N and M. Not Y.
+    expect(built(doc)).toEqual(["blk_a", "blk_l", "blk_p", "blk_x", "m", "n"])
+    expect(doc.blocks.n.upstream).toEqual(["blk_l"])
+  })
+
+  it("a closed row beneath a pivot is not walked, and a fold beats a pivot", () => {
+    const up = pivots({ blk_x: "up" })
+    const closedP = noteView("n", graph(), (key) => key !== "blk_a/blk_x/^blk_p", "downstream", up)!
+    expect([...closedP.collapsed]).toEqual(["blk_a/blk_x/^blk_p"])
+    expect(closedP.doc.blocks.m).toBeUndefined()
+    const closedX = noteView("n", graph(), (key) => key !== "blk_a/blk_x", "downstream", up)!
+    expect([...closedX.collapsed]).toEqual(["blk_a/blk_x"])
+    expect(closedX.doc.blocks.blk_p).toBeUndefined()
+  })
+
+  it("the depth count starts again beneath a pivot row", () => {
+    // Two levels, with X (level 2) opened: P beneath it is level 1, so open.
+    const rule = (key: string, level: number) => key === "blk_a/blk_x" || level < 2
+    const { doc, collapsed } = noteView("n", graph(), rule, "downstream", pivots({ blk_x: "up" }))!
+    expect(collapsed.size).toBe(0)
+    expect(doc.blocks.m.type).toBe("note")
+  })
+})
+
+describe("walkGraph: one guard in both directions (docs/graph-walk.md, 3.3)", () => {
+  // N > C, C > D and D > C (C and D hold each other); N > A > X > Y.
+  const graph = () =>
+    buildGraphSnapshot(
+      [
+        row("n", "note", "N"),
+        row("blk_c", "ul", "c"),
+        row("blk_d", "ul", "d"),
+        row("blk_a", "ul", "a"),
+        row("blk_x", "ul", "x"),
+        row("blk_y", "ul", "y"),
+      ],
+      [
+        edge("n", "blk_c", "a0"),
+        edge("n", "blk_a", "a1"),
+        edge("blk_c", "blk_d", "a0"),
+        edge("blk_d", "blk_c", "a0"),
+        edge("blk_a", "blk_x", "a0"),
+        edge("blk_x", "blk_y", "a0"),
+      ],
+    )
+  const asking = () => {
+    const asked: string[] = []
+    return {
+      asked,
+      rule: (key: string) => {
+        asked.push(key)
+        return true
+      },
+    }
+  }
+
+  it("a two-block cycle walked up shows one looped leaf", () => {
+    const { asked, rule } = asking()
+    const { doc } = noteView("n", graph(), rule, "downstream", new Map([["blk_c", "up"]]))!
+    // Beneath C (up): D, its holder. N is the row C came from.
+    expect(doc.blocks.blk_c.upstream).toEqual(["blk_d", "n"])
+    // Beneath D (still up): C, on the path, so D has a row beneath it: the
+    // looped leaf, which is not walked again.
+    expect(doc.blocks.blk_d.upstream).toEqual(["blk_c"])
+    expect(asked.filter((key) => key.startsWith("blk_c"))).toEqual(["blk_c", "blk_c/^blk_d"])
+  })
+
+  it("a single-homed block's rows are the tree's", () => {
+    for (const directions of ["upstream", "both"] as const) {
+      const { asked, rule } = asking()
+      noteView("n", graph(), rule, directions)
+      // Each of A, X and Y has one holder, the row it came from: no up rows.
+      expect(asked.filter((key) => key.startsWith("blk_a"))).toEqual(
+        directions === "both" ? ["blk_a", "blk_a/blk_x"] : [],
+      )
+    }
+    const { asked, rule } = asking()
+    noteView("n", graph(), rule, "downstream", new Map([["blk_x", "up"]]))
+    // Up from X: A only, the row X came from. Nothing beneath X.
+    expect(asked).not.toContain("blk_a/blk_x")
+  })
+})
+
+describe("the narrowing indexes (docs/graph-walk.md, 4.5)", () => {
+  // N > A > H (a heading) > B, and N > C > D. M > A, so A has two holders.
+  const graph = () =>
+    buildGraphSnapshot(
+      [
+        row("n", "note", "N"),
+        row("m", "note", "M"),
+        row("blk_a", "ul", "a"),
+        row("blk_h", "h2", "h"),
+        row("blk_b", "ul", "b"),
+        row("blk_c", "ul", "c"),
+        row("blk_d", "h1", "d"),
+        row("blk_e", "ul", "e"),
+        row(CORPUS_ROOT_ID, "corpus_root", ""),
+      ],
+      [
+        edge(CORPUS_ROOT_ID, "n", "a0"),
+        edge("n", "blk_a", "a0"),
+        edge("n", "blk_c", "a1"),
+        edge("blk_a", "blk_h", "a0"),
+        edge("blk_h", "blk_b", "a0"),
+        edge("blk_c", "blk_d", "a0"),
+        edge("m", "blk_a", "a0"),
+        edge("m", "blk_e", "a1"),
+      ],
+    )
+
+  it("closes the ids over their holders, up to the view's root", () => {
+    expect([...ancestorClosure(graph(), ["blk_b"], "n")].sort()).toEqual(
+      ["blk_a", "blk_b", "blk_h", "m", "n"].sort(),
+    )
+    // Past the root nothing is climbed, and never into the corpus root.
+    expect([...ancestorClosure(graph(), ["blk_b"])]).not.toContain(CORPUS_ROOT_ID)
+    expect(ancestorClosure(graph(), ["blk_b"], "blk_h")).toEqual(new Set(["blk_b", "blk_h"]))
+    // A missing id adds nothing.
+    expect(ancestorClosure(graph(), ["gone"]).size).toBe(0)
+  })
+
+  it("ends at a loop", () => {
+    const looped = buildGraphSnapshot(
+      [row("n", "note", "N"), row("blk_a", "ul", "a"), row("blk_b", "ul", "b")],
+      [edge("n", "blk_a", "a0"), edge("blk_a", "blk_b", "a0"), edge("blk_b", "blk_a", "a0")],
+    )
+    expect(ancestorClosure(looped, ["blk_b"])).toEqual(new Set(["blk_b", "blk_a", "n"]))
+  })
+
+  it("reaches a section from the sections and everything above them", () => {
+    const snapshot = graph()
+    const reach = sectionReach(snapshot)
+    expect([...reach].sort()).toEqual(["blk_a", "blk_c", "blk_d", "blk_h", "m", "n"].sort())
+    // A block with no section beneath it is not in the set.
+    expect(reach.has("blk_b")).toBe(false)
+    expect(reach.has("blk_e")).toBe(false)
+    // Built once per snapshot.
+    expect(sectionReach(snapshot)).toBe(reach)
+    expect(sectionReach(graph())).not.toBe(reach)
   })
 })
 

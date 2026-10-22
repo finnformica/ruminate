@@ -1,9 +1,16 @@
-import { collapsedKeysOf } from "../blocks/default-collapsed"
+import type { LinkPivots } from "../blocks/query"
 import { serialize } from "../blocks/serialize"
-import type { Block, BlockDoc } from "../blocks/types"
 import type { ExpandedRule } from "../blocks/view"
 import type { ViewNarrowing } from "../utils/view-narrowing"
-import { blockView, noteView, type GraphSnapshot, type GraphView } from "./graph"
+import {
+  ancestorClosure,
+  blockView,
+  noteView,
+  type GraphSnapshot,
+  type GraphView,
+  type LinkDirections,
+  type WalkNarrowing,
+} from "./graph"
 
 /**
  * **Filtering and sorting a view, without leaving the view.**
@@ -29,10 +36,20 @@ import { blockView, noteView, type GraphSnapshot, type GraphView } from "./graph
  * not a thing a reader can follow. Document order is the default and the
  * absence of a sort.
  *
- * The walk this narrows must be EAGER — every row present, not just the
- * unfolded ones — because whether a branch survives depends on what is
- * beneath it, and whether a sort is right depends on the siblings it can
- * see. `useNoteDoc` walks eagerly exactly when a filter or a sort is on.
+ * **The walk narrows itself** (`walkGraph`, `WalkNarrowing`,
+ * docs/graph-walk.md, 4.5). Whether a branch survives is read off the
+ * filter's ancestor closure (`ancestorClosure`), not off a walk beneath it,
+ * and the sort orders a row's children as the walk builds the row. So a
+ * narrowed view is as lazy as the note: a closed row is not walked, and the
+ * fold rule is the walk's own. This module is the thin wrapper that builds
+ * the closure and counts what the walk kept.
+ *
+ * **Pivots** (docs/graph-walk.md, 3.9): the filter and the sort apply to
+ * down rows only. An up region — the rows beneath a row whose query is up,
+ * and every row reached up — is kept whole, in holder order, as Pensive's
+ * prune keeps a pivoted subtree whole. A row whose query is up stands
+ * whatever the filter says, as the place its region hangs from. The rows of
+ * an up region are context unless they matched.
  */
 
 /** A narrowed view: the doc, the folds, and the rows kept only as context. */
@@ -53,38 +70,44 @@ export function isNarrowed({ matched, compare }: ViewNarrowing): boolean {
 const NO_CONTEXT: ReadonlySet<string> = new Set()
 
 /**
- * `view`, narrowed by `narrowing`. With nothing to apply the view is handed
- * back untouched (and `matches` is null), so a page can call this
- * unconditionally.
+ * The filter's ancestor closure for a note's view: the matched ids and every
+ * node above them, up to the note (`ancestorClosure`). Built once per filter
+ * and snapshot; a focused view of the same note reads the same set.
+ */
+export function filterReach(
+  graph: GraphSnapshot,
+  noteId: string,
+  matched: ReadonlySet<string>,
+): ReadonlySet<string> {
+  return ancestorClosure(graph, matched, noteId)
+}
+
+/**
+ * The note's view — or, in focus, the focused block's — walked by `graph`
+ * and narrowed by `narrowing`. With nothing to apply it is the plain walk
+ * (and `matches` is null), so a page can call this unconditionally. Null
+ * when the view's root is not in the graph.
+ *
+ * Focused, the root block is the view's title rather than one of its rows,
+ * so the filter runs over what is inside it and never takes it away: an
+ * emptied root stands with nothing beneath it.
  */
 export function filteredView(
-  view: GraphView,
+  graph: GraphSnapshot,
+  noteId: string,
+  focusBlockId: string | null,
   narrowing: ViewNarrowing,
   {
-    keepRoots = false,
     expanded,
-    startLevel = 1,
     keep,
+    pivots,
+    directions = "downstream",
+    reach,
   }: {
-    /**
-     * Keep the view's roots whatever the filter says. A focused block is its
-     * view's root and is drawn as the view's TITLE, not as one of its rows
-     * (`blockView`), so filtering it away would leave the page with nothing
-     * to be a view of. A note's roots are ordinary rows and are pruned like
-     * any other.
-     */
-    keepRoots?: boolean
-    /**
-     * The fold rule the narrowed rows are drawn by — the narrowed view's own
-     * (`useFoldRule` with the narrowing, src/data/view-state.ts), which
-     * opens everything the reader has not folded themselves. Absent, nothing
-     * is folded. The walk handed in was eager, so the rule is applied here,
-     * over what survived, exactly as a lazy walk would have applied it.
-     */
+    /** The fold rule the rows are drawn by — the narrowed view's own
+     * (`useFoldRule` with the narrowing, src/data/view-state.ts). Absent,
+     * nothing is folded. */
     expanded?: ExpandedRule
-    /** The level of the view's roots, as the walk counts them (1 for a
-     * note's rows, 0 for a focused block). */
-    startLevel?: number
     /**
      * Rows kept whatever the filter says — the row being edited. A row is
      * judged by the filter when the editing leaves it, not on every
@@ -96,26 +119,50 @@ export function filteredView(
      * one (`matches` is the filter's own count).
      */
     keep?: ReadonlySet<string>
+    /** The frame's link pivots; the filter keeps their up regions whole. */
+    pivots?: LinkPivots
+    /** Which links the walk follows (Settings → Editor, "Show links"). */
+    directions?: LinkDirections
+    /** `filterReach` of the filter's matches, when the caller holds it;
+     * built here when absent. */
+    reach?: ReadonlySet<string>
   } = {},
-): FilteredView {
+): FilteredView | null {
   const { matched, compare } = narrowing
-  if (matched === null && compare === null) return { ...view, context: NO_CONTEXT, matches: null }
-
-  const sorted = compare ? sortSiblings(view.doc, compare) : view.doc
-  const { doc, context } =
-    matched === null
-      ? { doc: sorted, context: new Set<string>() }
-      : prune(sorted, matched, keepRoots, keep)
-  const collapsed = new Set(expanded ? collapsedKeysOf(doc, expanded, startLevel) : [])
-  return { doc, collapsed, context, matches: matched === null ? null : matched.size }
+  const walk: WalkNarrowing | undefined = isNarrowed(narrowing)
+    ? {
+        matched,
+        compare,
+        keep,
+        reach: matched === null ? NO_CONTEXT : (reach ?? filterReach(graph, noteId, matched)),
+      }
+    : undefined
+  const focused = focusBlockId
+    ? blockView(
+        focusBlockId,
+        graph,
+        expanded,
+        directions,
+        pivots,
+        walk && { ...walk, keepRoots: true },
+      )
+    : null
+  const view = focused ?? noteView(noteId, graph, expanded, directions, pivots, walk)
+  if (!view) return null
+  if (matched === null) return { ...view, context: NO_CONTEXT, matches: null }
+  // Every row the walk kept is a match, a kept row, or context.
+  const context = new Set(
+    Object.keys(view.doc.blocks).filter((id) => !matched.has(id) && !(keep?.has(id) ?? false)),
+  )
+  return { ...view, context, matches: matched.size }
 }
 
 /**
  * The markdown of a filtered view — what **Copy markdown** takes while a
  * filter is on: the rows the view shows, nested as it nests them, a match's
  * ancestors (the dimmed context) included. The note's (or, focused, the
- * block's) rollup, pruned as `filteredView` prunes the page. Folds play no
- * part, as they play none in the unfiltered rollup. Null when the view's
+ * block's) rollup, narrowed as `filteredView` narrows the page. Folds play
+ * no part, as they play none in the unfiltered rollup. Null when the view's
  * root is not in the graph.
  */
 export function filteredRollup(
@@ -124,97 +171,6 @@ export function filteredRollup(
   matched: ReadonlySet<string>,
   graph: GraphSnapshot,
 ): string | null {
-  const focused = focusBlockId ? blockView(focusBlockId, graph) : null
-  const base = focused ?? noteView(noteId, graph)
-  if (!base) return null
-  const { doc } = filteredView(base, { matched, compare: null }, { keepRoots: focused !== null })
-  return serialize(doc)
-}
-
-/**
- * `doc` with every branch that holds no match removed. A block is kept when
- * it matched, or when anything beneath it did; the kept-but-unmatched are
- * returned as `context` for the editor to dim.
- *
- * A match's own children are kept whether or not they matched — a to-do you
- * filtered to is still the to-do with its notes underneath — but they are
- * context, not matches, so the dimming says which row the filter found.
- *
- * A row in `kept` (the one being edited) stands as a match does, whatever
- * the filter made of it.
- */
-function prune(
-  doc: BlockDoc,
-  matched: ReadonlySet<string>,
-  keepRoots: boolean,
-  kept?: ReadonlySet<string>,
-): { doc: BlockDoc; context: Set<string> } {
-  const blocks: Record<string, Block> = {}
-  const context = new Set<string>()
-  const path = new Set<string>()
-  const held = (id: string): boolean => matched.has(id) || (kept?.has(id) ?? false)
-
-  // Whether `id` survives — it matched, or something beneath it did — and,
-  // on the way, the pruned block itself. Loops end the descent, as they do
-  // in the walk (docs/graph-schema-v2.md).
-  const keep = (id: string): boolean => {
-    if (blocks[id]) return true
-    const block = doc.blocks[id]
-    if (!block || path.has(id)) return false
-    const isMatch = held(id)
-    path.add(id)
-    // Beneath a match every row is kept; elsewhere only the branches that
-    // lead to one.
-    const children = isMatch
-      ? block.children.filter((childId) => keepAll(childId))
-      : block.children.filter((childId) => keep(childId))
-    path.delete(id)
-    if (!isMatch && children.length === 0) return false
-    if (!isMatch) context.add(id)
-    blocks[id] = { ...block, children }
-    return true
-  }
-
-  // Everything beneath a match, unconditionally — it is the match's content.
-  const keepAll = (id: string): boolean => {
-    if (blocks[id]) return true
-    const block = doc.blocks[id]
-    if (!block || path.has(id)) return false
-    path.add(id)
-    const children = block.children.filter((childId) => keepAll(childId))
-    path.delete(id)
-    if (!held(id)) context.add(id)
-    blocks[id] = { ...block, children }
-    return true
-  }
-
-  // A root the filter emptied still stands when the view is rooted on it:
-  // the page's title, with nothing beneath it, which is the honest way to
-  // say the filter found nothing in here.
-  const keepEmptyRoot = (id: string): boolean => {
-    if (keep(id)) return true
-    const block = doc.blocks[id]
-    if (!block) return false
-    blocks[id] = { ...block, children: [] }
-    if (!held(id)) context.add(id)
-    return true
-  }
-
-  const rootBlockIds = doc.rootBlockIds.filter((id) => (keepRoots ? keepEmptyRoot(id) : keep(id)))
-  return { doc: { ...doc, rootBlockIds, blocks }, context }
-}
-
-/**
- * `doc` with each parent's children reordered by `compare`, the nesting
- * untouched. The comparator is the one a search sorts its results by
- * (`compareBlockHits`, through `src/utils/view-narrowing.ts`), so a key
- * orders a note's rows exactly as it orders results.
- */
-function sortSiblings(doc: BlockDoc, compare: (a: string, b: string) => number): BlockDoc {
-  const order = (ids: string[]): string[] => (ids.length > 1 ? [...ids].sort(compare) : ids)
-  const blocks: Record<string, Block> = {}
-  for (const [id, block] of Object.entries(doc.blocks)) {
-    blocks[id] = { ...block, children: order(block.children) }
-  }
-  return { ...doc, rootBlockIds: order(doc.rootBlockIds), blocks }
+  const view = filteredView(graph, noteId, focusBlockId, { matched, compare: null })
+  return view ? serialize(view.doc) : null
 }
