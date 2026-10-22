@@ -12,7 +12,7 @@ import {
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { DEFAULT_EXPANDED_LEVELS, clampExpandedLevels } from "./blocks/default-collapsed"
 import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
-import { isNoteType, type GraphSnapshot, type LinkDirections } from "./data/graph"
+import { isNoteType, type GraphSnapshot } from "./data/graph"
 import { asBlockType, type BlockType } from "./blocks/types"
 import { orderedNoteIds } from "./data/note-order"
 import {
@@ -681,26 +681,25 @@ export const newBlockMarkerAtom = atomWithStorage<string>(
 )
 
 /**
+ * Settings this device may still hold from a build that had them, and no
+ * build reads now: "Show links" (`link-directions`), which pivots replaced
+ * (docs/graph-walk.md, GW-18). Forgotten once at boot.
+ */
+const RETIRED_SETTINGS = ["link-directions"]
+
+export function forgetRetiredSettings(storage: Pick<Storage, "removeItem"> | undefined) {
+  try {
+    for (const key of RETIRED_SETTINGS) storage?.removeItem(key)
+  } catch {
+    // Storage refused (a private window): nothing to forget.
+  }
+}
+
+/**
  * How many levels a note opens with beneath a heading or its top, until the
  * reader folds or unfolds something themselves (Settings → Editor; see
  * `defaultCollapsedKeys`). Stored on this device.
  */
-/**
- * Which links a note's view follows from a row (Settings → Editor, "Show
- * links" — `LinkDirections`): the tree beneath it — the default, and the
- * outline as it has always read — the parents holding it, or both, the
- * graph. Stored on this device.
- */
-const DEFAULT_LINK_DIRECTIONS: LinkDirections = "downstream"
-const storedLinkDirectionsAtom = atomWithStorage<string>("link-directions", DEFAULT_LINK_DIRECTIONS)
-export const linkDirectionsAtom = atom(
-  (get): LinkDirections => {
-    const stored = get(storedLinkDirectionsAtom)
-    return stored === "both" || stored === "upstream" ? stored : DEFAULT_LINK_DIRECTIONS
-  },
-  (_get, set, value: LinkDirections) => set(storedLinkDirectionsAtom, value),
-)
-
 const storedExpandedLevelsAtom = atomWithStorage<number>("expanded-levels", DEFAULT_EXPANDED_LEVELS)
 export const expandedLevelsAtom = atom(
   (get) => clampExpandedLevels(get(storedExpandedLevelsAtom)),

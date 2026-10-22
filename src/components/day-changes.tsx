@@ -302,7 +302,7 @@ function NoteSection({ change }: { change: NoteChange }) {
     () => changedBeneath(change.doc, change.marks),
     [change.doc, change.marks],
   )
-  const { expanded, setFold } = useFoldRule(change.id, {}, held)
+  const { expanded, setFold } = useFoldRule({ held })
   const collapsed = React.useMemo(
     () => new Set(collapsedKeysOf(change.doc, expanded)),
     [change.doc, expanded],

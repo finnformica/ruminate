@@ -137,6 +137,7 @@ export const EDITOR_COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   focusBack: "Pop the focus stack: back to the view before, with its block selected",
   leaveFocus: "Leave focus entirely",
   openBeside: "Open the block in the other pane (splits the view)",
+  cyclePivot: "Show the block's upstream, then its downstream, then neither",
 }
 
 /**

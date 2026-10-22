@@ -1,4 +1,3 @@
-import type { LinkDirections } from "../data/graph"
 import type { BlockOp } from "./history"
 import { DEFAULT_NEW_BLOCK_TYPE, isHeading, toggleType } from "./markers"
 import { defOf } from "./registry"
@@ -31,6 +30,7 @@ import {
   rootQueryOf,
   rowsBeneath,
   siblingKey,
+  type Direction,
 } from "./view"
 
 /**
@@ -126,9 +126,6 @@ export interface CommandInput {
    * a command reads the rows beneath a row as the view drew them
    * (`keysBeneath`). None by default. */
   pivots?: LinkPivots
-  /** The "Show links" setting, as the walk took it (`RowRule.directions`).
-   * Retires with the setting (GW-18). */
-  directions?: LinkDirections
   /** Where stepping back one level returns to: the previous entry in the focus
    * navigation stack — the path the user actually took, which under the graph
    * model (multi-parent blocks) is the only honest "up". Null/absent when
@@ -198,6 +195,9 @@ export interface CommandResult {
    * (nothing beneath them yet, so nothing folded), which the depth rule
    * would otherwise close the instant they gain a child. */
   reveal?: string[]
+  /** Rows a structural move took to new keys (indent, outdent), each as
+   * `[from, to]`: their folds move with them (`rekeyFolds`). */
+  moved?: [from: string, to: string][]
   /** Navigation tried to move above the first block — the caller may hand focus
    * to whatever sits above the editor (e.g. the note title). */
   exitTop?: boolean
@@ -211,6 +211,9 @@ export interface CommandResult {
   focusRoot?: { id: string | null; back?: boolean }
   /** Open this block in the pane beside the view (docs/split-view.md). */
   openBeside?: string
+  /** Set the pivot on the row's block, or clear it (null): the frame's to
+   * keep (docs/graph-walk.md, 3.4). `key` is the row it was set from. */
+  pivot?: { key: string; id: string; direction: Direction | null }
   /** Why the command did nothing, for the reader (a toast). */
   notice?: string
 }
@@ -229,7 +232,7 @@ const blockOf = ({ doc, key }: CommandInput) => doc.blocks[idOfKey(key)]
  * row's query is the pivots along its path, from the view's root query (in
  * focus, from the focused block down), so the keys are the rows drawn. */
 function keysBeneath(input: CommandInput): string[] {
-  const { doc, key, rootId, focusRootId, pivots = NO_PIVOTS, directions } = input
+  const { doc, key, rootId, focusRootId, pivots = NO_PIVOTS } = input
   const ids = pathIdsOf(key)
   const block = doc.blocks[idOfKey(key)] ?? null
   const focusAt = focusRootId ? ids.indexOf(focusRootId) : -1
@@ -241,8 +244,47 @@ function keysBeneath(input: CommandInput): string[] {
   // root for a root row, nothing for the focused block's own row.
   const from =
     focusAt === ids.length - 1 ? null : ids.length > 1 ? ids[ids.length - 2] : (rootId ?? null)
-  const rows = rowsBeneath(doc, block, from, directionOfKey(key), query, directions, rootId)
+  const rows = rowsBeneath(doc, block, from, directionOfKey(key), query, rootId)
   return rows.map((row) => keyOf(key, row.id, row.direction))
+}
+
+/** A row's pivot, as `p` and the block menu see it (docs/graph-walk.md,
+ * 3.10): the row's own pivot, and the direction it walks without one — the
+ * query of the row above (the view's root query at the top). */
+export interface RowPivot {
+  inherited: Direction
+  pivot: Direction | null
+}
+
+/** The row's pivot, or null where a row offers none: no row, or a looped
+ * row, which has nothing beneath it (3.7). */
+export function rowPivotOf(input: CommandInput): RowPivot | null {
+  const { key, rootId, focusRootId, pivots = NO_PIVOTS } = input
+  if (key === "") return null
+  const ids = pathIdsOf(key)
+  const id = ids[ids.length - 1]
+  if (ids.slice(0, -1).includes(id) || id === rootId) return null
+  const focusAt = focusRootId ? ids.indexOf(focusRootId) : -1
+  const inherited =
+    focusAt >= 0
+      ? queryOfPath(ids.slice(focusAt, -1), pivots)
+      : queryOfPath(ids.slice(0, -1), pivots, rootQueryOf(pivots, rootId))
+  return { inherited, pivot: pivots.get(id) ?? null }
+}
+
+/** The order `p` cycles a row's pivot in: up, then down, then none. */
+const PIVOT_CYCLE: (Direction | null)[] = [null, "up", "down"]
+
+/** The pivot after the row's own in the cycle. A pivot equal to the
+ * direction the row already walks changes nothing, so it is passed over:
+ * on a row walking down, `p` toggles upstream; walking up, downstream. */
+export function nextPivot({ inherited, pivot }: RowPivot): Direction | null {
+  const at = PIVOT_CYCLE.indexOf(pivot)
+  for (let step = 1; step <= PIVOT_CYCLE.length; step += 1) {
+    const next = PIVOT_CYCLE[(at + step) % PIVOT_CYCLE.length]
+    if (next !== inherited) return next
+  }
+  return null
 }
 
 /** Does `parentKey` name the focused block — i.e. is this row a direct child
@@ -693,6 +735,7 @@ export type CommandName =
   | "focusBack"
   | "leaveFocus"
   | "openBeside"
+  | "cyclePivot"
 
 export const COMMANDS: Record<CommandName, Command> = {
   /** Select → edit the highlighted row. */
@@ -740,6 +783,7 @@ export const COMMANDS: Record<CommandName, Command> = {
       doc: next,
       op: STRUCTURAL,
       reveal,
+      moved,
       focus: keepSelection(input, moved),
     }
   },
@@ -767,7 +811,13 @@ export const COMMANDS: Record<CommandName, Command> = {
       next = result.doc
     }
     if (next === doc) return { handled: true, focus: keepSelection(input) }
-    return { handled: true, doc: next, op: STRUCTURAL, focus: keepSelection(input, moved) }
+    return {
+      handled: true,
+      doc: next,
+      op: STRUCTURAL,
+      moved,
+      focus: keepSelection(input, moved),
+    }
   },
 
   moveSelectionUp: moveSelection("up"),
@@ -1192,6 +1242,16 @@ export const COMMANDS: Record<CommandName, Command> = {
   /** Open the row's block in the pane beside this one. */
   openBeside: (input) =>
     input.key === "" ? IGNORED : { handled: true, openBeside: idOfKey(input.key) },
+
+  /** Cycle the row's pivot (`nextPivot`). Not on a looped row. */
+  cyclePivot: (input) => {
+    const at = rowPivotOf(input)
+    if (!at) return IGNORED
+    return {
+      handled: true,
+      pivot: { key: input.key, id: idOfKey(input.key), direction: nextPivot(at) },
+    }
+  },
 }
 
 /** Run a named command. Unknown names are a no-op (defensive). */
@@ -1221,6 +1281,7 @@ export const BROWSE_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>([
   "focusBack",
   "leaveFocus",
   "openBeside",
+  "cyclePivot",
 ])
 
 export function runCommand(name: CommandName, input: CommandInput): CommandResult {

@@ -2,6 +2,7 @@ import { ContextMenu } from "@base-ui/react/context-menu"
 import { Menu } from "@base-ui/react/menu"
 import React from "react"
 import { FIGURE_ALIGNS, type FigureAlign } from "../../blocks/figure"
+import type { RowPivot } from "../../blocks/commands"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
 import type { BlockActions } from "./block-actions"
@@ -66,6 +67,9 @@ export interface BlockMenuTarget {
   /** The web links in the row's text (docs/links.md), for "Edit link" and
    * "Turn into link block"; a link block's own address. */
   links?: { href: string; title: string }[]
+  /** The row's pivot (`rowPivotOf`); absent on a row that offers none (a
+   * looped row). */
+  pivot?: RowPivot
 }
 
 /** The Align submenu's items, in the order the figure's toolbar has them. */
@@ -255,7 +259,19 @@ function menuEntries(target: BlockMenuTarget, actions: BlockActions): MenuEntry[
   // — another block beneath this one (downstream), or this one beneath
   // another (upstream), picked in the palette. One row at a time: a
   // selection of several has no one block to be the source or the target.
+  // First, the pivot (docs/graph-walk.md, 3.10): show what holds the block
+  // on a row that shows what it holds, and the other way round. Showing
+  // the way the row would walk anyway clears the pivot.
   section()
+  const pivot = target.pivot
+  if (keys.length === 1 && actions.pivot && pivot) {
+    const next = (pivot.pivot ?? pivot.inherited) === "down" ? "up" : "down"
+    item({
+      label: next === "up" ? "Show upstream" : "Show downstream",
+      shortcut: ["P"],
+      onSelect: () => actions.pivot?.(keys, next === pivot.inherited ? null : next),
+    })
+  }
   if (keys.length === 1 && actions.linkDownstream)
     item({ label: "Add downstream link", onSelect: () => actions.linkDownstream?.(keys) })
   if (keys.length === 1 && actions.linkUpstream)

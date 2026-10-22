@@ -4,6 +4,7 @@ import {
   closePane,
   currentFrame,
   formatFrame,
+  goAbove,
   goTo,
   goVia,
   layoutFromSearch,
@@ -12,9 +13,13 @@ import {
   withCurrent,
   openBeside,
   paneOf,
+  linkPivotsOf,
   parseFrame,
+  pivotRoot,
   popFrame,
   popTo,
+  withPane,
+  withPivot,
   type Pane,
   type PaneLayout,
 } from "./panes"
@@ -114,6 +119,37 @@ describe("the focus stack", () => {
   })
 })
 
+describe("a crumb above the stack's bottom frame (Finn's bug: it pushed a cycle)", () => {
+  it("replaces the stack with the view, as Shift+F on a lone focus does", () => {
+    // B › C, opened on a block: the note's crumb leads the trail.
+    const pane = push(paneOf(A, "blk_b"), "blk_c", "blk_b/blk_c")
+    const move = goAbove(pane, { noteId: A, root: null })!
+    expect(move.pane).toEqual(paneOf(A))
+    // A new view, so the page opens the folds down to the block left.
+    expect(move.restored).toBe(false)
+    // An ancestor of the bottom frame's root: the same.
+    expect(goAbove(pane, { noteId: A, root: "blk_a" })!.pane).toEqual(paneOf(A, "blk_a"))
+  })
+
+  it("acts on the second pane of a split alone", () => {
+    const first = push(paneOf(A), "blk_x", "blk_x")
+    const second = push(paneOf(B, "blk_b"), "blk_c", "blk_b/blk_c", B)
+    const layout: PaneLayout = { panes: [first, second], active: 1 }
+    const next = withPane(layout, 1, goAbove(second, { noteId: B, root: null })!.pane)
+    expect(next.panes).toEqual([first, paneOf(B)])
+    // Through the URL: pane1 holds the one frame, the first pane is as it was.
+    const { noteId, search } = layoutToSearch(next)
+    expect(search.pane1).toBe(B)
+    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(next)
+  })
+
+  it("pops to the view when it is on the stack, and does nothing on the view on screen", () => {
+    const pane = push(push(paneOf(A, "blk_b"), null, "blk_b"), "blk_c", "blk_c")
+    expect(goAbove(pane, { noteId: A, root: null })).toEqual(popTo(pane, 1))
+    expect(goAbove(pane, { noteId: A, root: "blk_c" })).toBeNull()
+  })
+})
+
 describe("a frame's state (Finn's decisions, docs/split-view.md)", () => {
   const narrowed = withCurrent(paneOf(A), {
     filter: "type:todo",
@@ -174,9 +210,88 @@ describe("a frame's state (Finn's decisions, docs/split-view.md)", () => {
     expect(JSON.parse(JSON.stringify(pane))).toEqual(pane)
   })
 
-  it("keeps the bottom frame's folds off the URL: they are the note's own", () => {
-    const layout = layoutFromSearch(A, { folds: "-x" })
-    expect(currentFrame(layout.panes[0]).folds).toBeUndefined()
+  it("keeps the bottom frame's folds in the URL too (docs/graph-walk.md, section 5)", () => {
+    const pane = withCurrent(paneOf(A), {
+      folds: { open: [], closed: ["blk_x"] },
+      narrowFolds: { open: ["blk_y"], closed: [] },
+      depth: 3,
+    })
+    const layout: PaneLayout = { panes: [pane, pane], active: 0 }
+    const { noteId, search } = layoutToSearch(layout)
+    expect(search).toMatchObject({ folds: "-x", nfolds: "+y", depth: 3 })
+    expect(search.pane1).toBe(`${A};z=-x;n=+y;d=3`)
+    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(layout)
+  })
+
+  it("drops a malformed depth", () => {
+    for (const depth of ["-1", "x", "1.5", ""]) {
+      expect(currentFrame(layoutFromSearch(A, { depth }).panes[0]).depth).toBeUndefined()
+    }
+    expect(parseFrame(`${A};d=two`)).toEqual({ noteId: A, root: null, selected: null })
+  })
+})
+
+describe("a frame's pivots (docs/graph-walk.md, 3.4)", () => {
+  const pivoted = withCurrent(paneOf(A), { pivots: { blk_x: "up", "2024-01-02": "down" } })
+
+  it("round-trips the pivots of every frame, without `blk_`", () => {
+    const pane = withCurrent(push(pivoted, "blk_b1", "blk_b1"), { pivots: { blk_b1: "up" } })
+    const layout: PaneLayout = { panes: [pane, pivoted], active: 0 }
+    const { noteId, search } = layoutToSearch(layout)
+    expect(search.pivots).toBe("^b1")
+    expect(search.stack).toBe(`${A}::b1;p=^x.v~2024-01-02`)
+    expect(search.pane1).toBe(`${A};p=^x.v~2024-01-02`)
+    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(layout)
+  })
+
+  it("drops a malformed pivot and keeps the rest", () => {
+    const layout = layoutFromSearch(A, { pivots: "^x.?y.v.^" })
+    expect(currentFrame(layout.panes[0]).pivots).toEqual({ blk_x: "up" })
+    expect(currentFrame(layoutFromSearch(A, { pivots: "?" }).panes[0]).pivots).toBeUndefined()
+  })
+
+  it("starts a pushed frame with none, and a pop restores them", () => {
+    const pushed = push(pivoted, "blk_b1", "blk_b1")
+    expect(currentFrame(pushed).pivots).toBeUndefined()
+    expect(currentFrame(popFrame(pushed)!.pane).pivots).toEqual(currentFrame(pivoted).pivots)
+  })
+
+  it("keeps each pane's pivots apart", () => {
+    const two = openBeside({ panes: [pivoted], active: 0 }, 0, { noteId: A, root: null }).layout
+    expect(currentFrame(two.panes[1]).pivots).toBeUndefined()
+    expect(currentFrame(two.panes[0]).pivots).toEqual({ blk_x: "up", "2024-01-02": "down" })
+  })
+
+  it("sets and clears one pivot, and is absent once none is left", () => {
+    expect(withPivot(undefined, "blk_x", "up")).toEqual({ blk_x: "up" })
+    expect(withPivot({ blk_x: "up" }, "blk_x", "down")).toEqual({ blk_x: "down" })
+    expect(withPivot({ blk_x: "up" }, "blk_x", null)).toBeUndefined()
+    expect(linkPivotsOf({ blk_x: "up" })).toEqual(new Map([["blk_x", "up"]]))
+    expect(linkPivotsOf(undefined).size).toBe(0)
+  })
+
+  it("pushes a frame for an up pivot on the note root, and Back returns to the note", () => {
+    const move = pivotRoot(paneOf(A), "up", P("blk_b1"))!
+    expect(move.pane.frames).toEqual([
+      { noteId: A, root: null, selected: ["blk_b1"] },
+      { noteId: A, root: null, selected: null, pivots: { [A]: "up" } },
+    ])
+    const back = popFrame(move.pane)!
+    expect(back.pane).toEqual(paneOf(A))
+    expect(back.landing).toEqual(["blk_b1"])
+    // Clearing the pivot is the same pop.
+    expect(pivotRoot(move.pane, null, null)).toEqual(back)
+    // Nothing to change: no move.
+    expect(pivotRoot(move.pane, "up", null)).toBeNull()
+    expect(pivotRoot(paneOf(A), null, null)).toBeNull()
+  })
+
+  it("reads a focused frame's root pivot by the focused block", () => {
+    const move = pivotRoot(paneOf(A, "blk_b1"), "up", null)!
+    expect(currentFrame(move.pane).pivots).toEqual({ blk_b1: "up" })
+    // From a link, with no frame beneath: clearing drops the pivot in place.
+    const linked = { frames: [currentFrame(move.pane)] }
+    expect(pivotRoot(linked, null, null)!.pane).toEqual(paneOf(A, "blk_b1"))
   })
 })
 

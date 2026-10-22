@@ -7,7 +7,7 @@ import type { ExpandedRule } from "../blocks/view"
 import { titlesFocus } from "../blocks/markers"
 import { basketDoc, basketToOps } from "../data/basket"
 import { filteredView, filterReach, type FilteredView } from "../data/filter-view"
-import { isNoteType, type LinkDirections } from "../data/graph"
+import { isNoteType } from "../data/graph"
 import { notePropsOps } from "../data/note-meta"
 import { docToOps } from "../data/ops"
 import { useApplyOps } from "../data/store"
@@ -57,7 +57,6 @@ export function useNoteDoc({
   defaultDoc,
   focusBlockId = null,
   expanded,
-  directions = "downstream",
   pivots = NO_PIVOTS,
   filter = "",
   sort = "",
@@ -73,8 +72,6 @@ export function useNoteDoc({
   /** The fold rule the view's rows are drawn by — the view's own
    * (`useFoldRule`, src/data/view-state.ts); absent = nothing folded. */
   expanded?: ExpandedRule
-  /** Which links the walk follows (Settings → Editor, "Show links"). */
-  directions?: LinkDirections
   /** The frame's link pivots (src/blocks/query.ts): the walk reads them, and
    * a filter or a sort keeps their up regions whole. None by default. */
   pivots?: LinkPivots
@@ -128,10 +125,9 @@ export function useNoteDoc({
       expanded: viewRule,
       keep,
       pivots,
-      directions,
       reach,
     })
-  }, [noteId, focusBlockId, snapshot, expanded, directions, pivots, narrowing, keep, reach])
+  }, [noteId, focusBlockId, snapshot, expanded, pivots, narrowing, keep, reach])
   // Whether the doc is rooted at the focused block (the note node is then not
   // this doc's to write).
   const rootId = focusBlockId && view?.doc.rootBlockIds[0] === focusBlockId ? focusBlockId : null

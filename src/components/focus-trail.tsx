@@ -32,7 +32,10 @@ interface Crumb {
  *   click on one pops back to the earlier frame and focuses the block from
  *   there.
  * - Where the stack starts on a block, the note and the path down to the
- *   block lead the trail, so the whole note is always one click away.
+ *   block lead the trail, so the whole note is always one click away. No
+ *   frame is there to pop to: a click on one replaces the stack with that
+ *   view (`goAbove`), as Shift+F does on a lone focus, and never pushes it
+ *   above the frames it leads to.
  *
  * The labels are read from the live graph, so a crumb renamed in the other
  * pane reads the new name at once.
@@ -41,6 +44,7 @@ export function FocusTrail({
   frames,
   onPopTo,
   onGoVia,
+  onGoAbove,
   className,
 }: {
   frames: FocusFrame[]
@@ -49,6 +53,8 @@ export function FocusTrail({
   /** Pop back to the frame at this index, then go to the view from it
    * (`goVia`). */
   onGoVia: (index: number, target: ViewTarget) => void
+  /** Go to a view above the stack's first frame (`goAbove`). */
+  onGoAbove: (target: ViewTarget) => void
   className?: string
 }) {
   const graph = useAtomValue(graphSnapshotAtom)
@@ -72,14 +78,16 @@ export function FocusTrail({
 
   const last = frames.length - 1
   const crumbs: Crumb[] = []
-  const pathCrumbs = (at: number, from: FocusFrame, to: FocusFrame) => {
+  // `at`: the frame the path leaves from, or null above the first frame.
+  const pathCrumbs = (at: number | null, from: FocusFrame, to: FocusFrame) => {
     if (to.root === null || to.noteId !== from.noteId) return
     for (const id of between(from, to.root)) {
+      const target = { noteId: from.noteId, root: id }
       crumbs.push({
-        key: `${at}>${id}`,
+        key: `${at ?? "above"}>${id}`,
         label: textOf(id) || "…",
         kind: "path",
-        onClick: () => onGoVia(at, { noteId: from.noteId, root: id }),
+        onClick: () => (at === null ? onGoAbove(target) : onGoVia(at, target)),
       })
     }
   }
@@ -90,9 +98,9 @@ export function FocusTrail({
       key: "note",
       label: textOf(first.noteId) || "Note",
       kind: "path",
-      onClick: () => onGoVia(0, { noteId: first.noteId, root: null }),
+      onClick: () => onGoAbove({ noteId: first.noteId, root: null }),
     })
-    pathCrumbs(0, note, first)
+    pathCrumbs(null, note, first)
   }
   frames.forEach((frame, index) => {
     if (index > 0) pathCrumbs(index - 1, frames[index - 1], frame)

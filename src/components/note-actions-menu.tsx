@@ -88,6 +88,12 @@ interface EditorActions {
    * by). Filtered, **Copy markdown** takes only the rows the view shows.
    */
   filter?: string
+  /**
+   * The pivot on the view's root (docs/graph-walk.md, Q6): whether the view
+   * shows what holds the root (upstream) in place of its blocks, and the
+   * way to switch. Absent where the view keeps no frame.
+   */
+  rootPivot?: { upstream: boolean; onToggle: () => void }
 }
 
 /**
@@ -406,6 +412,17 @@ export function NoteActionsMenu({
                 Full
               </DropdownMenu.Item>
             </DropdownMenu.Group>
+            <DropdownMenu.Separator />
+          </>
+        ) : null}
+        {editor?.rootPivot ? (
+          <>
+            <DropdownMenu.Item
+              icon={editor.rootPivot.upstream ? <ArrowDownIcon16 /> : <ArrowUpIcon16 />}
+              onClick={editor.rootPivot.onToggle}
+            >
+              {editor.rootPivot.upstream ? "Show downstream" : "Show upstream"}
+            </DropdownMenu.Item>
             <DropdownMenu.Separator />
           </>
         ) : null}

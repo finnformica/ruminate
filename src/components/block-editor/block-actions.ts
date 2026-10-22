@@ -1,6 +1,7 @@
 import type { Moves } from "../../blocks/commands"
 import type { FigureAlign } from "../../blocks/figure"
 import type { BlockType } from "../../blocks/types"
+import type { Direction } from "../../blocks/view"
 
 /**
  * The actions on blocks — **one set**, built once by the editor and handed
@@ -75,6 +76,10 @@ export interface BlockActions {
    * the palette — the way round a paste cannot reach from here: "Add
    * upstream link". The first of `keys`. Absent as `linkDownstream` is. */
   linkUpstream?: (keys: string[]) => void
+  /** Set the pivot on the first row's block, or clear it (null): its rows
+   * show what holds it (up) or what it holds (down) — docs/graph-walk.md,
+   * 3.10. Absent where the view keeps no frame to hold a pivot. */
+  pivot?: (keys: string[], direction: Direction | null) => void
   /** Open a link's card (`link-hover-card.tsx`) outright — a touch screen
    * has nothing to hover with. */
   editLink?: (keys: string[], href: string) => void

@@ -5,6 +5,7 @@ import { emptyBlock } from "../../blocks/ops"
 import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
 import type { BlockDoc } from "../../blocks/types"
+import type { Direction } from "../../blocks/view"
 import { BlockEditor } from "./block-editor"
 
 /** Ensure a parsed doc always has at least one block to edit. */
@@ -24,6 +25,7 @@ function Harness({
   startEditing,
   focusRootId,
   deferCollapse,
+  pivots: initialPivots,
 }: {
   initial: string
   /** A doc built by hand, for what markdown cannot say (an image's layout). */
@@ -36,7 +38,13 @@ function Harness({
    * later: the fold's motion must wait for the change, not run ahead of it
    * (e2e/fold-motion.e2e.mjs). */
   deferCollapse?: number
+  /** Start with these link pivots (docs/graph-walk.md, 3): the harness holds
+   * them as a frame would, so `p` and the block menu change them. */
+  pivots?: [id: string, direction: Direction][]
 }) {
+  const [pivots, setPivots] = useState<ReadonlyMap<string, Direction> | undefined>(() =>
+    initialPivots ? new Map(initialPivots) : undefined,
+  )
   const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? withStarterBlock(parse(initial)))
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const deferred = deferCollapse !== undefined
@@ -48,6 +56,18 @@ function Harness({
         startEditing={startEditing}
         focusRootId={focusRootId}
         noteTitle="My note"
+        pivots={pivots}
+        onPivot={
+          initialPivots
+            ? (_key, id, direction) =>
+                setPivots((prev) => {
+                  const next = new Map(prev)
+                  if (direction === null) next.delete(id)
+                  else next.set(id, direction)
+                  return next
+                })
+            : undefined
+        }
         collapsed={deferred ? collapsed : undefined}
         onToggleCollapse={
           deferred
@@ -293,6 +313,55 @@ export const Board: Story = {
         blk_t2: { id: "blk_t2", type: "text", text: "", children: [] },
       },
     },
+  },
+}
+
+/**
+ * Pivots (docs/graph-walk.md, 3.10): "Ship the beta on Friday" is held by
+ * the meeting, by the project's decisions and by the week's review. With an
+ * up pivot on it, its row carries the arrow beside its chevron and shows
+ * what holds it — less the meeting it came from — in place of what it
+ * holds. `p` on a row, or the block menu's Show upstream and Show
+ * downstream, changes the pivot. The visual-regression story for the marker.
+ */
+export const Pivots: Story = {
+  args: {
+    initial: "",
+    pivots: [["blk_dec", "up"]],
+    initialDoc: {
+      props: null,
+      rootBlockIds: ["blk_meet", "blk_next"],
+      blocks: {
+        blk_meet: {
+          id: "blk_meet",
+          type: "ul",
+          text: "Meeting with the design team",
+          children: ["blk_dec"],
+        },
+        blk_dec: {
+          id: "blk_dec",
+          type: "ul",
+          text: "Ship the beta on Friday",
+          children: ["blk_why"],
+          upstream: ["blk_meet", "blk_proj", "blk_week"],
+        },
+        blk_why: { id: "blk_why", type: "ul", text: "Feedback from three users", children: [] },
+        blk_proj: {
+          id: "blk_proj",
+          type: "ul",
+          text: "Project X decisions",
+          children: ["blk_dec"],
+        },
+        blk_week: { id: "blk_week", type: "ul", text: "Week 43 review", children: ["blk_dec"] },
+        blk_next: { id: "blk_next", type: "ul", text: "Next steps", children: [] },
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole("img", { name: "Upstream" })).toBeInTheDocument()
+    await expect(canvas.getByText("Project X decisions")).toBeInTheDocument()
+    await expect(canvas.queryByText("Feedback from three users")).toBeNull()
   },
 }
 

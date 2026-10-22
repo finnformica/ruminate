@@ -1,6 +1,7 @@
 # The graph walk: queries, pivots, panes and Views
 
-Status: **Decided 2026-10-20, not built.** Requested by Finn, who prefers
+Status: **Decided 2026-10-20, built in part** (see "Built so far" at the
+end of section 9). Requested by Finn, who prefers
 the walk of [Pensive](https://github.com/aatack/Pensive) to the walk
 ruminate had. This document is the decided model: what a pane, a frame and
 a View are, how the walk follows pivots, sections-only and the filter, where
@@ -122,8 +123,8 @@ The words used below:
    - From key to path: `pathIdsOf(key)` (`src/blocks/view.ts`) already
      strips the marks. A focus frame drops the first id.
    - From path to key: walk the path from the root. The query of each row
-     (the frame's pivots) gives the direction of the next step. Once "Show
-     links" goes (GW-18), each row walks one direction only, so a path
+     (the frame's pivots) gives the direction of the next step. "Show links"
+     is gone (GW-18), so each row walks one direction only, and a path
      names one row at most.
    - Folds use the same identity: a fold is a path (section 6).
    - When a path no longer names a row (the block moved), select the
@@ -306,7 +307,8 @@ Two rules join them:
   them.
 - **The depth count starts again at a pivot.** The rows beneath a pivot row
   are level 1, as a focused block's children are. So a pivot opens n levels
-  of holders, whatever the depth of the row. (Open question 5.)
+  of holders, whatever the depth of the row. (Q5, decided 2026-10-22: a pivot opens one level of holders, and the
+  depth count starts again from the pivot as the default expand.)
 
 A board's row still starts closed (`foldRule`).
 
@@ -397,12 +399,19 @@ prune keeps a pivoted subtree whole (Q7).
 
 ### 3.10 What the reader sees
 
-- The block menu gets two entries: **Show what holds this** (up) and, on a
-  row in an up region, **Show what this holds** (down). A row with a pivot
-  gets **Clear pivot** instead of its current entry. The final copy is for
-  Finn (docs/settings.md, Copy).
-- One shortcut cycles the selected row's pivot: up, then down, then none.
-  It goes in `src/shortcuts/registry.ts` and `src/blocks/keymap.ts`.
+- The block menu gets one entry (Q11, decided 2026-10-22): **Show upstream**
+  on a row that walks down, and **Show downstream** on a row that walks up
+  (in an up region, or with an up pivot of its own). The direction the row
+  walks without a pivot of its own clears the pivot, so a pivot row offers
+  the way back. A looped row offers none.
+- `p` cycles the selected row's pivot (`cyclePivot`, Q11): up, then down,
+  then none, passing over a pivot equal to the direction the row walks
+  anyway. So on a row walking down, `p` shows upstream and then clears it.
+  It is in `src/shortcuts/registry.ts` and `src/blocks/keymap.ts`.
+- A pivot on the frame's own root (the note, from the note's menu, or the
+  focused block as a row) pushes a frame (Q6, `pivotRoot`): an up pivot on
+  the note replaces its blocks with what holds the note, and Back returns
+  to the note.
 - A pivoted row shows a small arrow beside its chevron: up for "held by",
   down for "holds". The rows beneath look like rows.
 - The touch screen offers the same entries in the long-press sheet.
@@ -755,25 +764,25 @@ View has no hint.
 
 Each question keeps the number it had in the first draft, so the
 references in the text still hold. Questions 3, 4, 8, 9, 10 and 12 were
-decided on 2026-10-20 (section 2) and are not listed.
+decided on 2026-10-20 (section 2) and are not listed. Finn decided Q1, Q2,
+Q5, Q6 and Q11 on 2026-10-22; they are kept here with the answer.
 
-- **Q1. Pivot key.** This design keys a pivot by block id, as Pensive does, so
-  a pivot applies to every row of the block in the frame. Do you want it
-  per row (occurrence key), like a fold?
-- **Q2. "Both".** Pensive has no query that shows children and holders
-  together. Do you use "Both" today? If yes, do you want a third query,
-  or can it go?
-- **Q5. Depth inside a pivot.** This design starts the depth count again at a
-  pivot, so a pivot shows n levels of holders. Do you want all holders
-  open (as in Pensive), or one level only?
-- **Q6. An up pivot on the note root.** It replaces the note's blocks with what
-  holds the note, as in Pensive. Is that what you want, or must the note's
-  blocks stay?
+- **Q1. Pivot key.** Decided 2026-10-22: by block id, as Pensive keys it. A
+  pivot applies to every row of the block in the frame.
+- **Q2. "Both".** Decided 2026-10-22: "Both" goes with "Show links" (GW-18).
+  There is no third query.
+- **Q5. Depth inside a pivot.** Decided 2026-10-22: a pivot opens one level
+  of holders, and the depth count starts again from the pivot as the
+  default expand (`levelBeneath`).
+- **Q6. An up pivot on the note root.** Decided 2026-10-22: it replaces the
+  note's blocks with what holds the note, as Pensive does. Back returns to
+  the note (`pivotRoot` pushes a frame).
 - **Q7. Filter and pivots.** This design keeps an up region whole under a
   filter and under sections-only, as Pensive keeps a pivoted subtree
   whole. Do you want the filter to prune holders too?
-- **Q11. Labels and shortcut.** Which words and which key do you want for the
-  pivot entries and the cycle shortcut?
+- **Q11. Labels and shortcut.** Decided 2026-10-22: the labels use the words
+  "upstream" and "downstream" (**Show upstream**, **Show downstream**), and
+  `p` cycles the pivot of the selected block.
 - **Q13. A section's hidden body.** Do you want a count of hidden rows on a
   section in sections-only, so you can see where the detail is?
 - **Q14. The filter's language.** The design keeps the query language
@@ -892,7 +901,8 @@ on `main` first. A PR marked **blocked** waits for Finn.
     - Depends on: GW-10.
 12. **GW-12 Set a pivot.**
     - Scope: the block menu entries, the row marker and the long-press
-      entries (3.10). Setting a pivot records an open fold. No key yet.
+      entries (3.10). Setting a pivot records an open fold. The `p` key
+      (Q11 decided, so it came with this item, not GW-22).
     - Files: the block menu, `block-item.tsx`, the long-press sheet,
       `src/blocks/commands.ts`, a Storybook story. Add a changelog file.
     - Tests: a `commands.test.ts` case for the pivot command; the story
@@ -980,9 +990,9 @@ on `main` first. A PR marked **blocked** waits for Finn.
     - Tests: a three-frame View shows its hint; a one-frame View shows
       none.
     - Depends on: GW-20.
-22. **GW-22 Keys.** **Blocked** on Q11 and Q17.
-    - Scope: bind `q` (sections-only), `/` (the filter field) and the pivot
-      cycle; add them to docs/keyboard-shortcuts.md.
+22. **GW-22 Keys.** **Blocked** on Q17.
+    - Scope: bind `q` (sections-only) and `/` (the filter field); add them
+      to docs/keyboard-shortcuts.md. The pivot cycle (`p`) came with GW-12.
     - Files: `src/blocks/keymap.ts`, `src/shortcuts/registry.ts`,
       docs/keyboard-shortcuts.md, tests.
     - Tests: `keymap.test.ts` and `registry.test.ts` resolve each key.
@@ -1002,12 +1012,43 @@ and GW-20 to GW-22 after it.
 | GW-5      | #282 |
 | GW-6      | #277 |
 | GW-7      | #283 |
+| GW-8      | G    |
+| GW-9      | G    |
+| GW-10     | G    |
+| GW-11     | G    |
+| GW-12     | G    |
+| GW-18     | G    |
 | GW-19     | #286 |
 
 The walk PRs are stacked, and merge in this order: GW-1, GW-2, GW-3, GW-4,
 GW-6, GW-7. GW-5 is stacked on GW-4. GW-19 is stacked on the sync stack,
-after the ES-5 to ES-7 rework (docs/event-only-sync.md, "Built so far"). GW-8 and the PRs after
-it wait for SV.
+after the ES-5 to ES-7 rework (docs/event-only-sync.md, "Built so far").
+
+**G** is one PR, "G · Pivots: set a pivot per frame, retire Show links"
+(branch `orca/g-pivots-per-frame-7f95a1`), on `main` after SV (#269) and
+the walk engine (#283). Some of GW-8 to GW-11 was already on `main` from
+SV; G built what was missing:
+
+- **GW-8.** `FocusFrame` gained `pivots` (a record keyed by block id, so a
+  frame stays plain data), `narrowFolds` and `depth`. `sections` waits for
+  GW-13, which reads it. The URL codec is the plain one (`;p=`, `;n=`,
+  `;d=` in a frame; `pivots`, `nfolds`, `depth` for the first pane).
+- **GW-9.** The selection path and `pathOfKey`/`keyOfPath` were on `main`
+  (in `src/data/panes.ts`, not beside `pathIdsOf`). G added the fallbacks
+  (`landingRow`): a moved block lands on its first row, a gone block on
+  nothing. The frame on screen still records its selection only when the
+  reader leaves it, so arrow keys do not write the URL.
+- **GW-10.** Every frame keeps its folds in the URL, the bottom frame too.
+  The localStorage store and its cap are gone; the seed reads
+  `collapse:<noteId>` once and removes it. There was no Settings reset for
+  folds to remove. The calendar and the basket keep their folds while they
+  are mounted.
+- **GW-11.** `rekeyFolds` moves folds on indent and outdent. The editor has
+  no row drag, and a cut and paste makes new rows, so neither calls it.
+- **GW-18.** `linkDirectionsAtom`, `LinkDirections`, every `directions`
+  option and the Settings → Editor "Show links" entry are gone. Boot
+  removes the stored `link-directions` value (`forgetRetiredSettings`).
+  With no pivots, every row walks down.
 
 ## Appendix A. Ruminate's walk before this design
 

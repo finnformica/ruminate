@@ -178,8 +178,18 @@ marker key on a highlighted block — empty or not — leaves it highlighted.
 | Focus on the block (see Focus below)     | <kbd>F</kbd> (or <kbd>⌘</kbd> <kbd>.</kbd>)                                |
 | Pop the focus stack                      | <kbd>⇧</kbd> <kbd>F</kbd>                                                  |
 | Open the block in the other pane         | <kbd>o</kbd> (see Split view below)                                        |
+| Show upstream / downstream (pivot)       | <kbd>p</kbd> (see Pivots below)                                            |
 | Leave focus entirely                     | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>                                     |
 | Focus the note title (from first block)  | <kbd>↑</kbd>                                                               |
+
+**Pivots** (docs/graph-walk.md, section 3): <kbd>p</kbd> sets a pivot on the
+selected block, which changes the rows beneath each of its rows in the frame.
+On a block whose rows show what it holds, <kbd>p</kbd> shows what holds it
+(upstream); pressed again, it clears the pivot. Inside an upstream region it
+shows what the block holds (downstream), then clears it. A pivot on the
+focused block, or on the note from its menu, opens a new frame, so Back
+returns to the view as it was. The block menu offers the same as **Show
+upstream** and **Show downstream**.
 
 **Tree navigation** maps the tree spatially onto <kbd>w</kbd> <kbd>a</kbd>
 <kbd>s</kbd> <kbd>d</kbd>: <kbd>a</kbd> / <kbd>d</kbd> change depth (parent /

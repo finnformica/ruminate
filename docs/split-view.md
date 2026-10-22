@@ -62,17 +62,25 @@ interface PaneLayout {
 - **One frame left.** With one frame and a block in focus, <kbd>⇧</kbd>
   <kbd>F</kbd> leaves the focus for the whole note, as it did before the
   stack. On the whole note with nothing beneath, it does nothing.
-- **Folds.** Each frame keeps its own folds, so a pop restores them.
-  - The bottom frame (from a View, or a note opened) keeps the note's folds
-    on the device, as a note always has (`src/data/view-state.ts`).
-  - Every pushed frame holds its folds itself, in the URL, as the rows the
-    reader opened and closed over the standing rule (`FrameFolds`). It
-    starts with none. `useFoldRule` reads and writes them through its
-    `owned` argument, and a toggle replaces the URL entry.
+- **Folds.** Each frame keeps its own folds, so a pop restores them
+  (docs/graph-walk.md, section 5, GW-10).
+  - Every frame holds its folds itself, in the URL, as the rows the reader
+    opened and closed over the standing rule (`FrameFolds`), with the depth
+    they were made at (`depth`). A frame narrowed by a filter or a sort
+    keeps a second set (`narrowFolds`), cleared when the narrowing changes.
+    A pushed frame starts with none. `useFoldRule` reads and writes them
+    through its `owned` argument, and a toggle replaces the URL entry.
+  - The bottom frame of a note opened with no folds takes the folds the
+    note once kept on the device (`collapse:<noteId>`) once, and the stored
+    entry goes (`takeStoredFolds`).
   - A move to a new, wider view (<kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>
     from a deep link) opens the folds down to the block just left, so the
-    reader lands on it (`settleFolds`): in the new frame's folds, or in the
-    note's stored folds (`openFolds`) for the bottom frame.
+    reader lands on it (`settleFolds`), in the new frame's folds.
+  - An indent or an outdent moves a row's folds with it (`rekeyFolds`).
+- **Pivots.** Each frame keeps its own link pivots (`pivots`, keyed by
+  block id; docs/graph-walk.md, section 3). A pushed frame starts with none,
+  and a pop restores them. An up pivot on the frame's own root pushes a
+  frame (`pivotRoot`), so Back returns to the view as it was.
 - **Across notes.** A frame names its note, so one stack can hold views from
   more than one note. While the page is split, a note opened from the sidebar,
   the palette or the Views page opens in the active pane, as a push
@@ -81,9 +89,7 @@ interface PaneLayout {
   next pane's stack when there is no room for one. `closePane` removes a pane
   (never the last one). `activate` moves the keyboard. `MAX_PANES` is 2.
 
-Each pane keeps its own frames, so its own folds and selection. Two panes
-whose bottom frames show the same note write to the note's one stored entry,
-so after a reload both start from the folds written last.
+Each pane keeps its own frames, so its own folds, pivots and selection.
 
 ### Selection
 
@@ -115,8 +121,13 @@ stack and the graph path:
   colour. This is the path from the frame root to the focused block, as the
   breadcrumb showed it before. A click on one goes by way of the earlier
   frame (`goVia`): it pops to that frame and focuses the block from there.
-- **A stack that starts on a block** (an old `?block=` link) leads with the
-  note and the path down to the block, so the whole note is one click away.
+- **A stack that starts on a block** (an old `?block=` link, or a block
+  opened from Views) leads with the note and the path down to the block, so
+  the whole note is one click away. These crumbs have no frame to pop to. A
+  click on one replaces the stack with that view (`goAbove`), as
+  <kbd>⇧</kbd> <kbd>F</kbd> does on a lone focus. It never pushes the view
+  above the frames it leads to: that made the trail a cycle (`N › B › N`,
+  Finn's bug).
 - **A block with more than one parent.** The stack decides the path. The
   frame beneath recorded the row it was left from as an occurrence key, and
   that key is the path the reader took (`A/B/C`). When the key does not end
@@ -238,9 +249,8 @@ Finn settled these. The ones this branch touches are built as stated:
    occurrence keys already are this path, so they are reused (see
    "Selection").
 3. **Frame state lives in the URL**, encoded short, with folds as
-   differences from the default rule. The bottom frame's folds stay the
-   note's, on the device, because that frame is the View or the note
-   itself. See "URL length" for when the URL grows too long, and the
+   differences from the default rule — the bottom frame's too, since
+   GW-10. See "URL length" for when the URL grows too long, and the
    fallback.
 4. A section is a heading block. Not touched here.
 5. A note with no View shows only in a frame rooted at the hidden root.
@@ -256,10 +266,8 @@ Finn settled these. The ones this branch touches are built as stated:
    crumb pops to the earlier frame and then pushes. To make a path crumb
    push on top of the stack instead, call `goTo` in place of `goVia`
    (`src/components/focus-trail.tsx`).
-2. **The bottom frame keeps the note's stored folds.** To put every frame's
-   folds in the URL, pass `owned` folds for the bottom frame too
-   (`NotePage`), and write `folds` without the `below.length` check
-   (`layoutFromSearch`). A note then opens with the default folds each time.
+2. **The bottom frame's folds.** Decided and built (GW-10): every frame's
+   folds are in the URL, and a note opens with the default folds each time.
 
 ## Later
 

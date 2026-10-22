@@ -49,10 +49,12 @@ import { rootKeys } from "../../blocks/view"
 import { NoteTitle } from "./note-title"
 import { useCoarsePointer } from "../../hooks/coarse-pointer"
 import { REMOVE_VIEW, useWriteView } from "../../hooks/views"
+import { rekeyFolds, type Folds } from "../../data/view-state"
 import { viewRootIdsAtom } from "../../data/views"
 import { isHeading, leadingMarker, titlesFocus, typeOfMarker } from "../../blocks/markers"
 import {
   movesOf,
+  rowPivotOf,
   runCommand,
   type CaretInput,
   type CommandInput,
@@ -75,11 +77,14 @@ import {
   idOfKey,
   isWithin,
   keyOf,
+  landingRow,
   occurrenceKeys,
   parentKeyOf,
   siblingKey,
   focusRootKeyOf,
+  type Direction,
 } from "../../blocks/view"
+import type { LinkPivots } from "../../blocks/query"
 import {
   dropGhost,
   ghostFold,
@@ -428,6 +433,9 @@ export function BlockEditor({
   collapsed: collapsedProp,
   onToggleCollapse,
   onReveal,
+  onMoveFolds,
+  pivots,
+  onPivot,
   onExitTop,
   onExitBottom,
   focusFirstSignal,
@@ -537,6 +545,16 @@ export function BlockEditor({
    * would say (`reveal`). Absent, a reveal falls back to the toggle, which
    * is all transient local state needs. */
   onReveal?: (key: string) => void
+  /** Rows a structural move took to new keys (`CommandResult.moved`): the
+   * caller moves their folds with them. Absent, the editor's own folded
+   * keys move. */
+  onMoveFolds?: (moved: [from: string, to: string][]) => void
+  /** The frame's link pivots (src/blocks/query.ts), as the doc was walked
+   * with them: the rows and the commands read them. None by default. */
+  pivots?: LinkPivots
+  /** Set or clear the pivot on a row's block (`p`, the block menu): the
+   * frame's to keep. Absent, nothing offers a pivot. */
+  onPivot?: (key: string, id: string, direction: Direction | null) => void
   /** Called when the user navigates up past the first block — lets the caller
    * move focus to whatever sits above the editor (e.g. the note title). */
   onExitTop?: () => void
@@ -754,12 +772,13 @@ export function BlockEditor({
   // show a highlight, and neither where the keys are).
   //
   // A view opened by a pop lands on the row that was selected when it was
-  // left (`landing`), where the view still shows it.
+  // left (`landing`): that row, or the block's first row once it has moved,
+  // or nothing once the block is gone (`landingRow`).
   const [selected, setSelected] = useState<string | null>(() =>
     initialSelection === "none"
       ? null
-      : landing !== null && occurrenceKeys(doc).includes(landing)
-        ? landing
+      : landing !== null
+        ? landingRow(occurrenceKeys(doc), landing)
         : firstKey,
   )
   const landingRef = useRef(landing)
@@ -812,8 +831,9 @@ export function BlockEditor({
         focusTitled,
         folds: collapsed,
         rootId: noteId ?? null,
+        pivots,
       }),
-    [doc, collapsed, focusRoot, focusTitled, noteId],
+    [doc, collapsed, focusRoot, focusTitled, noteId, pivots],
   )
   // The rows' keys in the order they appear on screen — what up/down
   // navigation and a Shift+Arrow range walk.
@@ -911,10 +931,11 @@ export function BlockEditor({
     const current = docRef.current
     setAnchorKey(null)
     setFocus(null)
-    // A pop back to a frame: the row that was selected there, as it was.
+    // A pop back to a frame: the row that was selected there, as it was —
+    // or the block's first row once it moved, or nothing once it is gone.
     const land = landingRef.current
-    if (land !== null && visibleOrder.includes(land)) {
-      setSelected(land)
+    if (land !== null) {
+      setSelected(landingRow(visibleOrder, land))
       return
     }
     if (focusRootId) {
@@ -1513,7 +1534,19 @@ export function BlockEditor({
   }
   const applyResult = (result: CommandResult) => {
     if (result.doc) history.commit(doc, result.doc, result.op ?? { type: "structural" })
-    // Commands name rows, and folds are per row.
+    // Commands name rows, and folds are per row: a row moved to a new key
+    // takes its folds, and the folds beneath it, along.
+    if (result.moved && result.moved.length > 0) {
+      const moved = result.moved
+      if (onMoveFolds) onMoveFolds(moved)
+      else if (!collapsedProp) {
+        setCollapsedInternal((prev) => {
+          const start: Folds = { open: new Set(), closed: prev }
+          const folds = moved.reduce((next, [from, to]) => rekeyFolds(next, from, to), start)
+          return new Set(folds.closed)
+        })
+      }
+    }
     if (result.toggleCollapse) toggleCollapse(result.toggleCollapse)
     // `expand` is a demand ("this row must be open"), not a toggle: only act
     // when the row is actually collapsed (commands can't see collapse state).
@@ -1538,6 +1571,7 @@ export function BlockEditor({
       else navigateFocus(result.focusRoot.id)
     }
     if (result.openBeside !== undefined) onOpenBeside?.(result.openBeside)
+    if (result.pivot) onPivot?.(result.pivot.key, result.pivot.id, result.pivot.direction)
     if (result.notice) toast(result.notice)
     if (result.exitTop) exitTop()
     // Leaving the bottom is the same, downward — only where there is
@@ -1580,6 +1614,7 @@ export function BlockEditor({
       focusBackId,
       focusCanPop: onFocusBack !== undefined,
       rootId: noteId ?? null,
+      pivots,
       newBlockType: typeOfMarker(newBlockMarker),
       placesOf: parentCountOf,
       emptyable,
@@ -1674,6 +1709,7 @@ export function BlockEditor({
           : block.type === "code"
             ? []
             : linksInText(block.text),
+      pivot: onPivot ? (rowPivotOf(commandInput("select", [row.key])) ?? undefined) : undefined,
     }
   }
   const openMenuOn = (target: BlockMenuTarget) => {
@@ -2416,6 +2452,7 @@ export function BlockEditor({
     linkToInline: (keys) => linkToInline(firstId(keys)),
     alignFigure: (keys, align) => setFigureLayout(firstId(keys), { align }),
     resetFigureSize: (keys) => setFigureLayout(firstId(keys), { size: null }),
+    pivot: onPivot ? (keys, direction) => onPivot(keys[0], firstId(keys), direction) : undefined,
   }
 
   /**
