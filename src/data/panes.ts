@@ -205,6 +205,23 @@ export function goTo(
 }
 
 /**
+ * Go to a view above the stack: a crumb before its first frame — the note,
+ * or a block on the path down to the bottom frame's root, which the trail
+ * leads with when the stack starts on a block. There is no frame there to
+ * pop to, and a push would put the view above the frames it leads to (the
+ * trail reads `N › B › N`). So the view replaces the stack, as Shift+F does
+ * on a lone focus (`popFrame`). A view already on the stack is popped back
+ * to; the view on screen is no move.
+ */
+export function goAbove(pane: Pane, target: ViewTarget): FocusMove | null {
+  if (sameView(currentFrame(pane), target)) return null
+  for (let i = pane.frames.length - 2; i >= 0; i -= 1) {
+    if (sameView(pane.frames[i], target)) return popTo(pane, i)
+  }
+  return { pane: paneOf(target.noteId, target.root), landing: null, restored: false }
+}
+
+/**
  * Go to a view by way of frame `index`: pop back to that frame, then push
  * `target` from it — a crumb on the path between two frames' roots
  * (docs/split-view.md). The frame keeps the row it recorded, and the frames

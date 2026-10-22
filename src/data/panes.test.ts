@@ -4,6 +4,7 @@ import {
   closePane,
   currentFrame,
   formatFrame,
+  goAbove,
   goTo,
   goVia,
   layoutFromSearch,
@@ -17,6 +18,7 @@ import {
   pivotRoot,
   popFrame,
   popTo,
+  withPane,
   withPivot,
   type Pane,
   type PaneLayout,
@@ -114,6 +116,37 @@ describe("the focus stack", () => {
     const back = popFrame(pane)!
     expect(currentFrame(back.pane)).toEqual({ noteId: A, root: "blk_b1", selected: null })
     expect(back.landing).toEqual(P("k1"))
+  })
+})
+
+describe("a crumb above the stack's bottom frame (Finn's bug: it pushed a cycle)", () => {
+  it("replaces the stack with the view, as Shift+F on a lone focus does", () => {
+    // B › C, opened on a block: the note's crumb leads the trail.
+    const pane = push(paneOf(A, "blk_b"), "blk_c", "blk_b/blk_c")
+    const move = goAbove(pane, { noteId: A, root: null })!
+    expect(move.pane).toEqual(paneOf(A))
+    // A new view, so the page opens the folds down to the block left.
+    expect(move.restored).toBe(false)
+    // An ancestor of the bottom frame's root: the same.
+    expect(goAbove(pane, { noteId: A, root: "blk_a" })!.pane).toEqual(paneOf(A, "blk_a"))
+  })
+
+  it("acts on the second pane of a split alone", () => {
+    const first = push(paneOf(A), "blk_x", "blk_x")
+    const second = push(paneOf(B, "blk_b"), "blk_c", "blk_b/blk_c", B)
+    const layout: PaneLayout = { panes: [first, second], active: 1 }
+    const next = withPane(layout, 1, goAbove(second, { noteId: B, root: null })!.pane)
+    expect(next.panes).toEqual([first, paneOf(B)])
+    // Through the URL: pane1 holds the one frame, the first pane is as it was.
+    const { noteId, search } = layoutToSearch(next)
+    expect(search.pane1).toBe(B)
+    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(next)
+  })
+
+  it("pops to the view when it is on the stack, and does nothing on the view on screen", () => {
+    const pane = push(push(paneOf(A, "blk_b"), null, "blk_b"), "blk_c", "blk_c")
+    expect(goAbove(pane, { noteId: A, root: null })).toEqual(popTo(pane, 1))
+    expect(goAbove(pane, { noteId: A, root: "blk_c" })).toBeNull()
   })
 })
 

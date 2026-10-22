@@ -11,3 +11,7 @@
 ### Removed
 
 - The **Show links** setting under Settings → Editor. **Show upstream** on a block replaces it.
+
+### Fixed
+
+- A breadcrumb above a focused block opened from Views goes back up, and no longer adds the view again at the end of the trail. Before, clicking the note's crumb read "Note › Block › Note".

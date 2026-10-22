@@ -121,8 +121,13 @@ stack and the graph path:
   colour. This is the path from the frame root to the focused block, as the
   breadcrumb showed it before. A click on one goes by way of the earlier
   frame (`goVia`): it pops to that frame and focuses the block from there.
-- **A stack that starts on a block** (an old `?block=` link) leads with the
-  note and the path down to the block, so the whole note is one click away.
+- **A stack that starts on a block** (an old `?block=` link, or a block
+  opened from Views) leads with the note and the path down to the block, so
+  the whole note is one click away. These crumbs have no frame to pop to. A
+  click on one replaces the stack with that view (`goAbove`), as
+  <kbd>⇧</kbd> <kbd>F</kbd> does on a lone focus. It never pushes the view
+  above the frames it leads to: that made the trail a cycle (`N › B › N`,
+  Finn's bug).
 - **A block with more than one parent.** The stack decides the path. The
   frame beneath recorded the row it was left from as an occurrence key, and
   that key is the path the reader took (`A/B/C`). When the key does not end

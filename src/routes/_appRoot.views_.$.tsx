@@ -50,6 +50,7 @@ import {
   activate,
   closePane,
   currentFrame,
+  goAbove,
   goTo,
   goVia,
   layoutFromSearch,
@@ -751,6 +752,7 @@ function NotePage({
         frames={pane.frames}
         onPopTo={(at) => applyMove(popTo(pane, at))}
         onGoVia={(at, target) => applyMove(goVia(pane, at, target))}
+        onGoAbove={(target) => applyMove(goAbove(pane, target))}
       />
     ) : null
 
