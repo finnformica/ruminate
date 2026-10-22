@@ -123,6 +123,10 @@ export interface CommandInput {
    * model (multi-parent blocks) is the only honest "up". Null/absent when
    * nothing is below on the stack; stepping back then leaves focus entirely. */
   focusBackId?: string | null
+  /** Whether the page keeps a focus stack the view can pop (a pane,
+   * src/data/panes.ts): stepping back then has somewhere to go even with no
+   * block in focus — a view from another note beneath this one. */
+  focusCanPop?: boolean
   /**
    * The type a fresh block starts as when Enter creates one from a block that
    * isn't a list item (those continue their own list), and what an empty list
@@ -193,7 +197,9 @@ export interface CommandResult {
    * `{ id: null }` leaves focus, `{ id }` focuses that block. Absent = no
    * change. The editor navigates (URL state) accordingly. Distinct from
    * `focus` above, which is where the caret or highlight lands. */
-  focusRoot?: { id: string | null }
+  focusRoot?: { id: string | null; back?: boolean }
+  /** Open this block in the pane beside the view (docs/split-view.md). */
+  openBeside?: string
   /** Why the command did nothing, for the reader (a toast). */
   notice?: string
 }
@@ -665,6 +671,7 @@ export type CommandName =
   | "focusBlock"
   | "focusBack"
   | "leaveFocus"
+  | "openBeside"
 
 export const COMMANDS: Record<CommandName, Command> = {
   /** Select → edit the highlighted row. */
@@ -1152,14 +1159,18 @@ export const COMMANDS: Record<CommandName, Command> = {
   focusBlock: (input) => ({ handled: true, focusRoot: { id: idOfKey(input.key) } }),
 
   /** Step back one level — to the focus root's parent, or fully at the top. */
-  focusBack: ({ focusRootId, focusBackId }) => {
-    if (!focusRootId) return IGNORED
-    return { handled: true, focusRoot: { id: focusBackId ?? null } }
+  focusBack: ({ focusRootId, focusBackId, focusCanPop }) => {
+    if (!focusRootId && !focusCanPop) return IGNORED
+    return { handled: true, focusRoot: { id: focusBackId ?? null, back: true } }
   },
 
   /** Leave focus entirely, back to the whole note. */
   leaveFocus: ({ focusRootId }) =>
     focusRootId ? { handled: true, focusRoot: { id: null } } : IGNORED,
+
+  /** Open the row's block in the pane beside this one. */
+  openBeside: (input) =>
+    input.key === "" ? IGNORED : { handled: true, openBeside: idOfKey(input.key) },
 }
 
 /** Run a named command. Unknown names are a no-op (defensive). */
@@ -1188,6 +1199,7 @@ export const BROWSE_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>([
   "focusBlock",
   "focusBack",
   "leaveFocus",
+  "openBeside",
 ])
 
 export function runCommand(name: CommandName, input: CommandInput): CommandResult {

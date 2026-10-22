@@ -9,6 +9,7 @@ import {
   MAX_STORED_VIEWS,
   foldKeyOf,
   foldRule,
+  openFolds,
   readFolds,
   useFoldRule,
   withFold,
@@ -280,5 +281,44 @@ describe("useFoldRule, narrowed", () => {
     // The first filter again: the fold made in it is back.
     rerender({ id: "n1", narrowing: { filter: "type:todo" } })
     expect(result.current.expanded("a", 1)).toBe(false)
+  })
+})
+
+describe("folds a pushed frame holds (docs/split-view.md)", () => {
+  it("reads and writes the caller's folds, and stores nothing", () => {
+    const store = createStore()
+    store.set(expandedLevelsAtom, 2)
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <Provider store={store}>{children}</Provider>
+    )
+    let held = { open: new Set<string>(), closed: new Set(["a"]) } as const
+    const changes: unknown[] = []
+    const { result, rerender } = renderHook(
+      () =>
+        useFoldRule("n1", {}, undefined, {
+          folds: held,
+          onChange: (next) => {
+            changes.push(next)
+            held = next as typeof held
+          },
+        }),
+      { wrapper },
+    )
+    expect(result.current.expanded("a", 1)).toBe(false)
+    // Two toggles in one event build on each other.
+    act(() => {
+      result.current.setFold("a", true)
+      result.current.setFold("a/b", true)
+    })
+    rerender()
+    expect(changes).toHaveLength(2)
+    expect(result.current.expanded("a", 1)).toBe(true)
+    expect(result.current.expanded("a/b", 2)).toBe(true)
+    expect(stored("n1")).toBe(null)
+  })
+
+  it("opens rows ahead of a view that is not on screen yet", () => {
+    openFolds("n1", ["a", "a/b"])
+    expect(stored("n1")).toMatchObject({ open: ["a", "a/b"], closed: [] })
   })
 })

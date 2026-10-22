@@ -20,8 +20,9 @@ input method reuses it:
    (the target block, the on-screen order, the caret, the focus root) and
    returns _what should change_ — a new doc + history op, where focus should
    land, whether a block's collapse toggles, whether navigation ran off the
-   top, or a focus change (focus itself is URL state — `?block=` — owned by the
-   note route; the editor only requests it). It never touches React or the DOM.
+   top, or a focus change (focus itself is URL state — `?block=` and the
+   pane's focus stack, docs/split-view.md — owned by the note route; the
+   editor only requests it). It never touches React or the DOM.
    The editor component applies the result.
 
 3. **Bindings — `src/blocks/keymap.ts`.** A declarative table mapping a mode +

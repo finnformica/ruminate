@@ -174,6 +174,9 @@ keyboard that appears and disappears. The block editor
 
 ## Elsewhere in the app
 
+- The split view (docs/split-view.md) shows one pane on a narrow screen:
+  the pane with the keyboard, with its own header and focus trail. The
+  address keeps the other pane, and a wider window shows both again.
 - A bottom nav bar (`nav-bar.tsx`) on narrow screens: menu drawer, back,
   forward, search (the ⌘K palette), new note. The app frame pads for the safe
   area; toasts float above the bar.

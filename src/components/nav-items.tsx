@@ -16,6 +16,7 @@ import { appUpdateAtom } from "../hooks/app-update"
 import { usePending } from "../hooks/pending"
 import { useReorderViews } from "../hooks/views"
 import { useDragReorder } from "../hooks/drag-reorder"
+import { useOpenInPane } from "../hooks/open-note"
 import { shareOwnerName } from "../data/shares"
 import type { Note } from "../schema"
 import { typeGlyph } from "../blocks/registry"
@@ -597,6 +598,7 @@ function BlockViewNavItem({
   className?: string
 }) {
   const label = blockViewLabel(block)
+  const openInPane = useOpenInPane()
   return (
     <Link
       to="/views/$"
@@ -609,7 +611,10 @@ function BlockViewNavItem({
       className={cx("nav-item", className)}
       title={`${block.note.displayName} › ${label}`}
       onClick={(event) => {
-        if (!event.defaultPrevented) onNavigate?.()
+        if (event.defaultPrevented) return
+        // A split page opens it in the pane with the keyboard instead.
+        if (isPlainClick(event) && openInPane(block.noteId, block.id)) event.preventDefault()
+        onNavigate?.()
       }}
     >
       <NavRowIcon
@@ -724,6 +729,11 @@ function NavLink({
   )
 }
 
+/** A click that opens a link where it is: no modifier asking for a new tab
+ * or window. */
+const isPlainClick = (event: React.MouseEvent) =>
+  event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
+
 /** A note row in the sidebar list: its favicon and its display name. */
 function NoteNavItem({
   note,
@@ -738,6 +748,7 @@ function NoteNavItem({
   onNavigate?: () => void
   className?: string
 }) {
+  const openInPane = useOpenInPane()
   // A board's row opens its board page (docs/boards.md), with nothing to
   // say about focus; every other note's its outline.
   if (note.type === "board") {
@@ -780,7 +791,10 @@ function NoteNavItem({
       className={cx("nav-item", className)}
       title={title}
       onClick={(event) => {
-        if (!event.defaultPrevented) onNavigate?.()
+        if (event.defaultPrevented) return
+        // A split page opens it in the pane with the keyboard instead.
+        if (isPlainClick(event) && openInPane(note.id)) event.preventDefault()
+        onNavigate?.()
       }}
     >
       <NavRowIcon icon={<NoteFavicon note={note} />} filled={<NoteFavicon note={note} filled />} />
