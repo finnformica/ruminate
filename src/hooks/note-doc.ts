@@ -44,7 +44,7 @@ const NO_PIVOTS: LinkPivots = new Map()
  * that survived, in the view's order, and the edit is read as exactly
  * that: the rows the filter hid, and the note's own order, are left as they
  * are, and everything else edits as it does in the note. The note's
- * `updated_at` is stamped on every change — what orders the Views page and
+ * `updated_at` is stamped on every change — what orders the Views list and
  * drives the replica's incremental pulls (docs/graph-storage.md); in focus,
  * where the doc says nothing about the note node, as its own `setProps`.
  *

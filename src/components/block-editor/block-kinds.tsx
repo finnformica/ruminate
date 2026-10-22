@@ -179,7 +179,7 @@ const heading: BlockKind = {
  * A note is a node like any other (docs/graph-schema-v2.md): its `text` is
  * the title, its `props` the metadata, and its children are its top-level
  * blocks. It draws as a row like any other too — which is what lets a note
- * search result, a note in the Views page and a note linked under a block all
+ * search result, a note in the palette and a note linked under a block all
  * be the same row. Its key is its **favicon** (a board's, or the note icon):
  * the one thing about a note that its title does not already say, in the shared 15px marker slot
  * every other type's key sits in. Its text is ordinary body type — the 3xl
@@ -214,7 +214,7 @@ function noteKindOf(block: Block): NoteType {
 
 /**
  * A board is a note root of the other kind. Listed (a search result, the
- * Views page, the palette) it is the note row, its key the board's
+ * palette) it is the note row, its key the board's
  * favicon. As a row of an outline it is a board linked under the block
  * (docs/boards.md, "A board in a note"), a figure like a picture or a
  * link card: its slot is the empty one a figure gets, so its card starts

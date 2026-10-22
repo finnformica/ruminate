@@ -24,8 +24,8 @@ import { shareDialogAtom } from "./share-note-dialog"
  *
  * One list on every surface that meets a block away from its note: the
  * sidebar's ⋯ on a block view (`nav-items.tsx`, with the list's moves ahead
- * of it) and a right-click on a block's row on the Views page and in the
- * palette (`results-editor.tsx`). The note's own editor keeps its full menu,
+ * of it, and on a right-click of the row) and a right-click on a block's row
+ * in the palette (`results-editor.tsx`). The note's own editor keeps its full menu,
  * with the same Add to / Remove from Views item among the editing.
  *
  * A builder rather than the entries, as `useNoteMenuEntries` is: the Views

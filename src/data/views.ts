@@ -8,8 +8,8 @@ import { sampleViews } from "./sample-graph"
  * **Views** (migrations/0015, docs/metadata.md): the entrypoints into the
  * graph. A view is a node to start at (`root_id`), what of its subgraph to
  * keep (`filter`), how to lay that out (`sort`) and where it sits in the
- * **Views** list (`sort_key`) — the one list the sidebar, the Views page and
- * the palette draw.
+ * **Views** list (`sort_key`) — the one list the sidebar and the palette
+ * draw. A View saves a whole stack of frames (`stack`, `view-stack.ts`).
  *
  * **A node is listed exactly when its row says so** — `pinned`, the
  * column's name on the wire — whatever kind of node it is: a note, a board

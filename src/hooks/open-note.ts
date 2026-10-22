@@ -39,7 +39,7 @@ export function useOpenInPane() {
 /**
  * Where a note opens: a board (docs/boards.md) on its board page, every
  * other note on its outline — focused on a block when one is given. The one
- * place that decides, so the sidebar, the Views page and the palette agree.
+ * place that decides, so the sidebar, the Root frame and the palette agree.
  * While the page is split, the note opens in the pane with the keyboard
  * (`useOpenInPane`).
  */

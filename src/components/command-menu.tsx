@@ -17,10 +17,12 @@ import { composeQuery, parseQuery } from "../utils/search"
 import { CalendarDateIcon16, PlusIcon16, SearchIcon16 } from "./icons"
 import { Keys } from "./ui/keys"
 import { Surface } from "./ui/surface"
-import { QUERY_DEBOUNCE_MS } from "./note-list"
 import { QueryBox } from "./query-box"
 import { ResultsList } from "./results-list"
 import { isCommandMenuOpenAtom, paletteRequestAtom, type PaletteChoice } from "./palette"
+
+/** How long typing settles before the query runs. */
+const QUERY_DEBOUNCE_MS = 150
 
 /** The cmdk root the palette's input sits in. */
 function paletteRoot(input: HTMLInputElement | null): HTMLElement | null {

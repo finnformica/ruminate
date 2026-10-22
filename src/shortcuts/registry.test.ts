@@ -123,7 +123,6 @@ describe("shortcut registry entries", () => {
       "g v",
       "g s",
       "?",
-      APP_SHORTCUTS.focusSearch,
       APP_SHORTCUTS.historyBack,
       APP_SHORTCUTS.toggleSplit,
       APP_SHORTCUTS.otherPane,

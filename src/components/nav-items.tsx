@@ -311,8 +311,8 @@ const NOTE_SORTS: { value: NoteSort; label: string; icon: React.ReactNode }[] = 
 ]
 
 /**
- * The Views list's sort, over the heading: one preference for the sidebar,
- * the Views page and the palette (`noteSortAtom`), so no two surfaces
+ * The Views list's sort, over the heading: one preference for the sidebar
+ * and the palette (`noteSortAtom`), so no two surfaces
  * disagree about where a view is. **Manual** is what turns dragging on — a
  * drag in an automatic sort would be undone by the next render, so the rows
  * are only draggable once the order is the user's to set.
@@ -659,8 +659,8 @@ function RowName({ name, hint }: { name: string; hint?: string }) {
  * the block editor sets in the block's key slot (`BlockKey`: a bullet's
  * dot, a to-do's box, a heading's `#`, a paragraph's `¶`) — in the slot a
  * note's favicon takes, so the row says what kind of block it opens on the
- * way the row in the note does, and the sidebar and the Views page never
- * draw a type two ways. The key takes the icon's ink (`[&_.block-glyph]`
+ * way the row in the note does, and the sidebar and the palette never draw
+ * a type two ways. The key takes the icon's ink (`[&_.block-glyph]`
  * below hands the glyphs `currentColor`, where in a row they carry their
  * own), so it leans with the label when the row is current, as a favicon
  * does. A figure has no key, its frame being its mark; in a list it has no

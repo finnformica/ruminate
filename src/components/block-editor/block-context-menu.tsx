@@ -16,7 +16,7 @@ import { Surface } from "../ui/surface"
  * by the editor on any row it owns; the editor supplies the row (`target`)
  * and the actions, this file the menu. A read-only editor has no menu of
  * its own — unless its host says what a row's menu holds (`entriesFor`: the
- * Views page's rows, whose menus are the sidebar's), in which case the
+ * palette's rows, whose menus are the sidebar's), in which case the
  * popup and the sheet draw that list through the same renderers. The
  * actions are the editor's one set (`block-actions.ts`), the same object
  * the selection bar and the keys run, each over the rows the menu is for

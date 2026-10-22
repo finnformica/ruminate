@@ -81,7 +81,7 @@ export interface BlockEditorApi {
    */
   navigable?: boolean
   /**
-   * The roots are the view's own — a results list's hits, the Views page's
+   * The roots are the view's own — a results list's hits, the palette's
    * notes — not a parent's children (`BlockEditor.fixedRoots`). A kind may
    * draw a root differently for it (a listed note takes a roomier row).
    */

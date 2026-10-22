@@ -106,12 +106,13 @@ interface EditorActions {
  * **The note's menu, as entries** (`MenuEntry`, one list for every surface):
  * Copy markdown, Copy ID, Share, Rename, the board entries, then Print,
  * then Delete. The sidebar's ⋯ on a note row draws it (`NoteActionsMenu`), the open note's
- * header draws it with its own extras around it, and the Views page draws
- * it on a right-click of a note's row (`results-editor.tsx`) — so a note has
- * one menu wherever it is met.
+ * header draws it with its own extras around it, a right-click on a View's
+ * row in the sidebar draws it, and so does a right-click on a note's row in
+ * the palette (`results-editor.tsx`) — so a note has one menu wherever it is
+ * met.
  *
  * A hook that returns a builder rather than the entries: the surfaces that
- * list many notes (the Views page) build a list per row at the moment the
+ * list many notes (the palette's results) build a list per row at the moment the
  * menu opens, so what varies per note is read from the store then, not
  * subscribed to per row. Nothing here touches the router, so a surface
  * outside one (a story) can draw the menu too; where deleting should lead

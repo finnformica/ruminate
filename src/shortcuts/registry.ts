@@ -392,12 +392,6 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
     group: "Navigation",
   },
   {
-    combos: [APP_SHORTCUTS.focusSearch],
-    scope: "global",
-    description: "Jump to the search input (Views page)",
-    group: "Navigation",
-  },
-  {
     combos: [APP_SHORTCUTS.focusEditor],
     scope: "global",
     description: "Return to the editor, restoring the last selected block",
@@ -434,9 +428,9 @@ const SPLIT_VIEW_ENTRIES: Shortcut[] = [
   },
 ]
 
-// Search results — the rows in ⌘K, on the Views page and on the results view
-// (`/?query=`) are the block editor (src/components/results-editor.tsx), so
-// their keys are the editor's. These are the hand-offs around them.
+// Search results — the rows in ⌘K are the block editor
+// (src/components/results-editor.tsx), so their keys are the editor's. These
+// are the hand-offs around them.
 const SEARCH_RESULT_ENTRIES: Shortcut[] = [
   {
     combos: ["ArrowDown"],

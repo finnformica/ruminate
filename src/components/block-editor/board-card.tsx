@@ -51,7 +51,7 @@ export function boardCardLine(snapshot: GraphSnapshot, boardId: string): string 
  * so the card keeps to a side and takes a width as a link card does; its
  * surface is the link card's, class for class (`link-card.tsx`), as the
  * code panel's is its sibling (`code-panel.tsx`). Listed — a search
- * result, the Views page — a board is a note row with the board's favicon,
+ * result, the palette — a board is a note row with the board's favicon,
  * not this card (`block-kinds.tsx`).
  */
 export function BoardCard({

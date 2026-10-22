@@ -511,7 +511,7 @@ export function BlockEditor({
   noteId?: string
   /**
    * What a row's menu holds, where the host decides rather than the editor:
-   * a browsed list (the Views page, the palette) whose rows are notes and
+   * a browsed list (the palette) whose rows are notes and
    * blocks from many notes, each with the menu its sidebar row has. Given,
    * a read-only editor opens the menu on a right-click or a press-and-hold
    * as an editable one does; without it a read-only editor has no menu.
@@ -591,7 +591,7 @@ export function BlockEditor({
   browse?: boolean
   /**
    * Open a row — what Enter and a click do in a read-only view that is
-   * browsed with somewhere to go: the Views page, a search's results.
+   * browsed with somewhere to go: the palette, a search's results.
    */
   onActivate?: (id: string) => void
   /**
