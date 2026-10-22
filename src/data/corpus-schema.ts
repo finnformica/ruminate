@@ -69,12 +69,15 @@ export interface CorpusMigrations {
    * local store gets its own, single-tenant log (`LOCAL_V9_SQL`): the events
    * this device made, pushed from there. */
   events?: string
+  /** migrations/0024: the stamp column on the event log — required in
+   * `"columns"` mode. The local store adds the same column (`LOCAL_V11_SQL`). */
+  eventHlc?: string
 }
 
 /** Which v3 shape the ladder should produce (see the module header). */
 export type CorpusTenancy = "single" | "columns"
 
-const CORPUS_SCHEMA_VERSION = 10
+const CORPUS_SCHEMA_VERSION = 12
 
 /**
  * The single-tenant v5 step: the `views` table (migrations/0015) — the
@@ -197,6 +200,36 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '10');
 `
 
 /**
+ * The single-tenant v11 step: each event's stamp (`EventEnvelope.hlc`,
+ * docs/event-only-sync.md). One nullable column, so every event already in
+ * the log stays as it was: an event without a stamp gets one derived when it
+ * is read (`eventStamp`), never written back.
+ */
+const LOCAL_V11_SQL = `
+ALTER TABLE events ADD COLUMN hlc TEXT;
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '11');
+`
+
+/**
+ * The single-tenant v12 step: snapshots of the fold by stamp
+ * (`src/data/snapshot.ts`, docs/event-sourcing.md). Each row is the encoded
+ * state and the log `position` it covers; the store keeps the 2 newest, and
+ * `id` orders them. The index serves the tail past a snapshot's position, and
+ * the next position an append takes. The D1 shape has no snapshots: the
+ * replica's tables are its state.
+ */
+const LOCAL_V12_SQL = `
+CREATE TABLE snapshots (
+  id       INTEGER PRIMARY KEY,
+  position INTEGER NOT NULL,
+  taken_at INTEGER NOT NULL,
+  state    TEXT NOT NULL
+);
+CREATE INDEX events_position ON events (position);
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '12');
+`
+
+/**
  * The single-tenant v4 step: `notes_id` on nodes (migrations/0006) and nothing
  * else — no backfill, because the local store is a cache and re-pulls the
  * note ids the replica computed (`CACHE_GENERATION`, database-mode.ts).
@@ -220,6 +253,7 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '3');
 /** Drop everything either migration creates, so an incompatible schema can be
  * rebuilt from scratch — safe because a corpus can be re-pulled/re-pushed. */
 const RESET_SQL = `
+DROP TABLE IF EXISTS snapshots;
 DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS views;
 DROP TABLE IF EXISTS link;
@@ -345,6 +379,25 @@ async function applyV10(driver: SqlDriver, tenancy: CorpusTenancy): Promise<void
   if (tenancy === "single") await driver.execScript(LOCAL_V10_SQL)
 }
 
+async function applyV11(
+  driver: SqlDriver,
+  migrations: CorpusMigrations,
+  tenancy: CorpusTenancy,
+): Promise<void> {
+  if (tenancy === "single") {
+    await driver.execScript(LOCAL_V11_SQL)
+    return
+  }
+  if (!migrations.eventHlc) {
+    throw new Error('ensureCorpusSchema: "columns" tenancy needs migrations.eventHlc (0024)')
+  }
+  await driver.execScript(migrations.eventHlc)
+}
+
+async function applyV12(driver: SqlDriver, tenancy: CorpusTenancy): Promise<void> {
+  if (tenancy === "single") await driver.execScript(LOCAL_V12_SQL)
+}
+
 /**
  * Every local step that has shipped, by the version it leaves behind — for
  * `corpus-schema.test.ts`, which pins a hash of each. A step that has reached
@@ -360,6 +413,8 @@ export const SHIPPED_LOCAL_STEPS: Readonly<Record<number, string>> = {
   8: LOCAL_V8_SQL,
   9: LOCAL_V9_SQL,
   10: LOCAL_V10_SQL,
+  11: LOCAL_V11_SQL,
+  12: LOCAL_V12_SQL,
 }
 
 type Step = (
@@ -380,6 +435,8 @@ const STEPS: readonly [number, Step][] = [
   [8, applyV8],
   [9, applyV9],
   [10, (driver, _migrations, tenancy) => applyV10(driver, tenancy)],
+  [11, applyV11],
+  [12, (driver, _migrations, tenancy) => applyV12(driver, tenancy)],
 ]
 
 /**

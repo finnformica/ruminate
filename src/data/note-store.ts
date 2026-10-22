@@ -1,5 +1,5 @@
 import type { GraphDiff, LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
-import type { LoggedEvent, RuminateEvent } from "./events"
+import type { LoggedEvent, RuminateEvent, StampedState } from "./events"
 import type { GraphSnapshot } from "./graph"
 
 /**
@@ -59,6 +59,13 @@ export interface NoteStore {
    * then this device's unpushed ones, provisionally sequenced after them
    * (`LoggedEvent.pending`). What a day on the calendar is folded from. */
   eventLog(): Promise<LoggedEvent[]>
+  /**
+   * The fold by stamp of the whole log (`foldByStamp`): the newest snapshot
+   * that parses, then every event after the position it covers
+   * (`src/data/snapshot.ts`). The store writes the snapshots itself, after a
+   * batch and at open. Nothing in the app reads this yet.
+   */
+  loadFold(): Promise<StampedState>
   /** Every row of every corpus table, **tombstones included** — the replica
    * full-push source, and a delete only reaches other devices if it travels. */
   getAllRows(): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }>
@@ -72,8 +79,8 @@ export interface NoteStore {
   /** Apply a planned pull (row upserts + deletes) in one transaction. Rows
    * land verbatim — remote `updated_at` and `deleted_at` are preserved. */
   applyPull(plan: GraphDiff): Promise<void>
-  /** Wipe every corpus row — nodes, links, views and the device's log (meta
-   * is kept). A cache reset, not a delete: nothing is tombstoned, so nothing
+  /** Wipe every corpus row — nodes, links, views, the device's log and its
+   * snapshots (meta is kept). A cache reset, not a delete: nothing is tombstoned, so nothing
    * replicates — and an event not yet pushed goes with it, as an unpushed
    * row always did. */
   clear(): Promise<void>

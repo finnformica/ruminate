@@ -18,6 +18,15 @@ import {
 } from "./events"
 import { buildGraphSnapshot } from "./graph"
 import type { NoteStore } from "./note-store"
+import {
+  encodeSnapshot,
+  foldFromSnapshots,
+  snapshotDue,
+  snapshotZero,
+  SNAPSHOT_ZERO_KEY,
+  SNAPSHOTS_KEPT,
+  type StoredSnapshot,
+} from "./snapshot"
 import type { SqlDriver, SqlStatement, SqlValue } from "./sql-driver"
 
 /**
@@ -51,6 +60,18 @@ import type { SqlDriver, SqlStatement, SqlValue } from "./sql-driver"
  * `buildGraphSnapshot` drops links whose endpoints are gone — so deletes never
  * cascade at write time and a link to a deleted node survives as the position
  * a restore would put it back into.
+ *
+ * **Snapshots** (`snapshot.ts`, docs/event-sourcing.md): after a batch, and at
+ * open, the store writes a snapshot of the fold by stamp when 1,000 events
+ * are past the newest, or the newest is 24 hours old. It keeps 2. `position`
+ * is the log's append order: every event, made here or pulled, takes the next
+ * one, and an event the replica places moves to the next one, so the tail past
+ * a snapshot carries its `seq`. `loadFold` reads the newest snapshot that
+ * parses, then the tail. Nothing in the app reads the fold yet.
+ *
+ * **Snapshot 0** (`snapshotZero`): the first open of this build folds the
+ * tables into a snapshot at the last position, once (a `meta` flag). From
+ * then on the snapshots continue from it.
  */
 
 /**
@@ -60,8 +81,34 @@ import type { SqlDriver, SqlStatement, SqlValue } from "./sql-driver"
  * columns, and anything else unrecognized is reset. The ladder itself lives in
  * `corpus-schema.ts`, shared with the D1 corpus.
  */
-export async function openSqlNoteStore(driver: SqlDriver): Promise<NoteStore> {
+export async function openSqlNoteStore(
+  driver: SqlDriver,
+  options: { now?: () => number } = {},
+): Promise<NoteStore> {
   await ensureCorpusSchema(driver, { init: migration0001, nodes: migration0002 }, "single")
+  const now = options.now ?? Date.now
+
+  let snapshotting = false
+  /** Write a snapshot when one is due. A snapshot is a cache of the log, so a
+   * failure here never fails the write that asked: the next batch tries again. */
+  const snapshotIfDue = async () => {
+    if (snapshotting) return
+    snapshotting = true
+    try {
+      await writeSnapshotIfDue(driver, now())
+    } catch (error) {
+      console.warn("[ruminate-sql] snapshot failed", error)
+    } finally {
+      snapshotting = false
+    }
+  }
+  try {
+    await writeSnapshotZeroOnce(driver, now())
+  } catch (error) {
+    // The flag is not set, so the next open tries again.
+    console.warn("[ruminate-sql] snapshot 0 failed", error)
+  }
+  await snapshotIfDue()
 
   return {
     getGraph: async () => {
@@ -80,24 +127,26 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<NoteStore> {
       const coalesced = coalesceTyping([...open, ...events])
       const kept = new Set(coalesced.map((event) => event.id))
       const statements: SqlStatement[] = []
+      const appended: RuminateEvent[] = []
+      for (const event of coalesced) {
+        if (held.has(event.id)) continue
+        statements.push(insertEventStatement(event))
+        appended.push(event)
+      }
+      // The deletes go after the inserts, so a new event never takes the
+      // position of one it replaces: a snapshot may already cover that one.
       for (const event of open) {
         // tenant-exempt: the local store is one user per browser profile; and
         // this is the queue coalescing, not a delete of anything that happened.
         if (!kept.has(event.id))
           statements.push({ sql: "DELETE FROM events WHERE id = ?", params: [event.id] })
       }
-      let position = await nextPosition(driver)
-      const appended: RuminateEvent[] = []
-      for (const event of coalesced) {
-        if (held.has(event.id)) continue
-        statements.push(insertEventStatement(event, (position += 1)))
-        appended.push(event)
-      }
       // Events a run coalesced away never reached the rows either — the one
       // that replaced them carries their final text — so the rows take the
       // net of what is appended, exactly as the replica's will.
       statements.push(...projectionStatements(netChanges(appended)))
       if (statements.length > 0) await driver.batch(statements)
+      await snapshotIfDue()
     },
 
     unpushedEvents: () => loadUnpushed(driver),
@@ -105,8 +154,13 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<NoteStore> {
     markEventsPushed: async (seqs) => {
       if (seqs.length === 0) return
       const statements: SqlStatement[] = []
+      // A placed event moves to the end of the log, so the tail past a
+      // snapshot that took it unpushed brings its `seq` to the fold.
       for (const [id, seq] of seqs) {
-        statements.push({ sql: "UPDATE events SET seq = ? WHERE id = ?", params: [seq, id] })
+        statements.push({
+          sql: `UPDATE events SET seq = ?, position = ${NEXT_POSITION} WHERE id = ?`,
+          params: [seq, id],
+        })
       }
       // A row's `seq` is its last event's: stamp the rows these events changed,
       // never backwards.
@@ -129,9 +183,14 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<NoteStore> {
     applyPulledEvents: async (events) => {
       if (events.length === 0) return
       await driver.batch(events.map(insertPulledEventStatement))
+      await snapshotIfDue()
     },
 
     eventLog: () => loadLog(driver),
+
+    loadFold: async () =>
+      (await foldFromSnapshots(await loadSnapshots(driver), (after) => loadTail(driver, after)))
+        .state,
 
     getAllRows: () => loadAllRows(driver),
 
@@ -176,6 +235,8 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<NoteStore> {
         // tenant-exempt: as above — the device's log of a corpus it no longer
         // holds, unpushed events included (see `NoteStore.clear`).
         { sql: "DELETE FROM events" },
+        // The snapshots of that log go with it.
+        { sql: "DELETE FROM snapshots" },
       ])
     },
 
@@ -264,7 +325,7 @@ const ENTITY_OF = { nodes: "block", link: "link", views: "view" } as const
 async function loadUnpushed(driver: SqlDriver): Promise<RuminateEvent[]> {
   const rows = await driver.exec(
     "SELECT id, entity, entity_id, action, patch, v, batch, device, cause, base_seq, ref_seq, " +
-      "at, tz FROM events WHERE seq IS NULL ORDER BY position",
+      "at, tz, hlc FROM events WHERE seq IS NULL ORDER BY position",
   )
   return rows.map(toEvent)
 }
@@ -275,7 +336,7 @@ async function loadUnpushed(driver: SqlDriver): Promise<RuminateEvent[]> {
 async function loadLog(driver: SqlDriver): Promise<LoggedEvent[]> {
   const rows = await driver.exec(
     "SELECT id, seq, entity, entity_id, action, patch, v, batch, device, cause, base_seq, " +
-      "ref_seq, at, tz, origin, actor, received_at FROM events " +
+      "ref_seq, at, tz, hlc, origin, actor, received_at FROM events " +
       "ORDER BY seq IS NULL, seq, position",
   )
   let last = 0
@@ -295,10 +356,107 @@ async function loadLog(driver: SqlDriver): Promise<LoggedEvent[]> {
   })
 }
 
-async function nextPosition(driver: SqlDriver): Promise<number> {
+/** The events past `after` in the log's append order, up to `through`, each
+ * with its `seq` once placed: the tail a snapshot is continued with. */
+async function loadTail(
+  driver: SqlDriver,
+  after: number,
+  through = Number.MAX_SAFE_INTEGER,
+): Promise<RuminateEvent[]> {
+  const rows = await driver.exec(
+    "SELECT id, seq, entity, entity_id, action, patch, v, batch, device, cause, base_seq, " +
+      "ref_seq, at, tz, hlc FROM events WHERE position > ? AND position <= ? ORDER BY position",
+    [after, through],
+  )
+  return rows.map((row) => {
+    const event = toEvent(row)
+    if (row.seq !== null) event.seq = Number(row.seq)
+    return event
+  })
+}
+
+/** Every snapshot, newest first. */
+async function loadSnapshots(driver: SqlDriver): Promise<StoredSnapshot[]> {
+  const rows = await driver.exec("SELECT position, taken_at, state FROM snapshots ORDER BY id DESC")
+  return rows.map((row) => ({
+    position: Number(row.position),
+    taken_at: Number(row.taken_at),
+    state: String(row.state),
+  }))
+}
+
+/**
+ * Write a snapshot of the fold when one is due (`snapshotDue`): the newest
+ * that parses, plus the tail up to the last position now, in one write that
+ * also drops all but the newest `SNAPSHOTS_KEPT`. An event appended while
+ * this folds takes a later position, so it stays in the tail.
+ */
+async function writeSnapshotIfDue(driver: SqlDriver, now: number): Promise<void> {
+  const [newest] = await driver.exec(
+    "SELECT position, taken_at FROM snapshots ORDER BY id DESC LIMIT 1",
+  )
+  const after = newest ? Number(newest.position) : 0
+  const [tail] = await driver.exec("SELECT COUNT(*) AS n FROM events WHERE position > ?", [after])
+  if (!snapshotDue(Number(tail?.n ?? 0), newest ? Number(newest.taken_at) : 0, now)) return
+  const through = await lastPosition(driver)
+  const { state } = await foldFromSnapshots(await loadSnapshots(driver), (from) =>
+    loadTail(driver, from, through),
+  )
+  await driver.batch([
+    {
+      sql: "INSERT INTO snapshots (position, taken_at, state) VALUES (?, ?, ?)",
+      params: [through, now, encodeSnapshot(state)],
+    },
+    {
+      sql: "DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY id DESC LIMIT ?)",
+      params: [SNAPSHOTS_KEPT],
+    },
+  ])
+}
+
+/**
+ * Snapshot 0: once per store, fold the tables into a snapshot at the last
+ * position in `events`, and set the flag in the same write. The tables hold
+ * every event up to that position, so the tail past it is the rest. With no
+ * row there is nothing to fold: the flag is set, and the log's own snapshots
+ * start as before.
+ */
+async function writeSnapshotZeroOnce(driver: SqlDriver, now: number): Promise<void> {
+  const [flag] = await driver.exec("SELECT value FROM meta WHERE key = ?", [SNAPSHOT_ZERO_KEY])
+  if (flag) return
+  const rows = await loadAllRows(driver)
+  const statements: SqlStatement[] = []
+  if (rows.nodes.length + rows.links.length + rows.views.length > 0) {
+    statements.push(
+      {
+        sql: "INSERT INTO snapshots (position, taken_at, state) VALUES (?, ?, ?)",
+        params: [await lastPosition(driver), now, encodeSnapshot(snapshotZero(rows))],
+      },
+      {
+        sql: "DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY id DESC LIMIT ?)",
+        params: [SNAPSHOTS_KEPT],
+      },
+    )
+  }
+  statements.push({
+    sql: "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING",
+    params: [SNAPSHOT_ZERO_KEY, String(now)],
+  })
+  await driver.batch(statements)
+}
+
+async function lastPosition(driver: SqlDriver): Promise<number> {
   const [row] = await driver.exec("SELECT COALESCE(MAX(position), 0) AS position FROM events")
   return Number(row?.position ?? 0)
 }
+
+/**
+ * The position the next event takes, worked out by the statement that writes
+ * it. A batch is one transaction, so no write can take a position between
+ * `lastPosition` and its own: once a snapshot has read the last position,
+ * every event written after it lands past it, in the tail.
+ */
+const NEXT_POSITION = "(SELECT COALESCE(MAX(position), 0) + 1 FROM events)"
 
 const toEvent = (row: Record<string, SqlValue>): RuminateEvent =>
   ({
@@ -315,17 +473,21 @@ const toEvent = (row: Record<string, SqlValue>): RuminateEvent =>
     ...(row.ref_seq === null ? {} : { ref_seq: Number(row.ref_seq) }),
     at: Number(row.at),
     tz: row.tz === null ? null : Number(row.tz),
+    // Null on an event made before stamps: a reader derives it (`eventStamp`).
+    ...(row.hlc === null ? {} : { hlc: String(row.hlc) }),
   }) as RuminateEvent
 
-/** A pulled event, placed: its `seq` is its position. One of this device's
- * own that the replica took but never answered is placed by this. */
+/** A pulled event, placed, at the next position. One of this device's own
+ * that the replica took but never answered is placed by this, and moves to
+ * that position as `markEventsPushed` would move it; one already placed stays. */
 const insertPulledEventStatement = (event: LoggedEvent): SqlStatement => ({
   sql:
     "INSERT INTO events (id, seq, entity, entity_id, action, patch, v, batch, device, cause, " +
-    "base_seq, ref_seq, at, tz, origin, actor, received_at, position) " +
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+    "base_seq, ref_seq, at, tz, hlc, origin, actor, received_at, position) " +
+    `VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${NEXT_POSITION}) ` +
     "ON CONFLICT (id) DO UPDATE SET seq = excluded.seq, origin = excluded.origin, " +
-    "actor = excluded.actor, received_at = excluded.received_at",
+    "actor = excluded.actor, received_at = excluded.received_at, " +
+    "position = CASE WHEN events.seq IS NULL THEN excluded.position ELSE events.position END",
   params: [
     event.id,
     event.seq,
@@ -341,17 +503,18 @@ const insertPulledEventStatement = (event: LoggedEvent): SqlStatement => ({
     event.ref_seq ?? null,
     event.at,
     event.tz ?? null,
+    event.hlc ?? null,
     event.origin ?? null,
     event.actor ?? null,
     event.received_at ?? null,
-    event.seq,
   ],
 })
 
-const insertEventStatement = (event: RuminateEvent, position: number): SqlStatement => ({
+const insertEventStatement = (event: RuminateEvent): SqlStatement => ({
   sql:
     "INSERT INTO events (id, seq, entity, entity_id, action, patch, v, batch, device, cause, " +
-    "base_seq, ref_seq, at, tz, position) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "base_seq, ref_seq, at, tz, hlc, position) " +
+    `VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${NEXT_POSITION})`,
   params: [
     event.id,
     event.entity,
@@ -366,7 +529,7 @@ const insertEventStatement = (event: RuminateEvent, position: number): SqlStatem
     event.ref_seq ?? null,
     event.at,
     event.tz ?? null,
-    position,
+    event.hlc ?? null,
   ],
 })
 

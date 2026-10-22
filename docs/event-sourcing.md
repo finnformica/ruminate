@@ -9,7 +9,9 @@ from there — and the replica takes them in as made. Code: `src/data/events.ts`
 (the vocabulary, the fold, ops → events, the wire's validation),
 `worker/handlers/event-log.ts` (append, reconcile, reading the past),
 `src/data/sql-note-store.ts` (the device's log and its projection),
-`src/data/replica-sync.ts` (the push), `migrations/0023_events.sql`.
+`src/data/replica-sync.ts` (the push), `src/data/hlc.ts` (the stamp),
+`src/data/snapshot.ts` (snapshots of the fold),
+`migrations/0023_events.sql`, `migrations/0024_event_hlc.sql`.
 
 **Decided 2026-10-20: event-only sync** ([event-only-sync.md](./event-only-sync.md)).
 The log is the truth; the browser keeps `nodes`, `link` and `views` as an
@@ -45,10 +47,50 @@ editor's to fix, separately.
 (`planEventAppend`), inside the batch that appends the events they follow
 from. Everything that reads the corpus — pulls, MCP, shares, search, the D1
 console — reads the tables it always has, and a row's `seq` is the `seq` of
-the last event applied to it, so **the since-cursor pull is unchanged**.
+the last event that touched it, so **the since-cursor pull is unchanged**.
 
 The property everything rests on, pinned by tests and checkable in production
 (`GET /api/replica/verify`): **fold(events) == tables**.
+
+`fold` is a left fold in `seq` order. A second fold, `foldByStamp`, resolves
+each field by the event's hybrid logical clock stamp (`src/data/hlc.ts`,
+docs/event-only-sync.md): every field of an entity, and its liveness, is a
+last-writer-wins register. Its state does not depend on the order of the
+events, and an event applied twice changes nothing. An event without a stamp
+gets the derived one (`eventStamp`, below), the same as every other reader.
+`toGraphSnapshot` and `toViewRows` read its state out. Nothing in the app
+reads it yet: `stateAt`, a history and the calendar use the fold by `seq`.
+
+### The projection resolves by stamp
+
+The replica's projection resolves the same way (0025, `planEventAppend`).
+Each row keeps the stamp of each of its registers in a `stamps` column:
+
+| entity | registers                                                  |
+| ------ | ---------------------------------------------------------- |
+| block  | `type`, `text`, `props`, `notes_id`, `alive`               |
+| link   | `sort_key`, `alive` (the key never changes)                |
+| view   | `root_id`, `filter`, `sort`, `pinned`, `sort_key`, `alive` |
+
+- An append sets a register only when its stamp is higher than the one the
+  row holds. A run of events rolls up to the highest-stamp value of each
+  register, so the tables do not depend on the order the events arrive in.
+- A row takes the `at` of the event with the highest stamp as its
+  `updated_at`, as `foldByStamp` does. Its `seq` is the last event that
+  touched it, not the highest stamp: `seq` is the pull cursor. `foldByStamp`
+  keeps the same `seq`, the highest it has applied.
+- An event on an entity the replica does not hold is rejected unless it
+  creates it, as the fold by `seq` does: an update cannot land before its
+  create.
+- **A row from before 0025** holds no `stamps`. Each of its registers
+  resolves by the stamp its last event derives (`updated_at`, `seq`), and the
+  first append that touches it writes them all, with `legacy`: the `seq` the
+  old rule projected it up to. The tables are never rewritten for this.
+- `verify` folds each row's log up to `legacy` by `seq`, as it was projected,
+  and by stamp after (`projectLog`, `worker/handlers/event-log.ts`). It
+  compares every field and every stamp. The SQL spells `eventStamp`'s
+  derivation once (`derivedStamp`), because an event's `seq` is assigned in
+  SQL; a test pins the two together.
 
 ### One event = one change to one entity
 
@@ -66,8 +108,10 @@ written before it has one derived at read time
 
 **Patches are absolute values, never relative diffs** — "text is now X", not
 "insert X at 4". An event means the same thing wherever it is replayed, and a
-run of events rolls up to "the last value of each field" (`netChanges`), which
-is what lets an append of any size project in a fixed number of statements.
+run of events rolls up to one value per field — the last (`netChanges`, in
+the browser's store) or the highest stamp (`stampedChanges`, at the replica)
+— which is what lets an append of any size project in a fixed number of
+statements.
 The cost: two people typing in the _same block_ at once is last-writer-wins on
 the whole text, as it is today. Real-time co-editing would be a CRDT project.
 
@@ -97,6 +141,7 @@ history, and can itself be undone. One action covers "undelete" and "revert".
 | `cause`       | The command, when a writer names one (`snapshot`, `restore`, `share:ensure-view`; a client may pass one through `useApplyOps`). |
 | `base_seq`    | The entity's `seq` as the writer last saw it — what it believed it was changing (the cached row's `seq`, from its last pull).   |
 | `ref_seq`     | On a restore: the moment being returned to.                                                                                     |
+| `hlc`         | The writer's hybrid logical clock stamp (docs/event-only-sync.md). The projection resolves by it. Null before 0024: derived.    |
 | `append`      | The request that appended it (idempotency of the projections).                                                                  |
 
 Nothing else needs storing for a past moment to be viewable. Block content is
@@ -131,15 +176,23 @@ translated to events (`opsToEvents`; a view row becomes its one event with
 `viewChangeToEvent`). The batch's events share a `batch` id, the tab's
 `device` (`src/data/writer-identity.ts`), the writer's clock and `tz`, a
 `cause` when the caller names one, and each carries the cached row's `seq` as
-its `base_seq`. A typing run coalesces to its last event before it lands
+its `base_seq`. Each event also takes its own **stamp** (`hlc`,
+`src/data/hlc.ts`): the next after the device's last, which the runtime keeps
+in `meta` (`hlc_last`) and moves up to every stamp it pulls. An event without
+one (made before stamps, or derived at the replica from rows) gets one derived
+when it is read: `ms` from its `at`, counter 0, `seq:<seq>` as the device,
+with the `seq` zero-padded to 15 digits so that two such events in one ms keep
+their `seq` order (`eventStamp`, the one place this rule lives). The replica's
+projection and `foldByStamp` resolve by the stamp; `seq` still orders `fold`
+and the browser's own rows. A typing run coalesces to its last event before it lands
 (`coalesceTyping`): once in the runtime, over the ops still coalescing, and
 again in the store against the unpushed tail of its log — never into an event
 a push already holds (`inFlightEventIds`).
 
 The store (`src/data/sql-note-store.ts`) then lands the events twice in one
 transaction: appended to its own `events` table — the **device's log**, and
-the push queue — and applied to its rows exactly as the replica applies the
-same events to its (`planEventAppend`): a create inserts or revives, an update
+the push queue — and applied to its rows as the replica applied the same
+events to its before stamps (0025): a create inserts or revives, an update
 sets what its patch names, a delete tombstones, a restore revives, each row
 taking the event's `at` as its `updated_at`. The device's log is not the
 tenant's: it holds what this device did. Other devices' changes still arrive
@@ -158,11 +211,14 @@ The push loop (`src/data/replica-sync.ts`) reads the log's unpushed tail
 row it changed — with the `seq` the replica answers. The queue is therefore
 durable: a reload no longer loses what had not pushed, and a previous
 session's leftovers go first. The replica (`appendClientEvents`) answers a
-re-sent event with the seq it already has, drops an `update`/`delete`/
-`restore` behind the row it holds — the same last-writer-wins on the writer's
-clock a row push lands by — and appends the rest, reconcile first. A `create`
-is never stale: over a tombstone it revives, over a live entity it lands as
-an update, as the fold has it.
+re-sent event with the seq it already has, drops a **stale** event, and
+appends the rest, reconcile first. An event is stale when it would set no
+register: every field it names, and its liveness for a create, delete or
+restore, already holds a stamp at least as high. So an offline device's old
+edit to the text is dropped, and its old edit to the type of the same block
+lands when the type is older still. An event without a stamp derives one
+after every placed event, so for it the rule is the old one: older than the
+row's `updated_at` is stale.
 
 The row door stays for the writers that cannot speak events, and because the
 full push is the repair path: after a SQL failure the store is rebuilt from
@@ -180,6 +236,13 @@ last-writer-wins on the writer's `updated_at`:
 | dead    | live   | `restore`, setting what differs                     |
 | dead    | dead   | `update` of what differs, under the tombstone       |
 
+The events the row door derives carry a **server stamp**: the replica's clock,
+a counter for the place in the append, and `server:<origin>` as the device
+(`server:mcp`, `server:share`, `server:replica`). The clock first moves up to
+the highest stamp the rows it read hold, so a row that passes the check above
+always lands, even when a writer's clock ran ahead of the replica's. A
+restore stamps its events the same way, after the highest stamp in the log.
+
 Deriving events **at the replica** for the row door is deliberate. It makes
 "every change is an event" a property of the one place those writers pass,
 rather than a promise each keeps — so there was no protocol bump, no client
@@ -191,15 +254,61 @@ events itself, and why the two doors write the same log.
 
 One difference from the row planner, inside one window: rows are read _before_
 the batch (D1 has no interactive transactions), so two writers racing on one
-row both derive against the same held row and the later **append** wins,
-where the later `updated_at` used to. The fold and the tables agree either
-way.
+row both derive against the same held row and the higher **stamp** wins each
+field, where the later `updated_at` used to. The fold and the tables agree
+either way.
+
+### Snapshots
+
+**Decided 2026-10-21.** The snapshots go: the ES-5 to ES-7 rework keeps the
+tables as an indexed cache of the fold instead
+([event-only-sync.md](./event-only-sync.md), "The cache").
+
+The store keeps snapshots of the fold by stamp (`src/data/snapshot.ts`,
+docs/event-only-sync.md, item 5) in its `snapshots` table (schema v12). A
+snapshot is the encoded `StampedState`, every field with its stamp and
+tombstones too, and the **log position** it covers.
+
+- **Position.** `events.position` is the log's append order. Every event
+  takes the next position: one this device makes, and one it pulls. An event
+  the replica places (`markEventsPushed`, or a pull that brings back one of
+  this device's own) moves to the next position. So the tail past a snapshot
+  that took an event unpushed holds it again, with its `seq`.
+- **When.** After each batch (`applyEvents`, `applyPulledEvents`) and at
+  open, the store writes a snapshot when 1,000 events are past the newest one,
+  or when the newest is 24 hours old and any event is past it. With no
+  snapshot, the first event writes one.
+- **Keep 2.** One write adds the new snapshot and deletes all but the 2
+  newest. A snapshot is a cache of the log, so this is not a purge. A
+  snapshot that fails to write does not fail the batch: the next batch tries
+  again.
+- **Read.** `loadFold` reads the newest snapshot that parses, then applies
+  every event past its position. When the newest does not parse, it reads the
+  one before. With none that parses, it folds the whole log. The fold does
+  not depend on order and applies an event twice as once, so the result is
+  the fold of the whole log.
+- **Snapshot 0** (`snapshotZero`, docs/event-only-sync.md, item 6). The first
+  open of this build folds the `nodes`, `link` and `views` rows, tombstones
+  too, into a snapshot at the last position in `events`. So the fold holds
+  every row the tables hold, also one whose events this device never had.
+  Each row is the `create` it amounts to (`rowsToEvents`), with no stamp, the
+  row's `updated_at` as `at` and the row's `seq`. So each field takes the
+  stamp `eventStamp` derives for an old event: `updated_at`, counter 0,
+  `seq:<seq>`. It runs once: the same write sets the `snapshot_zero` flag in
+  `meta`. A snapshot of the log can be there already, so "no snapshot" does
+  not say it has run. A store with no row sets the flag and writes nothing.
+  `clear` keeps the flag: the pull after it brings the whole log again.
+
+Nothing in the app reads the fold yet (item 7 of docs/event-only-sync.md).
+`clear` deletes the snapshots with the log.
 
 ### Cost, by construction
 
-- **A fixed number of statements**: 1 reconcile + 7 per append (one insert
-  over `json_each`, then insert-created / update-changed per table), however
-  many events. D1's free plan allows 50 queries per invocation.
+- **A fixed number of statements**: 4 reconcile (one insert, after one
+  statement per table that clears the stamps of the rows it snapshots) + 7
+  per append (one insert over `json_each`, then insert-created /
+  update-changed per table), however many events. D1's free plan allows 50
+  queries per invocation.
 - **Reads what it touches.** `UPDATE t … FROM json_each(?) WHERE t.id = …`
   _looks_ like a lookup and is a walk of every row the tenant has; hinting the
   key fixes that and leaves each row re-scanning the JSON for its values (n²
@@ -230,6 +339,11 @@ row as a snapshot `create` under the `seq` it already holds (no cursor moves).
   SQL. A tenant's first write — or first read of its log — seeds it instead.
 - **A write around the log is repaired by the next write**, not left to
   drift: the old Worker during a rollout, a statement run in the console.
+  The rows it snapshots also lose their `stamps`, which named values the row
+  no longer holds: each then resolves by the stamp its snapshot derives.
+- **A Worker from before 0025 does not keep `stamps`.** After a rollback to
+  one, a row it changed through the log keeps stamps for values it no longer
+  holds, and `verify` reports it as drift. Do not roll back past 0025.
 - What it cannot see is a row changed _without_ taking a new `seq`. That is
   what `verify` is for.
 

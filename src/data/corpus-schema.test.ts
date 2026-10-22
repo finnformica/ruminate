@@ -56,6 +56,8 @@ describe("the migrations that have shipped", () => {
       8: "85366a541f57daf6",
       9: "34e8594abd0a8bf1", // as first shipped on 2026-10-10; the columns v10 adds are not here
       10: "90308fe01b9e8736",
+      11: "3647126993277b6c",
+      12: "49490fc8d460ce99",
     }
     expect(await hashes(SHIPPED_LOCAL_STEPS), RULE).toEqual(pinned)
   })
@@ -86,6 +88,8 @@ describe("the migrations that have shipped", () => {
       "0021_note_views.sql": "251f5dcbaed38f41",
       "0022_ai_history.sql": "aadcbea5ce6cbb65",
       "0023_events.sql": "71e19ec7350b93b6",
+      "0024_event_hlc.sql": "1fb7422eeca1484c",
+      "0025_projection_stamps.sql": "bfcd10e563ac2297",
     }
     const files = Object.fromEntries(
       Object.entries(MIGRATION_FILES).map(([path, sql]) => [path.split("/").pop()!, sql]),

@@ -129,8 +129,8 @@ describe("the planned write", () => {
   )
 
   it("every statement names its tenant with the :tenant token, never a parameter", () => {
-    const statements = [planReconcile(write), ...planEventAppend(events, write)]
-    expect(statements).toHaveLength(8)
+    const statements = [...planReconcile(write), ...planEventAppend(events, write)]
+    expect(statements).toHaveLength(11)
     for (const statement of statements) {
       expect(statement.sql).toContain("user_id")
       expect(statement.sql).toContain(":tenant")

@@ -3,7 +3,9 @@ import {
   EVENT_VERSION,
   MAX_EVENTS_PER_PUT,
   coalesceTyping,
+  eventStamp,
   fold,
+  foldByStamp,
   historyOf,
   linkEntityId,
   netChanges,
@@ -12,14 +14,19 @@ import {
   parseEventsPayload,
   planRestore,
   rowsToEvents,
+  projectRows,
   stateAt,
+  toGraphSnapshot,
+  toViewRows,
   viewChangeToEvent,
   type CurrentRows,
   type EventContext,
   type RuminateEvent,
 } from "./events"
-import { buildGraphSnapshot } from "./graph"
+import { buildGraphSnapshot, childIdsOf, type GraphSnapshot } from "./graph"
+import { decodeHlc, encodeHlc, tickHlc, type Hlc } from "./hlc"
 import type { Op } from "./ops"
+import { sampleGraph, sampleViews } from "./sample-graph"
 import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import type { ViewRow } from "./views"
 
@@ -261,6 +268,78 @@ describe("the envelope", () => {
   })
 })
 
+describe("the stamp", () => {
+  /** A context that stamps as the runtime does: each event ticks the clock. */
+  const stamping = (now = 1_000): EventContext => {
+    let last: Hlc | null = null
+    return {
+      ...context("dev.tab", now),
+      stamp: () => encodeHlc((last = tickHlc(last, now, "dev.tab"))),
+    }
+  }
+
+  it("gives each event of a batch its own stamp, rising in the order made", () => {
+    const events = opsToEvents(
+      snapshot,
+      [
+        { op: "create", id: "b", type: "text", text: "", props: null, notesId: "note" },
+        { op: "link", source: "note", destination: "b", sortKey: "a1" },
+        { op: "setText", id: "a", text: "A!" },
+      ],
+      stamping(),
+    )
+    const stamps = events.map((e) => e.hlc as string)
+    expect(stamps.map(decodeHlc)).toEqual([
+      { ms: 1_000, counter: 0, device: "dev.tab" },
+      { ms: 1_000, counter: 1, device: "dev.tab" },
+      { ms: 1_000, counter: 2, device: "dev.tab" },
+    ])
+    expect([...stamps].sort()).toEqual(stamps)
+  })
+
+  it("stamps a view's event, and leaves an event unstamped when the context mints none", () => {
+    const view: ViewRow = {
+      id: "v",
+      root_id: "note",
+      filter: null,
+      sort: null,
+      pinned: false,
+      sort_key: null,
+      updated_at: 5,
+    }
+    expect(viewChangeToEvent(undefined, view, stamping())?.hlc).toBe(
+      encodeHlc({ ms: 1_000, counter: 0, device: "dev.tab" }),
+    )
+    const [bare] = opsToEvents(snapshot, [{ op: "setText", id: "a", text: "A!" }], context())
+    expect("hlc" in bare).toBe(false)
+  })
+
+  it("is the event's own when it has one", () => {
+    const [event] = opsToEvents(snapshot, [{ op: "setText", id: "a", text: "A!" }], stamping())
+    expect(eventStamp({ ...event, seq: 7 })).toBe(event.hlc)
+  })
+
+  it("derives an old event's from its at and its seq, the same on every reader", () => {
+    const [old] = sequenced(
+      opsToEvents(snapshot, [{ op: "setText", id: "a", text: "A!" }], context("tab", 1_234.9)),
+      42,
+    )
+    // The seq is padded to 15 digits, so seq 10 sorts after seq 9.
+    expect(eventStamp(old)).toBe("000000000001234-0000-seq:000000000000042")
+    expect(eventStamp({ ...old })).toBe(eventStamp(old))
+    // A clock no stamp can hold is clamped, never thrown on: a log is forever.
+    expect(decodeHlc(eventStamp({ ...old, at: -5 }))?.ms).toBe(0)
+    expect(decodeHlc(eventStamp({ ...old, at: Number.NaN }))?.ms).toBe(0)
+  })
+
+  it("does not change what the fold makes: order is still seq", () => {
+    const ops: Op[] = [{ op: "setText", id: "a", text: "A!" }]
+    const stamped = sequenced(opsToEvents(snapshot, ops, stamping()), 4)
+    const bare = sequenced(opsToEvents(snapshot, ops, context()), 4)
+    expect(fold(stamped).blocks).toEqual(fold(bare).blocks)
+  })
+})
+
 describe("parseEvent", () => {
   const good = {
     id: "evt_1",
@@ -317,6 +396,15 @@ describe("parseEvent", () => {
     expect(parseEvent({ ...good, action: "restore", ref_seq: 4 })).toMatchObject({ ref_seq: 4 })
     expect(parseEvent({ ...good, action: "restore", ref_seq: null })).not.toBeNull()
     expect(parseEvent({ ...good, base_seq: 1.5 })).toBeNull()
+  })
+
+  it("takes a stamp when one is sent, and an event without one as it is", () => {
+    const hlc = "000000000001000-0003-dev.tab"
+    expect(parseEvent({ ...good, hlc })).toEqual({ ...good, hlc })
+    expect(parseEvent({ ...good, hlc: null })).toEqual(good)
+    expect(parseEvent({ ...good, hlc: "yesterday" })).toBeNull()
+    expect(parseEvent({ ...good, hlc: 1_000 })).toBeNull()
+    expect(parseEvent({ ...good, hlc: `000000000001000-0003-${"x".repeat(100)}` })).toBeNull()
   })
 
   it("a payload is all or nothing, and bounded", () => {
@@ -472,5 +560,184 @@ describe("rowsToEvents", () => {
       ],
       ["link.update", { sort_key: "a5" }, 200],
     ])
+  })
+})
+
+describe("the fold by stamp", () => {
+  /** A seeded shuffle (mulberry32), so a failure names its seed. */
+  const shuffled = <T>(items: readonly T[], seed: number): T[] => {
+    let a = seed >>> 0
+    const random = () => {
+      a = (a + 0x6d2b79f5) >>> 0
+      let t = a
+      t = Math.imul(t ^ (t >>> 15), t | 1)
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+    const out = [...items]
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1))
+      ;[out[i], out[j]] = [out[j], out[i]]
+    }
+    return out
+  }
+
+  const graphOfRows = (log: RuminateEvent[]): GraphSnapshot => {
+    const rows = projectRows(fold(log))
+    return buildGraphSnapshot(rows.nodes, rows.links)
+  }
+
+  /** The sample corpus as the replica would log it, then a day of edits:
+   * text, type and props, a reorder, a move out and back (a link revived
+   * over its tombstone), a delete, and view changes. In order: each batch's
+   * `at` is after the one before. */
+  function sampleLog(): RuminateEvent[] {
+    const graph = sampleGraph()
+    const nodes = [...graph.nodes.values()].map((node) => ({ ...node, updated_at: 1 }))
+    const links = [...graph.childLinks.values()].flat().map((link) => ({ ...link, updated_at: 1 }))
+    const views = sampleViews()
+    const empty: CurrentRows = { nodes: new Map(), links: new Map(), views: new Map() }
+    let log = sequenced(
+      rowsToEvents(empty, { nodes, links, views }, { batch: "seed", device: "replica", now: 1 }),
+    )
+    const note = [...graph.nodes.values()].find(
+      (node) => node.type === "note" && childIdsOf(graph, node.id).length >= 3,
+    )!.id
+    const [first, second, third] = childIdsOf(graph, note)
+    const batches: Op[][] = [
+      [{ op: "setText", id: first, text: "edited" }],
+      [{ op: "link", source: note, destination: second, sortKey: "zz" }],
+      [{ op: "unlink", source: note, destination: first }],
+      [{ op: "delete", id: third }],
+      [{ op: "link", source: note, destination: first, sortKey: "a0" }],
+      [
+        { op: "setType", id: second, type: "h1" },
+        { op: "setProps", id: note, props: '{"status":"done"}' },
+      ],
+    ]
+    batches.forEach((ops, i) => {
+      const events = opsToEvents(graphOfRows(log), ops, context("tab", 100 + i * 10))
+      log = [...log, ...sequenced(events, log.length + 1)]
+    })
+    const [view, other] = views
+    const viewEvents = [
+      viewChangeToEvent(view, { ...view, pinned: false, updated_at: 200 }, context("tab", 200)),
+      viewChangeToEvent(other, { ...other, deleted_at: 210, updated_at: 210 }, context("tab", 210)),
+    ] as RuminateEvent[]
+    return [...log, ...sequenced(viewEvents, log.length + 1)]
+  }
+
+  it("gives the fold by seq's graph and views for an in-order log", () => {
+    const log = sampleLog()
+    const byStamp = foldByStamp(log)
+    expect(toGraphSnapshot(byStamp)).toEqual(graphOfRows(log))
+    expect(toViewRows(byStamp)).toEqual(projectRows(fold(log)).views)
+  })
+
+  it("gives one state whatever the order, and when every event comes twice", () => {
+    const log = sampleLog()
+    const want = foldByStamp(log)
+    for (let seed = 1; seed <= 20; seed++) {
+      expect(foldByStamp(shuffled(log, seed)), `seed ${seed}`).toEqual(want)
+      expect(foldByStamp(shuffled([...log, ...log], seed)), `seed ${seed}`).toEqual(want)
+    }
+  })
+
+  it("continues from a state it built, so a state plus the rest is the state", () => {
+    const log = shuffled(sampleLog(), 7)
+    const half = Math.floor(log.length / 2)
+    expect(foldByStamp(log.slice(half), foldByStamp(log.slice(0, half)))).toEqual(foldByStamp(log))
+  })
+
+  const stamped = (
+    id: string,
+    hlc: string | undefined,
+    seq: number,
+    action: "create" | "update" | "delete" | "restore",
+    patch: object,
+  ): RuminateEvent =>
+    ({
+      id,
+      seq,
+      ...(hlc === undefined ? {} : { hlc }),
+      batch: id,
+      device: "tab",
+      at: 1,
+      v: 1,
+      entity: "block",
+      entity_id: "x",
+      action,
+      patch,
+    }) as unknown as RuminateEvent
+  const hlc = (ms: number, device: string) => encodeHlc({ ms, counter: 0, device })
+  const create = stamped("c", hlc(1, "a"), 1, "create", {
+    type: "text",
+    text: "one",
+    props: null,
+    notes_id: null,
+  })
+
+  it("keeps two devices' changes to two fields of one block, and the higher stamp on one field", () => {
+    const log = [
+      create,
+      stamped("phone-text", hlc(5, "phone"), 2, "update", { text: "from the phone" }),
+      stamped("laptop-type", hlc(6, "laptop"), 3, "update", { type: "h1" }),
+      stamped("laptop-text", hlc(4, "laptop"), 4, "update", { text: "older" }),
+    ]
+    for (const order of [log, [...log].reverse()]) {
+      expect(toGraphSnapshot(foldByStamp(order)).nodes.get("x")).toMatchObject({
+        type: "h1",
+        text: "from the phone",
+        // The pull cursor: the last event that touched it, as the replica's
+        // row has it, though that event's stamp lost.
+        seq: 4,
+      })
+    }
+    // The fold by seq is unchanged: the last event in seq order still wins.
+    expect(fold(log).blocks.get("x")?.fields.text).toBe("older")
+    expect(stateAt(log, 2).blocks.get("x")?.fields.text).toBe("from the phone")
+  })
+
+  it("resolves liveness by stamp: a delete wins over an older restore, and an edit lands under it", () => {
+    const log = [
+      create,
+      stamped("del", hlc(8, "phone"), 2, "delete", {}),
+      stamped("restore", hlc(7, "laptop"), 3, "restore", { text: "back" }),
+      stamped("typed", hlc(9, "laptop"), 4, "update", { text: "typed after" }),
+    ]
+    const state = foldByStamp([...log].reverse())
+    expect(toGraphSnapshot(state).nodes.has("x")).toBe(false)
+    expect(state.blocks.get("x")).toMatchObject({
+      alive: false,
+      deleted_at: 1,
+      fields: { text: "typed after" },
+    })
+  })
+
+  it("holds an event that comes before its create, and reads the block out once the create is in", () => {
+    const early = stamped("early", hlc(5, "phone"), 2, "update", { text: "early" })
+    expect(toGraphSnapshot(foldByStamp([early])).nodes.size).toBe(0)
+    expect(toGraphSnapshot(foldByStamp([early, create])).nodes.get("x")?.text).toBe("early")
+  })
+
+  it("derives a stamp for an old event: its `at`, then its `seq`, even past a digit", () => {
+    const old = (seq: number, at: number, text: string): RuminateEvent => ({
+      ...stamped(`e${seq}`, undefined, seq, "update", { text }),
+      at,
+    })
+    const base = { ...stamped("c", undefined, 1, "create", create.patch), at: 0 }
+    const log = [base, old(9, 50, "nine"), old(10, 50, "ten"), old(11, 40, "eleven, older")]
+    expect(toGraphSnapshot(foldByStamp([...log].reverse())).nodes.get("x")?.text).toBe("ten")
+  })
+
+  it("takes the seq of an event applied again once it is placed, in either order", () => {
+    const { seq: _seq, ...unplaced } = create as RuminateEvent & { seq?: number }
+    const placed = { ...create, seq: 42 }
+    for (const order of [
+      [unplaced, placed],
+      [placed, unplaced],
+    ]) {
+      expect(foldByStamp(order as RuminateEvent[]).blocks.get("x")?.seq).toBe(42)
+    }
   })
 })
