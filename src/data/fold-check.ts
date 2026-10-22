@@ -1,14 +1,16 @@
 import type { LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
 import { linkEntityId, type Entity } from "./events"
+import type { GraphSnapshot } from "./graph"
 
 /**
  * The fold check (docs/event-only-sync.md, "The cache"): the client's tables
- * are a cache of the fold of its log. In the background, after a batch, the
- * runtime compares, as the app would read each, the cache with the fold of
- * the log, and the cache with the replica's pulled rows. It reads only the
- * entities the batch touched (`foldOfLog`, `readOutEntities`,
- * `NoteStore.getLiveRows`), and reports where they differ with
- * `console.error`. A week with no difference lets the row pull go (ES-9).
+ * are a cache of the fold of its log. The runtime compares, as the app
+ * would read each, the cache with the fold of the log, and the cache with
+ * the replica's pulled rows, and lists where they differ, for Settings →
+ * Storage. After a batch it reads only the entities the batch touched
+ * (`foldOfLog`, `readOutEntities`, `NoteStore.getLiveRows`); the whole of
+ * both is read only when asked (`requestFullFoldCheck`). A week of checks
+ * with no difference is what lets the row pull go (ES-9).
  */
 
 /** One side of the check: rows, as the app reads them. */
@@ -16,6 +18,15 @@ export interface FoldCheckRows {
   nodes: readonly NodeRow[]
   links: readonly LinkRow[]
   views: readonly ViewRow[]
+}
+
+/** How many differences the check keeps to show. The count is still whole. */
+export const FOLD_CHECK_SAMPLE = 20
+
+/** The rows a whole read-out holds: its graph's nodes and child links, and
+ * the live views. */
+export function rowsOfGraph(graph: GraphSnapshot, views: readonly ViewRow[]): FoldCheckRows {
+  return { nodes: [...graph.nodes.values()], links: [...graph.childLinks.values()].flat(), views }
 }
 
 /**

@@ -318,11 +318,8 @@ fold by stamp (`foldByStamp`): each row is the fold of one entity's events
 ### The fold check
 
 `src/data/fold-check.ts`, run by the runtime (`src/data/database-mode.ts`)
-in the background after a batch, at most once in 10 seconds. It compares
-every field of each row except `seq`. It has no Settings UI (removed
-2026-10-22): each difference it finds is reported with `console.error`, one
-line per entity with its id. There is no path that sends a client report to
-the Worker, so the report stays in the browser's console.
+after a batch, at most once in 10 seconds. It compares every field of each
+row except `seq`, and lists where two sides differ, in Settings → Storage.
 
 - **The log against the cache.** For each entity the batches touched since
   the last check (a flush, a pulled page): the fold of that entity's events
@@ -334,8 +331,12 @@ the Worker, so the report stays in the browser's console.
   cursor (the events pull runs after the row pull, so another device's write
   can reach the cache first; the next pull brings its row). These lines start
   with `replica`. A week with none lets the row pull go (ES-9).
-- While the events pull is behind (a long log, pulled 10 pages at a time),
-  there is no check: the touched entities wait for the next one.
+- **Every row**, only from the "Check every row" button
+  (`requestFullFoldCheck`): the fold of the whole log against the whole
+  cache.
+- The runtime keeps each difference until a later check of that entity
+  finds it resolved. While the events pull is behind (a long log, pulled 10
+  pages at a time), there is no check.
 
 ### Cost
 

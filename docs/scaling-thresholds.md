@@ -118,9 +118,8 @@ Counts are a proxy; these are the actual failures. Act if:
 
 ## Instrument before migrating
 
-The trigger should fire from data. Before any of this is built, record (the
-Settings → Storage diagnostics panel was removed on 2026-10-22, so this
-needs a new place to show):
+The trigger should fire from data. Before any of this is built, add to the
+Settings → Storage diagnostics panel:
 
 - corpus size in blocks **and** content bytes (the store already counts rows;
   bytes is a `SUM(LENGTH(...))` away),

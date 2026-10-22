@@ -149,9 +149,8 @@ it.
   keeps the walk lazy (docs/graph-walk.md).
 - **The fold check** compares only the rows each batch touched: for each,
   the fold of that entity's events in the log against its cache row. The
-  rework adds an index on `events (entity, entity_id)` for this. It runs in
-  the background and has no Settings UI: a difference is reported with
-  `console.error`, with the entity ids (revised 2026-10-22).
+  rework adds an index on `events (entity, entity_id)` for this. A full
+  check of every row is a manual button in Settings → Storage diagnostics.
 - **Boot** opens the store and reads. There is no load step: the cache is
   already the state.
 
@@ -329,7 +328,7 @@ changelog file.
      through the store by index: `link` by source, then `nodes` by id, and
      `link` by destination for an up pivot. Add an index on `events
 (entity, entity_id)`. The fold check compares only the rows a batch
-     touched, and reports a difference with `console.error`.
+     touched; a full check is a button in Settings → Storage diagnostics.
    - Files: `src/data/corpus-schema.ts`, `src/data/sql-note-store.ts`,
      `src/data/note-store.ts`, `src/data/database-mode.ts`,
      `src/data/graph.ts` (the walk's reads), `src/data/fold-check.ts`,
@@ -360,10 +359,11 @@ changelog file.
    - Depends on: ES-3, the ES-5 to ES-7 rework. Soak the rework for a week
      with no fold difference first.
 8. **ES-10 Push events only.**
-   - Scope: the row push and the full push go (the "Push full copy" action
-     went with the Settings → Storage section on 2026-10-22). A repair
-     rebuilds the cache from the log and re-sends the unpushed tail.
-   - Files: `src/data/replica-sync.ts`, `src/data/database-mode.ts`.
+   - Scope: the row push, the full push and the "Push full copy" action
+     go. A repair rebuilds the cache from the log and re-sends the
+     unpushed tail.
+   - Files: `src/data/replica-sync.ts`, `src/data/database-mode.ts`, the
+     Settings storage card in `src/components/settings/`.
    - Tests: `replica-sync.test.ts`: no row request is made; a repair
      sends only unpushed events.
    - Depends on: ES-9.

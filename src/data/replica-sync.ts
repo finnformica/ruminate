@@ -38,8 +38,8 @@ import {
  * - **Flush on hide.** `visibilitychange → hidden` / `pagehide` push
  *   immediately with `fetch keepalive`, so closing or backgrounding the tab
  *   inside the debounce window doesn't strand the last save.
- * - **A full push is rows.** After a repair, or when the session's status
- *   check finds the replica drastically behind, every row the store holds goes out through the row door
+ * - **A full push is rows.** After a repair, or from the Settings action,
+ *   every row the store holds goes out through the row door
  *   (`PUT /api/replica/notes`), all node rows before any link rows (links
  *   reference nodes) in chunks; the replica derives whatever differs. The
  *   cursor rides only the final chunk — it means "the replica reflects local
@@ -61,8 +61,8 @@ import {
  * - **Status is diagnostics, not plumbing.** `GET /api/replica/status` costs
  *   a scan of the tenant's rows, so it is NOT fetched after every push (that
  *   alone consumed most of a D1 free-tier daily read budget on a corpus of a
- *   few hundred rows). It runs once per session, after the first successful
- *   push — enough to catch a
+ *   few hundred rows). It runs when the Settings → Storage panel asks for it,
+ *   and once per session after the first successful push — enough to catch a
  *   replica that is drastically behind, which is a fact about history, not
  *   about the save that just happened.
  */
@@ -138,9 +138,14 @@ export interface ReplicaSyncHandle {
    * coalesce a typing run into one of these (`NoteStore.applyEvents`), or
    * the replica would hold an event this device's log no longer does. */
   inFlightEventIds?(): Set<string>
-  /** Queue a full-corpus push (after a repair). The push loop also queues one
-   * itself when the session's status check finds the replica far behind. */
+  /** Queue a full-corpus push (after a repair, or from the Settings action). */
   requestFullPush(): void
+  /**
+   * Fetch `GET /api/replica/status` into the diagnostics (any tab). Called
+   * when the Settings → Storage panel opens — the counts are diagnostics, and
+   * the query scans the tenant's rows, so nothing on the save path calls it.
+   */
+  refreshRemoteStatus(): void
   stop(): void
   /** Wait for all queued replication work — tests only. */
   flush(): Promise<void>
@@ -547,6 +552,13 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     },
     inFlightEventIds() {
       return new Set(inFlightEventIds)
+    },
+    refreshRemoteStatus() {
+      if (stopped) return
+      // An explicit refresh IS the session's status check; the push path need
+      // not repeat it.
+      statusCheckedThisSession = true
+      queue = queue.then(() => fetchRemoteStatus()).catch(recordError)
     },
     stop() {
       stopped = true

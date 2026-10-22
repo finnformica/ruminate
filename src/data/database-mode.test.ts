@@ -1,6 +1,6 @@
 import { sampleViews } from "./sample-graph"
 import { getDefaultStore } from "jotai"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type {
   LinkRow,
   NodeRow,
@@ -23,6 +23,7 @@ import {
   flushDatabaseMode,
   isDatabaseModeActive,
   requestAmbientDatabasePull,
+  requestFullFoldCheck,
   requestDatabasePull,
   startDatabaseMode,
   stopDatabaseMode,
@@ -35,6 +36,7 @@ import type { NoteStore } from "./note-store"
 import { openSqlNoteStore } from "./sql-note-store"
 import { applyOpsToStore } from "./store-test-support"
 import { viewRootIdsAtom, viewsAtom, type ViewRow } from "./views"
+import { storageDiagnosticsAtom } from "./storage-diagnostics"
 import { linkEntityId, rowsToEvents, type LoggedEvent, type RuminateEvent } from "./events"
 import { decodeHlc } from "./hlc"
 import { writerTimezone } from "./writer-identity"
@@ -50,6 +52,7 @@ function stubReplica(pending: NoteId[] = [], pendingViews: string[] = []) {
   const handle: ReplicaSyncHandle = {
     notifyChange: (noteIds, viewIds) => calls.changes.push({ noteIds, viewIds }),
     requestFullPush: () => {},
+    refreshRemoteStatus: () => {},
     pendingNoteIds: () => new Set(pending),
     pendingViewIds: () => new Set(pendingViews),
     inFlightEventIds: () => new Set(),
@@ -586,22 +589,13 @@ describe("database mode since-pulls", () => {
 })
 
 /**
- * The store's tables are a cache of the fold of its log (docs/event-only-
- * sync.md, "The cache"): boot reads it, each batch of edits and each page of
- * pulled events updates it, and the fold check compares it in the background
- * with the log and with the replica's rows, reporting a difference with
- * `console.error`.
+ * The app reads the fold of the log (docs/event-only-sync.md, item 7): the
+ * newest snapshot and the events after it at boot, then each batch of edits
+ * and each page of pulled events. The tables are still written, and the fold
+ * check compares them with the fold.
  */
 describe("database mode reads the fold", () => {
-  let errors: { mock: { calls: unknown[][] } }
-  beforeEach(() => {
-    errors = vi.spyOn(console, "error").mockImplementation(() => {})
-  })
-  /** Every line the fold check has reported. */
-  const reported = () =>
-    errors.mock.calls
-      .filter((call) => String(call[0]).includes("fold check:"))
-      .flatMap((call) => call[1] as string[])
+  const foldCheck = () => jotai.get(storageDiagnosticsAtom).foldCheck
   /** Let the fold check's timer fire, then wait for the queue. */
   const checked = async () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -614,7 +608,7 @@ describe("database mode reads the fold", () => {
     cursor,
   })
 
-  it("boots from the cache with nothing to fold, and checks nothing no batch touched", async () => {
+  it("boots from the cache with nothing to fold, and the full check finds a row the log lacks", async () => {
     const store = await openSqlNoteStore(createNodeSqlDriver())
     await seedNotes(store, { "note-a": NOTE_A, "note-b": NOTE_B })
     // A row only the cache holds: no event made it.
@@ -627,41 +621,60 @@ describe("database mode reads the fold", () => {
     })
     await store.setMeta("d1_pull_cursor", "500")
     await store.setMeta("cache_generation", CACHE_GENERATION)
-    const folds = vi.spyOn(store, "foldOfLog")
 
     const { source } = stubSource({ since: nothingSince("500") })
     await boot({ store, source, foldCheckMs: 0 })
     expect(files()).toEqual({ "note-a.md": NOTE_A, "note-b.md": NOTE_B })
     expect(graph().nodes.has("blk_x")).toBe(true)
 
-    // Nothing was touched, so no check ran, and nothing is reported.
+    // Nothing was touched, so no check ran. The full check finds the row.
     await checked()
-    expect(folds).not.toHaveBeenCalled()
-    expect(reported()).toEqual([])
+    expect(foldCheck()).toBeNull()
+    await requestFullFoldCheck()
+    expect(foldCheck()).toMatchObject({
+      full: true,
+      differences: 1,
+      sample: ["block blk_x: only in the cache"],
+    })
   })
 
-  it("a check after a batch reads only what it touched, and reports a difference by its id", async () => {
+  it("a check after a batch reads only what it touched, and keeps a difference until resolved", async () => {
     const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }, 1, "100") })
     const store = await boot({ source, foldCheckMs: 0 })
     await checked()
-    // The pull's events and rows match the cache.
-    expect(reported()).toEqual([])
+    // The pull touched the note's node, its block and the link: their
+    // events against the cache, and their replica rows against it.
+    expect(foldCheck()).toMatchObject({ full: false, compared: 6, differences: 0 })
 
-    // A row only the cache holds: no batch touches it, so it is not read.
+    // A row only the cache holds: no batch touches it.
     const plant = (nodes: NodeRow[]) =>
       store.applyPull({ nodes, links: [], views: [], deleteNodes: [], deleteLinks: [] })
     await plant([{ id: "blk_x", type: "paragraph", text: "x", props: null, updated_at: 1 }])
-    const folds = vi.spyOn(store, "foldOfLog")
     writeNote("note-b", NOTE_B)
     await flushDatabaseMode()
     // A row a batch touched, changed under the log.
     const block = graph().nodes.get("blk_b000000000")!
     await plant([{ ...block, text: "planted" }])
     await checked()
-    expect(reported()).toEqual(["block blk_b000000000: text"])
-    const [keys] = folds.mock.calls[0]
-    expect(keys?.blocks.has("blk_b000000000")).toBe(true)
-    expect(keys?.blocks.has("blk_x")).toBe(false)
+    expect(foldCheck()).toMatchObject({
+      full: false,
+      differences: 1,
+      sample: ["block blk_b000000000: text"],
+    })
+    expect(foldCheck()!.compared).toBeLessThan(5)
+
+    // A later batch elsewhere keeps it.
+    writeNote("note-a", "- A again\n  id:: blk_a000000000\n")
+    await flushDatabaseMode()
+    await checked()
+    expect(foldCheck()).toMatchObject({ differences: 1 })
+
+    // The full check finds both.
+    await requestFullFoldCheck()
+    expect(foldCheck()?.sample.sort()).toEqual([
+      "block blk_b000000000: text",
+      "block blk_x: only in the cache",
+    ])
   })
 
   it("an edit and a pulled event both reach the fold, and the check finds no difference", async () => {
@@ -673,7 +686,7 @@ describe("database mode reads the fold", () => {
     })
     await boot({ source, foldCheckMs: 0 })
     await checked()
-    expect(reported()).toEqual([])
+    expect(foldCheck()).toMatchObject({ differences: 0, sample: [] })
 
     writeNote("note-a", EDIT)
     await flushDatabaseMode()
@@ -683,7 +696,7 @@ describe("database mode reads the fold", () => {
     expect(files()).toEqual({ "note-a.md": EDIT, "note-b.md": REMOTE })
 
     await checked()
-    expect(reported()).toEqual([])
+    expect(foldCheck()).toMatchObject({ differences: 0 })
   })
 
   it("a pulled row that differs from the cache is a replica difference", async () => {
@@ -699,7 +712,7 @@ describe("database mode reads the fold", () => {
     await boot({ source, foldCheckMs: 0 })
     expect(graph().nodes.get("note-d")?.text).toBe("D")
     await checked()
-    expect(reported()).toContain("replica block note-d: text, updated_at")
+    expect(foldCheck()?.sample).toContain("replica block note-d: text, updated_at")
   })
 
   it("an event past the rows the pull brought is not a difference", async () => {
@@ -719,7 +732,7 @@ describe("database mode reads the fold", () => {
     await boot({ source, foldCheckMs: 0 })
     expect(graph().nodes.get("note-c")?.text).toBe("C2")
     await checked()
-    expect(reported()).toEqual([])
+    expect(foldCheck()).toMatchObject({ differences: 0 })
   })
 
   it("pulls a long log to its end before the check, and shows all of it", async () => {
@@ -734,7 +747,7 @@ describe("database mode reads the fold", () => {
     expect(calls.events).toHaveLength(11)
     expect(graph().nodes.size).toBe(20_001)
     await checked()
-    expect(reported()).toEqual([])
+    expect(foldCheck()).toMatchObject({ differences: 0 })
   })
 })
 

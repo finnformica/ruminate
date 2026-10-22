@@ -1,3 +1,3 @@
-### Removed
+### Added
 
-- Settings no longer has a Storage section. Its status lines, the cloud sync details and **Push full copy to the cloud now** are gone, because the app keeps the cloud copy complete on its own. The Data page now lists Recently deleted only, so it shows only when you are signed in.
+- Settings → Storage checks that the notes on this device match the record of every change. After each save or sync it checks the notes that changed, and shows how many differ. **Check every row** checks every note on the device.

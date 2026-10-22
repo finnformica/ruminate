@@ -71,7 +71,6 @@ const SETTINGS_PAGES: SettingsPage[] = [
     id: "data",
     label: "Data",
     description: "The local database, cloud sync, and recently deleted notes.",
-    signedIn: true,
   },
   { id: "about", label: "About", description: "Version and credits." },
   {
