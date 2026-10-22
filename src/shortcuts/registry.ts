@@ -59,6 +59,10 @@ export const APP_SHORTCUTS = {
   goSettings: "g s",
   goAdmin: "g a",
   goChangelog: "g c",
+  /** The split view (docs/split-view.md): open a second pane on the view,
+   * or close the active one; and the chord that moves between them. */
+  toggleSplit: "mod+backslash",
+  otherPane: "g p",
   historyBack: "mod+[",
   historyForward: "mod+]",
   /** DEV builds only — deliberately not listed in the `?` reference. */
@@ -130,8 +134,9 @@ export const EDITOR_COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   stripMarker: "Strip the block's marker (at line start)",
   backspaceEmpty: "Merge into the block above (empty block, at line start)",
   focusBlock: "Focus on the block",
-  focusBack: "Step back one level",
+  focusBack: "Pop the focus stack: back to the view before, with its block selected",
   leaveFocus: "Leave focus entirely",
+  openBeside: "Open the block in the other pane (splits the view)",
 }
 
 /**
@@ -153,6 +158,9 @@ export const MENU_COMMANDS = new Set<CommandName>(["turnInto"])
 
 /** Focus commands render under their own group, whichever mode binds them. */
 const FOCUS_COMMANDS = new Set<CommandName>(["focusBlock", "focusBack", "leaveFocus"])
+
+/** Pane commands render with the split view's app keys. */
+const PANE_COMMANDS = new Set<CommandName>(["openBeside"])
 
 /**
  * Combos that exist only as alternate spellings of another binding (layouts
@@ -184,7 +192,13 @@ function editorEntries(): Shortcut[] {
         combos: [],
         scope,
         description: EDITOR_COMMAND_DESCRIPTIONS[binding.command],
-        group: focus ? "Focus" : binding.mode === "select" ? "Select mode" : "Edit mode",
+        group: focus
+          ? "Focus"
+          : PANE_COMMANDS.has(binding.command)
+            ? "Split view"
+            : binding.mode === "select"
+              ? "Select mode"
+              : "Edit mode",
       }
       byKey.set(key, entry)
       entries.push(entry)
@@ -402,6 +416,23 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
   },
 ]
 
+// The split view (docs/split-view.md): the page's panes, side by side on a
+// wide screen. `o` (the editor's `openBeside`) is listed beside these.
+const SPLIT_VIEW_ENTRIES: Shortcut[] = [
+  {
+    combos: [APP_SHORTCUTS.toggleSplit],
+    scope: "global",
+    description: "Split the view (one pane), or close the active pane (two)",
+    group: "Split view",
+  },
+  {
+    combos: [APP_SHORTCUTS.otherPane],
+    scope: "global",
+    description: "Move the keyboard to the other pane (press g, then p)",
+    group: "Split view",
+  },
+]
+
 // Search results — the rows in ⌘K, on the Views page and on the results view
 // (`/?query=`) are the block editor (src/components/results-editor.tsx), so
 // their keys are the editor's. These are the hand-offs around them.
@@ -506,6 +537,7 @@ export const GROUP_ORDER = [
   "Selection ladder",
   "History",
   "Focus",
+  "Split view",
   "Palette",
   "Note title",
 ] as const
@@ -514,6 +546,7 @@ export const GROUP_ORDER = [
 export const SHORTCUTS: Shortcut[] = [
   ...GLOBAL_ENTRIES,
   ...NAVIGATION_ENTRIES,
+  ...SPLIT_VIEW_ENTRIES,
   ...SEARCH_RESULT_ENTRIES,
   ...editorEntries(),
   ...CLIPBOARD_HISTORY_ENTRIES,
@@ -543,6 +576,7 @@ const KEY_LABELS: Record<string, string> = {
   escape: "Esc",
   " ": "Space",
   "`": "`",
+  backslash: "\\",
 }
 
 function formatKey(key: string, isMac: boolean): string {

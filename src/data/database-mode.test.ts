@@ -39,6 +39,7 @@ import { viewRootIdsAtom, viewsAtom, type ViewRow } from "./views"
 import { storageDiagnosticsAtom } from "./storage-diagnostics"
 import { linkEntityId, rowsToEvents, type LoggedEvent, type RuminateEvent } from "./events"
 import { decodeHlc } from "./hlc"
+import { writerTimezone } from "./writer-identity"
 
 /**
  * Boot-flow tests for database-authoritative mode, at the highest level the
@@ -370,7 +371,9 @@ describe("database mode saves", () => {
     const [created] = await store.unpushedEvents()
     expect(created).toMatchObject({
       device: expect.stringMatching(/^[0-9a-z]+\.[0-9a-z]{6}$/),
-      tz: 0,
+      // The writer's own offset, in minutes east of UTC: 0 only where the
+      // machine runs on UTC, so read it as the store did.
+      tz: writerTimezone(),
     })
   })
 

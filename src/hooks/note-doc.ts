@@ -1,12 +1,13 @@
 import { useAtomValue, useStore } from "jotai"
 import { useCallback, useMemo, useRef } from "react"
 import { isEmptyDoc } from "../blocks/ops"
+import type { LinkPivots } from "../blocks/query"
 import { asBlockType, type BlockDoc, type ChangeHint } from "../blocks/types"
 import type { ExpandedRule } from "../blocks/view"
 import { titlesFocus } from "../blocks/markers"
 import { basketDoc, basketToOps } from "../data/basket"
-import { filteredView, isNarrowed, type FilteredView } from "../data/filter-view"
-import { blockView, isNoteType, noteView, type LinkDirections } from "../data/graph"
+import { filteredView, filterReach, type FilteredView } from "../data/filter-view"
+import { isNoteType, type LinkDirections } from "../data/graph"
 import { notePropsOps } from "../data/note-meta"
 import { docToOps } from "../data/ops"
 import { useApplyOps } from "../data/store"
@@ -17,6 +18,7 @@ import type { NoteId } from "../schema"
 
 const NOTHING_COLLAPSED: ReadonlySet<string> = new Set()
 const NO_CONTEXT: ReadonlySet<string> = new Set()
+const NO_PIVOTS: LinkPivots = new Map()
 
 /**
  * The note's doc, straight from the graph — and the way back.
@@ -56,6 +58,7 @@ export function useNoteDoc({
   focusBlockId = null,
   expanded,
   directions = "downstream",
+  pivots = NO_PIVOTS,
   filter = "",
   sort = "",
   keep,
@@ -72,6 +75,9 @@ export function useNoteDoc({
   expanded?: ExpandedRule
   /** Which links the walk follows (Settings → Editor, "Show links"). */
   directions?: LinkDirections
+  /** The frame's link pivots (src/blocks/query.ts): the walk reads them, and
+   * a filter or a sort keeps their up regions whole. None by default. */
+  pivots?: LinkPivots
   /** Narrow the view to the blocks this query matches, their ancestors kept
    * as context (`src/data/filter-view.ts`). Empty = the whole view. */
   filter?: string
@@ -94,15 +100,17 @@ export function useNoteDoc({
     () => viewNarrowing({ filter, sort, noteId, index }),
     [filter, sort, noteId, index],
   )
-  const narrowed = isNarrowed(narrowing)
+  // The filter's ancestor closure, built once per filter and snapshot: what
+  // lets the walk narrow lazily (docs/graph-walk.md, 4.5).
+  const reach = useMemo(
+    () =>
+      noteId === undefined || narrowing.matched === null
+        ? undefined
+        : filterReach(snapshot, noteId, narrowing.matched),
+    [snapshot, noteId, narrowing.matched],
+  )
   const view = useMemo<FilteredView | null>(() => {
     if (noteId === undefined) return null
-    // A narrowed view is walked EAGERLY: whether a branch survives depends on
-    // what is beneath it, and a sort must see every sibling to order them,
-    // neither of which a lazy walk can answer. The fold rule is then applied
-    // over what survived (`filteredView`) rather than by the walk — the
-    // same rule, the narrowed view's own (`useFoldRule`), so a filtered
-    // note folds exactly as the note does.
     // A heading in focus is the view's title, always open (`titlesFocus`,
     // src/blocks/view.ts), so the walk opens it whatever the reader's fold
     // on it says: a top-level heading folded in the note has its fold under
@@ -113,20 +121,17 @@ export function useNoteDoc({
       expanded && focusBlockId && focusType && titlesFocus(asBlockType(focusType))
         ? (key, level, type) => key === focusBlockId || expanded(key, level, type)
         : expanded
-    const rule = narrowed ? undefined : viewRule
-    const focused = focusBlockId ? blockView(focusBlockId, snapshot, rule, directions) : null
-    const base = focused ?? noteView(noteId, snapshot, rule, directions)
-    if (!base) return null
-    // Focused, the root block is the view's title rather than one of its
-    // rows, so the filter runs over what is inside it and never takes it
-    // away (`keepRoots`).
-    return filteredView(base, narrowing, {
-      keepRoots: focused !== null,
+    // Narrowed or not, the walk is the lazy one, by the view's fold rule: a
+    // narrowed walk tells a branch's fate from `reach`, not from a walk
+    // beneath it, and sorts each row's children as it builds the row.
+    return filteredView(snapshot, noteId, focusBlockId, narrowing, {
       expanded: viewRule,
-      startLevel: focused ? 0 : 1,
       keep,
+      pivots,
+      directions,
+      reach,
     })
-  }, [noteId, focusBlockId, snapshot, expanded, directions, narrowed, narrowing, keep])
+  }, [noteId, focusBlockId, snapshot, expanded, directions, pivots, narrowing, keep, reach])
   // Whether the doc is rooted at the focused block (the note node is then not
   // this doc's to write).
   const rootId = focusBlockId && view?.doc.rootBlockIds[0] === focusBlockId ? focusBlockId : null

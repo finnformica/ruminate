@@ -15,13 +15,25 @@ export type PageHeaderProps = {
   icon?: React.ReactNode
   className?: string
   actions?: React.ReactNode
+  /** A pane after the first in a split view (docs/split-view.md): the
+   * page's own keys and history buttons belong to the first pane's header,
+   * so this one binds and draws neither. */
+  secondary?: boolean
 }
 
-export function PageHeader({ title, icon, className, actions }: PageHeaderProps) {
+export function PageHeader({
+  title,
+  icon,
+  className,
+  actions,
+  secondary = false,
+}: PageHeaderProps) {
   const router = useRouter()
   const [sidebar, setSidebar] = useAtom(sidebarAtom)
   const createNewNote = useCreateNewNote()
   const openNewBoard = useSetAtom(newBoardDialogAtom)
+
+  const hotkeyOptions = { ...GLOBAL_HOTKEY_OPTIONS, enabled: !secondary }
 
   // Toggle sidebar with Cmd/Ctrl + B
   useHotkeys(
@@ -29,16 +41,16 @@ export function PageHeader({ title, icon, className, actions }: PageHeaderProps)
     () => {
       setSidebar((prev) => (prev === "expanded" ? "collapsed" : "expanded"))
     },
-    GLOBAL_HOTKEY_OPTIONS,
+    hotkeyOptions,
   )
 
-  useHotkeys(APP_SHORTCUTS.newNote, createNewNote, GLOBAL_HOTKEY_OPTIONS)
-  useHotkeys(APP_SHORTCUTS.newBoard, () => openNewBoard(true), GLOBAL_HOTKEY_OPTIONS)
+  useHotkeys(APP_SHORTCUTS.newNote, createNewNote, hotkeyOptions)
+  useHotkeys(APP_SHORTCUTS.newBoard, () => openNewBoard(true), hotkeyOptions)
 
   return (
     <div className={cx("@container/header", className)}>
       <header className="flex h-[var(--height-app-header)] items-center gap-2 px-2">
-        {sidebar === "collapsed" ? (
+        {sidebar === "collapsed" && !secondary ? (
           <div className="hidden items-center sm:flex">
             <IconButton
               aria-label="Show sidebar"
@@ -74,7 +86,7 @@ export function PageHeader({ title, icon, className, actions }: PageHeaderProps)
         ) : null}
         {/* The rule between the nav buttons and the title, whether or not
             the title has an icon (a shared note carries its own, inline). */}
-        {sidebar === "collapsed" ? (
+        {sidebar === "collapsed" && !secondary ? (
           <div role="separator" className="h-5 w-px bg-border hidden sm:block" />
         ) : null}
         <div className="flex w-0 grow items-center gap-3 px-2">

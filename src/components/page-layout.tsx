@@ -27,6 +27,7 @@ export function PageLayout({
   actions,
   floatingActions,
   children,
+  secondary = false,
   ...props
 }: PageLayoutProps) {
   const isSignedOut = useAtomValue(isSignedOutAtom)
@@ -45,8 +46,11 @@ export function PageLayout({
   // A second Ruminate tab holds the persistent local database — this tab fell
   // back to a temporary in-memory copy and must say so (defect: it used to
   // silently show an empty corpus).
+  // The page's notices are said once, in the first pane of a split view.
   const otherTabHasDatabase =
-    diagnostics.persistence === "memory" && diagnostics.persistenceReason === "another-tab"
+    !secondary &&
+    diagnostics.persistence === "memory" &&
+    diagnostics.persistenceReason === "another-tab"
 
   // Signed in, the store serves notes immediately (isDatabaseMode); signed out,
   // the sample notes render. The only gated moment is the brief auth
@@ -67,6 +71,7 @@ export function PageLayout({
       <div className={cx("grid grid-rows-[auto_1fr] overflow-hidden", className)}>
         <PageHeader
           {...props}
+          secondary={secondary}
           title={booting ? <Skeleton className="h-4 w-40" /> : props.title}
           actions={showContent && !booting ? actions : undefined}
           className="print:hidden"
@@ -90,7 +95,7 @@ export function PageLayout({
                 </Notice>
               </div>
             ) : null}
-            {accessDenied !== null && !isSignedOut && !disableGuard ? (
+            {accessDenied !== null && !isSignedOut && !disableGuard && !secondary ? (
               <div className="p-4">
                 <Notice
                   variant="warning"
@@ -108,7 +113,7 @@ export function PageLayout({
                 </Notice>
               </div>
             ) : null}
-            {databaseStatus.emptyOffline && !disableGuard ? (
+            {databaseStatus.emptyOffline && !disableGuard && !secondary ? (
               <div className="p-4">
                 <Notice variant="info">
                   No notes yet — this device hasn’t been able to reach the notes database. They’ll

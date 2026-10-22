@@ -218,15 +218,18 @@ its parents after its children. Each is an **upstream occurrence**: a row
 drawn exactly like a child row, keyed by its path with the segment marked
 (`root/child/^parent`, src/blocks/view.ts), so folds, selection and loops
 stay per occurrence and a block that is both above and below another has
-two rows and two keys. The path guard applies in both directions: a parent
-already on the path above is skipped (a block's own parent is where the row
-came from, not something beneath it), which is what keeps a single-homed
+two rows and two keys. One guard applies in both directions
+(docs/graph-walk.md, 3.3): the block a row came from is not a row beneath
+it the other way. A child row's own parent is not listed under it, and a
+parent row's own child is not listed under it. This keeps a single-homed
 block's rows exactly the tree's and shows only the _other_ places a
 multi-homed block is held — the todos an "In progress" block was copied
-under, when you focus on it. A child on the path is skipped beneath a
-parent row for the same reason. The view's own root (the note) is on the
-path from the start, and the note's own parents, when it has any, are rows
-after its blocks (`BlockDoc.upstream`).
+under, when you focus on it. Any other block already on the path is a
+looped row, as in a down loop, so an up loop shows where it closes. The
+view's own root (the note) is on the path from the start. It is not a
+block in the doc, so it is never a row against the row's direction. The
+note's own parents, when it has any, are rows after its blocks
+(`BlockDoc.upstream`).
 
 A parent row edits as any row does: its text and type are the block's,
 wherever it shows. Structural edits on it move the link the other way
@@ -328,7 +331,10 @@ complete list of children's ids — the graph's, exactly, which is what draws
 the fold chevron and keeps a save diff to nothing — but the children
 themselves are walked in only beneath an occurrence the rule opens. A closed
 row is a row with a chevron and nothing beneath it; opening it walks one more
-level. So the doc is O(what is on screen), however large the graph, and a
+level. A view narrowed by a filter or a sort (docs/query-language.md) is the
+same lazy walk: a block's list is then the children that reach a match, read
+off the filter's ancestor closure (`ancestorClosure`), in the sort's order,
+so a closed row is still not walked (docs/graph-walk.md, 4.5). So the doc is O(what is on screen), however large the graph, and a
 view from any root is the same walk: a note (its children as the roots, level
 
 1. and a focused block (the block as the doc's one root, at level 0, its

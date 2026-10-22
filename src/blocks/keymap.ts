@@ -151,6 +151,8 @@ export const KEYMAP: Binding[] = [
   { mode: "select", combo: "Mod+.", command: "focusBlock" },
   { mode: "select", combo: "Mod+Shift+.", command: "leaveFocus" },
   { mode: "select", combo: "Mod+Shift+>", command: "leaveFocus" },
+  // o opens the block in the pane beside (docs/split-view.md).
+  { mode: "select", combo: "o", command: "openBeside" },
 
   // ── Edit mode ──────────────────────────────────────────────────────────
   { mode: "edit", combo: "Escape", command: "exitEdit" },

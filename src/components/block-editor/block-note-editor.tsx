@@ -1,5 +1,5 @@
 import { useAtomValue, useSetAtom, useStore } from "jotai"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 import { emptyBlock } from "../../blocks/ops"
 import type { BlockDoc, ChangeHint } from "../../blocks/types"
@@ -96,6 +96,10 @@ export function BlockNoteEditor({
   browse = false,
   focusBlockId = null,
   onFocusNavigate,
+  onFocusBack,
+  focusTrail,
+  landing,
+  onOpenBeside,
   noteTitle,
   collapseKey,
   folds,
@@ -156,7 +160,14 @@ export function BlockNoteEditor({
   /** Block id the editor is focused on (`?block=` search param), or null. */
   focusBlockId?: string | null
   /** Focus navigation (crumbs, F/Shift+F, bullet clicks) — updates the URL. */
-  onFocusNavigate?: (id: string | null) => void
+  onFocusNavigate?: (id: string | null, selected: string | null) => void
+  /** The pane's focus stack (src/data/panes.ts): pop it, draw it, and the
+   * row a pop lands on (`BlockEditor`). */
+  onFocusBack?: () => void
+  focusTrail?: ReactNode
+  landing?: string | null
+  /** Open a block in the pane beside (`o`, docs/split-view.md). */
+  onOpenBeside?: (id: string) => void
   /** The note's title, shown as the breadcrumb's first crumb while focused. */
   noteTitle?: string
   /** Where this editor's folds are kept, when not under the note's own id —
@@ -403,6 +414,10 @@ export function BlockNoteEditor({
       browse={browse}
       focusRootId={focusBlockId}
       onFocusNavigate={onFocusNavigate}
+      onFocusBack={onFocusBack}
+      focusTrail={focusTrail}
+      landing={landing}
+      onOpenBeside={onOpenBeside}
       noteTitle={noteTitle}
       resolveBlocks={resolveBlocks}
       debug={debug}
