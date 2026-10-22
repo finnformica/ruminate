@@ -75,6 +75,7 @@ import {
   idOfKey,
   isWithin,
   keyOf,
+  landingRow,
   occurrenceKeys,
   parentKeyOf,
   siblingKey,
@@ -754,12 +755,13 @@ export function BlockEditor({
   // show a highlight, and neither where the keys are).
   //
   // A view opened by a pop lands on the row that was selected when it was
-  // left (`landing`), where the view still shows it.
+  // left (`landing`): that row, or the block's first row once it has moved,
+  // or nothing once the block is gone (`landingRow`).
   const [selected, setSelected] = useState<string | null>(() =>
     initialSelection === "none"
       ? null
-      : landing !== null && occurrenceKeys(doc).includes(landing)
-        ? landing
+      : landing !== null
+        ? landingRow(occurrenceKeys(doc), landing)
         : firstKey,
   )
   const landingRef = useRef(landing)
@@ -911,10 +913,11 @@ export function BlockEditor({
     const current = docRef.current
     setAnchorKey(null)
     setFocus(null)
-    // A pop back to a frame: the row that was selected there, as it was.
+    // A pop back to a frame: the row that was selected there, as it was —
+    // or the block's first row once it moved, or nothing once it is gone.
     const land = landingRef.current
-    if (land !== null && visibleOrder.includes(land)) {
-      setSelected(land)
+    if (land !== null) {
+      setSelected(landingRow(visibleOrder, land))
       return
     }
     if (focusRootId) {

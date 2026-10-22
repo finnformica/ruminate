@@ -326,6 +326,18 @@ export function firstOccurrenceKey(doc: BlockDoc, id: string, rule?: RowRule): s
   return null
 }
 
+/**
+ * The row a selection path lands on among `keys` (docs/graph-walk.md,
+ * decision 2): the row it names; when the block has moved and the path names
+ * no row, the block's first row; when the block is gone, null — nothing is
+ * selected.
+ */
+export function landingRow(keys: readonly string[], landing: string): string | null {
+  if (keys.includes(landing)) return landing
+  const id = idOfKey(landing)
+  return keys.find((key) => idOfKey(key) === id) ?? null
+}
+
 /** The key the focused block is addressed by: its first occurrence in the
  * document (so a fold made while focused is the same fold outside focus), or its
  * bare id when the document does not reach it. */

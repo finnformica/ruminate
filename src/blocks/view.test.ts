@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import { blockView, buildGraphSnapshot, noteView, type LinkDirections } from "../data/graph"
+import { keyOfPath, pathOfKey } from "../data/panes"
 import { parse } from "./parse"
 import type { BlockDoc } from "./types"
 import {
@@ -13,6 +14,7 @@ import {
   idOfKey,
   isWithin,
   keyOf,
+  landingRow,
   occurrenceKeys,
   parentKeyOf,
   pathIdsOf,
@@ -554,5 +556,26 @@ describe("one guard in both directions (docs/graph-walk.md, 3.3)", () => {
     const up = rowsOf(new Map([["x", "up"]]))
     expect(shown(up).filter((key) => key.startsWith("a"))).toEqual(["a", "a/x"])
     expect(up.find((row) => row.key === "a/x")!.hasChildren).toBe(false)
+  })
+})
+
+describe("the selection as a path (docs/graph-walk.md, decision 2)", () => {
+  const keys = ["a", "a/x", "a/x/^p", "b", "b/x"]
+
+  it("crosses from a key to a path and back, in a note, a focus and an up region", () => {
+    for (const key of ["a/x", "F/a/x", "a/x/^p"]) {
+      expect(keyOfPath(pathOfKey(key))).toBe(key)
+    }
+    expect(pathIdsOf("a/x/^p")).toEqual(["a", "x", "p"])
+  })
+
+  it("lands on the row the path names", () => {
+    expect(landingRow(keys, "b/x")).toBe("b/x")
+    expect(landingRow(keys, "a/x/^p")).toBe("a/x/^p")
+  })
+
+  it("lands on the block's first row once it moved, and on nothing once it is gone", () => {
+    expect(landingRow(keys, "c/x")).toBe("a/x")
+    expect(landingRow(keys, "a/gone")).toBeNull()
   })
 })
