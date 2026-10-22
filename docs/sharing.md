@@ -203,7 +203,7 @@ someone else's rows does not belong in it. So shared notes live in memory
   online) re-pull every slice, coalesced to one per 30 s; a slice with a push
   in flight keeps its local copy until it lands.
 - **How the UI sees it**: `graphSnapshotAtom` merges the own graph with the
-  union of every slice, so the editor, search, hover cards and the Views page
+  union of every slice, so the editor, search, hover cards and the sidebar
   read a shared note exactly as they read an own one. `sharedOriginAtom`
   (node id → share id) is what tells them apart: the sidebar lists own notes
   under **Views** and the notes shared with them under **Shared** (who shared

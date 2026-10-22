@@ -83,7 +83,7 @@ interface PaneLayout {
   frame (`pivotRoot`), so Back returns to the view as it was.
 - **Across notes.** A frame names its note, so one stack can hold views from
   more than one note. While the page is split, a note opened from the sidebar,
-  the palette or the Views page opens in the active pane, as a push
+  the palette or the Root frame opens in the active pane, as a push
   (`useOpenInPane`, `src/hooks/open-note.ts`).
 - **Layout.** `openBeside` opens a view in a new pane, or pushes it onto the
   next pane's stack when there is no room for one. `closePane` removes a pane

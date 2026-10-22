@@ -36,7 +36,6 @@ key navigates. The chords work from the block editor's select mode too.
 | Go to settings                        | <kbd>g</kbd> then <kbd>s</kbd>                        |
 | Go to the changelog                   | <kbd>g</kbd> then <kbd>c</kbd>                        |
 | Go to the Admin settings (admin only) | <kbd>g</kbd> then <kbd>a</kbd>                        |
-| Focus the search (Views page)         | <kbd>/</kbd>                                          |
 | `i`                                   | Focus the editor, restoring the last selected block   |
 | Back / forward (browser history)      | <kbd>⌘</kbd> <kbd>[</kbd> / <kbd>⌘</kbd> <kbd>]</kbd> |
 | Move to the other pane (split view)   | <kbd>g</kbd> then <kbd>p</kbd>                        |
@@ -50,33 +49,18 @@ document order, and typing narrows them. <kbd>↵</kbd> on a highlighted
 heading opens the note focused on it. There is no separate outline mode:
 take the pills off and it is the ordinary search.
 
-## The Views page and search results
+## The Root frame
 
-The Views page (`/`) and the full results view (`/?query=…`) are the block
-editor over a set of roots — the views, or the matched blocks — so the keys
-are the editor's own (see "Block editor" above): the arrows and <kbd>w</kbd> /
-<kbd>s</kbd> / <kbd>a</kbd> / <kbd>d</kbd> move the highlight, <kbd>space</kbd>
-/ <kbd>→</kbd> / <kbd>←</kbd> fold and unfold, <kbd>f</kbd> focuses — which,
-here, opens the note at that block. Opening a row loads only that row's
-blocks; a child opens the next level the same way.
+Root (`/`, <kbd>g</kbd> then <kbd>v</kbd>) is the list of every note, at the
+base of every pane (docs/graph-walk.md, decision 5). The arrows move between
+the notes. <kbd>↵</kbd> (or a click) opens the note in the pane as a push, so
+Back and <kbd>⇧</kbd> <kbd>F</kbd> come back down to Root and land on that
+note. A modified click opens the note in a new tab, as any link does.
 
-The Views page is browsed: <kbd>↵</kbd> (or a click) opens the highlighted
-row, and nothing writes. A right-click on a row opens the menu its sidebar
-row has: a note's **⋯** menu on a note's row, and on a block's row the
-block's menu away from its note — **Copy**, **Copy link to block**,
-**Share**, **Remove from Views** — with none of the editing the note's own
-menu carries. A filtered view **edits in place**: <kbd>↵</kbd>
-edits the row as it would in its note, the change lands in the note, and the
-only thing refused is adding a block beside a result or removing one from the
-list — open the note for that.
-
-| Action                                  | Shortcut     |
-| --------------------------------------- | ------------ |
-| In the search box: highlight first row  | <kbd>↓</kbd> |
-| From the first row: back to the search  | <kbd>↑</kbd> |
-| Views page: open the highlighted row    | <kbd>↵</kbd> |
-| Filtered view: edit the highlighted row | <kbd>↵</kbd> |
-| Open the note at this block             | <kbd>f</kbd> |
+| Action                      | Shortcut                    |
+| --------------------------- | --------------------------- |
+| Root: next or previous note | <kbd>↓</kbd> / <kbd>↑</kbd> |
+| Root: open the note         | <kbd>↵</kbd>                |
 
 The tags page keeps its own Linear-style list keys (<kbd>↑</kbd> / <kbd>↓</kbd>,
 <kbd>↵</kbd>, <kbd>Esc</kbd> back to search).
@@ -88,23 +72,22 @@ whose title matched, ranked together by score; or, with nothing typed, the
 **Recent** places — the five most used lately, notes and blocks focused on
 alike, ranked by frecency (how often, weighted by how recently: each place's
 score halves every week, and a visit adds one). A place is visited when it
-is opened — from the Views page, the palette or a link, or by focusing on a
+is opened — from the sidebar, Root, the palette or a link, or by focusing on a
 block in the editor — edited, or a block in it folded or unfolded, on this
 device (at most fifty places, a timestamp and a score each, under one
 browser-storage key that overwrites itself; touches within half an hour of
 the last are the same visit), and a note is visited, too, when it is edited
 on another device (the graph's timestamp); selecting, focusing or arrowing
-through a note never counts (`src/utils/recents.ts`). The Views page lists
-the same Recent above its Views. With the
+through a note never counts (`src/utils/recents.ts`). With the
 **Views** — the notes and the block views, in the sidebar's order
 (docs/metadata.md), each block opening its note focused on it — beneath; a
 place used lately is under both. Both give way
 to results the moment you type — are the same block editor, browsed, under
-the same count line as the Views page. The
+one count line. The
 palette's one item of its own — a date, when the query reads as one —
 comes first and takes cmdk's <kbd>↑</kbd> / <kbd>↓</kbd>; nothing is
 highlighted until you arrow, so <kbd>↵</kbd> straight after typing is the
-query's and opens the full results view. <kbd>↓</kbd> from the query (past
+query's and opens its top result. <kbd>↓</kbd> from the query (past
 the date item, if there is one) hands the keyboard to the rows, whose keys
 are then the editor's (fold with <kbd>space</kbd> / <kbd>→</kbd> /
 <kbd>←</kbd>, walk with <kbd>w</kbd> <kbd>s</kbd> <kbd>a</kbd> <kbd>d</kbd>,
@@ -127,8 +110,6 @@ keeps it.
 
 Opening a row loads only that row's blocks; a child opens the next level the
 same way.
-and opens the full results view, whose `?query=` URL is bookmarkable and
-works with back/forward.
 
 ## Block editor
 
@@ -426,7 +407,7 @@ and selection; an edit in one shows in the other at once. A narrow screen
 | Move the keyboard to the other pane          | <kbd>g</kbd> then <kbd>p</kbd> |
 
 A click in a pane makes it the one with the keyboard. While two panes are
-open, a note opened from the sidebar, the palette or the Views page opens in
+open, a note opened from the sidebar, the palette or Root opens in
 the pane with the keyboard, pushed onto its stack. Pensive, the inspiration,
 pushes with <kbd>d</kbd> and pops with <kbd>⇧</kbd> <kbd>A</kbd>; here
 <kbd>w</kbd> <kbd>a</kbd> <kbd>s</kbd> <kbd>d</kbd> walk the tree, so the

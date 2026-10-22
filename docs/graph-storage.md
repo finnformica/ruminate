@@ -511,8 +511,8 @@ are all of its call sites:
 - `walkGraph`'s upstream pass: the root would show above a note as its parent.
 
 The sort itself is a preference, not data: **Name** (the default), **Recently
-updated** and **Manual**, one preference for the sidebar's Views list, the
-Views page and the palette, so no two surfaces disagree about where a view
+updated** and **Manual**, one preference for the sidebar's Views list and
+the palette, so no two surfaces disagree about where a view
 is. Manual is two bands — the notes the root holds, then the ones it does
 not, in the name order beneath them.
 

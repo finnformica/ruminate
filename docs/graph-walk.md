@@ -45,61 +45,67 @@ The words used below:
   `sort`, `pinned`, `sort_key` and `stack`), synced as view events
   (section 7).
 - **Pane** — one column of the split view. It holds a stack of frames: its
-  history. Its **base frame** comes from a View, or from the hidden root.
+  history. Its **base frame** is always the Root frame.
 - **Frame** — one live query state: a root, a selection, pivots, a filter
   (text and sections-only) and folds. The URL holds it (section 6).
-- **The hidden root** — the `corpus_root` node. A frame rooted there is the
-  list of all notes.
+- **Root** — the `corpus_root` node. The frame rooted there, the **Root
+  frame**, lists every note. It is at the base of every pane's stack. Its
+  label is "Root" (`ROOT_LABEL`, `src/data/root-frame.ts`). The URL does not
+  write it and a View does not save it: every reader puts it back at the
+  base.
 
-| Ruminate        | Pensive          | What it is                                                    | Where it is kept                         |
-| --------------- | ---------------- | ------------------------------------------------------------- | ---------------------------------------- |
-| The graph       | The entity store | One graph per user: `nodes` and `link` rows.                  | D1 and the browser's SQLite, synced      |
-| The hidden root | —                | The `corpus_root` node. Its frame lists every note.           | A node and its `child` links             |
-| A **View**      | A saved stack    | A saved stack of frames: a bookmark into the graph.           | The `views` table, synced as view events |
-| A **pane**      | A tab            | A stack of live frames: the pane's history.                   | The URL (`src/data/panes.ts`)            |
-| A **frame**     | A frame          | One live query state: root, selection, pivots, filter, folds. | The URL (section 6)                      |
-| A pivot         | A pivot          | A query on one block (section 3).                             | The frame                                |
-| A fold          | A collapse       | A collapse on one row, kept as a difference from the default. | The frame                                |
+| Ruminate    | Pensive          | What it is                                                    | Where it is kept                         |
+| ----------- | ---------------- | ------------------------------------------------------------- | ---------------------------------------- |
+| The graph   | The entity store | One graph per user: `nodes` and `link` rows.                  | D1 and the browser's SQLite, synced      |
+| Root        | —                | The `corpus_root` node. Its frame lists every note.           | A node and its `child` links             |
+| A **View**  | A saved stack    | A saved stack of frames: a bookmark into the graph.           | The `views` table, synced as view events |
+| A **pane**  | A tab            | A stack of live frames: the pane's history.                   | The URL (`src/data/panes.ts`)            |
+| A **frame** | A frame          | One live query state: root, selection, pivots, filter, folds. | The URL (section 6)                      |
+| A pivot     | A pivot          | A query on one block (section 3).                             | The frame                                |
+| A fold      | A collapse       | A collapse on one row, kept as a difference from the default. | The frame                                |
 
 ### 1.2 How the parts move
 
-1. **One graph.** Notes hang under the hidden root. Today the root
+1. **One graph.** Notes hang under Root. Today the root
    (docs/graph-storage.md, "Ordering notes") orders notes only. It holds
    only the notes that were dragged. A note is a note because its type is
    `note`.
-2. **Open a View.** The pane's stack becomes the View's saved frames, base
-   first, with the top frame on screen (section 7). A one-frame View gives one
-   frame.
-3. **Open the hidden root.** The pane's base frame is the list of all
-   notes (decision 5).
+2. **Open a View.** The pane's stack becomes Root, then the View's saved
+   frames, base first, with the top frame on screen (section 7). A one-frame
+   View gives Root and that frame.
+3. **Root is always the base.** The pane's base frame is the Root frame, the
+   list of all notes (decision 5). A note opened from search, a link or the
+   calendar opens as Root › note.
 4. **Focus pushes a frame.** The new frame is rooted at the focused block.
    Its filter, pivots and folds are the defaults (decision 1).
 5. **Pop restores the frame below** as it was: its root, selection,
    pivots, filter and folds. The URL holds each of them, so nothing is
    recomputed.
-6. **Save as view** writes the pane's stack, up to the frame on screen,
-   into the View row of the top frame's root (section 7).
+6. **Save as view** writes the pane's stack above Root, up to the frame on
+   screen, into the View row of the top frame's root (section 7).
 7. **The breadcrumb** shows the stack's frames, then the path inside the
    frame on screen. The split-view work builds it. A frame crumb pops to
    that frame. A path crumb is one id of the selection path (decision 2). A
    click on a path crumb pushes a frame rooted there.
-8. **Back pops a frame.** Each push adds a browser history entry. A change
-   of selection, pivot, filter or fold replaces the entry and adds none.
+8. **Back pops a frame**, one at a time, down to Root. Each push adds a
+   browser history entry. A change of selection, pivot, filter or fold
+   replaces the entry and adds none.
 
 ### 1.3 An example
 
-1. Finn opens the View "Project X" from the sidebar. Pane 1 has one frame:
-   root "Project X", with the View's saved filter.
+1. Finn opens the View "Project X" from the sidebar. Pane 1 has two frames:
+   Root, then root "Project X", with the View's saved filter.
 2. Finn presses `q`. The frame now has sections-only on. The outline shows
    the headings only.
 3. Finn selects the heading "Decisions" and presses `f`. A frame is pushed,
    rooted at "Decisions", with no filter, no sections-only, no pivots and
-   no folds. The crumbs read "Project X › Decisions".
+   no folds. The crumbs read "Root › Project X › Decisions".
 4. Finn puts an up pivot on one row, to see the other notes that hold it,
    and folds two rows.
 5. Finn presses `⇧F` (or Back). The pane pops to "Project X", with
    sections-only on, "Decisions" selected and the frame's folds as they
-   were. The pivot and the two folds of the popped frame are gone.
+   were. The pivot and the two folds of the popped frame are gone. A second
+   `⇧F` pops to Root.
 6. Finn chooses **Save as view**. The "Project X" View now holds this
    frame, with sections-only on (section 7). Had he saved in step 4, the View
    would be rooted at "Decisions", with "Project X" saved below it.
@@ -139,7 +145,7 @@ The words used below:
 4. **A section is a heading block** (`h1`, `h2`, `h3`; `isHeading`). Linked
    note rows and board rows are not sections. There is no section flag.
 
-5. **A note with no View shows only in a frame rooted at the hidden root.**
+5. **A note with no View shows only in the Root frame.**
    - The root frame's rows are every live note. First come the notes the
      root links, in `sort_key` order. Then come all other notes, by title.
      These are rows the walk adds from the note type, so no backfill of
@@ -147,11 +153,14 @@ The words used below:
    - A move of a note row in the root frame writes the root's `child` link,
      as a drag writes it today (`src/data/note-order.ts`).
    - "No View" means no listed `views` row. Such a note is in no other
-     list: not the sidebar's Views and not the Views page. Search, Recent,
-     the calendar and a link still open the note itself, because they open
-     a node, not a list.
-   - The sidebar and the Views page get one entry that opens the root
-     frame. Its label is for Finn.
+     list: not the sidebar's Views. Search, Recent, the calendar and a link
+     still open the note itself, because they open a node, not a list. They
+     open it as Root › note.
+   - Views are bookmarks. They are not rows in the Root frame: a View can
+     point at any depth (Root › Tasks › Todos).
+   - There is no Views page. The sidebar has one entry, "Root", first, then
+     the Views list. Finn chose the label (2026-10-22): "Root"
+     (`ROOT_LABEL`). `/` opens the Root frame.
 
 6. **Editing inside an inbound pivot behaves as editing does today** on an
    up row (docs/graph-schema-v2.md, "Upstream"). 3.8 records each case.
@@ -164,8 +173,8 @@ The words used below:
      `CommandInput` carries the frame's pivots.
 
 7. **The phone works as it does today.** Focus goes down; the breadcrumb
-   goes up. The browser's Back pops a frame (the gesture, Android's Back
-   key, or the browser button). The phone shows one pane only. It offers
+   goes up. The browser's Back pops a frame, down to Root (the gesture,
+   Android's Back key, or the browser button). The phone shows one pane only. It offers
    no split, and a URL with a second pane shows the active pane only, as
    the split-view work does.
 
@@ -677,12 +686,12 @@ Status: **Decided 2026-10-20** (Finn's proposal, made after the first
 decisions). A View saves a stack of frames. A one-frame View is the simple
 case.
 
-**Why.** Finn's "Todos" View is the path he walks: Ruminate › Tasks ›
-Todos. "Ruminate" is the hidden root frame (the list of all notes). Opening
-the View restores all three frames, so:
+**Why.** Finn's "Todos" View is the path he walks: Root › Tasks › Todos.
+"Root" is the Root frame (the list of all notes). Opening the View restores
+all three frames, so:
 
 - the breadcrumb shows the path he used, not a path the app picks;
-- `⇧F` and Back pop to "Tasks", then to "Ruminate", as if he had walked
+- `⇧F` and Back pop to "Tasks", then to "Root", as if he had walked
   there;
 - the saved path picks the parent of a block with many parents. If "Todos"
   is held by "Tasks" and by "Projects", the View says "Tasks".
@@ -693,8 +702,10 @@ the View restores all three frames, so:
   opens. So "one View per root" holds, and the row is still minted under
   its root's id.
 - `filter` and `sort` stay the top frame's.
-- A new field, `stack`, holds the rest: the frames below the top, base
-  first, and the top frame's pivots and sections-only. Each frame below
+- A new field, `stack`, holds the rest: the frames below the top and above
+  Root, base first, and the top frame's pivots and sections-only. Root is
+  never stored: it is the base of every pane. An entry for it is ignored on
+  read (`src/data/view-stack.ts`). Each frame below
   holds its note, its root, its filter (text and sections-only) and its
   pivots. The field uses the frame encoding of section 6, without selections and
   folds. Empty means a one-frame View, which is every View today.
@@ -713,12 +724,13 @@ change: a `views.stack` column in D1 and in the local store's schema ladder
 This document only records it. The PR that builds it (GW-19) makes the
 migration.
 
-**Open a View.** The pane's stack becomes the saved frames, base first,
-with the top frame on screen. These frames are restored, not pushed, so
+**Open a View.** The pane's stack becomes Root, then the saved frames, base
+first, with the top frame on screen. These frames are restored, not pushed, so
 they keep their saved filters and pivots (decision 1 applies to a push).
 
-**Save as view** saves the pane's whole stack, up to the frame on screen,
-into the View of the top frame's root. On a root that has a View, it
+**Save as view** (the note's header menu) saves the pane's stack above
+Root, up to the frame on screen, into the View of the top frame's root. The
+View's name is the top root's title or text. Save as view lists the View. On a root that has a View, it
 overwrites that row. **Add to Views** stays as today: it lists the root
 alone, a one-frame View.
 
@@ -729,7 +741,8 @@ unlinked or be deleted. On open, check the stack from the top down:
    leave the View out of the list, as today.
 2. Keep each lower frame while its root still reaches the root of the frame
    above it (`pathToBlock`, `src/data/graph.ts`).
-3. At the first frame that fails, drop it and every frame below it.
+3. At the first frame that fails, drop it and every frame below it. The
+   stack then opens as Root › the frames that still hold › the top.
 4. Show the graph path to the top root in the breadcrumb, as path crumbs:
    the shortest chain that `pathToBlock` finds from the top frame's note.
 
@@ -738,10 +751,14 @@ stack as it is then.
 
 **The sidebar** shows the View's name, which is its top root's title or
 text, as today. After the name it shows the path as a hint: the roots of
-the frames below, for example "Todos" with "Ruminate › Tasks", in the
-secondary colour and clipped to fit. The Views page and the palette draw
-the same list (`viewEntriesAtom`), so they show the same hint. A one-frame
-View has no hint.
+the frames below, from Root, for example "Todos" with "Root › Tasks", in the
+secondary colour and clipped to fit. A one-frame View has no hint. The
+palette draws the same list (`viewEntriesAtom`) without the hint.
+
+**Manage a View** in the sidebar: a right-click (or a press and hold) on its
+row opens the same menu as its ⋯ button: Rename, Move up and Move down in
+the manual sort, Remove from Views, and the rest. A View's Rename sets its
+root's title or text, since that is its name.
 
 ## 8. Still open
 
@@ -1018,7 +1035,10 @@ and GW-20 to GW-22 after it.
 | GW-11     | G    |
 | GW-12     | G    |
 | GW-18     | G    |
+| GW-16     | #286 |
 | GW-19     | #286 |
+| GW-20     | #286 |
+| GW-21     | #286 |
 
 The walk PRs are stacked, and merge in this order: GW-1, GW-2, GW-3, GW-4,
 GW-6, GW-7. GW-5 is stacked on GW-4. GW-19 is stacked on the sync stack,
@@ -1049,6 +1069,20 @@ SV; G built what was missing:
   option and the Settings → Editor "Show links" entry are gone. Boot
   removes the stored `link-directions` value (`forgetRetiredSettings`).
   With no pivots, every row walks down.
+
+**#286** ("F · Root frame and Views that save a whole stack") built the
+`stack` field (GW-19), the Root frame (GW-16), Save as view and open
+(GW-20) and the sidebar's path hint (GW-21):
+
+- **GW-16.** The Root frame is `src/data/root-frame.ts` and its page
+  `src/components/root-frame-page.tsx`, a list of note rows rather than
+  the block editor. A drag of a row there does not write the root's links
+  yet. The Views page is gone: `/` opens Root, `g v` goes to Root, and ↵ on
+  a typed query in the palette opens its top result.
+- **GW-20.** `src/data/view-stack.ts` writes and reads the field, and
+  applies the broken-path rule. The sidebar's View rows link to the
+  restored stack.
+- **GW-21.** The hint is the sidebar's alone.
 
 ## Appendix A. Ruminate's walk before this design
 
