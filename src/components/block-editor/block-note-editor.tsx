@@ -101,7 +101,6 @@ export function BlockNoteEditor({
   landing,
   onOpenBeside,
   noteTitle,
-  collapseKey,
   folds,
   onToggleCollapse,
   starter = true,
@@ -130,12 +129,7 @@ export function BlockNoteEditor({
   /** Told after a block is folded or unfolded — the note page counts it as
    * touching the note. */
   onToggleCollapse?: (key: string) => void
-  /**
-   * The note's id. When provided, the note's folds persist per-device in
-   * localStorage (seeded on first open from the default-expansion policy);
-   * without it, collapse is transient local state (e.g. Storybook /
-   * standalone usage).
-   */
+  /** The note's id: what links, boards and deletes act in. */
   noteId?: string
   /** Start with the first block in edit mode (e.g. a brand-new note). */
   startEditing?: boolean
@@ -170,9 +164,6 @@ export function BlockNoteEditor({
   onOpenBeside?: (id: string) => void
   /** The note's title, shown as the breadcrumb's first crumb while focused. */
   noteTitle?: string
-  /** Where this editor's folds are kept, when not under the note's own id —
-   * a second editor on the page (the Unassigned basket) keeps its own. */
-  collapseKey?: string
   /** Whether an editable doc always keeps a block to type into: an empty
    * one is seeded when it holds none, and the only root cannot be removed.
    * Off for the basket (a blank there would be a new unassigned block, and
@@ -216,7 +207,7 @@ export function BlockNoteEditor({
   }
 
   // Folds: the owner's, or this editor's own rule over its whole doc.
-  const own = useFoldRule(folds ? undefined : (collapseKey ?? noteId))
+  const own = useFoldRule()
   const ownCollapsed = useMemo(
     () => (folds ? null : new Set(collapsedKeysOf(doc, own.expanded))),
     [folds, doc, own.expanded],

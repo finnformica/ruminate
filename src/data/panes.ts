@@ -14,10 +14,10 @@ import type { Direction } from "../blocks/view"
  * selected; popping one goes back to the frame beneath, with its selection,
  * pivots, narrowing and folds as they were.
  *
- * The frame at the bottom comes from a View (or opens a note) and keeps its
- * folds where a note always has, on the device (`src/data/view-state.ts`).
- * Every frame pushed above it carries its folds itself, as what the reader
- * changed over the standing rule, so they travel in the URL with it.
+ * Every frame carries its folds itself, as what the reader changed over the
+ * standing rule (docs/graph-walk.md, section 5), so they travel in the URL
+ * with it: the frame at the bottom, which comes from a View or opens a note,
+ * as much as every frame pushed above it.
  *
  * A **layout** is a list of panes and which one has the keyboard. Two panes
  * sit side by side today (`MAX_PANES`); nothing here depends on the number,
@@ -49,10 +49,15 @@ export interface FocusFrame {
    * direction that block's rows walk. Absent = none, which is the walk of a
    * note. A record, not a map, so a frame stays plain data. */
   pivots?: FramePivots
-  /** A pushed frame's folds: the rows the reader opened and closed over the
-   * standing rule. Absent on the bottom frame, whose folds are the note's
-   * own, kept on the device; and on a frame still at the defaults. */
+  /** The frame's folds: the rows the reader opened and closed over the
+   * standing rule. Absent on a frame still at the defaults. */
   folds?: FrameFolds
+  /** The same while the frame is narrowed by a filter or a sort, whose
+   * standing rule is everything open; cleared when the narrowing changes. */
+  narrowFolds?: FrameFolds
+  /** The depth rule's n the folds were made against (Settings → Editor), so
+   * a fold means the same on every device. Absent: the device's setting. */
+  depth?: number
 }
 
 /**
@@ -316,7 +321,8 @@ export function closePane(layout: PaneLayout, index: number): PaneLayout {
 //
 // The first pane is the page's own address, as it has always been:
 // `/views/<note>?block=<root>&filter=…&sort=…`, so every link made before
-// panes still opens the same view. Its frame on screen also writes `folds`;
+// panes still opens the same view. Its frame on screen also writes `pivots`,
+// `folds`, `nfolds` and `depth`;
 // its stack beneath that frame is `stack`; each other pane is one `pane<i>`
 // parameter holding its whole stack; `active` names the pane with the
 // keyboard when it is not the first.
@@ -324,7 +330,8 @@ export function closePane(layout: PaneLayout, index: number): PaneLayout {
 //   /views/A?block=b2&stack=A::x1,A:b1:@&pane1=B,B:c1;f=type%3Atodo&active=1
 //
 // A frame is `note[:root[:selected]]`, then any of `;f=<filter>`,
-// `;s=<sort>`, `;p=<pivots>` and `;z=<folds>`; frames are joined by commas. Ids are `blk_…`
+// `;s=<sort>`, `;p=<pivots>`, `;z=<folds>`, `;n=<narrowed folds>` and
+// `;d=<depth>`; frames are joined by commas. Ids are `blk_…`
 // (or, for old notes, date-shaped) and occurrence keys join ids with `/` and
 // `^`, so neither `,` nor `:` can appear inside one; a filter or sort escapes
 // `%`, `,`, `:` and `;`.
@@ -342,6 +349,8 @@ export interface PaneSearch {
   filter?: string
   sort?: string
   folds?: string
+  nfolds?: string
+  depth?: number
   pivots?: string
   stack?: string
   pane1?: string
@@ -391,6 +400,15 @@ function formatFolds(folds: FrameFolds, root: string | null): string {
     ...folds.open.map((key) => `+${formatPath(key, root)}`),
     ...folds.closed.map((key) => `-${formatPath(key, root)}`),
   ].join(".")
+}
+
+const hasFolds = (folds: FrameFolds | undefined): folds is FrameFolds =>
+  folds !== undefined && folds.open.length + folds.closed.length > 0
+
+/** A depth read back: a whole number from 0 up, else nothing. */
+function parseDepth(value: unknown): number | undefined {
+  const depth = typeof value === "string" && value !== "" ? Number(value) : value
+  return typeof depth === "number" && Number.isInteger(depth) && depth >= 0 ? depth : undefined
 }
 
 function parseFolds(text: string, root: string | null): FrameFolds | undefined {
@@ -443,9 +461,9 @@ export function formatFrame(frame: FocusFrame): string {
   if (frame.filter) text += `;f=${escapeText(frame.filter)}`
   if (frame.sort) text += `;s=${escapeText(frame.sort)}`
   if (frame.pivots) text += `;p=${formatPivots(frame.pivots)}`
-  if (frame.folds && frame.folds.open.length + frame.folds.closed.length > 0) {
-    text += `;z=${formatFolds(frame.folds, root)}`
-  }
+  if (hasFolds(frame.folds)) text += `;z=${formatFolds(frame.folds, root)}`
+  if (hasFolds(frame.narrowFolds)) text += `;n=${formatFolds(frame.narrowFolds, root)}`
+  if (frame.depth !== undefined) text += `;d=${frame.depth}`
   return text
 }
 
@@ -471,6 +489,12 @@ export function parseFrame(text: string): FocusFrame | null {
     } else if (extra.startsWith("z=")) {
       const folds = parseFolds(value, frameRoot)
       if (folds) frame.folds = folds
+    } else if (extra.startsWith("n=")) {
+      const folds = parseFolds(value, frameRoot)
+      if (folds) frame.narrowFolds = folds
+    } else if (extra.startsWith("d=")) {
+      const depth = parseDepth(value)
+      if (depth !== undefined) frame.depth = depth
     }
   }
   return frame
@@ -489,7 +513,8 @@ const parseFrames = (text: unknown): FocusFrame[] =>
 const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : undefined)
 
 /** The layout a URL holds: the first pane from the address (`noteId`,
- * `block`, `filter`, `sort`, `pivots`, `folds`, `stack`), the rest from
+ * `block`, `filter`, `sort`, `pivots`, `folds`, `nfolds`, `depth`, `stack`),
+ * the rest from
  * `pane<i>`.
  * Malformed parts are dropped. */
 export function layoutFromSearch(noteId: string, search: Record<string, unknown>): PaneLayout {
@@ -499,12 +524,15 @@ export function layoutFromSearch(noteId: string, search: Record<string, unknown>
   const sort = text(search.sort)
   const pivots = text(search.pivots) ? parsePivots(search.pivots as string) : undefined
   const folds = text(search.folds) ? parseFolds(search.folds as string, root) : undefined
+  const narrowFolds = text(search.nfolds) ? parseFolds(search.nfolds as string, root) : undefined
+  const depth = parseDepth(search.depth)
   if (filter) top.filter = filter
   if (sort) top.sort = sort
   if (pivots) top.pivots = pivots
+  if (folds) top.folds = folds
+  if (narrowFolds) top.narrowFolds = narrowFolds
+  if (depth !== undefined) top.depth = depth
   const below = parseFrames(search.stack)
-  // Only a pushed frame keeps its folds in the URL.
-  if (folds && below.length > 0) top.folds = folds
   const panes: Pane[] = [{ frames: [...below, top] }]
   for (let i = 1; i < MAX_PANES; i += 1) {
     const frames = parseFrames(search[paneParam(i)])
@@ -526,13 +554,14 @@ export function layoutFromSearch(noteId: string, search: Record<string, unknown>
 export function layoutToSearch(layout: PaneLayout): { noteId: string; search: PaneSearch } {
   const [first, ...rest] = layout.panes
   const top = currentFrame(first)
-  const folds = first.frames.length > 1 && top.folds ? formatFolds(top.folds, top.root) : undefined
   const search: PaneSearch & Record<string, string | number | undefined> = {
     block: top.root ?? undefined,
     filter: top.filter || undefined,
     sort: top.sort || undefined,
     pivots: top.pivots ? formatPivots(top.pivots) : undefined,
-    folds: folds || undefined,
+    folds: hasFolds(top.folds) ? formatFolds(top.folds, top.root) : undefined,
+    nfolds: hasFolds(top.narrowFolds) ? formatFolds(top.narrowFolds, top.root) : undefined,
+    depth: top.depth,
     stack: first.frames.length > 1 ? formatFrames(first.frames.slice(0, -1)) : undefined,
   }
   for (let i = 1; i < MAX_PANES; i += 1) {

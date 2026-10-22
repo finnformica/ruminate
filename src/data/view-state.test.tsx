@@ -5,73 +5,71 @@ import { Provider, createStore } from "jotai"
 import type { ReactNode } from "react"
 import { expandedByDepth } from "../blocks/default-collapsed"
 import { expandedLevelsAtom } from "../global-state"
-import {
-  MAX_STORED_VIEWS,
-  foldKeyOf,
-  foldRule,
-  openFolds,
-  readFolds,
-  useFoldRule,
-  withFold,
-  writeFolds,
-  type Narrowing,
-} from "./view-state"
+import { foldRule, takeStoredFolds, useFoldRule, withFold, type HeldFolds } from "./view-state"
 
 /** Keys of a four-deep outline: `a`, `a/b`, `a/b/c`, `a/b/c/d`. Levels 1–4. */
-const stored = (noteId: string): unknown => {
-  const raw = localStorage.getItem(`collapse:${noteId}`)
-  return raw === null ? null : JSON.parse(raw)
-}
-
 const sorted = (set: ReadonlySet<string>) => [...set].sort()
 
+type Options = Parameters<typeof useFoldRule>[0]
+
 /** Render the hook against a store with the given depth setting. */
-function renderWithLevels(
-  levels: number,
-  noteId: string | undefined,
-  narrowing: { filter?: string; sort?: string } = {},
-  held?: ReadonlySet<string>,
-) {
+function renderWithLevels(levels: number, options: Options = {}) {
   const store = createStore()
   store.set(expandedLevelsAtom, levels)
   const wrapper = ({ children }: { children: ReactNode }) => (
     <Provider store={store}>{children}</Provider>
   )
-  type Props = { id: string | undefined; narrowing: Narrowing; held?: ReadonlySet<string> }
-  const rendered = renderHook(
-    ({ id, narrowing, held }: Props) => useFoldRule(id, narrowing, held),
-    { initialProps: { id: noteId, narrowing, held } as Props, wrapper },
-  )
+  const rendered = renderHook((props: Options) => useFoldRule(props), {
+    initialProps: options,
+    wrapper,
+  })
   return { ...rendered, store }
+}
+
+/** Folds a caller holds, as a frame holds them, with every change kept. */
+function heldFolds(): HeldFolds & { changes: unknown[] } {
+  const held = {
+    folds: { open: new Set<string>(), closed: new Set<string>() } as HeldFolds["folds"],
+    changes: [] as unknown[],
+    onChange: (next: HeldFolds["folds"]) => {
+      held.changes.push(next)
+      held.folds = next
+    },
+  }
+  return held
 }
 
 beforeEach(() => localStorage.clear())
 afterEach(cleanup)
 
-describe("readFolds", () => {
-  it("is null without a note id, an entry, or usable JSON", () => {
-    expect(readFolds(undefined)).toBe(null)
-    expect(readFolds("n1")).toBe(null)
+describe("takeStoredFolds (the seed, docs/graph-walk.md GW-10)", () => {
+  it("is null without an entry, usable JSON or a fold", () => {
+    expect(takeStoredFolds("n1")).toBe(null)
     localStorage.setItem("collapse:n1", "{not json")
-    expect(readFolds("n1")).toBe(null)
+    expect(takeStoredFolds("n1")).toBe(null)
+    localStorage.setItem("collapse:n1", JSON.stringify({ v: 3, open: [], closed: [], t: 1 }))
+    expect(takeStoredFolds("n1")).toBe(null)
   })
 
-  it("reads back both lists, ignoring junk entries", () => {
+  it("reads back both lists, ignoring junk entries, and runs once", () => {
     localStorage.setItem(
       "collapse:n1",
       JSON.stringify({ v: 3, open: ["a/b", 7], closed: ["a", null], t: 1 }),
     )
-    const folds = readFolds("n1")!
+    const folds = takeStoredFolds("n1")!
     expect(sorted(folds.open)).toEqual(["a/b"])
     expect(sorted(folds.closed)).toEqual(["a"])
+    expect(localStorage.getItem("collapse:n1")).toBe(null)
+    expect(takeStoredFolds("n1")).toBe(null)
   })
 
   it("reads the collapsed set of the previous shape, and a bare array, as closes", () => {
     localStorage.setItem("collapse:n1", JSON.stringify({ v: 2, collapsed: ["a/b"], t: 1 }))
-    expect(sorted(readFolds("n1")!.closed)).toEqual(["a/b"])
-    expect(readFolds("n1")!.open.size).toBe(0)
+    const folds = takeStoredFolds("n1")!
+    expect(sorted(folds.closed)).toEqual(["a/b"])
+    expect(folds.open.size).toBe(0)
     localStorage.setItem("collapse:n2", JSON.stringify(["a"]))
-    expect(sorted(readFolds("n2")!.closed)).toEqual(["a"])
+    expect(sorted(takeStoredFolds("n2")!.closed)).toEqual(["a"])
   })
 
   it("reads the old two-layer record as itself, dropping a key named both ways", () => {
@@ -79,7 +77,7 @@ describe("readFolds", () => {
       "collapse:n1",
       JSON.stringify({ expanded: ["b", "c"], collapsed: ["a", "c"] }),
     )
-    const folds = readFolds("n1")!
+    const folds = takeStoredFolds("n1")!
     expect(sorted(folds.open)).toEqual(["b"])
     expect(sorted(folds.closed)).toEqual(["a"])
   })
@@ -135,102 +133,69 @@ describe("withFold", () => {
     // The input is untouched.
     expect(sorted(start.open)).toEqual(["b"])
   })
-})
 
-describe("writeFolds", () => {
-  it("writes both lists, empty ones included (a fold put back is a state)", () => {
-    writeFolds("n1", { open: new Set(), closed: new Set() })
-    expect(stored("n1")).toMatchObject({ v: 3, open: [], closed: [] })
-  })
-
-  it("keeps at most MAX_STORED_VIEWS notes, dropping the least recently written", () => {
-    for (let i = 0; i < MAX_STORED_VIEWS; i += 1) {
-      localStorage.setItem(
-        `collapse:old-${i}`,
-        JSON.stringify({ v: 3, open: [], closed: ["a"], t: i + 1 }),
-      )
-    }
-    writeFolds("new", { open: new Set(), closed: new Set(["a"]) })
-    expect(localStorage.getItem("collapse:old-0")).toBe(null)
-    expect(localStorage.getItem("collapse:old-1")).not.toBe(null)
-    expect(localStorage.getItem("collapse:new")).not.toBe(null)
+  it("keeps nothing for a row the rule already puts there", () => {
+    const start = { open: new Set(["a/b"]), closed: new Set<string>() }
+    const back = withFold(start, "a/b", false, false)
+    expect(back.open.size + back.closed.size).toBe(0)
+    expect(sorted(withFold(start, "a/b", false, true).closed)).toEqual(["a/b"])
   })
 })
 
 describe("useFoldRule", () => {
   it("answers from the depth setting until the reader folds, and stores nothing", () => {
-    const { result } = renderWithLevels(2, "n1")
+    const { result } = renderWithLevels(2)
     expect(result.current.expanded("a", 1)).toBe(true)
-    expect(result.current.expanded("a/b", 2)).toBe(false)
-    expect(stored("n1")).toBe(null)
-  })
-
-  it("follows the depth the reader chose, live, for every untouched row", () => {
-    const { result, store } = renderWithLevels(1, "n1")
-    expect(result.current.expanded("a", 1)).toBe(false)
-    act(() => store.set(expandedLevelsAtom, 4))
-    expect(result.current.expanded("a/b/c", 3)).toBe(true)
-  })
-
-  it("a fold the reader made stays where they put it when the setting moves", () => {
-    const { result, store } = renderWithLevels(2, "n1")
-    act(() => result.current.setFold("a/b", true))
-    act(() => result.current.setFold("a", false))
-    act(() => store.set(expandedLevelsAtom, 4))
-    expect(result.current.expanded("a/b", 2)).toBe(true)
-    expect(result.current.expanded("a", 1)).toBe(false)
-    act(() => store.set(expandedLevelsAtom, 1))
-    expect(result.current.expanded("a/b", 2)).toBe(true)
-  })
-
-  it("persists each decision, and remembers them across a remount", () => {
-    const first = renderWithLevels(2, "n1")
-    act(() => first.result.current.setFold("a/b", true))
-    expect(stored("n1")).toMatchObject({ v: 3, open: ["a/b"], closed: [] })
-    first.unmount()
-
-    const second = renderWithLevels(2, "n1")
-    expect(second.result.current.expanded("a/b", 2)).toBe(true)
-    // And a row put back where the rule has it is remembered as the
-    // reader's, not re-decided by a later change of setting.
-    act(() => second.result.current.setFold("a/b", false))
-    act(() => second.store.set(expandedLevelsAtom, 10))
-    expect(second.result.current.expanded("a/b", 2)).toBe(false)
-  })
-
-  it("re-reads on a different note, so one note's folds never paint on another", () => {
-    const { result, rerender } = renderWithLevels(2, "n1")
-    act(() => result.current.setFold("a", false))
-    rerender({ id: "n2", narrowing: {} })
-    expect(result.current.expanded("a", 1)).toBe(true)
-    rerender({ id: "n1", narrowing: {} })
-    expect(result.current.expanded("a", 1)).toBe(false)
-  })
-
-  it("never leaves a row un-openable, whatever was stored", () => {
-    // Regression, stuck fold: an old record naming `b` in both directions
-    // used to make it permanently collapsed. The read drops the conflict,
-    // and a toggle records the reader's decision over any bare-id entry.
-    localStorage.setItem("collapse:n1", JSON.stringify({ expanded: ["b"], collapsed: ["b"] }))
-    const { result } = renderWithLevels(1, "n1")
-    expect(result.current.expanded("a/b", 2)).toBe(false)
-    act(() => result.current.setFold("a/b", true))
-    expect(result.current.expanded("a/b", 2)).toBe(true)
-    expect(stored("n1")).toMatchObject({ v: 3, open: ["a/b"], closed: [] })
-  })
-
-  it("works without a note id (Storybook / standalone) and stores nothing", () => {
-    const { result } = renderWithLevels(2, undefined)
     expect(result.current.expanded("a/b", 2)).toBe(false)
     act(() => result.current.setFold("a/b", true))
     expect(result.current.expanded("a/b", 2)).toBe(true)
     expect(Object.keys(localStorage).filter((key) => key.startsWith("collapse:"))).toEqual([])
   })
+
+  it("follows the depth setting, live, for every untouched row", () => {
+    const { result, store } = renderWithLevels(1)
+    expect(result.current.expanded("a", 1)).toBe(false)
+    act(() => store.set(expandedLevelsAtom, 4))
+    expect(result.current.expanded("a/b/c", 3)).toBe(true)
+  })
+
+  it("reads the frame's depth over the device's setting", () => {
+    const { result } = renderWithLevels(1, { depth: 3 })
+    expect(result.current.expanded("a/b", 2)).toBe(true)
+    expect(result.current.expanded("a/b/c", 3)).toBe(false)
+  })
+
+  it("does not keep a fold equal to the default", () => {
+    const held = heldFolds()
+    const { result, rerender } = renderWithLevels(2, { owned: held })
+    // The walk asks of each row before the reader can toggle it.
+    expect(result.current.expanded("a", 1)).toBe(true)
+    expect(result.current.expanded("a/b", 2)).toBe(false)
+    act(() => result.current.setFold("a/b", true))
+    rerender({ owned: held })
+    expect(sorted(held.folds.open)).toEqual(["a/b"])
+    // Closed again, the row is where the rule has it: nothing is kept.
+    act(() => result.current.setFold("a/b", false))
+    act(() => result.current.setFold("a", true))
+    expect(held.folds.open.size + held.folds.closed.size).toBe(0)
+  })
+
+  it("never leaves a row un-openable, whatever an old record said", () => {
+    // Regression, stuck fold: a bare-id entry used to win over the reader's
+    // toggle. The toggle records the decision over any bare-id entry.
+    const held = heldFolds()
+    held.folds = { open: new Set(), closed: new Set(["b"]) }
+    const { result, rerender } = renderWithLevels(1, { owned: held })
+    expect(result.current.expanded("a/b", 2)).toBe(false)
+    act(() => result.current.setFold("a/b", true))
+    rerender({ owned: held })
+    expect(result.current.expanded("a/b", 2)).toBe(true)
+  })
 })
 
 describe("useFoldRule, with rows held open", () => {
   it("opens a held block's rows over the depth setting, and still folds on the reader's say", () => {
-    const { result } = renderWithLevels(1, "n1", {}, new Set(["b", "c"]))
+    const { result } = renderWithLevels(1, { held: new Set(["b", "c"]) })
     // Level 2 would be closed under the depth setting; held, it is open —
     // every occurrence of the block, by its id.
     expect(result.current.expanded("a/b", 2)).toBe(true)
@@ -246,79 +211,32 @@ describe("useFoldRule, with rows held open", () => {
 })
 
 describe("useFoldRule, narrowed", () => {
-  it("keys the note's folds by its id alone, and a narrowed view's by the narrowing", () => {
-    expect(foldKeyOf("n1")).toBe("n1")
-    expect(foldKeyOf("n1", { filter: "", sort: "" })).toBe("n1")
-    expect(foldKeyOf("n1", { filter: "type:todo" })).not.toBe("n1")
-    expect(foldKeyOf("n1", { filter: "type:todo" })).not.toBe(foldKeyOf("n1", { sort: "text" }))
-    expect(foldKeyOf("n1", { filter: "type:todo" })).not.toBe(
-      foldKeyOf("n2", { filter: "type:todo" }),
-    )
-  })
-
-  it("starts fully open whatever the depth setting says, and folds without touching the note's", () => {
-    const { result } = renderWithLevels(1, "n1", { filter: "type:todo" })
+  it("starts fully open whatever the depth setting says", () => {
+    const { result } = renderWithLevels(1, { narrowed: true })
     // Level 1 would be closed under the note's depth setting; narrowed, it is open.
     expect(result.current.expanded("a", 1)).toBe(true)
     expect(result.current.expanded("a/b/c", 3)).toBe(true)
     act(() => result.current.setFold("a", false))
     expect(result.current.expanded("a", 1)).toBe(false)
-    // The narrowed view's entry, not the note's.
-    expect(stored("n1")).toBe(null)
-    expect(readFolds(foldKeyOf("n1", { filter: "type:todo" }))?.closed.has("a")).toBe(true)
-  })
-
-  it("keeps each narrowing's folds apart, and remembers them", () => {
-    const { result, rerender } = renderWithLevels(2, "n1", { filter: "type:todo" })
-    act(() => result.current.setFold("a", false))
-    // Another filter: its own folds, open.
-    rerender({ id: "n1", narrowing: { filter: "type:done" } })
-    expect(result.current.expanded("a", 1)).toBe(true)
-    // The note itself: the depth setting, untouched by the fold above.
-    rerender({ id: "n1", narrowing: {} })
-    expect(result.current.expanded("a", 1)).toBe(true)
-    expect(result.current.expanded("a/b", 2)).toBe(false)
-    // The first filter again: the fold made in it is back.
-    rerender({ id: "n1", narrowing: { filter: "type:todo" } })
-    expect(result.current.expanded("a", 1)).toBe(false)
   })
 })
 
-describe("folds a pushed frame holds (docs/split-view.md)", () => {
+describe("folds a frame holds (docs/graph-walk.md, section 5)", () => {
   it("reads and writes the caller's folds, and stores nothing", () => {
-    const store = createStore()
-    store.set(expandedLevelsAtom, 2)
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <Provider store={store}>{children}</Provider>
-    )
-    let held = { open: new Set<string>(), closed: new Set(["a"]) } as const
-    const changes: unknown[] = []
-    const { result, rerender } = renderHook(
-      () =>
-        useFoldRule("n1", {}, undefined, {
-          folds: held,
-          onChange: (next) => {
-            changes.push(next)
-            held = next as typeof held
-          },
-        }),
-      { wrapper },
-    )
+    const held = heldFolds()
+    held.folds = { open: new Set(), closed: new Set(["a"]) }
+    const { result, rerender } = renderWithLevels(2, { owned: held })
     expect(result.current.expanded("a", 1)).toBe(false)
+    expect(result.current.expanded("a/b", 2)).toBe(false)
     // Two toggles in one event build on each other.
     act(() => {
       result.current.setFold("a", true)
       result.current.setFold("a/b", true)
     })
-    rerender()
-    expect(changes).toHaveLength(2)
+    rerender({ owned: held })
+    expect(held.changes).toHaveLength(2)
     expect(result.current.expanded("a", 1)).toBe(true)
     expect(result.current.expanded("a/b", 2)).toBe(true)
-    expect(stored("n1")).toBe(null)
-  })
-
-  it("opens rows ahead of a view that is not on screen yet", () => {
-    openFolds("n1", ["a", "a/b"])
-    expect(stored("n1")).toMatchObject({ open: ["a", "a/b"], closed: [] })
+    expect(Object.keys(localStorage).filter((key) => key.startsWith("collapse:"))).toEqual([])
   })
 })

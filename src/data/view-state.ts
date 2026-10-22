@@ -6,59 +6,33 @@ import { BOARD_TYPE } from "./graph"
 import { expandedLevelsAtom } from "../global-state"
 
 /**
- * Fold state for one VIEW: per-device ephemera, not synced data
- * (docs/graph-schema-v2.md dropped the view_state table). Folds key by
- * occurrence (`src/blocks/view.ts`): a block that shows up twice in a note is
- * two rows, folded independently.
+ * Fold state for one view: view state, not synced data (docs/graph-schema-v2.md
+ * dropped the view_state table). Folds key by occurrence (`src/blocks/view.ts`):
+ * a block that shows up twice in a note is two rows, folded independently.
  *
- * A view is a note, or a note narrowed by a filter and a sort
- * (`src/data/filter-view.ts`), and each keeps folds of its own under its own
- * key (`foldKeyOf`). So the note's folds and a filtered view's are two
- * entries in one store, told apart by key rather than by a second store: a
- * chevron clicked while narrowed lands on the narrowed view's entry, and
- * the note's is untouched underneath; clear the filter and the note's folds
- * are back, put the same filter on again and its folds are back too.
+ * Folds belong to a frame (docs/graph-walk.md, section 5): each frame of each
+ * pane holds its own in the URL (`src/data/panes.ts`), so a pushed frame
+ * starts with none and a pop restores them. A frame narrowed by a filter or a
+ * sort keeps its narrowed folds apart, and clears them when the narrowing
+ * changes, so a fold made while narrowed never closes a row of the note.
  *
  * Two layers, one answer. A standing rule decides every row the reader has
- * not touched: for a note, the depth setting (`expandedByDepth`, Settings →
- * Editor); for a narrowed view, everything open — the reader asked for the
- * matches, and a match behind a fold would be a riddle. Over it sit the
- * reader's own folds — the rows they closed AND the rows they opened, each
- * remembered explicitly, so a row they opened stays open when the setting
- * moves and a row they closed stays closed when the note grows around it. A
- * row with no entry follows the rule, which is what lets the walk be lazy
+ * not touched: for a note, the depth rule at the frame's depth
+ * (`expandedByDepth`, Settings → Editor, recorded on the frame so a fold means
+ * the same on every device); for a narrowed view, everything open — the
+ * reader asked for the matches, and a match behind a fold would be a riddle.
+ * Over it sit the reader's own folds: the rows they closed AND the rows they
+ * opened, as differences from the rule. A fold equal to the rule is not kept.
+ * A row with no entry follows the rule, which is what lets the walk be lazy
  * (`walkGraph`): a row reached for the first time has an answer without a
  * document to seed from.
  *
- * Storage is bounded: entries are per view (`collapse:<key>`), only views
- * the reader has folded or unfolded in are stored, and the least recently
- * written fall off past `MAX_STORED_VIEWS`. Settings offers a reset that
- * forgets every fold on the device. Nothing is pruned against the document:
- * a lazy doc does not hold the rows beneath a fold, and a fold on a row that
- * has since gone is inert.
+ * Folds were once kept on the device, per note, in localStorage
+ * (`collapse:<noteId>`). The first open of a note seeds its base frame from
+ * that entry once, and the entry goes (`takeStoredFolds`).
  */
 
 const STORAGE_PREFIX = "collapse:"
-const storageKey = (viewKey: string) => `${STORAGE_PREFIX}${viewKey}`
-
-/** How many views' folds a device keeps; the least recently written go first. */
-export const MAX_STORED_VIEWS = 500
-
-/** What a view is narrowed by, as the page has it (empty = not at all). */
-export interface Narrowing {
-  filter?: string
-  sort?: string
-}
-
-/**
- * The key a view's folds are kept under: the note's id for the note itself
- * (so every fold stored to date is still where it was), and the id with the
- * filter and sort appended for a narrowed view. Newlines separate the parts
- * because neither an id nor a query holds one.
- */
-export function foldKeyOf(noteId: string, { filter = "", sort = "" }: Narrowing = {}): string {
-  return filter === "" && sort === "" ? noteId : `${noteId}\n${filter}\n${sort}`
-}
 
 /** The reader's explicit folds on one note. Never mutated — every update
  * builds fresh sets. */
@@ -71,21 +45,13 @@ export interface Folds {
 
 const NO_FOLDS: Folds = { open: new Set(), closed: new Set() }
 
-/** The stored shape: both lists and when they were last written. */
-interface StoredFolds {
-  v: 3
-  open: string[]
-  closed: string[]
-  t: number
-}
-
 const asStrings = (x: unknown): string[] =>
   Array.isArray(x) ? x.filter((id): id is string => typeof id === "string") : []
 
 /**
- * Tolerant read — the folds the reader left on a note, or null when nothing
- * usable is stored (a note never folded on this device, cleared storage,
- * malformed JSON).
+ * Tolerant read of a stored entry — the folds the reader left on a note, or
+ * null when nothing usable is stored (a note never folded on this device,
+ * cleared storage, malformed JSON).
  *
  * Older shapes are read too, each as the reader's own folds: the `v: 2`
  * collapsed set and the bare array before it (which also stored policy
@@ -94,10 +60,8 @@ const asStrings = (x: unknown): string[] =>
  * along. An entry without a `/` is a block id from before folds keyed by
  * occurrence, and applies to every occurrence of that block (`foldRule`).
  */
-export function readFolds(viewKey: string | undefined): Folds | null {
-  if (!viewKey || typeof localStorage === "undefined") return null
+function readFolds(raw: string | null): Folds | null {
   try {
-    const raw = localStorage.getItem(storageKey(viewKey))
     if (!raw) return null
     const parsed: unknown = JSON.parse(raw)
     if (Array.isArray(parsed)) return { open: new Set(), closed: new Set(asStrings(parsed)) }
@@ -124,72 +88,29 @@ export function readFolds(viewKey: string | undefined): Folds | null {
   }
 }
 
-/** The last-written time of a stored entry (older shapes count as oldest). */
-function storedTime(raw: string | null): number {
-  if (!raw) return 0
+/**
+ * The folds a note once kept on this device, taken once: read, and the entry
+ * removed, so the seed of a note's base frame runs one time only. Null when
+ * nothing usable is stored. A narrowed view's old entries are not read.
+ */
+export function takeStoredFolds(noteId: string): Folds | null {
+  if (typeof localStorage === "undefined") return null
   try {
-    const parsed: unknown = JSON.parse(raw)
-    const t = (parsed as { t?: unknown } | null)?.t
-    return typeof t === "number" ? t : 0
+    const key = `${STORAGE_PREFIX}${noteId}`
+    const raw = localStorage.getItem(key)
+    if (raw === null) return null
+    localStorage.removeItem(key)
+    const folds = readFolds(raw)
+    return folds && folds.open.size + folds.closed.size > 0 ? folds : null
   } catch {
-    return 0
+    return null
   }
-}
-
-/** Every view key with folds stored on this device. */
-function storedViewKeys(): string[] {
-  const keys: string[] = []
-  for (let i = 0; i < localStorage.length; i += 1) {
-    const key = localStorage.key(i)
-    if (key?.startsWith(STORAGE_PREFIX)) keys.push(key.slice(STORAGE_PREFIX.length))
-  }
-  return keys
-}
-
-/** Drop the least recently written entries beyond the cap. */
-function pruneStoredViews(keep: string) {
-  const keys = storedViewKeys()
-  if (keys.length <= MAX_STORED_VIEWS) return
-  const byAge = keys
-    .filter((key) => key !== keep)
-    .map((key) => ({ key, t: storedTime(localStorage.getItem(storageKey(key))) }))
-    .sort((a, b) => a.t - b.t)
-  for (const { key } of byAge.slice(0, keys.length - MAX_STORED_VIEWS)) {
-    localStorage.removeItem(storageKey(key))
-  }
-}
-
-/** Persist a view's folds. Empty lists are still written: they record that
- * the reader's last toggle put a row back where the rule has it. */
-export function writeFolds(viewKey: string, folds: Folds) {
-  if (typeof localStorage === "undefined") return
-  try {
-    const entry: StoredFolds = {
-      v: 3,
-      open: [...folds.open],
-      closed: [...folds.closed],
-      t: Date.now(),
-    }
-    localStorage.setItem(storageKey(viewKey), JSON.stringify(entry))
-    pruneStoredViews(viewKey)
-  } catch {
-    // Storage full/unavailable — fold state is ephemeral by design.
-  }
-}
-
-/** Record rows as open in a view that is not on screen yet — the folds
- * down to a block a wider view must show as it opens. */
-export function openFolds(viewKey: string, keys: string[]) {
-  if (keys.length === 0) return
-  let folds = readFolds(viewKey) ?? NO_FOLDS
-  for (const key of keys) folds = withFold(folds, key, true)
-  writeFolds(viewKey, folds)
 }
 
 /**
- * Folds the caller holds rather than the device: a frame pushed onto a
- * pane's focus stack keeps its own in the URL (docs/split-view.md). Given,
- * `useFoldRule` reads and writes these and touches no storage.
+ * Folds the caller holds: a frame keeps its own in the URL
+ * (src/data/panes.ts). Given, `useFoldRule` reads and writes these; without
+ * them it keeps its own for as long as it is mounted.
  */
 export interface HeldFolds {
   folds: Folds
@@ -219,8 +140,10 @@ export function foldRule(folds: Folds, byDepth: ExpandedRule): ExpandedRule {
 }
 
 /** `folds` with `key` set open or closed — and any bare-id entry for its
- * block dropped, so the reader's toggle is never outvoted by an old record. */
-export function withFold(folds: Folds, key: string, open: boolean): Folds {
+ * block dropped, so the reader's toggle is never outvoted by an old record.
+ * When the standing rule already puts the row there (`byDefault`), the fold
+ * is a difference of nothing, and is not kept. */
+export function withFold(folds: Folds, key: string, open: boolean, byDefault?: boolean): Folds {
   const id = idOfKey(key)
   const next = {
     open: new Set(folds.open),
@@ -230,6 +153,7 @@ export function withFold(folds: Folds, key: string, open: boolean): Folds {
   next.closed.delete(key)
   next.open.delete(id)
   next.closed.delete(id)
+  if (byDefault === open) return next
   if (open) next.open.add(key)
   else next.closed.add(key)
   return next
@@ -239,65 +163,68 @@ export function withFold(folds: Folds, key: string, open: boolean): Folds {
 const EVERYTHING_OPEN: ExpandedRule = () => true
 
 /**
- * Fold state for one view — a note, or the note narrowed by `narrowing`:
- * the rule its rows are drawn by, and the way to move a row. `setFold(key,
- * open)` records the reader's decision for that row (and persists it, under
- * the view's own key, when there is a note to persist under); the owner of
- * the view — which knows what is folded right now — turns a toggle into
- * one. Without a note id (Storybook / standalone) nothing is stored.
+ * Fold state for one view: the rule its rows are drawn by, and the way to
+ * move a row. `setFold(key, open)` records the reader's decision for that
+ * row, in the folds the caller holds (`owned`, a frame's) or in this hook's
+ * own; the owner of the view — which knows what is folded right now — turns
+ * a toggle into one.
  *
- * The standing rule beneath the reader's folds is the depth setting for a
- * note and everything open for a narrowed view (see the top of this file):
- * the one place that says what a view starts as. `held` names blocks the
- * rule holds open over the depth setting — the calendar's rows with a
- * change beneath them (`components/day-changes.tsx`) — as a default only:
- * the reader's own fold on one of them still closes it.
+ * The standing rule beneath the reader's folds is the depth rule at `depth`
+ * (the frame's; absent, the device's setting) for a note, and everything
+ * open for a narrowed view (see the top of this file): the one place that
+ * says what a view starts as. `held` names blocks the rule holds open over
+ * the depth rule — the calendar's rows with a change beneath them
+ * (`components/day-changes.tsx`) — as a default only: the reader's own fold
+ * on one of them still closes it.
  */
-export function useFoldRule(
-  noteId: string | undefined,
-  narrowing: Narrowing = {},
-  held?: ReadonlySet<string>,
-  owned?: HeldFolds,
-) {
-  const levels = useAtomValue(expandedLevelsAtom)
-  const { filter = "", sort = "" } = narrowing
-  const viewKey = noteId === undefined ? undefined : foldKeyOf(noteId, { filter, sort })
-  const narrowed = filter !== "" || sort !== ""
-  const [state, setState] = React.useState<{ viewKey: string | undefined; folds: Folds }>(() => ({
-    viewKey,
-    folds: readFolds(viewKey) ?? NO_FOLDS,
-  }))
-  // Re-read during render on a different view, so the new view never paints
-  // with the old one's folds. Settles in one extra render.
-  if (state.viewKey !== viewKey) setState({ viewKey, folds: readFolds(viewKey) ?? NO_FOLDS })
-
-  // Folds the caller holds stand in for the device's.
-  const folds = owned ? owned.folds : state.folds
-  const expanded = React.useMemo(() => {
+export function useFoldRule({
+  narrowed = false,
+  held,
+  owned,
+  depth,
+}: {
+  narrowed?: boolean
+  held?: ReadonlySet<string>
+  owned?: HeldFolds
+  depth?: number
+} = {}) {
+  const setting = useAtomValue(expandedLevelsAtom)
+  const levels = depth ?? setting
+  const [own, setOwn] = React.useState<Folds>(NO_FOLDS)
+  const folds = owned ? owned.folds : own
+  // The level and type the walk asked of each row, so a toggle can tell
+  // whether it puts the row where the standing rule has it.
+  const asked = React.useRef(new Map<string, { level: number; type?: string }>())
+  const standing = React.useMemo<ExpandedRule>(() => {
     const byDepth = narrowed ? EVERYTHING_OPEN : expandedByDepth(levels)
-    const standing: ExpandedRule = held
-      ? (key, level, type) => held.has(idOfKey(key)) || byDepth(key, level, type)
-      : byDepth
-    return foldRule(folds, standing)
-  }, [folds, narrowed, levels, held])
+    return (key, level, type) =>
+      type === BOARD_TYPE ? false : (held?.has(idOfKey(key)) ?? false) || byDepth(key, level, type)
+  }, [narrowed, levels, held])
+  const expanded = React.useMemo<ExpandedRule>(() => {
+    const rule = foldRule(folds, standing)
+    return (key, level, type) => {
+      asked.current.set(key, { level, type })
+      return rule(key, level, type)
+    }
+  }, [folds, standing])
 
-  // Read through a ref, so two toggles in one event build on each other and
+  // Read through refs, so two toggles in one event build on each other and
   // `setFold` keeps one identity.
   const ownedRef = React.useRef(owned)
   ownedRef.current = owned
+  const standingRef = React.useRef(standing)
+  standingRef.current = standing
   const setFold = React.useCallback((key: string, open: boolean) => {
+    const at = asked.current.get(key)
+    const byDefault = at ? standingRef.current(key, at.level, at.type) : undefined
     const held = ownedRef.current
     if (held) {
-      const next = withFold(held.folds, key, open)
+      const next = withFold(held.folds, key, open, byDefault)
       held.folds = next
       held.onChange(next)
       return
     }
-    setState((prev) => {
-      const folds = withFold(prev.folds, key, open)
-      if (prev.viewKey) writeFolds(prev.viewKey, folds)
-      return { ...prev, folds }
-    })
+    setOwn((prev) => withFold(prev, key, open, byDefault))
   }, [])
 
   return { expanded, setFold, folds }

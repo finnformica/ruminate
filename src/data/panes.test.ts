@@ -177,9 +177,24 @@ describe("a frame's state (Finn's decisions, docs/split-view.md)", () => {
     expect(JSON.parse(JSON.stringify(pane))).toEqual(pane)
   })
 
-  it("keeps the bottom frame's folds off the URL: they are the note's own", () => {
-    const layout = layoutFromSearch(A, { folds: "-x" })
-    expect(currentFrame(layout.panes[0]).folds).toBeUndefined()
+  it("keeps the bottom frame's folds in the URL too (docs/graph-walk.md, section 5)", () => {
+    const pane = withCurrent(paneOf(A), {
+      folds: { open: [], closed: ["blk_x"] },
+      narrowFolds: { open: ["blk_y"], closed: [] },
+      depth: 3,
+    })
+    const layout: PaneLayout = { panes: [pane, pane], active: 0 }
+    const { noteId, search } = layoutToSearch(layout)
+    expect(search).toMatchObject({ folds: "-x", nfolds: "+y", depth: 3 })
+    expect(search.pane1).toBe(`${A};z=-x;n=+y;d=3`)
+    expect(layoutFromSearch(noteId, search as Record<string, unknown>)).toEqual(layout)
+  })
+
+  it("drops a malformed depth", () => {
+    for (const depth of ["-1", "x", "1.5", ""]) {
+      expect(currentFrame(layoutFromSearch(A, { depth }).panes[0]).depth).toBeUndefined()
+    }
+    expect(parseFrame(`${A};d=two`)).toEqual({ noteId: A, root: null, selected: null })
   })
 })
 

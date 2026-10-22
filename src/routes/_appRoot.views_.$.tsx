@@ -28,6 +28,7 @@ import { databaseModeStatusAtom } from "../data/database-mode"
 import { sharedModeStatusAtom } from "../data/shared-mode"
 import { requestDatabaseFlush } from "../data/database-mode"
 import {
+  expandedLevelsAtom,
   graphSnapshotAtom,
   isDatabaseModeAtom,
   isSignedOutAtom,
@@ -42,7 +43,7 @@ import { useOpenNote } from "../hooks/open-note"
 import { pathToBlock } from "../data/graph"
 import { narrowingParam, resolveNarrowing } from "../utils/view-filter"
 import { FilterMenu, SortMenu } from "../components/view-controls"
-import { foldKeyOf, openFolds, useFoldRule, type Folds } from "../data/view-state"
+import { takeStoredFolds, useFoldRule, type Folds } from "../data/view-state"
 import { keyOf } from "../blocks/view"
 import { useNoteShare } from "../hooks/share"
 import { shareOwnerName } from "../data/shares"
@@ -81,9 +82,13 @@ type RouteSearch = {
   query: string | undefined
   /** Block id the editor is focused on; absent = outside focus. */
   block?: string
-  /** The folds of a frame pushed onto the first pane's stack, as what the
-   * reader changed over the standing rule (docs/split-view.md). */
+  /** The first pane's frame on screen: its folds, as what the reader
+   * changed over the standing rule; its folds while narrowed; the depth they
+   * were made at; and its link pivots (src/data/panes.ts). */
   folds?: string
+  nfolds?: string
+  depth?: number
+  pivots?: string
   /**
    * The view's filter, in the query language (`type:todo`): the rows that
    * match stay, their ancestors are kept as dimmed context and everything
@@ -109,6 +114,9 @@ export const Route = createFileRoute("/_appRoot/views_/$")({
       filter: typeof search.filter === "string" ? search.filter : undefined,
       sort: typeof search.sort === "string" ? search.sort : undefined,
       folds: typeof search.folds === "string" ? search.folds : undefined,
+      nfolds: typeof search.nfolds === "string" ? search.nfolds : undefined,
+      depth: Number.isInteger(Number(search.depth)) ? Number(search.depth) : undefined,
+      pivots: typeof search.pivots === "string" ? search.pivots : undefined,
       stack: typeof search.stack === "string" ? search.stack : undefined,
       pane1: typeof search.pane1 === "string" ? search.pane1 : undefined,
       active: Number.isInteger(Number(search.active)) ? Number(search.active) : undefined,
@@ -414,23 +422,35 @@ function NotePage({
   // — narrowed — the ones kept for this filter and sort, so a chevron
   // clicked here never lands on the note's own.
   //
-  // The bottom frame's folds are the note's, kept on the device. A frame
-  // pushed above it holds its own in the URL, as what the reader changed
-  // over the standing rule: it starts with none, and a pop gives them back
-  // (docs/split-view.md).
-  const pushed = pane.frames.length > 1
-  const { expanded, setFold } = useFoldRule(
-    noteId,
-    { filter, sort },
-    undefined,
-    pushed
-      ? {
-          folds: foldsOf(frame.folds),
-          onChange: (next) => onUpdate({ folds: frameFoldsOf(next) }),
-        }
-      : undefined,
-  )
+  // The folds are the frame's, in the URL (docs/graph-walk.md, section 5):
+  // a pushed frame starts with none, and a pop gives them back. Narrowed, the
+  // frame keeps a second set apart, over a rule with every row open. A fold
+  // is written with the depth it was made at, so it means the same on every
+  // device.
   const narrowed = filter !== "" || sort !== ""
+  const levels = useAtomValue(expandedLevelsAtom)
+  const { expanded, setFold } = useFoldRule({
+    narrowed,
+    depth: frame.depth,
+    owned: {
+      folds: foldsOf(narrowed ? frame.narrowFolds : frame.folds),
+      onChange: (next) =>
+        onUpdate(
+          narrowed
+            ? { narrowFolds: frameFoldsOf(next), depth: frame.depth ?? levels }
+            : { folds: frameFoldsOf(next), depth: frame.depth ?? levels },
+        ),
+    },
+  })
+  // A note's folds were once kept on the device. Its base frame, opened with
+  // none, takes them once (`takeStoredFolds`).
+  const seedable = pane.frames.length === 1 && root === null && !frame.folds
+  React.useEffect(() => {
+    if (!seedable || !noteId) return
+    const stored = takeStoredFolds(noteId)
+    if (stored) onUpdate({ folds: frameFoldsOf(stored), depth: frame.depth ?? levels })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedable, noteId])
   // Whether a click beneath the note may add a block to its end (the page's
   // foot, below): an editable note, shown whole.
   const canAppend = !readOnlyShare && !narrowed
@@ -465,8 +485,7 @@ function NotePage({
   // standing rule. But leaving a focus for a wider view — the note, or a
   // block above — must show the block just left, so the reader lands back
   // on it: the folds along one path from the new root to it are opened, in
-  // the new frame's own folds, or the note's on the device for the bottom
-  // frame.
+  // the new frame's own folds.
   const settleFolds = (move: FocusMove): FocusMove => {
     if (move.restored) return move
     const next = currentFrame(move.pane)
@@ -477,10 +496,6 @@ function NotePage({
     if (!chain || chain.length < 2) return move
     let key: string | null = next.root
     const keys = chain.slice(0, -1).map((id) => (key = keyOf(key, id)))
-    if (move.pane.frames.length === 1) {
-      openFolds(foldKeyOf(next.noteId, { filter: next.filter, sort: next.sort }), keys)
-      return move
-    }
     return { ...move, pane: withCurrent(move.pane, { folds: { open: keys, closed: [] } }) }
   }
   // A brand-new note opens ready to be written: the title editing when there
@@ -607,7 +622,9 @@ function NotePage({
   // frame beneath its own back.
   const setNarrowing = React.useCallback(
     (patch: { filter?: string; sort?: string }) => {
+      // A narrowing of its own: the folds made under the old one go.
       onUpdate({
+        narrowFolds: undefined,
         ...("filter" in patch
           ? { filter: narrowingParam(patch.filter ?? "", savedView.filter) }
           : {}),
