@@ -629,6 +629,13 @@ export const isHelpPanelOpenAtom = atomWithStorage<boolean>(
 )
 
 /**
+ * Move the keyboard to the other pane of a split view (`g p`,
+ * docs/split-view.md). The note page sets it while two panes are on screen;
+ * null otherwise, and the chord does nothing.
+ */
+export const otherPaneAtom = atom<(() => void) | null>(null)
+
+/**
  * The places VISITED on this device — a note, or a block focused on in one
  * — each with a timestamp and a frecency score, at most `RECENT_KEEP`
  * (`src/utils/recents.ts`), under the one storage key, overwritten whole.

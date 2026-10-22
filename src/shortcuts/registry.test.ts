@@ -28,6 +28,7 @@ const MODIFIERS = new Set(["mod", "ctrl", "alt", "shift"])
 const NAMED_KEYS = new Set([
   "enter",
   "escape",
+  "backslash",
   "tab",
   "backspace",
   "delete",
@@ -124,6 +125,8 @@ describe("shortcut registry entries", () => {
       "?",
       APP_SHORTCUTS.focusSearch,
       APP_SHORTCUTS.historyBack,
+      APP_SHORTCUTS.toggleSplit,
+      APP_SHORTCUTS.otherPane,
       APP_SHORTCUTS.historyForward,
       APP_SHORTCUTS.commandMenu,
       APP_SHORTCUTS.searchHeadings,

@@ -1,9 +1,9 @@
 import { useNavigate, useRouter } from "@tanstack/react-router"
-import { useSetAtom } from "jotai"
+import { useSetAtom, useStore } from "jotai"
 import { useEffect, useRef } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useIsAdmin } from "../data/features"
-import { isHelpPanelOpenAtom } from "../global-state"
+import { isHelpPanelOpenAtom, otherPaneAtom } from "../global-state"
 import { GChordMachine } from "./chords"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "./registry"
 
@@ -24,7 +24,8 @@ function isTypingTarget(target: EventTarget | null): boolean {
  *   any input or the block editor's edit-mode textarea, but fire from the
  *   editor's select mode (whose container leaves unbound keys un-prevented, so
  *   they bubble here).
- * - `g` chords (`g v` / `g s` / `g c` / `g a`) navigate — same listener, same
+ * - `g` chords (`g v` / `g s` / `g c` / `g a`) navigate, and `g p` moves the
+ *   keyboard to the other pane of a split view (`otherPaneAtom`) — same listener, same
  *   typing guard, via {@link GChordMachine}. An *armed* chord's second key is
  *   additionally intercepted at capture phase so it wins over the block
  *   editor's own single-key select-mode bindings (w/a/s/d — a bare `s` there
@@ -39,6 +40,7 @@ export function GlobalShortcuts() {
   const navigate = useNavigate()
   const router = useRouter()
   const setHelpPanel = useSetAtom(isHelpPanelOpenAtom)
+  const store = useStore()
   // `g a` reaches the admin page for the admin alone (src/data/features.ts);
   // read through a ref so the chord machine, built once, sees the live answer.
   const isAdmin = useIsAdmin()
@@ -53,6 +55,7 @@ export function GlobalShortcuts() {
       a: () => {
         if (isAdminRef.current) navigate({ to: "/settings/$page", params: { page: "admin" } })
       },
+      p: () => store.get(otherPaneAtom)?.(),
     })
 
     const chordKeyOf = (event: KeyboardEvent) => ({
@@ -111,7 +114,7 @@ export function GlobalShortcuts() {
       document.removeEventListener("keydown", handleKeyDown)
       machine.disarm()
     }
-  }, [navigate, setHelpPanel])
+  }, [navigate, setHelpPanel, store])
 
   useHotkeys(APP_SHORTCUTS.historyBack, () => router.history.back(), GLOBAL_HOTKEY_OPTIONS, [
     router,

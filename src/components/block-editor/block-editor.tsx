@@ -20,6 +20,7 @@ import {
   releasePendingImage,
   type UploadedImage,
 } from "../../data/images"
+import { queueUpload } from "../../data/image-queue"
 import {
   figureAlignOf,
   figureLayoutOf,
@@ -441,6 +442,10 @@ export function BlockEditor({
   browse = false,
   focusRootId: focusRootIdProp = null,
   onFocusNavigate,
+  onFocusBack,
+  focusTrail,
+  landing = null,
+  onOpenBeside,
   noteTitle,
   resolveBlocks,
   debug,
@@ -609,9 +614,26 @@ export function BlockEditor({
    * (Storybook / tests).
    */
   focusRootId?: string | null
-  /** Called to change the focus root (`null` leaves focus). Makes focus
-   * controlled. */
-  onFocusNavigate?: (id: string | null) => void
+  /** Called to change the focus root (`null` leaves focus), with the row
+   * selected as the view is left — what a focus stack records, so a pop can
+   * select it again (src/data/panes.ts). Makes focus controlled. */
+  onFocusNavigate?: (id: string | null, selected: string | null) => void
+  /**
+   * Pop the caller's focus stack (Shift+F): back to the view before, which
+   * the caller restores (`landing`). Absent, Shift+F steps back along the
+   * editor's own trail.
+   */
+  onFocusBack?: () => void
+  /** The caller's focus trail, drawn above a focused view in place of the
+   * editor's own breadcrumb. Absent = the editor's own. */
+  focusTrail?: React.ReactNode
+  /** The row to select when the view next opens — on mount, or when the
+   * focus root changes: a popped frame's selection. Ignored when the view
+   * does not show it. */
+  landing?: string | null
+  /** Open a block in the pane beside this one (`o`). Absent, the key does
+   * nothing here. */
+  onOpenBeside?: (id: string) => void
   /** The note's title — the breadcrumb's first crumb while focused. (The
    * focused block itself is drawn as the view's title beneath the breadcrumb,
    * by the same `NoteTitle` the page draws the note's with.) */
@@ -685,7 +707,7 @@ export function BlockEditor({
   const newBlockMarker = useAtomValue(newBlockMarkerAtom)
 
   const navigateFocus = (id: string | null) => {
-    if (onFocusNavigate) onFocusNavigate(id)
+    if (onFocusNavigate) onFocusNavigate(id, lastSelectedRef.current)
     else setFocusInternal(id)
   }
   const focusRoot = focusRootId ? (doc.blocks[focusRootId] ?? null) : null
@@ -730,9 +752,18 @@ export function BlockEditor({
   // nothing highlighted until the keyboard arrives (`initialSelection:
   // "none"` — the palette's lists: two under one query would otherwise each
   // show a highlight, and neither where the keys are).
+  //
+  // A view opened by a pop lands on the row that was selected when it was
+  // left (`landing`), where the view still shows it.
   const [selected, setSelected] = useState<string | null>(() =>
-    initialSelection === "none" ? null : firstKey,
+    initialSelection === "none"
+      ? null
+      : landing !== null && occurrenceKeys(doc).includes(landing)
+        ? landing
+        : firstKey,
   )
+  const landingRef = useRef(landing)
+  landingRef.current = landing
   const [collapsedInternal, setCollapsedInternal] = useState<Set<string>>(new Set())
   const collapsed = collapsedProp ?? collapsedInternal
   // The other end of a multi-row selection (Shift+Arrow). null = single select.
@@ -880,6 +911,12 @@ export function BlockEditor({
     const current = docRef.current
     setAnchorKey(null)
     setFocus(null)
+    // A pop back to a frame: the row that was selected there, as it was.
+    const land = landingRef.current
+    if (land !== null && visibleOrder.includes(land)) {
+      setSelected(land)
+      return
+    }
     if (focusRootId) {
       const root = current.blocks[focusRootId]
       if (!root) return // the graceful-exit effect above cleans this up
@@ -1496,7 +1533,11 @@ export function BlockEditor({
     // A change of focus root navigates (URL state); the focus-change effect
     // then places the selection (the focused block, or its first child under a
     // title, on the way in; the block left behind on the way out).
-    if (result.focusRoot !== undefined) navigateFocus(result.focusRoot.id)
+    if (result.focusRoot !== undefined) {
+      if (result.focusRoot.back && onFocusBack) onFocusBack()
+      else navigateFocus(result.focusRoot.id)
+    }
+    if (result.openBeside !== undefined) onOpenBeside?.(result.openBeside)
     if (result.notice) toast(result.notice)
     if (result.exitTop) exitTop()
     // Leaving the bottom is the same, downward — only where there is
@@ -1537,6 +1578,7 @@ export function BlockEditor({
       focusRootId,
       focusTitled,
       focusBackId,
+      focusCanPop: onFocusBack !== undefined,
       rootId: noteId ?? null,
       newBlockType: typeOfMarker(newBlockMarker),
       placesOf: parentCountOf,
@@ -1556,6 +1598,9 @@ export function BlockEditor({
     const input = commandInput(mode, keys, { caret, typed: event.key })
     const name = resolveKey(mode, event, input)
     if (!name) return false
+    // Nowhere beside to open into (a lone editor, the palette's lists): the
+    // key is not this editor's.
+    if (name === "openBeside" && !onOpenBeside) return false
     if (readOnly) {
       // Browsing: Enter opens the row where it would have edited it (or
       // does nothing, where there is nowhere to go), and only what moves,
@@ -1878,7 +1923,11 @@ export function BlockEditor({
       queued.push({ id: imageId, key: nextKey, file, restore })
     }
 
+    // Told once for the batch: the pictures added offline (below).
+    let toldOffline = false
     for (const { id, key: rowKey, file, restore } of queued) {
+      // Kept on the device to go up later: the row and its preview stay.
+      let kept = false
       try {
         const asset = await onImageUpload(file)
         // The bytes are already in hand — draw them rather than fetching the
@@ -1908,6 +1957,17 @@ export function BlockEditor({
         docRef.current = next
         onChange(next)
       } catch (error) {
+        // Offline: the picture waits on the device and goes up when the
+        // network returns (src/data/image-queue.ts), its row drawn as
+        // waiting. Only where it cannot be kept is the row taken out.
+        if (error instanceof ImageUploadError && error.code === "offline") {
+          kept = await queueUpload(id, error.file ?? file)
+          if (kept) {
+            if (!toldOffline) toast("You are offline. The image uploads when you are back online")
+            toldOffline = true
+            continue
+          }
+        }
         const doc = docRef.current
         let next: BlockDoc | null = null
         if (restore) {
@@ -1922,7 +1982,7 @@ export function BlockEditor({
         }
         toast.error(error instanceof ImageUploadError ? error.message : "Image upload failed")
       } finally {
-        releasePendingImage(id)
+        if (!kept) releasePendingImage(id)
       }
     }
   }
@@ -2956,7 +3016,9 @@ export function BlockEditor({
 
   return (
     <>
-      {focusRoot ? (
+      {focusRoot && focusTrail !== undefined ? (
+        focusTrail
+      ) : focusRoot ? (
         <nav
           aria-label="Focus path"
           data-testid="focus-breadcrumb"

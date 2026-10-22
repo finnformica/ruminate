@@ -511,11 +511,12 @@ Today a narrowed view walks the whole note eagerly, because a branch's fate
 depends on what is beneath it. Both narrowings can tell that from an index
 instead, so the walk stays lazy and has no budget:
 
-- **Sections.** A `sectionReach` set per snapshot: every node from which a
-  section can be reached down. Build it once by walking **up** from each
-  section over the reverse index (`parentLinks`). Memoise it on
-  `graphSnapshotAtom`, so every pane shares it. The cost is O(sections ×
-  their ancestors).
+- **Sections.** A `sectionReach` set: every node from which a section can
+  be reached down. Build it by walking **up** from each section: the
+  headings by type, then their holders by `link_destination`, from the
+  client's cache (docs/event-only-sync.md, "The cache"). Keep it until a
+  batch touches a heading or a link, so every pane shares it. The cost is
+  O(sections × their ancestors).
 - **Text filter.** The ancestor closure of the matched ids, built by
   walking up from each match to the view's root. The cost is O(matches ×
   depth), once per filter and snapshot.
@@ -958,8 +959,9 @@ on `main` first. A PR marked **blocked** waits for Finn.
       `src/data/views.ts`, `worker/handlers/event-log.ts`, tests.
     - Tests: the migration on both stores; a `view.update` without `stack`
       keeps it; fold equals tables.
-    - Depends on: nothing in this plan. If event-only sync (ES-4) is in
-      first, the client keeps `stack` in its fold, not in a table.
+    - Depends on: nothing in this plan. With event-only sync the client's
+      `views` table is the cache of the fold, so `stack` is a cache column
+      there too.
 20. **GW-20 Save and open a stack.**
     - Scope: **Save as view** writes the stack; opening a View restores
       its frames, opens the folds on the path, and applies the broken-path
@@ -1004,7 +1006,7 @@ and GW-20 to GW-22 after it.
 
 The walk PRs are stacked, and merge in this order: GW-1, GW-2, GW-3, GW-4,
 GW-6, GW-7. GW-5 is stacked on GW-4. GW-19 is stacked on the sync stack,
-after ES-7 (docs/event-only-sync.md, "Built so far"). GW-8 and the PRs after
+after the ES-5 to ES-7 rework (docs/event-only-sync.md, "Built so far"). GW-8 and the PRs after
 it wait for SV.
 
 ## Appendix A. Ruminate's walk before this design
