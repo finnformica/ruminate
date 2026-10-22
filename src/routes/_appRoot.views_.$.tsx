@@ -32,7 +32,6 @@ import {
   graphSnapshotAtom,
   isDatabaseModeAtom,
   isSignedOutAtom,
-  linkDirectionsAtom,
   otherPaneAtom,
 } from "../global-state"
 import { useCreateNote, useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
@@ -457,7 +456,6 @@ function NotePage({
   // Whether a click beneath the note may add a block to its end (the page's
   // foot, below): an editable note, shown whole.
   const canAppend = !readOnlyShare && !narrowed
-  const directions = useAtomValue(linkDirectionsAtom)
   // The block being edited, which a filter keeps whatever it says of it:
   // a row is judged when the editing leaves it, not on every keystroke
   // (`filteredView`, `keep`).
@@ -481,7 +479,6 @@ function NotePage({
     focusBlockId: focusBlockId ?? null,
     expanded,
     pivots,
-    directions,
     filter,
     sort,
     keep,

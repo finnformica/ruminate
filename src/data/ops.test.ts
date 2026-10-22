@@ -451,7 +451,9 @@ describe("docToOps over a doc walked upstream", () => {
   const A2 = "- one\n  id:: blk_one0000000\n  - shared\n    id:: blk_shared0000\n"
   const B2 = "- other\n  id:: blk_other00000\n  - shared\n    id:: blk_shared0000\n"
   const both = () => graphOf({ a: A2, b: B2 })
-  const view = (snapshot: GraphSnapshot) => noteView("a", snapshot, () => true, "both")!.doc
+  // An up pivot on `shared`: its rows show what holds it.
+  const view = (snapshot: GraphSnapshot) =>
+    noteView("a", snapshot, () => true, new Map([["blk_shared0000", "up" as const]]))!.doc
 
   it("an unchanged doc is no ops, however far upstream it was walked", () => {
     const snapshot = both()

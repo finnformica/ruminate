@@ -108,6 +108,8 @@ describe("a shared note (read-only, browsed)", () => {
 })
 
 describe("a note walked upstream", () => {
+  /** An up pivot on `shared`: its rows show what holds it. */
+  const SHARED_UP = new Map([["shared", "up" as const]])
   /** n > a > shared; shared is also held by p, in another note. */
   const graphed: BlockDoc = {
     props: null,
@@ -124,7 +126,15 @@ describe("a note walked upstream", () => {
   it("draws a block's other parent beneath it, as a row like any other", () => {
     const folds = { collapsed: new Set<string>(), toggle: vi.fn(), setOpen: vi.fn() }
     const { container } = render(
-      <BlockNoteEditor doc={graphed} onChange={vi.fn()} noteId="n" folds={folds} readOnly browse />,
+      <BlockNoteEditor
+        doc={graphed}
+        onChange={vi.fn()}
+        noteId="n"
+        folds={folds}
+        pivots={SHARED_UP}
+        readOnly
+        browse
+      />,
     )
     expect(rows(container)).toEqual(["a", "shared", "from elsewhere", "b"])
     const parent = container.querySelector('[data-occurrence="a/shared/^p"]')
@@ -134,7 +144,15 @@ describe("a note walked upstream", () => {
   it("folds a parent row like any other, and the toggle names its key", () => {
     const folds = { collapsed: new Set(["a/shared"]), toggle: vi.fn(), setOpen: vi.fn() }
     const { container } = render(
-      <BlockNoteEditor doc={graphed} onChange={vi.fn()} noteId="n" folds={folds} readOnly browse />,
+      <BlockNoteEditor
+        doc={graphed}
+        onChange={vi.fn()}
+        noteId="n"
+        folds={folds}
+        pivots={SHARED_UP}
+        readOnly
+        browse
+      />,
     )
     expect(rows(container)).toEqual(["a", "shared", "b"])
     const root = editor(container)

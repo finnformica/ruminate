@@ -15,7 +15,7 @@ import {
   signOutAtom,
   graphSnapshotAtom,
   isSignedOutAtom,
-  linkDirectionsAtom,
+  forgetRetiredSettings,
   notesAtom,
   ownSortedNotesAtom,
   blockViewsAtom,
@@ -123,20 +123,14 @@ describe("graphSnapshotAtom", () => {
   })
 })
 
-describe("linkDirectionsAtom", () => {
-  it("follows downstream links by default, so a note reads as its outline", () => {
-    const store = createStore()
-    expect(store.get(linkDirectionsAtom)).toBe("downstream")
-  })
-
-  it("keeps a chosen direction, and falls back to the default on an unknown value", () => {
-    const store = createStore()
-    store.set(linkDirectionsAtom, "both")
-    expect(store.get(linkDirectionsAtom)).toBe("both")
-    store.set(linkDirectionsAtom, "upstream")
-    expect(store.get(linkDirectionsAtom)).toBe("upstream")
-    localStorage.setItem("link-directions", JSON.stringify("sideways"))
-    expect(createStore().get(linkDirectionsAtom)).toBe("downstream")
+describe("forgetRetiredSettings", () => {
+  it('removes the stored "Show links" value (docs/graph-walk.md, GW-18)', () => {
+    localStorage.setItem("link-directions", JSON.stringify("both"))
+    localStorage.setItem("expanded-levels", "3")
+    forgetRetiredSettings(localStorage)
+    expect(localStorage.getItem("link-directions")).toBeNull()
+    expect(localStorage.getItem("expanded-levels")).toBe("3")
+    expect(() => forgetRetiredSettings(undefined)).not.toThrow()
   })
 })
 

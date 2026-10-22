@@ -486,14 +486,6 @@ export interface GraphView {
   collapsed: Set<string>
 }
 
-/**
- * Which links a view follows from a row (Settings → Editor, "Show links"):
- * downstream — what a block holds, the tree; upstream — what holds it, its
- * parents shown beneath it after its children; or both, the graph
- * (docs/graph-schema-v2.md, "Upstream").
- */
-export type LinkDirections = "downstream" | "upstream" | "both"
-
 /** Every occurrence open: the eager walk (export, search, the basket). */
 const EVERYTHING_OPEN: ExpandedRule = () => true
 
@@ -506,17 +498,14 @@ export interface WalkOptions {
   expanded?: ExpandedRule
   /** The level of the roots (1 for a note's children; 0 for a focused block). */
   startLevel?: number
-  /** Which links a row whose query is down follows; `"downstream"` by
-   * default — the tree. Retires with the "Show links" setting (GW-18). */
-  directions?: LinkDirections
   /** The frame's link pivots (src/blocks/query.ts): block id → the direction
    * the rows beneath that block's rows walk. None by default, which is the
    * walk of today. */
   pivots?: LinkPivots
   /** The id of the view's own root when it is not a block in the doc (the
    * note): on the path from the start, so a root's parent that is the note
-   * is never listed beneath it. With `directions` upstream, the root's own
-   * parents are the doc's `upstream`, rows after the roots. */
+   * is never listed beneath it. With an up pivot on it, the root's own
+   * parents are the doc's `upstream`, in place of the roots. */
   rootId?: string
   /** Narrow and sort the rows as the walk goes (docs/graph-walk.md, 4.5).
    * Absent = every row, in the graph's order. */
@@ -639,10 +628,9 @@ export function sectionReach(graph: GraphSnapshot): ReadonlySet<string> {
  * note id as a root and it walks like any node — a note linked under a block
  * renders as a `note` block, a board as a `board` one.
  *
- * Walked **upstream** as well (`directions`), every block also carries the
+ * Walked **upstream** (beneath an up pivot), a block also carries the
  * complete list of its parents' ids (`upstream`), and beneath an open row
- * the walk continues into its parents after its children — each an upstream
- * occurrence (`^` in the key, src/blocks/view.ts), walked on by the same
+ * the walk continues into its parents — each an upstream occurrence (`^` in the key, src/blocks/view.ts), walked on by the same
  * rule in both directions. The guard is one rule both ways
  * (docs/graph-walk.md, 3.3): the block a row came from (the row above,
  * reached the other way; the view's root at the top) is not a row beneath
@@ -655,9 +643,8 @@ export function sectionReach(graph: GraphSnapshot): ReadonlySet<string> {
  * **Pivots** (`pivots`, docs/graph-walk.md, 3) set the query of a row by its
  * block: up, the row's holders are the rows beneath it (less the row it came
  * from), and nothing it holds; down, what it holds. The rows beneath inherit
- * the query until the next pivot. A row whose query is down follows the
- * links `directions` names, so with no pivots the walk is exactly the walk
- * above. The fold rule still closes a pivot row (`queryAt`: a fold beats a
+ * the query until the next pivot. With no pivots every row walks down: the
+ * tree. The fold rule still closes a pivot row (`queryAt`: a fold beats a
  * pivot), and the depth count starts again beneath a pivot row
  * (`levelBeneath`). A block reached up, or whose row walks up, carries its
  * `upstream` list. A pivot on `rootId` (the note) is the root query: up,
@@ -678,14 +665,11 @@ export function walkGraph(
   {
     expanded = EVERYTHING_OPEN,
     startLevel = 1,
-    directions = "downstream",
     pivots = NO_PIVOTS,
     rootId,
     narrowing,
   }: WalkOptions = {},
 ): GraphView {
-  const down = directions !== "upstream"
-  const up = directions !== "downstream"
   const rule: WalkRule = { pivots, expanded }
   const blocks: Record<string, Block> = {}
   const collapsed = new Set<string>()
@@ -753,7 +737,6 @@ export function walkGraph(
       text: node.text,
       ...(props ? { props } : {}),
       children: narrowing ? narrowedChildren(id, scope) : childrenOf(id),
-      ...(up ? { upstream: parentsOf(id) } : {}),
     }
     blocks[id] = block
     return block
@@ -794,13 +777,13 @@ export function walkGraph(
       delete blocks[id]
       return false
     }
-    if (pruned && (!down || block.children.length === 0)) return drop()
+    if (pruned && block.children.length === 0) return drop()
     const key = keyOf(parentKey, id, direction)
     if ((query === "up" || direction === "up") && !block.upstream) block.upstream = parentsOf(id)
-    // A row walking down follows what `directions` names; one walking up
-    // (beneath an up pivot), its holders only.
-    const followsDown = query === "down" && down
-    const followsUp = query === "up" || up
+    // A row walking down follows what it holds; one walking up (beneath an
+    // up pivot), its holders only.
+    const followsDown = query === "down"
+    const followsUp = query === "up"
     // The block the row came from is not a row beneath it, in the other
     // direction (docs/graph-walk.md, 3.3). Any other block on the path is a
     // row, and closes its loop there as a leaf. The view's own root is not a
@@ -862,7 +845,7 @@ export function walkGraph(
             visit(id, null, startLevel, "down", "down", rootId ?? null, "narrow") || keepRoot(id),
         )
   const doc: BlockDoc = { props: null, rootBlockIds, blocks }
-  if ((up || rootQuery === "up") && rootId) {
+  if (rootQuery === "up" && rootId) {
     // The root's own parents: rows after the roots, at the roots' level.
     const upstream = parentsOf(rootId)
     doc.upstream = upstream.filter((parentId) =>
@@ -897,7 +880,6 @@ export function noteView(
   noteId: string,
   graph: GraphSnapshot,
   expanded?: ExpandedRule,
-  directions: LinkDirections = "downstream",
   pivots?: LinkPivots,
   narrowing?: WalkNarrowing,
 ): GraphView | null {
@@ -906,11 +888,8 @@ export function noteView(
   const entries = noteEntries(note.props)
   const title = emittedNoteTitle(note.id, note.text)
   const props = title !== null ? { title, ...(entries ?? {}) } : entries
-  // Upstream only, the note's blocks are still the roots — a root is always
-  // shown — but nothing beneath them is followed down.
   const { doc, collapsed } = walkGraph(childIdsOf(graph, noteId), graph, {
     expanded,
-    directions,
     pivots,
     rootId: noteId,
     narrowing,
@@ -929,13 +908,12 @@ export function blockView(
   blockId: string,
   graph: GraphSnapshot,
   expanded?: ExpandedRule,
-  directions: LinkDirections = "downstream",
   pivots?: LinkPivots,
   narrowing?: WalkNarrowing,
 ): GraphView | null {
   const node = graph.nodes.get(blockId)
   if (!node || isNoteType(node.type)) return null
-  return walkGraph([blockId], graph, { expanded, startLevel: 0, directions, pivots, narrowing })
+  return walkGraph([blockId], graph, { expanded, startLevel: 0, pivots, narrowing })
 }
 
 /**

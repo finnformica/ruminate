@@ -925,34 +925,32 @@ describe("walkGraph upstream (the graph, not the tree)", () => {
     )
   const open = () => true
 
-  it("carries every block's parents, and walks only the ones not on the path", () => {
-    const { doc } = noteView("home", graph(), open, "both")!
-    // Complete lists, the graph's: a is held by home, s by a and p.
-    expect(doc.blocks.blk_a.upstream).toEqual(["home"])
+  const up = (...ids: string[]) => new Map(ids.map((id) => [id, "up" as const]))
+
+  it("carries a pivoted block's parents, and walks only the ones not on the path", () => {
+    const { doc } = noteView("home", graph(), open, up("blk_s"))!
+    // Complete lists, the graph's: s is held by a and p.
     expect(doc.blocks.blk_s.upstream).toEqual(["blk_a", "blk_p"])
     // s's other parent p is walked in beneath it, and p's parent `other`
-    // beneath p; a's only parent is the note, on the path, so a's rows are
-    // the tree's.
-    expect(Object.keys(doc.blocks).sort()).toEqual(["blk_a", "blk_link", "blk_p", "blk_s", "other"])
+    // beneath p; a walks down, so it carries no parents.
+    expect(Object.keys(doc.blocks).sort()).toEqual(["blk_a", "blk_p", "blk_s", "other"])
     expect(doc.blocks.blk_p.upstream).toEqual(["other"])
-    // The note's own parents are the doc's, after the roots.
-    expect(doc.upstream).toEqual(["blk_link"])
-    expect(doc.blocks.blk_link.upstream).toEqual(["other"])
+    expect(doc.blocks.blk_a.upstream).toBeUndefined()
+    expect(doc.upstream).toBeUndefined()
   })
 
-  it("downstream only carries no parents and equals the eager walk", () => {
-    const { doc } = noteView("home", graph(), open, "downstream")!
+  it("no pivots carries no parents and equals the eager walk", () => {
+    const { doc } = noteView("home", graph(), open)!
     expect(doc.blocks.blk_s.upstream).toBeUndefined()
     expect(doc.upstream).toBeUndefined()
     expect(doc).toEqual(noteDoc("home", graph()))
   })
 
-  it("upstream only keeps the roots and follows nothing down", () => {
-    const { doc } = noteView("home", graph(), open, "upstream")!
-    expect(doc.rootBlockIds).toEqual(["blk_a"])
-    expect(doc.blocks.blk_a.children).toEqual(["blk_s"])
-    expect(doc.blocks.blk_s).toBeUndefined()
+  it("an up pivot on the note replaces its blocks with what holds the note", () => {
+    const { doc } = noteView("home", graph(), open, up("home"))!
+    expect(doc.rootBlockIds).toEqual([])
     expect(doc.upstream).toEqual(["blk_link"])
+    expect(doc.blocks.blk_link.upstream).toEqual(["other"])
   })
 
   it("folds and levels apply upstream as they do down", () => {
@@ -960,16 +958,15 @@ describe("walkGraph upstream (the graph, not the tree)", () => {
     // Focused on s (level 0), one level: its parents a and p are level 1 —
     // rows with a chevron (each has a parent of its own beneath it), not
     // walked, so the notes above them are not built.
-    const one = blockView("blk_s", graph(), byDepth(1), "both")!
+    const one = blockView("blk_s", graph(), byDepth(1), up("blk_s"))!
     expect(one.doc.blocks.blk_s.upstream).toEqual(["blk_a", "blk_p"])
     expect([...one.collapsed].sort()).toEqual(["blk_s/^blk_a", "blk_s/^blk_p"])
     expect(one.doc.blocks.home).toBeUndefined()
-    // Two levels: the notes are rows at level 2, each with a chevron — Home
-    // is held by `link` (its one child, a, is the row it was reached up
-    // from, so not beneath it), Other also holds `link`.
-    const two = blockView("blk_s", graph(), byDepth(2), "both")!
+    // Two levels: the notes are rows at level 2. Home is held by `link`, so
+    // it has a chevron; nothing holds Other, so it is a leaf.
+    const two = blockView("blk_s", graph(), byDepth(2), up("blk_s"))!
     expect(two.doc.blocks.home.type).toBe("note")
-    expect([...two.collapsed].sort()).toEqual(["blk_s/^blk_a/^home", "blk_s/^blk_p/^other"])
+    expect([...two.collapsed].sort()).toEqual(["blk_s/^blk_a/^home"])
   })
 
   it("a two-block loop shows once per path and ends where it closes", () => {
@@ -977,7 +974,7 @@ describe("walkGraph upstream (the graph, not the tree)", () => {
       [row("p", "note", "p"), row("blk_x", "text", "x"), row("blk_y", "text", "y")],
       [edge("p", "blk_x", "a0"), edge("blk_x", "blk_y", "a0"), edge("blk_y", "blk_x", "a0")],
     )
-    const { doc, collapsed } = noteView("p", snapshot, open, "both")!
+    const { doc, collapsed } = noteView("p", snapshot, open, up("blk_x"))!
     expect(doc.blocks.blk_x.upstream).toEqual(["blk_y", "p"])
     expect(doc.blocks.blk_y.upstream).toEqual(["blk_x"])
     expect(collapsed.size).toBe(0)
@@ -1025,23 +1022,19 @@ describe("walkGraph pivots (docs/graph-walk.md, 3)", () => {
   }
   const built = (doc: BlockDoc) => Object.keys(doc.blocks).sort()
 
-  it("no pivots is the walk of today, in each direction setting", () => {
+  it("no pivots is the walk of a note: the tree", () => {
     const byDepth = (_key: string, level: number) => level < 2
-    for (const directions of ["downstream", "upstream", "both"] as const) {
-      for (const rule of [undefined, byDepth]) {
-        expect(noteView("n", graph(), rule, directions, new Map())).toEqual(
-          noteView("n", graph(), rule, directions),
-        )
-        expect(blockView("blk_x", graph(), rule, directions, new Map())).toEqual(
-          blockView("blk_x", graph(), rule, directions),
-        )
-      }
+    for (const rule of [undefined, byDepth]) {
+      expect(noteView("n", graph(), rule, new Map())).toEqual(noteView("n", graph(), rule))
+      expect(blockView("blk_x", graph(), rule, new Map())).toEqual(
+        blockView("blk_x", graph(), rule),
+      )
     }
   })
 
   it("an up pivot lists the holders, less the row it came from, and not what it holds", () => {
     const { asked, rule } = recording()
-    const { doc, collapsed } = noteView("n", graph(), rule, "downstream", pivots({ blk_x: "up" }))!
+    const { doc, collapsed } = noteView("n", graph(), rule, pivots({ blk_x: "up" }))!
     // Beneath X: P (A is the row X came from). Y, what X holds, is not walked.
     expect(asked).toContain("blk_a/blk_x/^blk_p")
     expect(built(doc)).toEqual(["blk_a", "blk_b", "blk_p", "blk_x", "m"])
@@ -1056,7 +1049,7 @@ describe("walkGraph pivots (docs/graph-walk.md, 3)", () => {
 
   it("the rows beneath an up pivot inherit up", () => {
     const { asked, rule } = recording()
-    const { doc } = noteView("n", graph(), rule, "downstream", pivots({ blk_x: "up" }))!
+    const { doc } = noteView("n", graph(), rule, pivots({ blk_x: "up" }))!
     // Beneath P (still up): its holder M, and not Z, which P holds.
     expect(doc.blocks.blk_p.upstream).toEqual(["m"])
     expect(doc.blocks.m.type).toBe("note")
@@ -1066,13 +1059,7 @@ describe("walkGraph pivots (docs/graph-walk.md, 3)", () => {
 
   it("a down pivot inside an up region shows what the row holds, less the row it came from", () => {
     const { asked, rule } = recording()
-    const { doc } = noteView(
-      "n",
-      graph(),
-      rule,
-      "downstream",
-      pivots({ blk_x: "up", blk_p: "down" }),
-    )!
+    const { doc } = noteView("n", graph(), rule, pivots({ blk_x: "up", blk_p: "down" }))!
     // Beneath P: Z (X is the row P was reached up from). M is not walked.
     expect(built(doc)).toEqual(["blk_a", "blk_b", "blk_p", "blk_x", "blk_z"])
     expect(asked).toEqual(["blk_a", "blk_a/blk_x", "blk_a/blk_x/^blk_p"])
@@ -1081,7 +1068,7 @@ describe("walkGraph pivots (docs/graph-walk.md, 3)", () => {
   })
 
   it("an up pivot on the note root replaces the note's blocks with its holders", () => {
-    const { doc } = noteView("n", graph(), () => true, "downstream", pivots({ n: "up" }))!
+    const { doc } = noteView("n", graph(), () => true, pivots({ n: "up" }))!
     expect(doc.rootBlockIds).toEqual([])
     expect(doc.upstream).toEqual(["blk_l"])
     // Beneath L (up): M. The note's own blocks are not walked.
@@ -1090,7 +1077,7 @@ describe("walkGraph pivots (docs/graph-walk.md, 3)", () => {
   })
 
   it("an up pivot on a focused block is its root query", () => {
-    const { doc } = blockView("blk_x", graph(), () => true, "downstream", pivots({ blk_x: "up" }))!
+    const { doc } = blockView("blk_x", graph(), () => true, pivots({ blk_x: "up" }))!
     expect(doc.rootBlockIds).toEqual(["blk_x"])
     // Beneath X: A and P, then their holders N and M. Not Y.
     expect(built(doc)).toEqual(["blk_a", "blk_l", "blk_p", "blk_x", "m", "n"])
@@ -1099,10 +1086,10 @@ describe("walkGraph pivots (docs/graph-walk.md, 3)", () => {
 
   it("a closed row beneath a pivot is not walked, and a fold beats a pivot", () => {
     const up = pivots({ blk_x: "up" })
-    const closedP = noteView("n", graph(), (key) => key !== "blk_a/blk_x/^blk_p", "downstream", up)!
+    const closedP = noteView("n", graph(), (key) => key !== "blk_a/blk_x/^blk_p", up)!
     expect([...closedP.collapsed]).toEqual(["blk_a/blk_x/^blk_p"])
     expect(closedP.doc.blocks.m).toBeUndefined()
-    const closedX = noteView("n", graph(), (key) => key !== "blk_a/blk_x", "downstream", up)!
+    const closedX = noteView("n", graph(), (key) => key !== "blk_a/blk_x", up)!
     expect([...closedX.collapsed]).toEqual(["blk_a/blk_x"])
     expect(closedX.doc.blocks.blk_p).toBeUndefined()
   })
@@ -1110,7 +1097,7 @@ describe("walkGraph pivots (docs/graph-walk.md, 3)", () => {
   it("the depth count starts again beneath a pivot row", () => {
     // Two levels, with X (level 2) opened: P beneath it is level 1, so open.
     const rule = (key: string, level: number) => key === "blk_a/blk_x" || level < 2
-    const { doc, collapsed } = noteView("n", graph(), rule, "downstream", pivots({ blk_x: "up" }))!
+    const { doc, collapsed } = noteView("n", graph(), rule, pivots({ blk_x: "up" }))!
     expect(collapsed.size).toBe(0)
     expect(doc.blocks.m.type).toBe("note")
   })
@@ -1150,7 +1137,7 @@ describe("walkGraph: one guard in both directions (docs/graph-walk.md, 3.3)", ()
 
   it("a two-block cycle walked up shows one looped leaf", () => {
     const { asked, rule } = asking()
-    const { doc } = noteView("n", graph(), rule, "downstream", new Map([["blk_c", "up"]]))!
+    const { doc } = noteView("n", graph(), rule, new Map([["blk_c", "up"]]))!
     // Beneath C (up): D, its holder. N is the row C came from.
     expect(doc.blocks.blk_c.upstream).toEqual(["blk_d", "n"])
     // Beneath D (still up): C, on the path, so D has a row beneath it: the
@@ -1160,16 +1147,8 @@ describe("walkGraph: one guard in both directions (docs/graph-walk.md, 3.3)", ()
   })
 
   it("a single-homed block's rows are the tree's", () => {
-    for (const directions of ["upstream", "both"] as const) {
-      const { asked, rule } = asking()
-      noteView("n", graph(), rule, directions)
-      // Each of A, X and Y has one holder, the row it came from: no up rows.
-      expect(asked.filter((key) => key.startsWith("blk_a"))).toEqual(
-        directions === "both" ? ["blk_a", "blk_a/blk_x"] : [],
-      )
-    }
     const { asked, rule } = asking()
-    noteView("n", graph(), rule, "downstream", new Map([["blk_x", "up"]]))
+    noteView("n", graph(), rule, new Map([["blk_x", "up"]]))
     // Up from X: A only, the row X came from. Nothing beneath X.
     expect(asked).not.toContain("blk_a/blk_x")
   })

@@ -444,7 +444,7 @@ describe("filteredView with pivots (docs/graph-walk.md, 3.9)", () => {
       ],
     )
     const up = pivots({ blk_c: "up" })
-    const base = noteView("n", looped, undefined, "downstream", up)!
+    const base = noteView("n", looped, undefined, up)!
     const { doc, context } = narrowedN(byIds(["blk_b"]), { pivots: up }, looped)
     // Beneath C: D, its holder. Beneath D: C closes the loop, as a leaf.
     expect(rowsOf(doc, context, up)).toEqual(["~c", "  ^~d", "    ^~c", "b"])
@@ -453,7 +453,7 @@ describe("filteredView with pivots (docs/graph-walk.md, 3.9)", () => {
 
   it("a sort leaves up rows in holder order", () => {
     const up = pivots({ blk_x: "up" })
-    const base = noteView("n", graph(), undefined, "downstream", up)!
+    const base = noteView("n", graph(), undefined, up)!
     const compare = (a: string, b: string) =>
       (base.doc.blocks[b]?.text ?? "").localeCompare(base.doc.blocks[a]?.text ?? "")
     const { doc } = narrowedN({ matched: null, compare }, { pivots: up })
@@ -477,9 +477,9 @@ describe("filteredView with pivots (docs/graph-walk.md, 3.9)", () => {
     const up = pivots({ blk_x: "up" })
     // Two levels, and X opened by the reader (setting a pivot opens a row).
     const byDepth = (key: string, level: number) => level < 2 || key === "blk_a/blk_x"
-    const all = Object.keys(noteView("n", graph(), undefined, "downstream", up)!.doc.blocks)
+    const all = Object.keys(noteView("n", graph(), undefined, up)!.doc.blocks)
     const { collapsed } = narrowedN(byIds(all), { pivots: up, expanded: byDepth })
-    const lazy = noteView("n", graph(), byDepth, "downstream", up)!
+    const lazy = noteView("n", graph(), byDepth, up)!
     expect([...collapsed].sort()).toEqual([...lazy.collapsed].sort())
     // The holders sit at level 1 beneath the pivot, so they open: M shows
     // beneath each. Counted from the note, they are at level 3 and close.

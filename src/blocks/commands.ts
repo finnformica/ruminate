@@ -1,4 +1,3 @@
-import type { LinkDirections } from "../data/graph"
 import type { BlockOp } from "./history"
 import { DEFAULT_NEW_BLOCK_TYPE, isHeading, toggleType } from "./markers"
 import { defOf } from "./registry"
@@ -127,9 +126,6 @@ export interface CommandInput {
    * a command reads the rows beneath a row as the view drew them
    * (`keysBeneath`). None by default. */
   pivots?: LinkPivots
-  /** The "Show links" setting, as the walk took it (`RowRule.directions`).
-   * Retires with the setting (GW-18). */
-  directions?: LinkDirections
   /** Where stepping back one level returns to: the previous entry in the focus
    * navigation stack — the path the user actually took, which under the graph
    * model (multi-parent blocks) is the only honest "up". Null/absent when
@@ -236,7 +232,7 @@ const blockOf = ({ doc, key }: CommandInput) => doc.blocks[idOfKey(key)]
  * row's query is the pivots along its path, from the view's root query (in
  * focus, from the focused block down), so the keys are the rows drawn. */
 function keysBeneath(input: CommandInput): string[] {
-  const { doc, key, rootId, focusRootId, pivots = NO_PIVOTS, directions } = input
+  const { doc, key, rootId, focusRootId, pivots = NO_PIVOTS } = input
   const ids = pathIdsOf(key)
   const block = doc.blocks[idOfKey(key)] ?? null
   const focusAt = focusRootId ? ids.indexOf(focusRootId) : -1
@@ -248,7 +244,7 @@ function keysBeneath(input: CommandInput): string[] {
   // root for a root row, nothing for the focused block's own row.
   const from =
     focusAt === ids.length - 1 ? null : ids.length > 1 ? ids[ids.length - 2] : (rootId ?? null)
-  const rows = rowsBeneath(doc, block, from, directionOfKey(key), query, directions, rootId)
+  const rows = rowsBeneath(doc, block, from, directionOfKey(key), query, rootId)
   return rows.map((row) => keyOf(key, row.id, row.direction))
 }
 
