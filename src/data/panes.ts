@@ -1,3 +1,6 @@
+import type { LinkPivots } from "../blocks/query"
+import type { Direction } from "../blocks/view"
+
 /**
  * The note page's panes and their focus stacks (docs/split-view.md): view
  * state only, held in the URL, never in the graph.
@@ -5,10 +8,11 @@
  * A **pane** shows one note, rooted at the note or at one block in it, and
  * keeps a **focus stack**: its history of frames, the last the one on
  * screen. A **frame** is one live query state: its root, its selection, its
- * filter and sort, and its folds. Focusing on a block pushes a frame, which
- * starts from the defaults — the root's saved view, the standing fold rule
- * and nothing selected; popping one goes back to the frame beneath, with
- * its selection, narrowing and folds as they were.
+ * pivots (docs/graph-walk.md, 3), its filter and sort, and its folds.
+ * Focusing on a block pushes a frame, which starts from the defaults — the
+ * root's saved view, no pivots, the standing fold rule and nothing
+ * selected; popping one goes back to the frame beneath, with its selection,
+ * pivots, narrowing and folds as they were.
  *
  * The frame at the bottom comes from a View (or opens a note) and keeps its
  * folds where a note always has, on the device (`src/data/view-state.ts`).
@@ -41,6 +45,10 @@ export interface FocusFrame {
    * absent = what the root's view saved. A pushed frame starts with none. */
   filter?: string
   sort?: string
+  /** The frame's link pivots (docs/graph-walk.md, 3.4): block id → the
+   * direction that block's rows walk. Absent = none, which is the walk of a
+   * note. A record, not a map, so a frame stays plain data. */
+  pivots?: FramePivots
   /** A pushed frame's folds: the rows the reader opened and closed over the
    * standing rule. Absent on the bottom frame, whose folds are the note's
    * own, kept on the device; and on a frame still at the defaults. */
@@ -57,6 +65,29 @@ export interface FocusFrame {
  * `src/blocks/view.ts`): `keyOfPath` and `pathOfKey` cross between them.
  */
 export type SelectionPath = readonly string[]
+
+/** A frame's pivots as the URL and a View hold them (`LinkPivots` as a
+ * record). Keyed by block id, as Pensive keys them (docs/graph-walk.md, Q1). */
+export type FramePivots = Readonly<Record<string, Direction>>
+
+const NO_PIVOTS: LinkPivots = new Map()
+
+/** The pivots the walk reads (`LinkPivots`), from a frame's. */
+export const linkPivotsOf = (pivots: FramePivots | undefined): LinkPivots =>
+  pivots ? new Map(Object.entries(pivots)) : NO_PIVOTS
+
+/** `pivots` with the pivot on `id` set, or cleared (null). Absent when none
+ * is left, so a frame with no pivots is written as it always was. */
+export function withPivot(
+  pivots: FramePivots | undefined,
+  id: string,
+  direction: Direction | null,
+): FramePivots | undefined {
+  const next: Record<string, Direction> = { ...pivots }
+  if (direction === null) delete next[id]
+  else next[id] = direction
+  return Object.keys(next).length > 0 ? next : undefined
+}
 
 export const pathOfKey = (key: string): SelectionPath => key.split("/")
 export const keyOfPath = (path: SelectionPath): string => path.join("/")
@@ -184,6 +215,50 @@ export function goVia(pane: Pane, index: number, target: ViewTarget): FocusMove 
   return popped
 }
 
+/**
+ * Set or clear the pivot on the frame's own root: the note, or the focused
+ * block (docs/graph-walk.md, Q6). An up pivot there replaces the view's rows
+ * with what holds the root, so it is a new view: it pushes a frame, and
+ * Back returns to the view as it was. Clearing it pops back to that view
+ * when it is the frame beneath; else the frame on screen loses the pivot.
+ */
+export function pivotRoot(
+  pane: Pane,
+  direction: Direction | null,
+  selected: SelectionPath | null,
+): FocusMove | null {
+  const top = currentFrame(pane)
+  const rootId = top.root ?? top.noteId
+  if ((top.pivots?.[rootId] ?? null) === direction) return null
+  if (direction === null) {
+    const below = pane.frames[pane.frames.length - 2]
+    if (below && sameView(below, top) && !below.pivots?.[rootId]) {
+      return popTo(pane, pane.frames.length - 2)
+    }
+    return {
+      pane: withCurrent(pane, { pivots: withPivot(top.pivots, rootId, null) }),
+      landing: null,
+      restored: true,
+    }
+  }
+  return {
+    pane: {
+      frames: [
+        ...pane.frames.slice(0, -1),
+        { ...top, selected },
+        {
+          noteId: top.noteId,
+          root: top.root,
+          selected: null,
+          pivots: { [rootId]: direction },
+        },
+      ],
+    },
+    landing: null,
+    restored: true,
+  }
+}
+
 /** The pane with its frame on screen changed: its narrowing or folds. */
 export const withCurrent = (pane: Pane, patch: Partial<FocusFrame>): Pane => ({
   frames: [...pane.frames.slice(0, -1), { ...currentFrame(pane), ...patch }],
@@ -249,7 +324,7 @@ export function closePane(layout: PaneLayout, index: number): PaneLayout {
 //   /views/A?block=b2&stack=A::x1,A:b1:@&pane1=B,B:c1;f=type%3Atodo&active=1
 //
 // A frame is `note[:root[:selected]]`, then any of `;f=<filter>`,
-// `;s=<sort>` and `;z=<folds>`; frames are joined by commas. Ids are `blk_…`
+// `;s=<sort>`, `;p=<pivots>` and `;z=<folds>`; frames are joined by commas. Ids are `blk_…`
 // (or, for old notes, date-shaped) and occurrence keys join ids with `/` and
 // `^`, so neither `,` nor `:` can appear inside one; a filter or sort escapes
 // `%`, `,`, `:` and `;`.
@@ -258,7 +333,8 @@ export function closePane(layout: PaneLayout, index: number): PaneLayout {
 // frame's root — the root's own id, which every path in a focused frame
 // starts with, is left out (`@` is the root itself) — and each id drops its
 // `blk_` (an id without one is written after `~`). Folds are `+path` for a
-// row opened and `-path` for a row closed, joined by `.`.
+// row opened and `-path` for a row closed, joined by `.`. Pivots are `^id`
+// for up and `vid` for down, joined by `.` (GW-17 picks the final marks).
 
 /** The search parameters the layout is written to. */
 export interface PaneSearch {
@@ -266,6 +342,7 @@ export interface PaneSearch {
   filter?: string
   sort?: string
   folds?: string
+  pivots?: string
   stack?: string
   pane1?: string
   active?: number
@@ -278,6 +355,11 @@ const validId = (id: string) => id !== "" && !/[,:;.@~+]/.test(id) && !id.starts
 
 const MINTED = "blk_"
 
+/** An id as the URL writes it: without `blk_`, or after `~` when it has
+ * none. */
+const formatId = (id: string) => (id.startsWith(MINTED) ? id.slice(MINTED.length) : `~${id}`)
+const parseId = (text: string) => (text.startsWith("~") ? text.slice(1) : MINTED + text)
+
 /** A row's path (an occurrence key) as the URL writes it, from `root`. */
 function formatPath(key: string, root: string | null): string {
   let segments = key.split("/")
@@ -286,8 +368,7 @@ function formatPath(key: string, root: string | null): string {
   return segments
     .map((segment) => {
       const up = segment.startsWith("^") ? "^" : ""
-      const id = up ? segment.slice(1) : segment
-      return up + (id.startsWith(MINTED) ? id.slice(MINTED.length) : `~${id}`)
+      return up + formatId(up ? segment.slice(1) : segment)
     })
     .join("/")
 }
@@ -299,8 +380,7 @@ function parsePath(text: string, root: string | null): string {
       ? []
       : text.split("/").map((segment) => {
           const up = segment.startsWith("^") ? "^" : ""
-          const id = up ? segment.slice(1) : segment
-          return up + (id.startsWith("~") ? id.slice(1) : MINTED + id)
+          return up + parseId(up ? segment.slice(1) : segment)
         })
   return (root !== null ? [root, ...ids] : ids).join("/")
 }
@@ -325,6 +405,24 @@ function parseFolds(text: string, root: string | null): FrameFolds | undefined {
   return open.length + closed.length > 0 ? { open, closed } : undefined
 }
 
+const PIVOT_MARKS: Record<Direction, string> = { up: "^", down: "v" }
+
+/** Pivots as the URL writes them (`^id` up, `vid` down, `.`-joined). */
+const formatPivots = (pivots: FramePivots): string =>
+  Object.entries(pivots)
+    .map(([id, direction]) => PIVOT_MARKS[direction] + formatId(id))
+    .join(".")
+
+function parsePivots(text: string): FramePivots | undefined {
+  let pivots: FramePivots | undefined
+  for (const entry of text.split(".")) {
+    const direction = entry[0] === "^" ? "up" : entry[0] === "v" ? "down" : null
+    const id = entry.length > 1 ? parseId(entry.slice(1)) : ""
+    if (direction && validId(id)) pivots = withPivot(pivots, id, direction)
+  }
+  return pivots
+}
+
 const escapeText = (text: string) => text.replace(/[%,:;]/g, (c) => encodeURIComponent(c))
 const unescapeText = (text: string) => {
   try {
@@ -344,6 +442,7 @@ export function formatFrame(frame: FocusFrame): string {
         : noteId
   if (frame.filter) text += `;f=${escapeText(frame.filter)}`
   if (frame.sort) text += `;s=${escapeText(frame.sort)}`
+  if (frame.pivots) text += `;p=${formatPivots(frame.pivots)}`
   if (frame.folds && frame.folds.open.length + frame.folds.closed.length > 0) {
     text += `;z=${formatFolds(frame.folds, root)}`
   }
@@ -366,7 +465,10 @@ export function parseFrame(text: string): FocusFrame | null {
     const value = extra.slice(2)
     if (extra.startsWith("f=") && value) frame.filter = unescapeText(value)
     else if (extra.startsWith("s=") && value) frame.sort = unescapeText(value)
-    else if (extra.startsWith("z=")) {
+    else if (extra.startsWith("p=")) {
+      const pivots = parsePivots(value)
+      if (pivots) frame.pivots = pivots
+    } else if (extra.startsWith("z=")) {
       const folds = parseFolds(value, frameRoot)
       if (folds) frame.folds = folds
     }
@@ -387,16 +489,19 @@ const parseFrames = (text: unknown): FocusFrame[] =>
 const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : undefined)
 
 /** The layout a URL holds: the first pane from the address (`noteId`,
- * `block`, `filter`, `sort`, `folds`, `stack`), the rest from `pane<i>`.
+ * `block`, `filter`, `sort`, `pivots`, `folds`, `stack`), the rest from
+ * `pane<i>`.
  * Malformed parts are dropped. */
 export function layoutFromSearch(noteId: string, search: Record<string, unknown>): PaneLayout {
   const root = text(search.block) ?? null
   const top: FocusFrame = { noteId, root, selected: null }
   const filter = text(search.filter)
   const sort = text(search.sort)
+  const pivots = text(search.pivots) ? parsePivots(search.pivots as string) : undefined
   const folds = text(search.folds) ? parseFolds(search.folds as string, root) : undefined
   if (filter) top.filter = filter
   if (sort) top.sort = sort
+  if (pivots) top.pivots = pivots
   const below = parseFrames(search.stack)
   // Only a pushed frame keeps its folds in the URL.
   if (folds && below.length > 0) top.folds = folds
@@ -426,6 +531,7 @@ export function layoutToSearch(layout: PaneLayout): { noteId: string; search: Pa
     block: top.root ?? undefined,
     filter: top.filter || undefined,
     sort: top.sort || undefined,
+    pivots: top.pivots ? formatPivots(top.pivots) : undefined,
     folds: folds || undefined,
     stack: first.frames.length > 1 ? formatFrames(first.frames.slice(0, -1)) : undefined,
   }
