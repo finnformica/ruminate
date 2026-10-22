@@ -391,7 +391,12 @@ describe("replica sync queue", () => {
     const server = createTestServer()
     const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const response = await server.fetchImpl(input, init)
-      if ((init?.method ?? "GET") !== "PUT") return response
+      if ((init?.method ?? "GET") !== "PUT") {
+        // Its status does not name the cursor either.
+        if (!String(input).includes("/api/replica/status")) return response
+        const status = (await response.json()) as Record<string, unknown>
+        return new Response(JSON.stringify({ ...status, replica_cursor: null }), { status: 200 })
+      }
       // Either door: the answer carries no cursor.
       const body = (await response.json()) as EventsPutResult
       return new Response(JSON.stringify({ ...body, cursor: null }), { status: 200 })
@@ -402,9 +407,6 @@ describe("replica sync queue", () => {
       { fetchImpl },
     )
 
-    // Spend the session's one status check up front (as opening the Settings
-    // panel does), so what the push reports comes from the push alone.
-    handle.refreshRemoteStatus()
     save(["a"], [create("a")])
     await advance(handle, DEBOUNCE)
 
@@ -576,10 +578,12 @@ describe("replica sync queue", () => {
       links: [],
       views: [],
     }
-    const { handle, server } = createTestSync(files, rows)
+    const { handle, server, save } = createTestSync(files, rows)
 
-    handle.refreshRemoteStatus() // remote is empty → drastically behind
-    await handle.flush()
+    // The first push spends the session's one status check: the remote holds
+    // one note, so it is drastically behind.
+    save(["note-0"], [create("note-0")])
+    await advance(handle, DEBOUNCE)
     expect(replicaDiagnostics().fullPushPending).toBe(true)
 
     await advance(handle, DEBOUNCE)
