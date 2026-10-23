@@ -722,6 +722,44 @@ describe("database mode reads the fold", () => {
     expect(reported()).toEqual([])
   })
 
+  it("a fresh device shows each page of the log as it lands, not only after the run", async () => {
+    // Finn's bug: on a fresh profile nothing showed until a whole run of
+    // pages was in, and each reload showed a little more. Here the second
+    // page is slow: the first page's notes are on screen while it waits.
+    const events = Array.from({ length: 2_001 }, (_, i) => placed(i + 1, `note-${i}`, `N${i}`))
+    const { source } = stubSource({
+      full: { nodes: [], links: [], views: [], cursor: "0" },
+      events,
+    })
+    let asked = 0
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const pullEvents = source.pullEvents
+    source.pullEvents = async (since, limit) => {
+      asked += 1
+      if (since > 0) await gate
+      return pullEvents(since, limit)
+    }
+    startDatabaseMode({
+      openStore: async () => ({
+        store: await openSqlNoteStore(createNodeSqlDriver()),
+        persistence: "memory",
+      }),
+      openReplicaSync: async () => null,
+      source,
+      pullRetryMs: 10 * 60_000,
+    })
+    try {
+      // Folding a page of 2,000 events takes a moment.
+      await vi.waitFor(() => expect(asked).toBe(2), { timeout: 30_000 })
+      await vi.waitFor(() => expect(graph().nodes.size).toBe(2_000), { timeout: 5_000 })
+    } finally {
+      release()
+    }
+    await flushDatabaseMode()
+    expect(graph().nodes.size).toBe(2_001)
+  }, 60_000)
+
   it("pulls a long log to its end before the check, and shows all of it", async () => {
     const events = Array.from({ length: 20_001 }, (_, i) => placed(i + 1, `note-${i}`, `N${i}`))
     const { source, calls } = stubSource({
