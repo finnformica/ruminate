@@ -10,6 +10,7 @@ import { githubUserAtom, isSignedOutAtom, sampleGraphAtom } from "../global-stat
 import { resultsDoc, resultsToOps, type ResultRoot } from "../hooks/results-doc"
 import { viewRootIdsAtom } from "../data/views"
 import { ResultsEditor } from "./results-editor"
+import type { NodeRow } from "../../worker/handlers/replica-payload"
 
 /** What "Copy link to block" put on the clipboard. */
 const clipboard = vi.hoisted(() => ({ copy: vi.fn() }))
@@ -43,13 +44,13 @@ const RESEARCH = [
 ].join("\n")
 const JOURNAL = ["- in another note", "  id:: blk_elsewhere", ""].join("\n")
 
-async function signedOutStore(notes: Record<string, string>) {
+async function signedOutStore(notes: Record<string, string>, extra: NodeRow[] = []) {
   const store = createStore()
   const unsubscribe = store.sub(githubUserAtom, () => {})
   await vi.waitFor(() => {
     expect(store.get(isSignedOutAtom)).toBe(true)
   })
-  const nodes = []
+  const nodes: NodeRow[] = [...extra]
   const links = []
   for (const [id, markdown] of Object.entries(notes)) {
     const g = docToGraph(id, serialize(parse(markdown)), 1)
@@ -418,5 +419,68 @@ describe("ResultsEditor (editing a filtered view)", () => {
     const created = children[1].destination_id
     expect(store.get(sampleGraphAtom).nodes.get(created)?.notes_id).toBe("research")
     expect(rowIds()).toEqual(["blk_semis", "blk_gpus", created])
+  })
+})
+
+describe("the Root frame: the palette's editor over every note (docs/graph-walk.md, decision 5)", () => {
+  const KITCHEN: NodeRow = {
+    id: "kitchen",
+    type: "board",
+    text: "Kitchen",
+    props: null,
+    updated_at: 1,
+  }
+  const ROOTS: ResultRoot[] = [
+    { id: "research", noteId: "research" },
+    { id: "journal", noteId: "journal" },
+    { id: "kitchen", noteId: "kitchen" },
+  ]
+
+  async function renderRoot() {
+    const moveRoot = vi.fn(() => [])
+    const { store } = await signedOutStore({ research: RESEARCH, journal: JOURNAL }, [KITCHEN])
+    render(
+      <Provider store={store}>
+        <ResultsEditor
+          roots={ROOTS}
+          resetKey="corpus_root"
+          onOpen={onOpen}
+          moveRoot={moveRoot}
+          initialSelection="first"
+        />
+      </Provider>,
+    )
+    return { moveRoot, store }
+  }
+  const iconIn = (id: string, testId: string) =>
+    document.querySelector(`[data-block-row="${id}"] [data-testid="${testId}"]`)
+
+  it("draws a note row and a board row as block rows, each with its type's icon", async () => {
+    await renderRoot()
+    expect(rowIds()).toEqual(["research", "journal", "kitchen"])
+    expect(iconIn("research", "favicon-default")).not.toBeNull()
+    expect(iconIn("kitchen", "favicon-board")).not.toBeNull()
+    expect(document.querySelector('[data-testid="board-figure"]')).toBeNull()
+  })
+
+  it("opens and closes a note row as any row", async () => {
+    await renderRoot()
+    const chevron = (label: string) =>
+      document.querySelector(`[data-block-row="research"] button[aria-label="${label}"]`)!
+    fireEvent.click(chevron("Expand"))
+    expect(rowIds()).toEqual(["research", "blk_semis", "blk_milk", "journal", "kitchen"])
+    fireEvent.click(chevron("Collapse"))
+    expect(rowIds()).toEqual(["research", "journal", "kitchen"])
+  })
+
+  it("moves a note row with the keys, and asks moveRoot to write the new order", async () => {
+    const { moveRoot } = await renderRoot()
+    press("ArrowDown")
+    press("ArrowUp", { altKey: true })
+    expect(moveRoot).toHaveBeenCalledWith(
+      "journal",
+      ["journal", "research", "kitchen"],
+      expect.anything(),
+    )
   })
 })

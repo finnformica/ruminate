@@ -72,8 +72,8 @@ export type FigureNoun = "image" | "link" | "code" | "board"
 
 /**
  * The frame every figure block sits in — a picture (`image-figure.tsx`),
- * a link block's card (`link-card.tsx`), a code block's panel
- * (`code-panel.tsx`), a board's card (`board-card.tsx`): the layout the
+ * a link block's card (`link-card.tsx`) and a code block's panel
+ * (`code-panel.tsx`): the layout the
  * figure types share (`src/blocks/figure.ts`), drawn once.
  *
  * No chrome of its own: the block frame's inset (`block-frame.tsx`) is the

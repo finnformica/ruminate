@@ -426,6 +426,15 @@ function sameRoots(prev: BlockDoc, next: BlockDoc): boolean {
   )
 }
 
+/** Same roots in any order — a move among them (`movableRoots`). */
+function sameRootSet(prev: BlockDoc, next: BlockDoc): boolean {
+  const ids = new Set(prev.rootBlockIds)
+  return (
+    prev.rootBlockIds.length === next.rootBlockIds.length &&
+    next.rootBlockIds.every((id) => ids.has(id))
+  )
+}
+
 export function BlockEditor({
   doc,
   onChange,
@@ -465,10 +474,10 @@ export function BlockEditor({
   onImageUpload,
   onLinkPreview,
   onRequestBoard,
-  onOpenBoard,
   onRequestLink,
   onActivate,
   fixedRoots = false,
+  movableRoots = false,
   emptyable = false,
   context,
   rootHints,
@@ -498,9 +507,6 @@ export function BlockEditor({
    * menu offers no "Board" (a standalone editor, a note someone shared).
    */
   onRequestBoard?: (request: BoardRequest) => void
-  /** Open a board's page (a board card's "Open board"). Absent = the card
-   * offers no way there. */
-  onOpenBoard?: (id: string) => void
   /**
    * Link a block beneath the row, or the row's block beneath another, by
    * name (`LinkRequest`): open the palette as a picker and, downstream,
@@ -603,6 +609,13 @@ export function BlockEditor({
    * edits as it does in its note.
    */
   fixedRoots?: boolean
+  /**
+   * With `fixedRoots`, the roots may still move among themselves: a move
+   * (the keys that move a block) passes, and the caller writes the new order
+   * (the Root frame's notes, `useResultsDoc`'s `moveRoot`). Adding or
+   * removing a root is still refused.
+   */
+  movableRoots?: boolean
   /**
    * Rows the view keeps only as context — the unmatched ancestors of a
    * filtered view's matches (`src/data/filter-view.ts`), drawn dimmed. The
@@ -813,7 +826,7 @@ export function BlockEditor({
     ? {
         ...rawHistory,
         commit: (prev: BlockDoc, next: BlockDoc, op: BlockOp) => {
-          if (!sameRoots(prev, next)) {
+          if (!sameRoots(prev, next) && !(movableRoots && sameRootSet(prev, next))) {
             toast(FIXED_ROOTS_NOTICE)
             return
           }
@@ -2487,7 +2500,6 @@ export function BlockEditor({
     requestImage: onImageUpload && !readOnly ? requestImage : undefined,
     openImage: (id) => setLightbox(id),
     requestBoard: onRequestBoard && !readOnly ? requestBoard : undefined,
-    openBoard: onOpenBoard,
     linkToBlock: readOnly ? undefined : linkToBlock,
     updateLink: readOnly ? undefined : updateLink,
     linkToInline: readOnly ? undefined : linkToInline,

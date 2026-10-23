@@ -165,9 +165,6 @@ export interface BlockEditorApi {
    * own undo step. Absent where the editor has no note of the reader's own
    * behind it. */
   requestBoard?: (key: string, text?: string) => void
-  /** Open a board's page (a board card's "Open board"). Absent where there
-   * is nowhere to go (a standalone editor). */
-  openBoard?: (id: string) => void
   /** Make a link block of a link in this row's text (docs/links.md): the
    * row itself when its text is nothing but the link, else a new row
    * beneath it. Absent in read-only views. */

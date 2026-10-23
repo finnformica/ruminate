@@ -94,7 +94,11 @@ function seedOps(live: NoteId[], snapshot: GraphSnapshot): Op[] {
  * keeps the first run of keys it can, so a note dragged to the front would
  * re-key every note it passed. A drag knows which row moved.
  */
-export function moveNoteOps(noteId: NoteId, desired: NoteId[], snapshot: GraphSnapshot): Op[] {
+export function moveNoteOps(
+  noteId: NoteId,
+  desired: readonly NoteId[],
+  snapshot: GraphSnapshot,
+): Op[] {
   const live = desired.filter((id) => isNote(snapshot, id))
   const index = live.indexOf(noteId)
   if (index === -1) return []

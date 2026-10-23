@@ -898,6 +898,34 @@ export function noteView(
 }
 
 /**
+ * **The Root frame's rows** (docs/graph-walk.md, decision 5): every live
+ * note, first the notes the corpus root links, in `sort_key` order, then
+ * all the others by title. The rows the root does not link are added from
+ * the note type, so no backfill of root links is needed. `exclude` leaves
+ * notes out by id: the notes other people shared, which are listed apart.
+ * The Root frame draws them as the palette's rows do (`useRootRoots`,
+ * `ResultsEditor`).
+ */
+export function rootChildIds(graph: GraphSnapshot, exclude?: ReadonlySet<string>): string[] {
+  const isRow = (id: string) =>
+    isNoteType(graph.nodes.get(id)?.type ?? "") && !(exclude?.has(id) ?? false)
+  const lead: string[] = []
+  const seen = new Set<string>()
+  for (const id of childIdsOf(graph, CORPUS_ROOT_ID)) {
+    if (seen.has(id) || !isRow(id)) continue
+    seen.add(id)
+    lead.push(id)
+  }
+  const rest: { id: string; title: string }[] = []
+  for (const node of graph.nodes.values()) {
+    if (seen.has(node.id) || !isRow(node.id)) continue
+    rest.push({ id: node.id, title: node.text })
+  }
+  rest.sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id))
+  return [...lead, ...rest.map((row) => row.id)]
+}
+
+/**
  * A block's view — the focused page: the block as the doc's one root, at
  * level 0 (always open; the editor draws it as the view's title), its
  * children the rows at level 1, walked by the same rule as a note is. A view

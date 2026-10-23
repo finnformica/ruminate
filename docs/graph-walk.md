@@ -150,8 +150,21 @@ The words used below:
      root links, in `sort_key` order. Then come all other notes, by title.
      These are rows the walk adds from the note type, so no backfill of
      root links is needed.
-   - A move of a note row in the root frame writes the root's `child` link,
-     as a drag writes it today (`src/data/note-order.ts`).
+   - The Root frame is drawn by the palette's own editor (`ResultsEditor`,
+     Finn, 2026-10-23), the block editor over a set of roots, so Root and
+     the palette share one row renderer. Its roots are the walk rows above
+     (`rootChildIds`, `src/data/graph.ts`; `useRootRoots`). A note row
+     opens to its blocks and folds as any row; its title edits as a row's
+     text; focus or Enter opens the note.
+   - A move of a note row (the keys that move a block) writes the root's
+     `child` link (`moveRoot`: `moveNoteOps`). The root's other links are
+     never written from there: no backfill, and no note row is added,
+     removed or nested under another (`fixedRoots`, `movableRoots`).
+   - The Root frame has no filter, sort or pivots of its own: the palette's
+     editor has none.
+   - In the editor a note row and a board row are block rows. The one
+     difference is the key slot: the type's icon (the one the sidebar and
+     the palette draw) in place of a marker. There is no card.
    - "No View" means no listed `views` row. Such a note is in no other
      list: not the sidebar's Views. Search, Recent, the calendar and a link
      still open the note itself, because they open a node, not a list. They
@@ -629,8 +642,9 @@ interface FoldDiff {
 }
 ```
 
-**The default rule** is the depth rule at the frame's `depth`, with a
-board row closed. A narrowed walk's default is everything open. A fold
+**The default rule** is the depth rule at the frame's `depth`. A board row
+folds by it as any row does (2026-10-23). A narrowed walk's default is
+everything open. A fold
 equal to the default is not stored.
 
 **The encoding.** A frame stays one comma-free string in the pane's
@@ -1075,10 +1089,11 @@ SV; G built what was missing:
 `stack` field (GW-19), the Root frame (GW-16), Save as view and open
 (GW-20) and the sidebar's path hint (GW-21):
 
-- **GW-16.** The Root frame is `src/data/root-frame.ts` and its page
-  `src/components/root-frame-page.tsx`, a list of note rows rather than
-  the block editor. A drag of a row there writes the root's `child` link
-  (`moveNoteOps`, `src/data/note-order.ts`). The Views page is gone: `/` opens Root, `g v` goes to Root, and ↵ on
+- **GW-16.** The Root frame is `src/data/root-frame.ts`, drawn by the
+  palette's `ResultsEditor` over `rootChildIds`. A move of a note row
+  writes the root's `child` link (`moveNoteOps`). A note row and a board
+  row draw as block rows with the type's icon, in Root, the palette and
+  any outline. The Views page is gone: `/` opens Root, `g v` goes to Root, and ↵ on
   a typed query in the palette opens its top result.
 - **GW-20.** `src/data/view-stack.ts` writes and reads the field, and
   applies the broken-path rule. The sidebar's View rows link to the

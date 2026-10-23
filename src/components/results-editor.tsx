@@ -1,6 +1,6 @@
 import React from "react"
 import { isNoteType } from "../data/graph"
-import { useResultsDoc, type ResultRoot } from "../hooks/results-doc"
+import { useResultsDoc, type MoveRoot, type ResultRoot } from "../hooks/results-doc"
 import type { NoteId } from "../schema"
 import type { BlockMenuTarget, MenuEntry } from "./block-editor/block-context-menu"
 import { BlockEditor } from "./block-editor/block-editor"
@@ -27,7 +27,9 @@ import { useNoteMenuEntries } from "./note-actions-menu"
  * the graph (`useResultsDoc`); focusing opens the note instead, since a
  * results view has no focus view of its own. Either way the roots are the
  * view's (`fixedRoots`): nothing is added beside a root or taken from the
- * list here.
+ * list here. With `moveRoot` they may move among themselves: the Root frame
+ * (src/data/root-frame.ts) is this view over every note, and a move there
+ * writes the root's links.
  */
 export function ResultsEditor({
   roots,
@@ -40,6 +42,7 @@ export function ResultsEditor({
   onExitBottom,
   initialSelection,
   rootHints,
+  moveRoot,
 }: {
   /** Memoized by the caller (see `useResultsDoc`). */
   roots: readonly ResultRoot[]
@@ -62,8 +65,14 @@ export function ResultsEditor({
   initialSelection?: "first" | "none"
   /** Quiet text after a root row, by root id: a View's path. */
   rootHints?: ReadonlyMap<string, string>
+  /** The roots move among themselves, and this writes the move. */
+  moveRoot?: MoveRoot
 }) {
-  const { doc, collapsed, toggleCollapse, setDoc, noteOf } = useResultsDoc({ roots, resetKey })
+  const { doc, collapsed, toggleCollapse, setDoc, noteOf } = useResultsDoc({
+    roots,
+    resetKey,
+    moveRoot,
+  })
 
   const noteEntries = useNoteMenuEntries()
   const blockEntries = useBlockViewMenuEntries()
@@ -103,6 +112,7 @@ export function ResultsEditor({
       // own, as in a note.
       menuEntries={readOnly ? menuEntries : undefined}
       fixedRoots
+      movableRoots={moveRoot !== undefined}
       rootHints={rootHints}
       collapsed={collapsed}
       onToggleCollapse={toggleCollapse}

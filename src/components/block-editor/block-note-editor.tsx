@@ -109,7 +109,6 @@ export function BlockNoteEditor({
   rowRemoval = "unlink",
   context,
   onEditingChange,
-  onOpenBoard,
   pivots,
   onPivot,
 }: {
@@ -187,9 +186,6 @@ export function BlockNoteEditor({
   context?: ReadonlySet<string>
   /** Told which block is being edited as it changes (`BlockEditor`). */
   onEditingChange?: (id: string | null) => void
-  /** Open a board's page (a board card's "Open board", docs/boards.md).
-   * The page's to give: navigation is its business. */
-  onOpenBoard?: (id: string) => void
   /** The frame's link pivots and the way to set one (`BlockEditor`). */
   pivots?: LinkPivots
   onPivot?: (key: string, id: string, direction: Direction | null) => void
@@ -432,7 +428,6 @@ export function BlockNoteEditor({
       onImageUpload={onImageUpload}
       onLinkPreview={onLinkPreview}
       onRequestBoard={ownNote ? onRequestBoard : undefined}
-      onOpenBoard={onOpenBoard}
       onRequestLink={ownNote ? onRequestLink : undefined}
       // The starter is what keeps a block to type in; without it (the
       // basket) the last row may go, and the basket goes with it.

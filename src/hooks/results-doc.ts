@@ -146,6 +146,22 @@ function sameIds(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((id, index) => id === b[index])
 }
 
+/** The one root that moved between two orders of the same roots, or null
+ * when they are the same or more than one moved: the root whose removal from
+ * both leaves them equal. */
+function movedRoot(before: readonly string[], after: readonly string[]): string | null {
+  if (before.length !== after.length || sameIds(before, after)) return null
+  const without = (ids: readonly string[], id: string) => ids.filter((other) => other !== id)
+  for (const id of after) {
+    if (sameIds(without(before, id), without(after, id))) return id
+  }
+  return null
+}
+
+/** The ops a move of one root to its place in `order` comes to — the Root
+ * frame's: the root's link to the note (`moveNoteOps`). */
+export type MoveRoot = (id: string, order: readonly string[], snapshot: GraphSnapshot) => Op[]
+
 /**
  * The live doc of a results view, its folds, and the way back — what a
  * `ResultsEditor` hands the block editor.
@@ -160,11 +176,15 @@ function sameIds(a: readonly string[], b: readonly string[]): boolean {
 export function useResultsDoc({
   roots,
   resetKey,
+  moveRoot,
 }: {
   /** Memoized by the caller: a new array is a new view. */
   roots: readonly ResultRoot[]
   /** The query. Changing it folds everything and forgets what was loaded. */
   resetKey: string
+  /** Where a move among the roots lands (`BlockEditor.movableRoots`): the
+   * Root frame's notes write the root's links. Absent, the roots are fixed. */
+  moveRoot?: MoveRoot
 }) {
   const snapshot = useAtomValue(graphSnapshotAtom)
   const store = useStore()
@@ -223,9 +243,18 @@ export function useResultsDoc({
         }
         return grown ?? prev
       })
-      apply(resultsToOps(next, roots, current, hint?.discard))
+      const moved = moveRoot
+        ? movedRoot(
+            roots.map((root) => root.id),
+            next.rootBlockIds,
+          )
+        : null
+      apply([
+        ...resultsToOps(next, roots, current, hint?.discard),
+        ...(moveRoot && moved !== null ? moveRoot(moved, next.rootBlockIds, current) : []),
+      ])
     },
-    [store, apply, roots],
+    [store, apply, roots, moveRoot],
   )
 
   return { doc, collapsed, toggleCollapse, setDoc, noteOf }

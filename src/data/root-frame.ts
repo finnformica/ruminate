@@ -1,4 +1,3 @@
-import type { Note } from "../schema"
 import { CORPUS_ROOT_ID } from "./graph"
 import type { FocusFrame } from "./panes"
 
@@ -21,25 +20,3 @@ export const rootFrame = (): FocusFrame => ({ noteId: CORPUS_ROOT_ID, root: null
 
 /** Is this frame the Root frame? */
 export const isRootFrame = (frame: { noteId: string }): boolean => frame.noteId === CORPUS_ROOT_ID
-
-/**
- * The Root frame's rows: every note given, first the notes the corpus root
- * links, in its `sort_key` order (`placed`, `orderedNoteIds`), then all the
- * others by title. Views are bookmarks, not rows: a block View is not here,
- * and a note is here whether or not it is listed in Views.
- */
-export function rootFrameNotes(notes: readonly Note[], placed: readonly string[]): Note[] {
-  const byId = new Map(notes.map((note) => [note.id, note]))
-  const lead: Note[] = []
-  const seen = new Set<string>()
-  for (const id of placed) {
-    const note = byId.get(id)
-    if (!note || seen.has(id)) continue
-    seen.add(id)
-    lead.push(note)
-  }
-  const rest = notes
-    .filter((note) => !seen.has(note.id))
-    .sort((a, b) => a.displayName.localeCompare(b.displayName) || a.id.localeCompare(b.id))
-  return [...lead, ...rest]
-}

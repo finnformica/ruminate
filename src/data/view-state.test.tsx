@@ -105,16 +105,14 @@ describe("foldRule", () => {
     expect(rule("a/b", 2)).toBe(true)
   })
 
-  it("closes a board's row whatever the depth says, until the reader opens it", () => {
-    // A board linked under a block is a card standing for what is beneath
-    // it (docs/boards.md, "A board in a note"); a note's row follows the
-    // depth rule as any block does.
+  it("folds a board's row and a note's row by the depth rule, as any row", () => {
+    // A board is a row like a note's (docs/boards.md, "A board in a note").
     const rule = foldRule({ open: new Set(), closed: new Set() }, byDepth)
-    expect(rule("a", 1, "board")).toBe(false)
+    expect(rule("a", 1, "board")).toBe(true)
     expect(rule("a", 1, "note")).toBe(true)
     expect(rule("a", 1, "ul")).toBe(true)
-    const opened = foldRule({ open: new Set(["a"]), closed: new Set() }, byDepth)
-    expect(opened("a", 1, "board")).toBe(true)
+    const closed = foldRule({ open: new Set(), closed: new Set(["a"]) }, byDepth)
+    expect(closed("a", 1, "board")).toBe(false)
   })
 
   it("applies an entry stored as a block id (pre-occurrence folds) to every occurrence", () => {

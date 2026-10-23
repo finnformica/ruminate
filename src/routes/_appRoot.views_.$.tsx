@@ -5,6 +5,7 @@ import { useHotkeys } from "react-hotkeys-hook"
 import { useMedia } from "react-use"
 import useResizeObserver from "use-resize-observer"
 import {
+  GridIcon16,
   LoadingIcon16,
   NoteIcon16,
   OfflineIcon16,
@@ -13,7 +14,7 @@ import {
   XIcon16,
 } from "../components/icons"
 import { FocusTrail } from "../components/focus-trail"
-import { RootFramePage } from "../components/root-frame-page"
+import { ResultsEditor } from "../components/results-editor"
 import { IconButton } from "../components/ui/icon-button"
 import { Notice } from "../components/notice"
 import { parse } from "../blocks/parse"
@@ -39,10 +40,11 @@ import { useCreateNote, useNoteById, useRenameNote, useSetNoteProps } from "../h
 import { useSavedView, useWriteView } from "../hooks/views"
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
-import { useOpenNote } from "../hooks/open-note"
 import { CORPUS_ROOT_ID, pathToBlock } from "../data/graph"
 import { ROOT_LABEL, isRootFrame } from "../data/root-frame"
 import { stackToSave } from "../data/view-stack"
+import { moveNoteOps } from "../data/note-order"
+import { useRootRoots } from "../hooks/root-roots"
 import { narrowingParam, resolveNarrowing } from "../utils/view-filter"
 import { FilterMenu, SortMenu } from "../components/view-controls"
 import { takeStoredFolds, useFoldRule, withFold, type Folds } from "../data/view-state"
@@ -285,29 +287,6 @@ function SplitView() {
           landing.view.root === frame.root
         const onClose = layout.panes.length > 1 ? () => close(index) : undefined
         const onSplit = wide && !isSplit ? split : undefined
-        if (isRootFrame(frame)) {
-          return (
-            <RootFramePage
-              key={`${index}:${frame.noteId}`}
-              leading={index === shown[0]}
-              landing={lands ? landing.path[0] : null}
-              actions={
-                <PaneButtons active={index === layout.active} onSplit={onSplit} onClose={onClose} />
-              }
-              onOpen={(note) => {
-                if (note.type === "board") {
-                  void navigate({ to: "/boards/$", params: { _splat: note.id } })
-                  return
-                }
-                const next = goTo(pane, { noteId: note.id, root: null }, [note.id])
-                if (next) move(index, next)
-              }}
-              onActivate={() => {
-                if (index !== layout.active) write(activate(layout, index), { replace: true })
-              }}
-            />
-          )
-        }
         return (
           <NotePage
             key={`${index}:${frame.noteId}`}
@@ -428,13 +407,16 @@ function NotePage({
   const frame = currentFrame(pane)
   const { noteId, root } = frame
   const focusBlockId = root ?? undefined
+  // The Root frame (`src/data/root-frame.ts`) is this page too: its header,
+  // and the palette's editor over every note (`ResultsEditor`), so Root and
+  // the palette draw the same rows. It has no title of its own to edit,
+  // saves no view, and is no place in Recent.
+  const isRoot = isRootFrame(frame)
   // The frame's own narrowing, over what its root's view saved
   // (`resolveNarrowing`): a frame pushed starts with none.
   const filterParam = frame.filter
   const sortParam = frame.sort
   const navigate = Route.useNavigate()
-  // A board card's "Open board" (docs/boards.md, "A board in a note").
-  const openNote = useOpenNote()
 
   // Global state
   const isSignedOut = useAtomValue(isSignedOutAtom)
@@ -461,7 +443,10 @@ function NotePage({
   // block saved as its default view (docs/metadata.md, `resolveNarrowing`).
   // So a narrowed view is a link and the back button undoes it, and a note
   // opens the way it was left.
-  const savedView = useSavedView(focusBlockId ?? null, noteId)
+  const savedView = useSavedView(
+    isRoot ? null : (focusBlockId ?? null),
+    isRoot ? undefined : noteId,
+  )
   const filter = resolveNarrowing(filterParam, savedView.filter)
   const sort = resolveNarrowing(sortParam, savedView.sort)
 
@@ -513,7 +498,9 @@ function NotePage({
   })
   // A note's folds were once kept on the device. Its base frame, opened with
   // none, takes them once (`takeStoredFolds`).
-  const seedable = pane.frames.length === 1 && root === null && !frame.folds
+  // The base frame is the one above Root (or the only one, without it).
+  const base = isRootFrame(pane.frames[0]) ? 2 : 1
+  const seedable = !isRoot && pane.frames.length === base && root === null && !frame.folds
   React.useEffect(() => {
     if (!seedable || !noteId) return
     const stored = takeStoredFolds(noteId)
@@ -522,7 +509,7 @@ function NotePage({
   }, [seedable, noteId])
   // Whether a click beneath the note may add a block to its end (the page's
   // foot, below): an editable note, shown whole.
-  const canAppend = !readOnlyShare && !narrowed
+  const canAppend = !readOnlyShare && !narrowed && !isRoot
   // The block being edited, which a filter keeps whatever it says of it:
   // a row is judged when the editing leaves it, not on every keystroke
   // (`filteredView`, `keep`).
@@ -573,7 +560,7 @@ function NotePage({
   // is one (naming it is the first thing to do, and naming it creates it —
   // `renameTo`), else the first block. Never while the notes are still
   // loading, or under a shared note's id (see `notesLoaded`).
-  const isNewNote = !noteExists && notesLoaded && share === null
+  const isNewNote = !noteExists && notesLoaded && share === null && !isRoot
   React.useEffect(() => {
     if (!calendarId || !notesLoaded || noteExists || share !== null || split) return
     navigate({ to: "/calendar/$", params: { _splat: noteId }, search: {}, replace: true })
@@ -585,7 +572,7 @@ function NotePage({
   // (`onToggleCollapse`). Never by selecting, focusing or arrowing through
   // it: reading a note is not touching it. One seam (`useTouchNote`), no
   // calls inside the editor.
-  const touch = useTouchNote(noteId, focusBlockId)
+  const touch = useTouchNote(isRoot ? undefined : noteId, focusBlockId)
   const setEditorDoc = React.useCallback(
     (next: BlockDoc, hint?: ChangeHint) => {
       if (!isSignedOut) {
@@ -789,8 +776,15 @@ function NotePage({
     onMove(settleFolds(move))
   }
   const focusTo = (id: string | null, selected: string | null) => {
-    if (noteId) applyMove(goTo(pane, { noteId, root: id }, selected ? pathOfKey(selected) : null))
+    if (!noteId) return
+    applyMove(goTo(pane, { noteId, root: id }, selected ? pathOfKey(selected) : null))
   }
+  // The Root frame is the palette's editor over every note (`ResultsEditor`,
+  // `useRootRoots`): opening a row from it pushes the note, or the note
+  // focused on the block, and Back comes down to Root on that row.
+  const rootRoots = useRootRoots(isRoot)
+  const openFromRoot = (openId: string, blockId?: string) =>
+    applyMove(goTo(pane, { noteId: openId, root: blockId ?? null }, [openId]))
   // A pivot set from a row (`p`, the block menu) is frame state: it
   // replaces the URL entry, and opens the row so the depth rule cannot hide
   // what it shows (docs/graph-walk.md, 3.5). On the view's own root it is a
@@ -831,8 +825,8 @@ function NotePage({
       />
     ) : null
 
-  const favicon = note ? <NoteFavicon note={note} /> : <NoteIcon16 />
-  const pageTitle = note?.displayName || "Untitled"
+  const favicon = isRoot ? <GridIcon16 /> : note ? <NoteFavicon note={note} /> : <NoteIcon16 />
+  const pageTitle = isRoot ? ROOT_LABEL : note?.displayName || "Untitled"
 
   return (
     // The pane is the active one the moment the reader presses on it.
@@ -906,41 +900,52 @@ function NotePage({
             ) : null}
 
             <div className="flex items-center">
-              {/* Each pane's frame has its own filter and sort. */}
-              <SortMenu
-                sort={sort}
-                onSortChange={(next) => setNarrowing({ sort: next })}
-                saved={savedView.writable ? { ...savedViewActions, dirty: sortDirty } : undefined}
-              />
-              <FilterMenu
-                filter={filter}
-                onFilterChange={(next) => setNarrowing({ filter: next })}
-                scope={focusBlockId ?? noteId}
-                saved={savedView.writable ? { ...savedViewActions, dirty: filterDirty } : undefined}
-              />
-              <NoteActionsMenu
-                noteId={noteId ?? ""}
-                align="end"
-                editor={{
-                  showWidth: containerWidth > 800,
-                  width: resolvedWidth,
-                  onWidth: updateWidth,
-                  onDeleted: () =>
-                    onClose
-                      ? onClose()
-                      : navigate({ to: "/", search: { query: undefined }, replace: true }),
-                  focusBlockId: focusBlockId ?? null,
-                  filter,
-                  onSaveView: noteExists && share === null ? saveAsView : undefined,
-                  rootPivot:
-                    viewRootId && noteExists
-                      ? {
-                          upstream: rootUpstream,
-                          onToggle: () => setPivot(null, viewRootId, rootUpstream ? null : "up"),
-                        }
-                      : undefined,
-                }}
-              />
+              {/* Each pane's frame has its own filter and sort. Root has none:
+                  it is the list of every note. */}
+              {isRoot ? null : (
+                <>
+                  <SortMenu
+                    sort={sort}
+                    onSortChange={(next) => setNarrowing({ sort: next })}
+                    saved={
+                      savedView.writable ? { ...savedViewActions, dirty: sortDirty } : undefined
+                    }
+                  />
+                  <FilterMenu
+                    filter={filter}
+                    onFilterChange={(next) => setNarrowing({ filter: next })}
+                    scope={focusBlockId ?? noteId}
+                    saved={
+                      savedView.writable ? { ...savedViewActions, dirty: filterDirty } : undefined
+                    }
+                  />
+                </>
+              )}
+              {isRoot ? null : (
+                <NoteActionsMenu
+                  noteId={noteId ?? ""}
+                  align="end"
+                  editor={{
+                    showWidth: containerWidth > 800,
+                    width: resolvedWidth,
+                    onWidth: updateWidth,
+                    onDeleted: () =>
+                      onClose
+                        ? onClose()
+                        : navigate({ to: "/", search: { query: undefined }, replace: true }),
+                    focusBlockId: focusBlockId ?? null,
+                    filter,
+                    onSaveView: noteExists && share === null ? saveAsView : undefined,
+                    rootPivot:
+                      viewRootId && noteExists
+                        ? {
+                            upstream: rootUpstream,
+                            onToggle: () => setPivot(null, viewRootId, rootUpstream ? null : "up"),
+                          }
+                        : undefined,
+                  }}
+                />
+              )}
               <PaneButtons active={active} onSplit={onSplit} onClose={onClose} />
             </div>
           </div>
@@ -977,7 +982,11 @@ function NotePage({
                     avoid doubling it. Outside focus, a stack with views
                     beneath this one shows them above the title. */}
                 {showsTitle ? trail : null}
-                {showsTitle ? (
+                {showsTitle && isRoot ? (
+                  // Root's title is its label, drawn as a note's title is; there
+                  // is no node text to rename.
+                  <NoteTitle title={ROOT_LABEL} onRename={() => false} readOnly />
+                ) : showsTitle ? (
                   <NoteTitle
                     title={note?.title ?? ""}
                     onRename={renameTo}
@@ -991,51 +1000,60 @@ function NotePage({
                     focusSignal={titleFocusSignal}
                   />
                 ) : null}
-                <BlockNoteEditor
-                  key={noteId}
-                  noteId={noteId}
-                  doc={editorDoc}
-                  onChange={setEditorDoc}
-                  folds={{
-                    collapsed,
-                    toggle: (key) => setFold(key, collapsed.has(key)),
-                    setOpen: (key) => setFold(key, true),
-                    move: moveFolds,
-                  }}
-                  onToggleCollapse={touch}
-                  startEditing={isNewNote && !showsTitle}
-                  readOnly={readOnlyShare}
-                  browse={readOnlyShare}
-                  // Only where there IS a title above the editor to take the
-                  // keyboard: a focused block carries its name in the
-                  // breadcrumb instead (the focused heading's own title is
-                  // the editor's to hand focus to, not ours).
-                  onExitTop={showsTitle ? () => setTitleFocusSignal((n) => n + 1) : undefined}
-                  focusFirstSignal={focusFirstSignal}
-                  focusFirstMode={focusFirstMode}
-                  newRootSignal={newRootSignal}
-                  appendRootSignal={appendRootSignal}
-                  refocusSignal={refocusSignal}
-                  focusBlockId={focusBlockId ?? null}
-                  // Each move is a plain push of the URL, so the back button
-                  // undoes it too.
-                  onFocusNavigate={focusTo}
-                  onFocusBack={canPop ? focusBack : undefined}
-                  focusTrail={trail ?? undefined}
-                  landing={landing}
-                  onOpenBeside={onOpenBeside}
-                  noteTitle={note?.displayName ?? ""}
-                  context={context}
-                  onOpenBoard={(id) => void openNote(id)}
-                  onEditingChange={setEditingBlockId}
-                  pivots={pivots}
-                  onPivot={setPivot}
-                  // Narrowed, there is no starter row to type into. A new
-                  // row lands in the note as it does anywhere (Enter on a
-                  // row, `useNoteDoc`), but a blank one is a plain text row
-                  // the filter hides the moment it is typed into.
-                  starter={!narrowed}
-                />
+                {isRoot ? (
+                  <ResultsEditor
+                    roots={rootRoots}
+                    resetKey={CORPUS_ROOT_ID}
+                    onOpen={openFromRoot}
+                    moveRoot={moveNoteOps}
+                    initialSelection="first"
+                  />
+                ) : (
+                  <BlockNoteEditor
+                    key={noteId}
+                    noteId={noteId}
+                    doc={editorDoc}
+                    onChange={setEditorDoc}
+                    folds={{
+                      collapsed,
+                      toggle: (key) => setFold(key, collapsed.has(key)),
+                      setOpen: (key) => setFold(key, true),
+                      move: moveFolds,
+                    }}
+                    onToggleCollapse={touch}
+                    startEditing={isNewNote && !showsTitle}
+                    readOnly={readOnlyShare}
+                    browse={readOnlyShare}
+                    // Only where there IS a title above the editor to take the
+                    // keyboard: a focused block carries its name in the
+                    // breadcrumb instead (the focused heading's own title is
+                    // the editor's to hand focus to, not ours).
+                    onExitTop={showsTitle ? () => setTitleFocusSignal((n) => n + 1) : undefined}
+                    focusFirstSignal={focusFirstSignal}
+                    focusFirstMode={focusFirstMode}
+                    newRootSignal={newRootSignal}
+                    appendRootSignal={appendRootSignal}
+                    refocusSignal={refocusSignal}
+                    focusBlockId={focusBlockId ?? null}
+                    // Each move is a plain push of the URL, so the back button
+                    // undoes it too.
+                    onFocusNavigate={focusTo}
+                    onFocusBack={canPop ? focusBack : undefined}
+                    focusTrail={trail ?? undefined}
+                    landing={landing}
+                    onOpenBeside={onOpenBeside}
+                    noteTitle={note?.displayName ?? ""}
+                    context={context}
+                    onEditingChange={setEditingBlockId}
+                    pivots={pivots}
+                    onPivot={setPivot}
+                    // Narrowed, there is no starter row to type into. A new
+                    // row lands in the note as it does anywhere (Enter on a
+                    // row, `useNoteDoc`), but a blank one is a plain text row
+                    // the filter hides the moment it is typed into.
+                    starter={!narrowed}
+                  />
+                )}
                 {noteId && noteExists && share === null ? (
                   <UnassignedBasket noteId={noteId} />
                 ) : null}

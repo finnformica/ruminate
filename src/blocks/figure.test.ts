@@ -12,7 +12,8 @@ describe("figure layout props", () => {
     expect(isFigureType("image")).toBe(true)
     expect(isFigureType("link")).toBe(true)
     expect(isFigureType("code")).toBe(true)
-    expect(isFigureType("board")).toBe(true)
+    // A board is a row like a note's, not a figure.
+    expect(isFigureType("board")).toBe(false)
     expect(isFigureType("text")).toBe(false)
     expect(isFigureType("note")).toBe(false)
   })
