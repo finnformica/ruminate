@@ -1,10 +1,18 @@
 import { useAtom } from "jotai"
+import React from "react"
 import { DEFAULT_NEW_BLOCK_MARKER } from "../../blocks/markers"
 import { MAX_EXPANDED_LEVELS, MIN_EXPANDED_LEVELS } from "../../blocks/default-collapsed"
-import { expandedLevelsAtom, newBlockMarkerAtom } from "../../global-state"
+import { expandedLevelsAtom, newBlockMarkerAtom, pageWidthAtom } from "../../global-state"
+import type { Width } from "../../schema"
+import { WidthFixedIcon16, WidthFullIcon16 } from "../icons"
 import { Button } from "../ui/button"
 import { TextInput } from "../ui/text-input"
 import { SettingsSection } from "../settings-section"
+
+const WIDTH_OPTIONS: Array<{ value: Width; label: string; icon: React.ReactNode }> = [
+  { value: "fixed", label: "Fixed", icon: <WidthFixedIcon16 /> },
+  { value: "full", label: "Full width", icon: <WidthFullIcon16 /> },
+]
 
 /** Quick picks for the new-block marker; anything else can be typed in. */
 const NEW_BLOCK_MARKER_PRESETS: Array<{ value: string; label: string }> = [
@@ -17,9 +25,29 @@ const NEW_BLOCK_MARKER_PRESETS: Array<{ value: string; label: string }> = [
 export function EditorSection() {
   const [newBlockMarker, setNewBlockMarker] = useAtom(newBlockMarkerAtom)
   const [expandedLevels, setExpandedLevels] = useAtom(expandedLevelsAtom)
+  const [pageWidth, setPageWidth] = useAtom(pageWidthAtom)
 
   return (
     <SettingsSection title="Editor">
+      <div className="flex flex-col gap-2">
+        <span id="page-width-label" className="text-sm leading-4 text-text-secondary">
+          Page width
+        </span>
+        <div role="group" aria-labelledby="page-width-label" className="flex flex-wrap gap-1">
+          {WIDTH_OPTIONS.map((option) => (
+            <Button
+              key={option.value}
+              size="small"
+              aria-pressed={pageWidth === option.value}
+              onClick={() => setPageWidth(option.value)}
+              selected={pageWidth === option.value}
+            >
+              {option.icon}
+              {option.label}
+            </Button>
+          ))}
+        </div>
+      </div>
       <div className="flex flex-col gap-2">
         <label htmlFor="expanded-levels" className="text-sm leading-4 text-text-secondary">
           Default expand
