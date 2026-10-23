@@ -1,5 +1,6 @@
 import type { LinkPivots } from "../blocks/query"
 import type { Direction } from "../blocks/view"
+import type { Width } from "../schema"
 import { isRootFrame, rootFrame } from "./root-frame"
 
 /**
@@ -112,10 +113,23 @@ export interface FrameFolds {
 }
 
 /** One pane: its focus stack, bottom first. Never empty; the last frame is
- * the view on screen. */
+ * the view on screen.
+ *
+ * `width` overrides the app's page-width setting (Settings → Editor) for
+ * this pane alone, for as long as it lives (`withPaneWidth`); absent, the
+ * pane follows the app setting. Kept in memory with the rest of the pane
+ * state the page holds beside the URL, not written to it, the graph or any
+ * event. */
 export interface Pane {
   frames: FocusFrame[]
+  width?: Width
 }
+
+/** A pane with a new focus stack, carrying its width override (if any)
+ * across the move: a pane's width lasts for as long as it lives, not just
+ * its frame on screen. */
+const derivePane = (pane: Pane, frames: FocusFrame[]): Pane =>
+  pane.width !== undefined ? { frames, width: pane.width } : { frames }
 
 /** The page's panes, left to right, and the one the keyboard is in. */
 export interface PaneLayout {
@@ -166,7 +180,7 @@ export function popTo(pane: Pane, index: number): FocusMove | null {
   // lands on the note the reader came down into.
   const landing = frame.selected ?? (isRootFrame(frame) ? [pane.frames[index + 1].noteId] : null)
   return {
-    pane: { frames: [...pane.frames.slice(0, index), { ...frame, selected: null }] },
+    pane: derivePane(pane, [...pane.frames.slice(0, index), { ...frame, selected: null }]),
     landing,
     restored: true,
   }
@@ -184,16 +198,17 @@ export function popFrame(pane: Pane): FocusMove | null {
   const below = pane.frames[pane.frames.length - 2]
   if (below && isRootFrame(below) && top.root !== null) {
     return {
-      pane: {
-        frames: [...pane.frames.slice(0, -1), { noteId: top.noteId, root: null, selected: null }],
-      },
+      pane: derivePane(pane, [
+        ...pane.frames.slice(0, -1),
+        { noteId: top.noteId, root: null, selected: null },
+      ]),
       landing: null,
       restored: false,
     }
   }
   if (pane.frames.length > 1) return popTo(pane, pane.frames.length - 2)
   if (top.root === null) return null
-  return { pane: paneOf(top.noteId), landing: null, restored: false }
+  return { pane: derivePane(pane, paneOf(top.noteId).frames), landing: null, restored: false }
 }
 
 /**
@@ -214,13 +229,11 @@ export function goTo(
   }
   const below = pane.frames.slice(0, -1)
   return {
-    pane: {
-      frames: [
-        ...below,
-        { ...currentFrame(pane), selected },
-        { noteId: target.noteId, root: target.root, selected: null },
-      ],
-    },
+    pane: derivePane(pane, [
+      ...below,
+      { ...currentFrame(pane), selected },
+      { noteId: target.noteId, root: target.root, selected: null },
+    ]),
     landing: null,
     restored: false,
   }
@@ -240,7 +253,11 @@ export function goAbove(pane: Pane, target: ViewTarget): FocusMove | null {
   for (let i = pane.frames.length - 2; i >= 0; i -= 1) {
     if (sameView(pane.frames[i], target)) return popTo(pane, i)
   }
-  return { pane: paneOf(target.noteId, target.root), landing: null, restored: false }
+  return {
+    pane: derivePane(pane, paneOf(target.noteId, target.root).frames),
+    landing: null,
+    restored: false,
+  }
 }
 
 /**
@@ -286,27 +303,29 @@ export function pivotRoot(
     }
   }
   return {
-    pane: {
-      frames: [
-        ...pane.frames.slice(0, -1),
-        { ...top, selected },
-        {
-          noteId: top.noteId,
-          root: top.root,
-          selected: null,
-          pivots: { [rootId]: direction },
-        },
-      ],
-    },
+    pane: derivePane(pane, [
+      ...pane.frames.slice(0, -1),
+      { ...top, selected },
+      {
+        noteId: top.noteId,
+        root: top.root,
+        selected: null,
+        pivots: { [rootId]: direction },
+      },
+    ]),
     landing: null,
     restored: true,
   }
 }
 
 /** The pane with its frame on screen changed: its narrowing or folds. */
-export const withCurrent = (pane: Pane, patch: Partial<FocusFrame>): Pane => ({
-  frames: [...pane.frames.slice(0, -1), { ...currentFrame(pane), ...patch }],
-})
+export const withCurrent = (pane: Pane, patch: Partial<FocusFrame>): Pane =>
+  derivePane(pane, [...pane.frames.slice(0, -1), { ...currentFrame(pane), ...patch }])
+
+/** `pane` with its own width set, or — `null` — back to following the app
+ * setting. */
+export const withPaneWidth = (pane: Pane, width: Width | null): Pane =>
+  width === null ? { frames: pane.frames } : { ...pane, width }
 
 export const withPane = (layout: PaneLayout, index: number, pane: Pane): PaneLayout => ({
   ...layout,

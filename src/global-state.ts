@@ -1,7 +1,7 @@
 import { Searcher } from "fast-fuzzy"
 import { atom } from "jotai"
 import { atomWithStorage } from "jotai/utils"
-import { GitHubUser, Note, NoteId, githubUserSchema } from "./schema"
+import { GitHubUser, Note, NoteId, Width, githubUserSchema } from "./schema"
 import {
   loadRecentVisits,
   saveRecentVisits,
@@ -704,3 +704,11 @@ export const expandedLevelsAtom = atom(
   (get) => clampExpandedLevels(get(storedExpandedLevelsAtom)),
   (_get, set, value: number) => set(storedExpandedLevelsAtom, clampExpandedLevels(value)),
 )
+
+/**
+ * How wide a note's text column is: `fixed` (700px, centred) or `full` (the
+ * pane's width). Settings → Editor, for the whole app; a pane in a split can
+ * override it for itself (`src/data/panes.ts`, `withPaneWidth`), kept only
+ * while that pane lives. Stored on this device.
+ */
+export const pageWidthAtom = atomWithStorage<Width>("page-width", "fixed")

@@ -35,8 +35,9 @@ import {
   isDatabaseModeAtom,
   isSignedOutAtom,
   otherPaneAtom,
+  pageWidthAtom,
 } from "../global-state"
-import { useCreateNote, useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
+import { useCreateNote, useNoteById, useRenameNote } from "../hooks/note"
 import { useSavedView, useWriteView } from "../hooks/views"
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
@@ -70,6 +71,7 @@ import {
   pathOfKey,
   withCurrent,
   withPane,
+  withPaneWidth,
   withPivot,
   type FocusFrame,
   type FocusMove,
@@ -79,7 +81,7 @@ import {
   type SelectionPath,
   type ViewTarget,
 } from "../data/panes"
-import { Width, fontSchema, widthSchema } from "../schema"
+import { Width, fontSchema } from "../schema"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS, formatCombo } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString } from "../utils/date"
@@ -185,6 +187,19 @@ function SplitView() {
     pane: layout.active,
     n: layout.active > 0 ? 1 : 0,
   }))
+  // Each pane's width, overriding the app setting (Settings → Editor) for
+  // that pane alone: kept beside the URL, like `landing` and `refocus`,
+  // for as long as the pane lives, not across a reload. Re-keyed by index
+  // when a pane closes, since that is how the panes below renumber.
+  const [paneWidths, setPaneWidths] = useState<Record<number, Width>>({})
+  const setPageWidth = useSetAtom(pageWidthAtom)
+  const useForAllPanes = React.useCallback(
+    (width: Width) => {
+      setPageWidth(width)
+      setPaneWidths({})
+    },
+    [setPageWidth],
+  )
 
   const write = React.useCallback(
     (
@@ -236,6 +251,15 @@ function SplitView() {
   }
   const close = (index: number) => {
     const next = closePane(layout, index)
+    setPaneWidths((prev) => {
+      const shifted: Record<number, Width> = {}
+      for (const [key, width] of Object.entries(prev)) {
+        const i = Number(key)
+        if (i === index) continue
+        shifted[i > index ? i - 1 : i] = width
+      }
+      return shifted
+    })
     write(next)
     focusPane(next.active)
   }
@@ -278,7 +302,7 @@ function SplitView() {
   return (
     <div className={cx("grid overflow-hidden", isSplit && "grid-cols-2")}>
       {shown.map((index) => {
-        const pane = layout.panes[index]
+        const pane = withPaneWidth(layout.panes[index], paneWidths[index] ?? null)
         const frame = currentFrame(pane)
         const lands =
           landing !== null &&
@@ -299,6 +323,8 @@ function SplitView() {
             refocusRequest={refocus.pane === index ? refocus.n : 0}
             onMove={(focusMove) => move(index, focusMove)}
             onUpdate={(patch) => update(index, patch)}
+            onPaneWidth={(width) => setPaneWidths((prev) => ({ ...prev, [index]: width }))}
+            onUseForAllPanes={useForAllPanes}
             onOpenBeside={wide ? (id) => openBesideFrom(index, id) : undefined}
             onActivate={() => {
               if (index !== layout.active) write(activate(layout, index), { replace: true })
@@ -379,6 +405,12 @@ interface NotePageProps {
   onMove: (move: FocusMove) => void
   /** The frame on screen changed its narrowing or folds. */
   onUpdate: (patch: Partial<FocusFrame>) => void
+  /** In a split, the Width item on this pane's note menu sets this pane's
+   * own width, overriding the app setting. */
+  onPaneWidth: (width: Width) => void
+  /** **Use for all panes**: the app setting (Settings → Editor) becomes
+   * `width`, and every pane's own override is cleared. */
+  onUseForAllPanes: (width: Width) => void
   /** Open a block in the pane beside (`o`); absent on a narrow screen. */
   onOpenBeside?: (id: string) => void
   /** The reader is in this pane now (a click, a focus inside it). */
@@ -398,6 +430,8 @@ function NotePage({
   refocusRequest,
   onMove,
   onUpdate,
+  onPaneWidth,
+  onUseForAllPanes,
   onOpenBeside,
   onActivate,
   onSplit,
@@ -584,16 +618,18 @@ function NotePage({
     },
     [isSignedOut, setDoc, touch],
   )
-  const setNoteProps = useSetNoteProps()
-
   // Resolve font (the `font` prop or default)
   const parseResult = fontSchema.safeParse(note?.props.font)
   const parsedFont = parseResult.success ? parseResult.data : null
   const resolvedFont = parsedFont || "sans"
 
-  // Resolve width (the `width` prop or default)
-  const parsedWidthResult = widthSchema.safeParse(note?.props.width)
-  const resolvedWidth = parsedWidthResult.success ? parsedWidthResult.data : "fixed"
+  // Resolve width: this pane's own override, else the app setting
+  // (Settings → Editor). The `width` note prop is no longer read — a note
+  // may still carry one from before this setting moved off the note, and
+  // it is ignored.
+  const appWidth = useAtomValue(pageWidthAtom)
+  const setAppWidth = useSetAtom(pageWidthAtom)
+  const resolvedWidth = pane.width ?? appWidth
 
   // Set the font: the page's, from the pane with the keyboard. Side by
   // side, each pane also sets its own on itself (`fontVars`, below).
@@ -646,20 +682,13 @@ function NotePage({
   // "Saving" and what follows it on every keystroke (`useSteadySaveTrace`).
   const trace = useSteadySaveTrace(saveTrace(syncStatus, { pendingSave, pushesPending }))
 
-  // Note props (width, gist) are one `setProps` op, written at once.
-  const setProp = React.useCallback(
-    (patch: Record<string, unknown>) => {
-      if (!noteId) return
-      setNoteProps(noteId, patch)
-      requestDatabaseFlush()
-    },
-    [noteId, setNoteProps],
-  )
-
+  // The Width item sets this pane's own width in a split, where there is
+  // more than one pane to keep apart; with one pane, it sets the app
+  // setting directly, since that pane's width and the app's are the same
+  // thing.
   const updateWidth = React.useCallback(
-    // "fixed" is the default width
-    (width: Width) => setProp({ width: width === "fixed" ? null : width }),
-    [setProp],
+    (width: Width) => (split ? onPaneWidth(width) : setAppWidth(width)),
+    [split, onPaneWidth, setAppWidth],
   )
 
   // What the header offers when the view has moved away from what was saved.
@@ -929,6 +958,7 @@ function NotePage({
                     showWidth: containerWidth > 800,
                     width: resolvedWidth,
                     onWidth: updateWidth,
+                    onUseForAllPanes: split ? onUseForAllPanes : undefined,
                     onDeleted: () =>
                       onClose
                         ? onClose()

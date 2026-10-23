@@ -19,6 +19,7 @@ import {
   popFrame,
   popTo,
   withPane,
+  withPaneWidth,
   withPivot,
   withRootBase,
   type Pane,
@@ -346,6 +347,41 @@ describe("the layout", () => {
     expect(closePane(two, 0)).toEqual({ panes: [paneOf(B)], active: 0 })
     expect(closePane(activate(two, 0), 1).active).toBe(0)
     expect(closePane(one, 0)).toBe(one)
+  })
+})
+
+describe("a pane's width override (H, page width)", () => {
+  it("is absent on a fresh pane, which follows the app setting", () => {
+    expect(paneOf(A).width).toBeUndefined()
+  })
+
+  it("is set, and cleared back to following the app setting", () => {
+    const widened = withPaneWidth(paneOf(A), "full")
+    expect(widened.width).toBe("full")
+    expect(widened.frames).toEqual(paneOf(A).frames)
+    expect(withPaneWidth(widened, null)).toEqual(paneOf(A))
+  })
+
+  it("lasts across a focus pushed and popped: it is the pane's, not the frame's", () => {
+    const widened = withPaneWidth(paneOf(A), "full")
+    const pushed = push(widened, "blk_b1", "k1")
+    expect(pushed.width).toBe("full")
+    expect(popFrame(pushed)!.pane.width).toBe("full")
+  })
+
+  it("lasts across a crumb to another note, and the view's own pivot", () => {
+    const widened = withPaneWidth(paneOf(A), "full")
+    expect(goTo(widened, { noteId: B, root: null }, null)!.pane.width).toBe("full")
+    expect(goAbove(widened, { noteId: B, root: null })!.pane.width).toBe("full")
+    expect(pivotRoot(widened, "up", null)!.pane.width).toBe("full")
+  })
+
+  it("stays with its own pane once a split opens a second, unwidened, one", () => {
+    const widened = withPaneWidth(paneOf(A), "full")
+    const layout: PaneLayout = { panes: [widened], active: 0 }
+    const { layout: split } = openBeside(layout, 0, { noteId: A, root: "blk_b1" })
+    expect(split.panes[0].width).toBe("full")
+    expect(split.panes[1].width).toBeUndefined()
   })
 })
 

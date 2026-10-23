@@ -75,6 +75,12 @@ interface EditorActions {
   showWidth?: boolean
   width?: Width
   onWidth?: (width: Width) => void
+  /**
+   * In a split, sets the app's width setting (Settings → Editor) and clears
+   * every pane's own override, so every pane follows it again. Absent with
+   * one pane, where the Width item already sets the app setting itself.
+   */
+  onUseForAllPanes?: (width: Width) => void
   /** Called after the open note is deleted, so the page can navigate away. */
   onDeleted?: () => void
   /**
@@ -418,6 +424,13 @@ export function NoteActionsMenu({
               >
                 Full
               </DropdownMenu.Item>
+              {editor.onUseForAllPanes ? (
+                <DropdownMenu.Item
+                  onClick={() => editor.onUseForAllPanes?.(editor.width ?? "fixed")}
+                >
+                  Use for all panes
+                </DropdownMenu.Item>
+              ) : null}
             </DropdownMenu.Group>
             <DropdownMenu.Separator />
           </>
