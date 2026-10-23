@@ -64,13 +64,14 @@ describe("queryAt", () => {
     expect(queryAt(rule, row("A", 2), "down")).toEqual({ type: "collapse" })
   })
 
-  it("starts a board's row closed, and opens it when the reader opens it", () => {
-    expect(queryAt(ruleOf(), row("B", 1, BOARD_TYPE), "down")).toEqual({ type: "collapse" })
-    const opened = ruleOf(new Map(), { open: new Set(["N/B"]), closed: new Set() })
-    expect(queryAt(opened, row("B", 1, BOARD_TYPE), "down")).toEqual({
+  it("walks a board's row by the depth rule, as any row, and closes it when the reader does", () => {
+    // A board is a row like a note's (docs/boards.md, "A board in a note").
+    expect(queryAt(ruleOf(), row("B", 1, BOARD_TYPE), "down")).toEqual({
       type: "links",
       direction: "down",
     })
+    const closed = ruleOf(new Map(), { open: new Set(), closed: new Set(["N/B"]) })
+    expect(queryAt(closed, row("B", 1, BOARD_TYPE), "down")).toEqual({ type: "collapse" })
   })
 })
 
