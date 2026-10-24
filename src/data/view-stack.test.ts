@@ -7,7 +7,7 @@ import { parseViewStack, restoreViewFrames, stackToSave, viewPathHint } from "./
 
 /**
  * Views save a whole stack (docs/graph-walk.md, section 7), above the Root
- * frame. Finn's example: Root › Tasks › Todos, where Tasks is a note and
+ * frame. Finn's example: Notes › Tasks › Todos, where Tasks is a note and
  * Todos a heading in it, under the block Week.
  *
  *   Tasks › Week › Todos, and Projects › Todos (a second parent).
@@ -149,7 +149,7 @@ describe("open a View", () => {
     expect(frames?.[1].selected).toEqual(["blk_todos"])
   })
 
-  it("opens a one-frame View as Root › its root", () => {
+  it("opens a one-frame View as Notes › its root", () => {
     expect(restoreViewFrames(view(null), GRAPH)).toEqual([
       rootFrame(),
       frame("blk_tasks", "blk_todos"),
@@ -201,14 +201,14 @@ describe("open a View", () => {
 })
 
 describe("the path hint (docs/graph-walk.md, section 7)", () => {
-  it("names the frames between Root and the top, from Root", () => {
+  it("names the frames between Notes and the top, from Notes", () => {
     const frames = [
       rootFrame(),
       frame("blk_tasks", null),
       frame("blk_tasks", "blk_week"),
       frame("blk_tasks", "blk_todos"),
     ]
-    expect(viewPathHint(frames, GRAPH)).toBe("Root › Tasks › Week")
+    expect(viewPathHint(frames, GRAPH)).toBe("Notes › Tasks › Week")
   })
 
   it("is empty for a one-frame View", () => {

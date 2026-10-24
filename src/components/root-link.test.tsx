@@ -53,7 +53,7 @@ function tap(element: Element) {
 }
 
 describe("RootLink", () => {
-  it("goes to Root on one tap of the icon", async () => {
+  it("goes to Notes on one tap of the icon", async () => {
     const router = await renderAt("/views/note")
     await act(async () => {
       tap(screen.getByTestId("favicon-default"))
@@ -65,7 +65,7 @@ describe("RootLink", () => {
 
   it("has a hit area for a finger, around the 16px icon", async () => {
     await renderAt("/views/note")
-    const link = screen.getByRole("link", { name: "Root" })
+    const link = screen.getByRole("link", { name: "Notes" })
     expect(link.className).toContain("coarse:before:-inset-3")
     expect(link.className).toContain("touch-manipulation")
   })

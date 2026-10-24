@@ -18,8 +18,9 @@ import type { FocusFrame } from "./panes"
  */
 
 /** What the Root frame is called: its crumb, its header and its sidebar
- * entry. Finn's choice was "Base" or "Root"; this is the one place to change. */
-export const ROOT_LABEL = "Root"
+ * entry. Finn's choice was "Base" or "Root", then "Notes"; this is the one
+ * place to change. */
+export const ROOT_LABEL = "Notes"
 
 /** The Root frame as a pane holds it. */
 export const rootFrame = (): FocusFrame => ({ noteId: CORPUS_ROOT_ID, root: null, selected: null })

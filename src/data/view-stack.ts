@@ -143,7 +143,7 @@ export function restoreViewFrames(view: ViewToOpen, graph: GraphSnapshot): Focus
 
 /**
  * The path hint a View row shows after its name (section 7): the roots of
- * the frames between Root and the top, from Root — "Root › Tasks". Empty for
+ * the frames between Root and the top, from Root — "Notes › Tasks". Empty for
  * a one-frame View. Read from the frames the View opens with
  * (`restoreViewFrames`), so a broken path shows what is left of it. The
  * sidebar and the palette show the same hint.
