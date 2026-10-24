@@ -561,18 +561,22 @@ export function parseFrame(text: string): FocusFrame | null {
 const formatFrames = (frames: readonly FocusFrame[]) => frames.map(formatFrame).join(",")
 
 /** A pane's frames as the URL writes them: without the Root frame, which
- * every reader puts back (`withRootBase`) — unless Root is all there is. */
+ * every reader puts back (`withRootBase`) — unless Root is all there is, and
+ * then with its folds and depth, as a note's frame on screen writes its own. */
 const writtenFrames = (frames: readonly FocusFrame[]): FocusFrame[] => {
   const kept = frames.filter((frame) => !isRootFrame(frame))
-  return kept.length > 0 ? kept : [rootFrame()]
+  return kept.length > 0 ? kept : frames.slice(-1)
 }
 
 /** Frames read back, with the Root frame at the base: any Root frame among
  * them is dropped and one is put first. A stack whose top is Root is Root
- * alone, since Root is only ever the base. */
+ * alone, since Root is only ever the base; it keeps what the URL wrote of
+ * it (its folds, its depth), or a fold made in Root would not stay. Root has
+ * no focus, so its root is always null. */
 export function withRootBase(frames: readonly FocusFrame[]): FocusFrame[] {
   const top = frames[frames.length - 1]
-  if (!top || isRootFrame(top)) return [rootFrame()]
+  if (!top) return [rootFrame()]
+  if (isRootFrame(top)) return [{ ...top, root: null }]
   return [rootFrame(), ...frames.filter((frame) => !isRootFrame(frame))]
 }
 
