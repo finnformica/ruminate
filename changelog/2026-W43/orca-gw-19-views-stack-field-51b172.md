@@ -1,6 +1,6 @@
 ### Added
 
-- Root lists every note, and every page starts from it. It is first in the sidebar, and it is an outline like any note: open a note there to see its blocks, rename it, or move it up or down. A note opened from search, a link or the calendar reads Root › note, and Back or <kbd>⇧</kbd> <kbd>F</kbd> steps down to Root.
+- Root lists every note, and every page starts from it. It is first in the sidebar, and it is an outline like any note: open a note there to see its blocks, rename it, or move it up or down. Its filter and sort search every note. A note opened from search, a link or the calendar reads Root › note, and Back or <kbd>⇧</kbd> <kbd>F</kbd> steps down to Root.
 - Save as view keeps the whole path you walked. Choose **Save as view** in a note's menu at any depth: the View opens again as Root › Tasks › Todos, with each step's filter, and Back goes down it one step at a time.
 - A View shows the path it opens with, in the sidebar and in the search palette. After its name, in grey, it shows the steps below it, for example "Todos Root › Tasks". A View whose path has moved opens at its own place, straight from Root.
 

@@ -5,6 +5,7 @@ import { asBlockType, type Block, type BlockDoc, type ChangeHint } from "../bloc
 import { idOfKey, walkDoc } from "../blocks/view"
 import { childIdsOf, parseProps, propsJson, type GraphSnapshot } from "../data/graph"
 import { partsToOps, reachableFrom, type Op } from "../data/ops"
+import { moveNoteOps } from "../data/note-order"
 import { useApplyOps } from "../data/store"
 import { graphSnapshotAtom } from "../global-state"
 import type { NoteId } from "../schema"
@@ -96,13 +97,21 @@ function notesOfBlocks(doc: BlockDoc, roots: readonly ResultRoot[]): Map<string,
  *
  * The root list itself is never reconciled: the roots are the view's, not a
  * parent's children (`BlockEditor.fixedRoots` refuses an edit to them).
+ *
+ * `shown` is the doc the view drew, when a filter may have hidden rows from
+ * it: a child the view did not show is not this edit's to unlink
+ * (`partsToOps`, `shownOf`).
  */
 export function resultsToOps(
   next: BlockDoc,
   roots: readonly ResultRoot[],
   snapshot: GraphSnapshot,
   discard?: Iterable<string>,
+  shown?: BlockDoc,
 ): Op[] {
+  const shownOf = shown
+    ? new Map(Object.values(shown.blocks).map((block) => [block.id, block.children]))
+    : undefined
   const byNote = new Map<NoteId, string[]>()
   for (const [id, noteId] of notesOfBlocks(next, roots)) {
     const ids = byNote.get(noteId)
@@ -135,6 +144,8 @@ export function resultsToOps(
         reachableFrom(snapshot, ids),
         "keep",
         discarded,
+        undefined,
+        shownOf,
       ),
     )
   }
@@ -158,9 +169,28 @@ function movedRoot(before: readonly string[], after: readonly string[]): string 
   return null
 }
 
-/** The ops a move of one root to its place in `order` comes to — the Root
- * frame's: the root's link to the note (`moveNoteOps`). */
-export type MoveRoot = (id: string, order: readonly string[], snapshot: GraphSnapshot) => Op[]
+/**
+ * **The Root frame's edit** (docs/graph-walk.md, decision 5): the batch that
+ * makes the graph hold what the Root frame now shows. Its rows are notes,
+ * so the rows beneath them edit as a results view's do (`resultsToOps`):
+ * each block's home is the note it sits in, and retyping a note row renames
+ * the note. The root list is not reconciled, so the notes the corpus root
+ * does not link get no link row (no backfill). A move of one note row,
+ * where `movable`, is the root's link to that note (`moveNoteOps`).
+ */
+export function rootToOps(
+  next: BlockDoc,
+  shown: BlockDoc,
+  snapshot: GraphSnapshot,
+  { discard, movable = false }: { discard?: Iterable<string>; movable?: boolean } = {},
+): Op[] {
+  const roots = shown.rootBlockIds.map((id) => ({ id, noteId: id }))
+  const moved = movable ? movedRoot(shown.rootBlockIds, next.rootBlockIds) : null
+  return [
+    ...resultsToOps(next, roots, snapshot, discard, shown),
+    ...(moved !== null ? moveNoteOps(moved, next.rootBlockIds, snapshot) : []),
+  ]
+}
 
 /**
  * The live doc of a results view, its folds, and the way back — what a
@@ -176,15 +206,11 @@ export type MoveRoot = (id: string, order: readonly string[], snapshot: GraphSna
 export function useResultsDoc({
   roots,
   resetKey,
-  moveRoot,
 }: {
   /** Memoized by the caller: a new array is a new view. */
   roots: readonly ResultRoot[]
   /** The query. Changing it folds everything and forgets what was loaded. */
   resetKey: string
-  /** Where a move among the roots lands (`BlockEditor.movableRoots`): the
-   * Root frame's notes write the root's links. Absent, the roots are fixed. */
-  moveRoot?: MoveRoot
 }) {
   const snapshot = useAtomValue(graphSnapshotAtom)
   const store = useStore()
@@ -243,18 +269,9 @@ export function useResultsDoc({
         }
         return grown ?? prev
       })
-      const moved = moveRoot
-        ? movedRoot(
-            roots.map((root) => root.id),
-            next.rootBlockIds,
-          )
-        : null
-      apply([
-        ...resultsToOps(next, roots, current, hint?.discard),
-        ...(moveRoot && moved !== null ? moveRoot(moved, next.rootBlockIds, current) : []),
-      ])
+      apply(resultsToOps(next, roots, current, hint?.discard))
     },
-    [store, apply, roots, moveRoot],
+    [store, apply, roots],
   )
 
   return { doc, collapsed, toggleCollapse, setDoc, noteOf }

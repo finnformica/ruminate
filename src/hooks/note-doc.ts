@@ -7,14 +7,16 @@ import type { ExpandedRule } from "../blocks/view"
 import { titlesFocus } from "../blocks/markers"
 import { basketDoc, basketToOps } from "../data/basket"
 import { filteredView, filterReach, type FilteredView } from "../data/filter-view"
-import { isNoteType } from "../data/graph"
+import { CORPUS_ROOT_ID, isNoteType } from "../data/graph"
 import { notePropsOps } from "../data/note-meta"
 import { docToOps } from "../data/ops"
+import { sharedOriginAtom } from "../data/shared-mode"
 import { useApplyOps } from "../data/store"
 import { LISTED_VIEW } from "../data/views"
 import { blockIndexAtom, graphSnapshotAtom } from "../global-state"
 import { viewNarrowing } from "../utils/view-narrowing"
 import type { NoteId } from "../schema"
+import { rootToOps } from "./results-doc"
 
 const NOTHING_COLLAPSED: ReadonlySet<string> = new Set()
 const NO_CONTEXT: ReadonlySet<string> = new Set()
@@ -51,6 +53,12 @@ const NO_PIVOTS: LinkPivots = new Map()
  * A note that is not in the graph yet (a new one) starts from `defaultDoc`
  * and is created by its first edit with content; a note deleted while open
  * stays gone — a trailing edit never resurrects it.
+ *
+ * The Root frame (`CORPUS_ROOT_ID`, src/data/root-frame.ts) is this same doc:
+ * the walk of the corpus root (`rootView`), whose rows are every note of the
+ * reader's own. Its edit is `rootToOps`: each block's home is the note it
+ * sits in, and a move of one note row, with nothing narrowed, writes the
+ * root's link to it.
  */
 export function useNoteDoc({
   noteId,
@@ -88,6 +96,9 @@ export function useNoteDoc({
   const snapshot = useAtomValue(graphSnapshotAtom)
   const store = useStore()
   const apply = useApplyOps()
+  // The notes other people shared are listed apart, not as Root's rows.
+  const shared = useAtomValue(sharedOriginAtom)
+  const exclude = useMemo(() => (shared.size > 0 ? new Set(shared.keys()) : undefined), [shared])
 
   // What the filter and the sort come to, answered by the SEARCH engine —
   // one vocabulary and one comparator for the header's menus and the query
@@ -126,8 +137,9 @@ export function useNoteDoc({
       keep,
       pivots,
       reach,
+      exclude,
     })
-  }, [noteId, focusBlockId, snapshot, expanded, pivots, narrowing, keep, reach])
+  }, [noteId, focusBlockId, snapshot, expanded, pivots, narrowing, keep, reach, exclude])
   // Whether the doc is rooted at the focused block (the note node is then not
   // this doc's to write).
   const rootId = focusBlockId && view?.doc.rootBlockIds[0] === focusBlockId ? focusBlockId : null
@@ -146,6 +158,15 @@ export function useNoteDoc({
       if (noteId === undefined) return
       // Diff against the graph as it is NOW (edits can outrun renders).
       const current = store.get(graphSnapshotAtom)
+      if (noteId === CORPUS_ROOT_ID) {
+        const shown = shownRef.current?.doc
+        if (!shown) return
+        // A move means the root's order only where the rows are in it: a
+        // filter or a sort shows another order (`movableRoots`).
+        const movable = narrowing.matched === null && narrowing.compare === null
+        apply(rootToOps(next, shown, current, { discard: hint?.discard, movable }))
+        return
+      }
       const note = isNoteType(current.nodes.get(noteId)?.type ?? "") ? noteId : null
       if (note === null) {
         if (seenRef.current) return // deleted underneath: let it stay deleted
@@ -179,7 +200,7 @@ export function useNoteDoc({
         note === null ? { views: [{ rootId: noteId, patch: LISTED_VIEW }] } : {},
       )
     },
-    [noteId, rootId, store, apply],
+    [noteId, rootId, store, apply, narrowing],
   )
 
   return {

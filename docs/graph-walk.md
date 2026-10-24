@@ -150,18 +150,25 @@ The words used below:
      root links, in `sort_key` order. Then come all other notes, by title.
      These are rows the walk adds from the note type, so no backfill of
      root links is needed.
-   - The Root frame is drawn by the palette's own editor (`ResultsEditor`,
-     Finn, 2026-10-23), the block editor over a set of roots, so Root and
-     the palette share one row renderer. Its roots are the walk rows above
-     (`rootChildIds`, `src/data/graph.ts`; `useRootRoots`). A note row
-     opens to its blocks and folds as any row; its title edits as a row's
-     text; focus or Enter opens the note.
-   - A move of a note row (the keys that move a block) writes the root's
-     `child` link (`moveRoot`: `moveNoteOps`). The root's other links are
-     never written from there: no backfill, and no note row is added,
-     removed or nested under another (`fixedRoots`, `movableRoots`).
-   - The Root frame has no filter, sort or pivots of its own: the palette's
-     editor has none.
+   - The Root frame is the note page's own editor (Finn, 2026-10-24). Its
+     doc is the walk of the corpus root (`rootView`, `src/data/graph.ts`),
+     read by `useNoteDoc` as a note's walk is. Its rows are the walk rows
+     above (`rootChildIds`). The root is a node of its own type
+     (`corpus_root`) with its own icon (`ROOT_FAVICON`), drawn by the one
+     icon component a note and a board use (`NoteFavicon`).
+   - So Root has what every note page has: the filter and the sort (over
+     every note), pivots, folds, focus and the keys that move rows. A note
+     row opens to its blocks and folds as any row, closed at first
+     (`ROOT_DEPTH`); its title edits as a row's text; focus opens the note,
+     or the note focused on the block.
+   - An edit in Root is `rootToOps` (`src/hooks/results-doc.ts`): each block
+     keeps the note it sits in as its home, as in a results view. A move of
+     one note row writes the root's `child` link (`moveNoteOps`). The root's
+     other links are never written from there: no backfill, and no note row
+     is added, removed or nested under another (`fixedRoots`,
+     `movableRoots`). With a filter or a sort on, the rows do not move.
+   - Root saves no view of its own, has no basket, and its menu holds only
+     the page width.
    - In the editor a note row and a board row are block rows. The one
      difference is the key slot: the type's icon (the one the sidebar and
      the palette draw) in place of a marker. There is no card.
@@ -1090,7 +1097,7 @@ SV; G built what was missing:
 (GW-20) and the sidebar's path hint (GW-21):
 
 - **GW-16.** The Root frame is `src/data/root-frame.ts`, drawn by the
-  palette's `ResultsEditor` over `rootChildIds`. A move of a note row
+  note page's own editor over `rootView`. A move of a note row
   writes the root's `child` link (`moveNoteOps`). A note row and a board
   row draw as block rows with the type's icon, in Root, the palette and
   any outline. The Views page is gone: `/` opens Root, `g v` goes to Root, and ↵ on

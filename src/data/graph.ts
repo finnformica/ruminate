@@ -903,8 +903,7 @@ export function noteView(
  * all the others by title. The rows the root does not link are added from
  * the note type, so no backfill of root links is needed. `exclude` leaves
  * notes out by id: the notes other people shared, which are listed apart.
- * The Root frame draws them as the palette's rows do (`useRootRoots`,
- * `ResultsEditor`).
+ * They are the doc roots of the Root frame's walk (`rootView`).
  */
 export function rootChildIds(graph: GraphSnapshot, exclude?: ReadonlySet<string>): string[] {
   const isRow = (id: string) =>
@@ -923,6 +922,30 @@ export function rootChildIds(graph: GraphSnapshot, exclude?: ReadonlySet<string>
   }
   rest.sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id))
   return [...lead, ...rest.map((row) => row.id)]
+}
+
+/**
+ * **The Root frame's view** (docs/graph-walk.md, decision 5): the walk of
+ * the corpus root, as `noteView` walks a note. Its rows are `rootChildIds`,
+ * so a note the root does not link is still a row, and each note row walks
+ * to its blocks by the same rule as any row. The doc has no props: Root's
+ * name is its label (`ROOT_LABEL`), not node text. The corpus root node
+ * may not exist yet (it is made by the first move, `moveNoteOps`): the view
+ * is there all the same.
+ */
+export function rootView(
+  graph: GraphSnapshot,
+  expanded?: ExpandedRule,
+  pivots?: LinkPivots,
+  narrowing?: WalkNarrowing,
+  exclude?: ReadonlySet<string>,
+): GraphView {
+  return walkGraph(rootChildIds(graph, exclude), graph, {
+    expanded,
+    pivots,
+    rootId: CORPUS_ROOT_ID,
+    narrowing,
+  })
 }
 
 /**

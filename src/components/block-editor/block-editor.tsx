@@ -603,7 +603,7 @@ export function BlockEditor({
   onActivate?: (id: string) => void
   /**
    * The roots are the view's own, not a parent's children — a results
-   * list's hits, the Views page's notes — so there is nowhere for a new root
+   * list's hits, the Root frame's notes — so there is nowhere for a new root
    * to go and nothing a removed one leaves. An edit that would add, remove
    * or reorder them is refused with a notice; everything beneath a root
    * edits as it does in its note.
@@ -612,8 +612,8 @@ export function BlockEditor({
   /**
    * With `fixedRoots`, the roots may still move among themselves: a move
    * (the keys that move a block) passes, and the caller writes the new order
-   * (the Root frame's notes, `useResultsDoc`'s `moveRoot`). Adding or
-   * removing a root is still refused.
+   * (the Root frame's notes, `rootToOps`). Adding or removing a root is still
+   * refused.
    */
   movableRoots?: boolean
   /**

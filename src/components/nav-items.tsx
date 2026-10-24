@@ -4,7 +4,7 @@ import React, { createContext, useContext } from "react"
 import { requestDatabasePull } from "../data/database-mode"
 import { CORPUS_ROOT_ID } from "../data/graph"
 import { layoutToSearch, type FocusFrame, type PaneSearch } from "../data/panes"
-import { ROOT_LABEL, rootFrame } from "../data/root-frame"
+import { ROOT_FAVICON, ROOT_LABEL, rootFrame } from "../data/root-frame"
 import { restoreViewFrames, viewPathHint } from "../data/view-stack"
 import { viewByRootAtom } from "../data/views"
 import {
@@ -40,8 +40,6 @@ import {
   CalendarDateIcon16,
   CircleQuestionMarkFillIcon16,
   CircleQuestionMarkIcon16,
-  GridFillIcon16,
-  GridIcon16,
   HistoryFillIcon16,
   HistoryIcon16,
   ListIcon16,
@@ -113,8 +111,8 @@ export function NavItems({
                 to="/views/$"
                 params={{ _splat: CORPUS_ROOT_ID }}
                 search={{ query: undefined }}
-                activeIcon={<GridFillIcon16 />}
-                icon={<GridIcon16 />}
+                activeIcon={<NoteFavicon note={ROOT_FAVICON} filled />}
+                icon={<NoteFavicon note={ROOT_FAVICON} />}
                 shortcut={formatCombo(APP_SHORTCUTS.goRoot)}
                 onNavigate={onNavigate}
               >

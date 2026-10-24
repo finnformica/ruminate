@@ -25,6 +25,7 @@ import {
   reconcileSortKeys,
   rollup,
   rootChildIds,
+  rootView,
   sectionReach,
   sortKeyBetween,
   walkGraph,
@@ -1590,5 +1591,22 @@ describe("the Root frame's walk (docs/graph-walk.md, decision 5)", () => {
   it("needs no root node: a corpus nobody has reordered still has its rows", () => {
     const bare = buildGraphSnapshot([node("a", "Apple", NOTE_TYPE)], [])
     expect(rootChildIds(bare)).toEqual(["a"])
+  })
+
+  it("walks the corpus root as a note: its rows are the notes, as their own types", () => {
+    const { doc, collapsed } = rootView(graph, () => false)
+    expect(doc.rootBlockIds).toEqual(["c", "a", "b"])
+    expect(doc.blocks.a.type).toBe(NOTE_TYPE)
+    expect(doc.blocks.b.type).toBe(BOARD_TYPE)
+    // Closed by the rule, a note row is a row with its blocks folded away.
+    expect(doc.blocks.a.children).toEqual(["blk_seed"])
+    expect(doc.blocks.blk_seed).toBeUndefined()
+    expect(collapsed).toEqual(new Set(["a"]))
+  })
+
+  it("expands a note row to its blocks, as any row", () => {
+    const { doc, collapsed } = rootView(graph, (key) => key === "a")
+    expect(doc.blocks.blk_seed?.text).toBe("Seed")
+    expect(collapsed.has("a")).toBe(false)
   })
 })

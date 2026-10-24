@@ -4,7 +4,7 @@ import { useAtom, useAtomValue, useSetAtom, useStore } from "jotai"
 import React from "react"
 import { blockIndexAtom, graphSnapshotAtom, isSignedOutAtom, notesAtom } from "../global-state"
 import { filteredRollup } from "../data/filter-view"
-import { blockRollup, rollup } from "../data/graph"
+import { CORPUS_ROOT_ID, blockRollup, rollup } from "../data/graph"
 import { receivedSharesAtom, sharePermissions, sharedOriginAtom } from "../data/shared-mode"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { viewNarrowing } from "../utils/view-narrowing"
@@ -457,22 +457,28 @@ export function NoteActionsMenu({
         <MenuItems
           entries={[
             ...(reorder ? reorderEntries(reorder) : []),
-            ...entriesFor(noteId, {
-              focusBlockId: editor?.focusBlockId,
-              filter: editor?.filter,
-              onDeleted,
-              ...(surface === "board"
-                ? {
-                    openOutline: () =>
-                      navigate({
-                        to: "/views/$",
-                        params: { _splat: noteId },
-                        search: { query: undefined },
+            // The Root frame's menu has the page's items only: the corpus root
+            // is no note to rename, share, list or delete.
+            ...(noteId === CORPUS_ROOT_ID
+              ? []
+              : entriesFor(noteId, {
+                  focusBlockId: editor?.focusBlockId,
+                  filter: editor?.filter,
+                  onDeleted,
+                  ...(surface === "board"
+                    ? {
+                        openOutline: () =>
+                          navigate({
+                            to: "/views/$",
+                            params: { _splat: noteId },
+                            search: { query: undefined },
+                          }),
+                        openFeatures: onFeatures,
+                      }
+                    : {
+                        openBoard: () => navigate({ to: "/boards/$", params: { _splat: noteId } }),
                       }),
-                    openFeatures: onFeatures,
-                  }
-                : { openBoard: () => navigate({ to: "/boards/$", params: { _splat: noteId } }) }),
-            }),
+                })),
           ]}
         />
         {editor && isDeveloper ? (

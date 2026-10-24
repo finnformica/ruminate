@@ -1,4 +1,5 @@
 import type { NoteId } from "../schema"
+import { CORPUS_ROOT_ID } from "../data/graph"
 import { compareBlockHits, searchBlocks, type BlockHit, type BlockIndex } from "./block-search"
 import { parseQuery } from "./search"
 import { parseSort } from "./view-filter"
@@ -41,7 +42,8 @@ const NO_NARROWING: ViewNarrowing = { matched: null, compare: null }
 /**
  * `filter` and `sort` resolved against the corpus block index, scoped to
  * `noteId`. A row of another note never matches: a note's header narrows
- * that note.
+ * that note. The Root frame's id (the corpus root) scopes to every note, as
+ * Root lists them all.
  */
 export function viewNarrowing({
   filter = "",
@@ -58,11 +60,12 @@ export function viewNarrowing({
   const hasFilter = filter.trim() !== ""
   const sorts = parseSort(sort)
   if (!hasFilter && sorts.length === 0) return NO_NARROWING
+  const inScope = (hit: BlockHit) => noteId === CORPUS_ROOT_ID || hit.noteId === noteId
 
   // The block's hit in this note — what both halves below are read off.
   const hitsById = new Map<string, BlockHit>()
   for (const hit of index.hits) {
-    if (hit.noteId === noteId && !hitsById.has(hit.blockId)) hitsById.set(hit.blockId, hit)
+    if (inScope(hit) && !hitsById.has(hit.blockId)) hitsById.set(hit.blockId, hit)
   }
 
   let matched: ReadonlySet<string> | null = null
@@ -73,7 +76,7 @@ export function viewNarrowing({
     const query = parseQuery(filter)
     const hits = searchBlocks({ ...query, sorts: [] }, index)
     const ids = new Set<string>()
-    for (const hit of hits) if (hit.noteId === noteId) ids.add(hit.blockId)
+    for (const hit of hits) if (inScope(hit)) ids.add(hit.blockId)
     matched = ids
   }
 
