@@ -1,4 +1,4 @@
-import { Link, createFileRoute } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import { useAtomValue, useSetAtom, useStore } from "jotai"
 import React, { useEffect, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
@@ -23,6 +23,7 @@ import { NoteActionsMenu } from "../components/note-actions-menu"
 import { UnassignedBasket } from "../components/unassigned-basket"
 import { NoteFavicon } from "../components/note-favicon"
 import { PageLayout } from "../components/page-layout"
+import { RootLink } from "../components/root-link"
 import { saveTrace, useSaveTraceState, useSteadySaveTrace } from "../components/sync-status"
 import { databaseModeStatusAtom } from "../data/database-mode"
 import { sharedModeStatusAtom } from "../data/shared-mode"
@@ -39,7 +40,7 @@ import { useCreateNote, useNoteById, useRenameNote } from "../hooks/note"
 import { useSavedView, useWriteView } from "../hooks/views"
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
-import { CORPUS_ROOT_ID, pathToBlock } from "../data/graph"
+import { pathToBlock } from "../data/graph"
 import { ROOT_DEPTH, ROOT_FAVICON, ROOT_LABEL, isRootFrame, rootHomeOf } from "../data/root-frame"
 import { stackToSave } from "../data/view-stack"
 import { narrowingParam, resolveNarrowing } from "../utils/view-filter"
@@ -899,19 +900,7 @@ function NotePage({
         }
         // The note's icon leads back to Root, the list of every note, on a
         // phone as on a desktop.
-        icon={
-          share === null ? (
-            <Link
-              to="/views/$"
-              params={{ _splat: CORPUS_ROOT_ID }}
-              search={{ query: undefined }}
-              aria-label={ROOT_LABEL}
-              className="focus-ring flex rounded-sm"
-            >
-              {favicon}
-            </Link>
-          ) : undefined
-        }
+        icon={share === null ? <RootLink>{favicon}</RootLink> : undefined}
         actions={
           <div className="flex items-center gap-2">
             {/* Changes save automatically; this is the honest-but-quiet trace of

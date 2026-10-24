@@ -17,4 +17,5 @@
 
 ### Fixed
 
+- Tap a note's or a board's icon at the top of its page to go to Root, on a phone too. One tap now lands: the icon's tap area is bigger on a touch screen, and a board's icon is a link now.
 - Notes show as they arrive on a new device. A first sign-in in a fresh browser used to show nothing for a long time, and each reload showed a little more.
