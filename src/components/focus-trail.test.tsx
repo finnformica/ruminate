@@ -123,18 +123,18 @@ describe("the focus breadcrumb", () => {
     expect(onPopTo).toHaveBeenCalledWith(0)
   })
 
-  it("leads with Root, the base of every pane, which pops back to the list of notes", () => {
+  it("leads with Notes, the base of every pane, which pops back to the list of notes", () => {
     const { crumbs, onPopTo } = trail([rootFrame(), frame(null, "A/B/C"), frame("C")])
-    expect(crumbs).toEqual(["frame:Root", "frame:Note", "path:Alpha", "path:Beta", "frame:Gamma"])
-    fireEvent.click(screen.getByText("Root"))
+    expect(crumbs).toEqual(["frame:Notes", "frame:Note", "path:Alpha", "path:Beta", "frame:Gamma"])
+    fireEvent.click(screen.getByText("Notes"))
     expect(onPopTo).toHaveBeenLastCalledWith(0)
     fireEvent.click(screen.getByText("Note"))
     expect(onPopTo).toHaveBeenLastCalledWith(1)
   })
 
-  it("leads a block opened from a link with Root, then the note and the path down", () => {
+  it("leads a block opened from a link with Notes, then the note and the path down", () => {
     const { crumbs, onGoAbove } = trail([rootFrame(), frame("B")])
-    expect(crumbs).toEqual(["frame:Root", "path:Note", "path:Alpha", "frame:Beta"])
+    expect(crumbs).toEqual(["frame:Notes", "path:Note", "path:Alpha", "frame:Beta"])
     fireEvent.click(screen.getByText("Note"))
     expect(onGoAbove).toHaveBeenLastCalledWith({ noteId: "N", root: null })
   })

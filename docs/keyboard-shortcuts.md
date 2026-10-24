@@ -32,7 +32,7 @@ key navigates. The chords work from the block editor's select mode too.
 
 | Action                                | Shortcut                                              |
 | ------------------------------------- | ----------------------------------------------------- |
-| Go to Root, the list of every note    | <kbd>g</kbd> then <kbd>v</kbd>                        |
+| Go to Notes, the list of every note   | <kbd>g</kbd> then <kbd>v</kbd>                        |
 | Go to settings                        | <kbd>g</kbd> then <kbd>s</kbd>                        |
 | Go to the changelog                   | <kbd>g</kbd> then <kbd>c</kbd>                        |
 | Go to the Admin settings (admin only) | <kbd>g</kbd> then <kbd>a</kbd>                        |

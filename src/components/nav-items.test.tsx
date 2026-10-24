@@ -207,14 +207,13 @@ describe("the sidebar's Views list", () => {
     expect(screen.getByText("Shared one")).toBeTruthy()
   })
 
-  it("leads with Root, the list of every note, reached by g then v — and no Views page", () => {
+  it("leads with Notes, the list of every note, reached by g then v — and no Views page", () => {
     renderSidebar({ notes: THREE })
     const links = screen.getAllByRole("link")
-    expect(links[0].textContent).toMatch(/^Root/)
+    expect(links[0].textContent).toMatch(/^Notes/)
     expect(links[0].getAttribute("href")).toBe("/views/$")
     expect(links[0].textContent?.toUpperCase()).toContain("V")
     expect(screen.queryByRole("link", { name: /^Views/ })).toBeNull()
-    expect(screen.queryByRole("link", { name: /^Notes/ })).toBeNull()
   })
 
   it("offers the three sorts, with the current one marked", async () => {
@@ -368,8 +367,8 @@ describe("the sidebar's Views list", () => {
     expect(deleteIcon.innerHTML).toBe(removeIcon)
   })
 
-  it("shows a View's path after its name: the frames below its top, from Root", () => {
-    // Finn's Todos: Root › Tasks › Todos, saved from a note Tasks.
+  it("shows a View's path after its name: the frames below its top, from Notes", () => {
+    // Finn's Todos: Notes › Tasks › Todos, saved from a note Tasks.
     const node = (id: string, text: string, type = "text") => ({
       id,
       type,
@@ -390,7 +389,9 @@ describe("the sidebar's Views list", () => {
       ],
     )
     renderSidebar({ notes: [THREE[1]], blocks: [BLOCK], graph, stacks: { blk_x: "a,a:blk_x" } })
-    expect(screen.getAllByTestId("view-hint").map((el) => el.textContent)).toEqual(["Root › Alpha"])
+    expect(screen.getAllByTestId("view-hint").map((el) => el.textContent)).toEqual([
+      "Notes › Alpha",
+    ])
     // The name stays the row's name; a one-frame View has no hint.
     expect(rowNames()).toEqual(["Bravo", "A block view"])
   })
@@ -472,7 +473,7 @@ describe("the sidebar while Settings is open", () => {
     mocks.pathname = "/settings/preferences"
     renderSidebar({ notes: THREE, shared: [noteOf("shared", "Theirs")] })
     // The chrome every page has.
-    expect(screen.getByRole("link", { name: /^Root/ })).toBeTruthy()
+    expect(screen.getByRole("link", { name: /^Notes/ })).toBeTruthy()
     expect(screen.getByRole("link", { name: /^Calendar/ })).toBeTruthy()
     // Settings is marked on any of its pages, exactly as Help is while
     // open: pressed, not current.
@@ -481,7 +482,7 @@ describe("the sidebar while Settings is open", () => {
     )
     expect(screen.getByRole("link", { name: /^Changelog/ })).toBeTruthy()
     expect(screen.getByRole("button", { name: /^Help/ })).toBeTruthy()
-    // The pages, where the views were — and no way back, since Root is
+    // The pages, where the views were — and no way back, since Notes is
     // right there above them.
     const headings = screen.getAllByTestId("section-heading").map((el) => el.textContent)
     expect(headings).toEqual(["Settings"])
