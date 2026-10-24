@@ -8,6 +8,7 @@ import { BoardWall, type BoardImage } from "../components/boards/board-wall"
 import { BoardIcon16 } from "../components/icons"
 import { NoteActionsMenu } from "../components/note-actions-menu"
 import { Notice } from "../components/notice"
+import { RootLink } from "../components/root-link"
 import { PageLayout } from "../components/page-layout"
 import { listHeading } from "../components/ui/list"
 import { FilterMenu, SortMenu, type FilterBranch } from "../components/view-controls"
@@ -184,7 +185,12 @@ function BoardPage({ boardId }: { boardId: string }) {
   return (
     <PageLayout
       title={<span className="truncate">{note?.displayName || "Untitled"}</span>}
-      icon={<BoardIcon16 />}
+      // The board's icon leads back to Root, as a note's does.
+      icon={
+        <RootLink>
+          <BoardIcon16 />
+        </RootLink>
+      }
       actions={
         <div className="flex items-center">
           <SortMenu

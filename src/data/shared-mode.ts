@@ -61,7 +61,7 @@ import {
  *
  * **How the UI sees it.** `sharedGraphAtom` is the union of every slice, and
  * `graphSnapshotAtom` (global-state.ts) merges it with the user's own graph,
- * so the editor, search, hover cards and the Views page read shared notes
+ * so the editor, search, hover cards and the sidebar read shared notes
  * exactly as they read the user's own. `sharedOriginAtom` says which share a
  * node came from, which is how the write seam (`store.ts`) routes a batch of
  * ops here rather than to the local store, and how the sidebar tells a

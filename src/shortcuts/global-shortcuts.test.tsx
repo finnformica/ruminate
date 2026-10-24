@@ -91,11 +91,13 @@ describe("g chords", () => {
     expect(mocks.navigate).not.toHaveBeenCalled()
   })
 
-  it("g then v / s navigate to the Views list, settings", () => {
+  it("g then v / s navigate to Root, settings", () => {
     renderShortcuts()
     fireEvent.keyDown(document.body, { key: "g" })
     fireEvent.keyDown(document.body, { key: "v" })
-    expect(mocks.navigate).toHaveBeenLastCalledWith(expect.objectContaining({ to: "/" }))
+    expect(mocks.navigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ to: "/views/$", params: { _splat: "corpus_root" } }),
+    )
     fireEvent.keyDown(document.body, { key: "g" })
     fireEvent.keyDown(document.body, { key: "s" })
     expect(mocks.navigate).toHaveBeenLastCalledWith(expect.objectContaining({ to: "/settings" }))

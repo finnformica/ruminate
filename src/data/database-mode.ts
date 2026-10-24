@@ -1124,8 +1124,14 @@ function runPull(activation: DatabaseModeRuntime) {
  * cursor, in pages, into the store's log and cache (`applyPulledEvents`) — this
  * device's own among them, placed. Only the log is written; the rows came
  * with the pull of rows just before. A long log (a first pull) is read a
- * bounded number of pages at a time, the screen refreshed after each run of
- * pages, and the next run queued at once (`logBehind`) until it is caught up.
+ * bounded number of pages at a time, and the next run queued at once
+ * (`logBehind`) until it is caught up.
+ *
+ * The screen is refreshed after **each page** that brought events. The
+ * cache is the screen's only source since the rows stopped writing it, so a
+ * refresh only at the end of a run left a fresh device blank until a whole
+ * run of pages was folded, and each reload showed a little more (Finn's
+ * report, 2026-10-23).
  */
 async function pullEventLog(activation: DatabaseModeRuntime, store: NoteStore) {
   const held = await store.getMeta(EVENTS_CURSOR_KEY)
@@ -1145,6 +1151,8 @@ async function pullEventLog(activation: DatabaseModeRuntime, store: NoteStore) {
         if (stamp !== null) activation.lastStamp = receiveHlc(activation.lastStamp, stamp)
       }
       await saveStamp(activation, store)
+      await refreshGraph(activation)
+      if (runtime !== activation) return
       changed = true
     }
     if (cursor === null || cursor <= since) break
@@ -1154,10 +1162,7 @@ async function pullEventLog(activation: DatabaseModeRuntime, store: NoteStore) {
     behind = page === EVENTS_PAGES_PER_PULL - 1
   }
   activation.logBehind = behind
-  if (changed) {
-    await refreshGraph(activation)
-    bumpEventLog()
-  }
+  if (changed) bumpEventLog()
   if (behind) {
     enqueue(async () => {
       if (runtime !== activation || !activation.store) return

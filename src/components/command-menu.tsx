@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useDebounce } from "use-debounce"
 import { viewRootsAtom } from "../global-state"
+import { useViewHints } from "../hooks/view-hints"
 import { useRecentRoots } from "../hooks/recent-roots"
 import { useCreateNote } from "../hooks/note"
 import { keepResults, useSearchResults } from "../hooks/search-results"
@@ -17,10 +18,12 @@ import { composeQuery, parseQuery } from "../utils/search"
 import { CalendarDateIcon16, PlusIcon16, SearchIcon16 } from "./icons"
 import { Keys } from "./ui/keys"
 import { Surface } from "./ui/surface"
-import { QUERY_DEBOUNCE_MS } from "./note-list"
 import { QueryBox } from "./query-box"
 import { ResultsList } from "./results-list"
 import { isCommandMenuOpenAtom, paletteRequestAtom, type PaletteChoice } from "./palette"
+
+/** How long typing settles before the query runs. */
+const QUERY_DEBOUNCE_MS = 150
 
 /** The cmdk root the palette's input sits in. */
 function paletteRoot(input: HTMLInputElement | null): HTMLElement | null {
@@ -75,6 +78,8 @@ export function CommandMenu() {
   // use, Views is everything there is.
   const recentRoots = useRecentRoots()
   const viewRoots = useAtomValue(viewRootsAtom)
+  // Each View's path, after its name, as the sidebar shows it.
+  const viewHints = useViewHints()
   const [isOpen, setIsOpen] = useAtom(isCommandMenuOpenAtom)
 
   // The open note, if any: it leads the `in:` suggestions, and ⌘P searches
@@ -288,16 +293,17 @@ export function CommandMenu() {
     navigate({ to: "/views/$", params: { _splat: id }, search: { query: undefined } })
   }, [picking, text, createNote, leave, navigate])
 
-  // Commit the typed query to the full results view — the URL-addressable
-  // `/?query=` the Views page already owns, so filter views are bookmarkable
-  // and back/forward just work. The query as typed, not as last searched:
-  // ↵ can land inside the debounce.
-  const openResultsView = useCallback(() => {
+  // Commit the typed query: open its top result, the note or the block
+  // ranked first. There is no Views page to list them on any more; the
+  // palette is where the results are. Nothing to open, nothing happens.
+  const openTopResult = useCallback(() => {
+    const top = results.rows[0]
+    if (!top) return
     leave()
-    navigate({ to: "/", search: { query: query.trim() } })
-  }, [leave, navigate, query])
+    void openNote(top.noteId, top.kind === "block" ? top.id : undefined)
+  }, [leave, openNote, results])
   /** ↵ in the query: with a query typed and no item highlighted, it is a
-   * search, and the results view opens. With an item highlighted, ↵ is
+   * search, and its top result opens. With an item highlighted, ↵ is
    * cmdk's and picks the item. For a picker that takes a value, ↵ on the
    * query picks the typed text; for one that does not, it does nothing. */
   const submit = useCallback(() => {
@@ -307,9 +313,9 @@ export function CommandMenu() {
       if (textRow) pick({ kind: "text", text: text.trim() })
       return true
     }
-    openResultsView()
+    openTopResult()
     return true
-  }, [query, picking, textRow, text, pick, openResultsView])
+  }, [query, picking, textRow, text, pick, openTopResult])
 
   // Open a result: the note, or the note focused on the block — or, for a
   // picker, hand it back as the pick.
@@ -463,7 +469,7 @@ export function CommandMenu() {
                 {/* The results block — the count and the rows — as the
                     notes page draws it. ↓ past the last item hands the
                     keyboard to the rows; ↵ straight after typing commits
-                    the query to the results view (`submit`). */}
+                    the query by opening its top result (`submit`). */}
                 <ResultsList
                   variant="palette"
                   query={deferredQuery}
@@ -494,6 +500,7 @@ export function CommandMenu() {
                   query=""
                   results={results}
                   browseRoots={viewRoots}
+                  rootHints={viewHints}
                   limit={NUM_VISIBLE_RESULTS}
                   readOnly
                   initialSelection="none"

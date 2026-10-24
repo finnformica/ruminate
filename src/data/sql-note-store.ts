@@ -266,7 +266,7 @@ const LIVE_LINKS =
   "WHERE nodes.id IN (link.source_id, link.destination_id) " +
   "AND nodes.deleted_at IS NOT NULL)"
 const LIVE_VIEWS =
-  "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, seq FROM views " +
+  "SELECT id, root_id, filter, sort, pinned, sort_key, stack, updated_at, seq FROM views " +
   "WHERE deleted_at IS NULL"
 
 /** Keys in one statement: well under SQLite's bound on parameters. */
@@ -324,7 +324,8 @@ async function loadAllRows(
         `WHERE ${CREATED} /* includes-deleted: as above */`,
     ),
     driver.exec(
-      "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at, seq FROM views " +
+      "SELECT id, root_id, filter, sort, pinned, sort_key, stack, updated_at, deleted_at, seq " +
+        "FROM views " +
         `WHERE ${CREATED} /* includes-deleted: as above */`,
     ),
   ])
@@ -655,11 +656,12 @@ function upsertViewStatement(view: ViewRow): SqlStatement {
     // tenant-exempt: the local store is one user per browser profile; there is
     // no second tenant in an OPFS database (src/data/corpus-schema.ts).
     sql:
-      "INSERT INTO views (id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at, seq, " +
-      "stamps) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+      "INSERT INTO views (id, root_id, filter, sort, pinned, sort_key, stack, updated_at, " +
+      "deleted_at, seq, stamps) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
       "ON CONFLICT (id) DO UPDATE SET root_id = excluded.root_id, filter = excluded.filter, " +
       "sort = excluded.sort, pinned = excluded.pinned, sort_key = excluded.sort_key, " +
-      "updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, seq = excluded.seq, " +
+      "stack = excluded.stack, updated_at = excluded.updated_at, " +
+      "deleted_at = excluded.deleted_at, seq = excluded.seq, " +
       "stamps = excluded.stamps WHERE excluded.updated_at >= views.updated_at",
     params: [
       view.id,
@@ -668,6 +670,7 @@ function upsertViewStatement(view: ViewRow): SqlStatement {
       view.sort,
       view.pinned ? 1 : 0,
       view.sort_key,
+      view.stack ?? null,
       view.updated_at,
       view.deleted_at ?? null,
       view.seq ?? null,

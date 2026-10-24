@@ -5,6 +5,7 @@ import { asBlockType, type Block, type BlockDoc, type ChangeHint } from "../bloc
 import { idOfKey, walkDoc } from "../blocks/view"
 import { childIdsOf, parseProps, propsJson, type GraphSnapshot } from "../data/graph"
 import { partsToOps, reachableFrom, type Op } from "../data/ops"
+import { moveNoteOps } from "../data/note-order"
 import { useApplyOps } from "../data/store"
 import { graphSnapshotAtom } from "../global-state"
 import type { NoteId } from "../schema"
@@ -96,13 +97,21 @@ function notesOfBlocks(doc: BlockDoc, roots: readonly ResultRoot[]): Map<string,
  *
  * The root list itself is never reconciled: the roots are the view's, not a
  * parent's children (`BlockEditor.fixedRoots` refuses an edit to them).
+ *
+ * `shown` is the doc the view drew, when a filter may have hidden rows from
+ * it: a child the view did not show is not this edit's to unlink
+ * (`partsToOps`, `shownOf`).
  */
 export function resultsToOps(
   next: BlockDoc,
   roots: readonly ResultRoot[],
   snapshot: GraphSnapshot,
   discard?: Iterable<string>,
+  shown?: BlockDoc,
 ): Op[] {
+  const shownOf = shown
+    ? new Map(Object.values(shown.blocks).map((block) => [block.id, block.children]))
+    : undefined
   const byNote = new Map<NoteId, string[]>()
   for (const [id, noteId] of notesOfBlocks(next, roots)) {
     const ids = byNote.get(noteId)
@@ -135,6 +144,8 @@ export function resultsToOps(
         reachableFrom(snapshot, ids),
         "keep",
         discarded,
+        undefined,
+        shownOf,
       ),
     )
   }
@@ -144,6 +155,41 @@ export function resultsToOps(
 /** Same ids, same order. */
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((id, index) => id === b[index])
+}
+
+/** The one root that moved between two orders of the same roots, or null
+ * when they are the same or more than one moved: the root whose removal from
+ * both leaves them equal. */
+function movedRoot(before: readonly string[], after: readonly string[]): string | null {
+  if (before.length !== after.length || sameIds(before, after)) return null
+  const without = (ids: readonly string[], id: string) => ids.filter((other) => other !== id)
+  for (const id of after) {
+    if (sameIds(without(before, id), without(after, id))) return id
+  }
+  return null
+}
+
+/**
+ * **The Root frame's edit** (docs/graph-walk.md, decision 5): the batch that
+ * makes the graph hold what the Root frame now shows. Its rows are notes,
+ * so the rows beneath them edit as a results view's do (`resultsToOps`):
+ * each block's home is the note it sits in, and retyping a note row renames
+ * the note. The root list is not reconciled, so the notes the corpus root
+ * does not link get no link row (no backfill). A move of one note row,
+ * where `movable`, is the root's link to that note (`moveNoteOps`).
+ */
+export function rootToOps(
+  next: BlockDoc,
+  shown: BlockDoc,
+  snapshot: GraphSnapshot,
+  { discard, movable = false }: { discard?: Iterable<string>; movable?: boolean } = {},
+): Op[] {
+  const roots = shown.rootBlockIds.map((id) => ({ id, noteId: id }))
+  const moved = movable ? movedRoot(shown.rootBlockIds, next.rootBlockIds) : null
+  return [
+    ...resultsToOps(next, roots, snapshot, discard, shown),
+    ...(moved !== null ? moveNoteOps(moved, next.rootBlockIds, snapshot) : []),
+  ]
 }
 
 /**

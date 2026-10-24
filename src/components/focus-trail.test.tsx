@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import { buildGraphSnapshot, CHILD_KIND } from "../data/graph"
 import type { FocusFrame } from "../data/panes"
+import { rootFrame } from "../data/root-frame"
 
 /**
  * The one focus breadcrumb (docs/split-view.md): the stack's frames as
@@ -120,5 +121,21 @@ describe("the focus breadcrumb", () => {
     // A frame up the stack still pops.
     fireEvent.click(screen.getByText("Beta"))
     expect(onPopTo).toHaveBeenCalledWith(0)
+  })
+
+  it("leads with Root, the base of every pane, which pops back to the list of notes", () => {
+    const { crumbs, onPopTo } = trail([rootFrame(), frame(null, "A/B/C"), frame("C")])
+    expect(crumbs).toEqual(["frame:Root", "frame:Note", "path:Alpha", "path:Beta", "frame:Gamma"])
+    fireEvent.click(screen.getByText("Root"))
+    expect(onPopTo).toHaveBeenLastCalledWith(0)
+    fireEvent.click(screen.getByText("Note"))
+    expect(onPopTo).toHaveBeenLastCalledWith(1)
+  })
+
+  it("leads a block opened from a link with Root, then the note and the path down", () => {
+    const { crumbs, onGoAbove } = trail([rootFrame(), frame("B")])
+    expect(crumbs).toEqual(["frame:Root", "path:Note", "path:Alpha", "frame:Beta"])
+    fireEvent.click(screen.getByText("Note"))
+    expect(onGoAbove).toHaveBeenLastCalledWith({ noteId: "N", root: null })
   })
 })

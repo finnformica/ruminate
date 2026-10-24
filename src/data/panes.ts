@@ -1,6 +1,7 @@
 import type { LinkPivots } from "../blocks/query"
 import type { Direction } from "../blocks/view"
 import type { Width } from "../schema"
+import { isRootFrame, rootFrame } from "./root-frame"
 
 /**
  * The note page's panes and their focus stacks (docs/split-view.md): view
@@ -24,6 +25,12 @@ import type { Width } from "../schema"
  * sit side by side today (`MAX_PANES`); nothing here depends on the number,
  * so more panes, or a tiling of them, change the cap and the page's grid,
  * not this model.
+ *
+ * **The Root frame is the base of every pane** (`src/data/root-frame.ts`,
+ * docs/graph-walk.md, decision 5): the list of every note. It is implicit in
+ * the URL — `layoutFromSearch` puts it back under each pane, and
+ * `layoutToSearch` leaves it out — so a link to a note opens Root › note, and
+ * Back and Shift+F come down to it.
  *
  * Everything here is pure: the page reads a layout out of the URL
  * (`layoutFromSearch`), changes it with these functions, and writes it back
@@ -169,21 +176,37 @@ const sameView = (a: ViewTarget, b: ViewTarget) => a.noteId === b.noteId && a.ro
 export function popTo(pane: Pane, index: number): FocusMove | null {
   if (index < 0 || index >= pane.frames.length - 1) return null
   const frame = pane.frames[index]
+  // The URL does not keep the Root frame, so it has no recorded row: it
+  // lands on the note the reader came down into.
+  const landing = frame.selected ?? (isRootFrame(frame) ? [pane.frames[index + 1].noteId] : null)
   return {
     pane: derivePane(pane, [...pane.frames.slice(0, index), { ...frame, selected: null }]),
-    landing: frame.selected,
+    landing,
     restored: true,
   }
 }
 
 /**
- * Pop one frame. With one frame left and a block in focus, the pop leaves
- * the focus for the whole note, as Shift+F always has; on the whole note
- * with nothing beneath it there is nothing to pop.
+ * Pop one frame. A block in focus straight above the Root frame (a link to
+ * a block, a search result) leaves the focus for the whole note first, as
+ * Shift+F always has; then the note pops to Root. With one frame left and a
+ * block in focus the pop leaves the focus the same way; on the whole note or
+ * on Root with nothing beneath it there is nothing to pop.
  */
 export function popFrame(pane: Pane): FocusMove | null {
-  if (pane.frames.length > 1) return popTo(pane, pane.frames.length - 2)
   const top = currentFrame(pane)
+  const below = pane.frames[pane.frames.length - 2]
+  if (below && isRootFrame(below) && top.root !== null) {
+    return {
+      pane: derivePane(pane, [
+        ...pane.frames.slice(0, -1),
+        { noteId: top.noteId, root: null, selected: null },
+      ]),
+      landing: null,
+      restored: false,
+    }
+  }
+  if (pane.frames.length > 1) return popTo(pane, pane.frames.length - 2)
   if (top.root === null) return null
   return { pane: derivePane(pane, paneOf(top.noteId).frames), landing: null, restored: false }
 }
@@ -535,7 +558,23 @@ export function parseFrame(text: string): FocusFrame | null {
   return frame
 }
 
-const formatFrames = (frames: FocusFrame[]) => frames.map(formatFrame).join(",")
+const formatFrames = (frames: readonly FocusFrame[]) => frames.map(formatFrame).join(",")
+
+/** A pane's frames as the URL writes them: without the Root frame, which
+ * every reader puts back (`withRootBase`) — unless Root is all there is. */
+const writtenFrames = (frames: readonly FocusFrame[]): FocusFrame[] => {
+  const kept = frames.filter((frame) => !isRootFrame(frame))
+  return kept.length > 0 ? kept : [rootFrame()]
+}
+
+/** Frames read back, with the Root frame at the base: any Root frame among
+ * them is dropped and one is put first. A stack whose top is Root is Root
+ * alone, since Root is only ever the base. */
+export function withRootBase(frames: readonly FocusFrame[]): FocusFrame[] {
+  const top = frames[frames.length - 1]
+  if (!top || isRootFrame(top)) return [rootFrame()]
+  return [rootFrame(), ...frames.filter((frame) => !isRootFrame(frame))]
+}
 
 const parseFrames = (text: unknown): FocusFrame[] =>
   typeof text === "string" && text !== ""
@@ -568,10 +607,11 @@ export function layoutFromSearch(noteId: string, search: Record<string, unknown>
   if (narrowFolds) top.narrowFolds = narrowFolds
   if (depth !== undefined) top.depth = depth
   const below = parseFrames(search.stack)
-  const panes: Pane[] = [{ frames: [...below, top] }]
+  const panes: Pane[] = [{ frames: withRootBase([...below, top]) }]
   for (let i = 1; i < MAX_PANES; i += 1) {
-    const frames = parseFrames(search[paneParam(i)])
-    if (frames.length === 0) break
+    const read = parseFrames(search[paneParam(i)])
+    if (read.length === 0) break
+    const frames = withRootBase(read)
     // The frame on screen carries no selection of its own.
     frames[frames.length - 1] = { ...frames[frames.length - 1], selected: null }
     panes.push({ frames })
@@ -589,6 +629,7 @@ export function layoutFromSearch(noteId: string, search: Record<string, unknown>
 export function layoutToSearch(layout: PaneLayout): { noteId: string; search: PaneSearch } {
   const [first, ...rest] = layout.panes
   const top = currentFrame(first)
+  const beneath = first.frames.slice(0, -1).filter((frame) => !isRootFrame(frame))
   const search: PaneSearch & Record<string, string | number | undefined> = {
     block: top.root ?? undefined,
     filter: top.filter || undefined,
@@ -597,10 +638,10 @@ export function layoutToSearch(layout: PaneLayout): { noteId: string; search: Pa
     folds: hasFolds(top.folds) ? formatFolds(top.folds, top.root) : undefined,
     nfolds: hasFolds(top.narrowFolds) ? formatFolds(top.narrowFolds, top.root) : undefined,
     depth: top.depth,
-    stack: first.frames.length > 1 ? formatFrames(first.frames.slice(0, -1)) : undefined,
+    stack: beneath.length > 0 ? formatFrames(beneath) : undefined,
   }
   for (let i = 1; i < MAX_PANES; i += 1) {
-    search[paneParam(i)] = rest[i - 1] ? formatFrames(rest[i - 1].frames) : undefined
+    search[paneParam(i)] = rest[i - 1] ? formatFrames(writtenFrames(rest[i - 1].frames)) : undefined
   }
   search.active = layout.active > 0 ? layout.active : undefined
   return { noteId: top.noteId, search }

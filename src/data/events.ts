@@ -88,6 +88,13 @@ interface ViewFields {
   sort: string | null
   pinned: boolean
   sort_key: string | null
+  /**
+   * The frames a View saves below its top frame (migrations/0027,
+   * docs/graph-walk.md, "Views save stacks"); null = a one-frame View. Absent
+   * from a create written before the field, so a create need not name it: a
+   * View that no event has given a stack has none.
+   */
+  stack?: string | null
 }
 
 type FieldsOf<E extends Entity> = E extends "block"
@@ -573,7 +580,11 @@ export function projectRows(state: Projectable): {
   const links: LinkRow[] = []
   for (const link of state.links.values()) links.push(stamp({ ...link.fields } as LinkRow, link))
   const views: ViewRow[] = []
-  for (const [id, view] of state.views) views.push(stamp({ id, ...view.fields } as ViewRow, view))
+  for (const [id, view] of state.views) {
+    // A row holds `stack` only when it has one, as the tables give it (`toViewRow`).
+    const { stack, ...fields } = view.fields
+    views.push(stamp({ id, ...fields, ...(stack ? { stack } : {}) } as ViewRow, view))
+  }
   return { nodes, links, views }
 }
 
@@ -851,6 +862,9 @@ export function opsToEvents(
  * whoever made it, the projection writes `at` back as `updated_at`, and the
  * two must agree for the atom and the store to hold the same row.
  */
+const withoutNullStack = ({ stack, ...fields }: ViewFields): ViewFields =>
+  stack === null || stack === undefined ? fields : { ...fields, stack }
+
 export function viewChangeToEvent(
   before: ViewRow | undefined,
   after: ViewRow | undefined,
@@ -862,6 +876,7 @@ export function viewChangeToEvent(
     sort: row.sort,
     pinned: row.pinned,
     sort_key: row.sort_key,
+    stack: row.stack ?? null,
   })
   const live = (row: ViewRow | undefined) => row !== undefined && row.deleted_at === undefined
   const stamped = (row: ViewRow, baseSeq: number | null = null): EventEnvelope => ({
@@ -883,7 +898,8 @@ export function viewChangeToEvent(
           entity: "view",
           entity_id: row.id,
           action: "create",
-          patch: fieldsOf(row),
+          // A create without a stack names none, as every create before 0027.
+          patch: withoutNullStack(fieldsOf(row)),
         }
   }
   if (live(before) && !live(after)) {
@@ -1081,10 +1097,17 @@ export function rowsToEvents(
   })
   for (const view of write.views ?? []) {
     const held = current.views.get(view.id)
-    land<ViewFields>("view", view.id, held ? { fields: viewFields(held), row: held } : null, {
-      fields: viewFields(view),
-      row: view,
-    })
+    land<ViewFields>(
+      "view",
+      view.id,
+      held ? { fields: { ...viewFields(held), stack: held.stack ?? null }, row: held } : null,
+      {
+        // A row pushed without a stack says nothing about it (a client that
+        // predates 0027): the held one stands, as with `notes_id` above.
+        fields: { ...viewFields(view), ...(view.stack === undefined ? {} : { stack: view.stack }) },
+        row: view,
+      },
+    )
   }
   const linkFields = (link: LinkRow): LinkFields => ({
     source_id: link.source_id,
@@ -1242,12 +1265,22 @@ const FIELD_CHECKS: Record<Entity, Record<string, (x: unknown) => boolean>> = {
     sort: isNullableString,
     pinned: (x) => typeof x === "boolean",
     sort_key: isNullableString,
+    stack: isNullableString,
   },
+}
+
+/** The fields a `create` may leave out: each added after creates without it
+ * were written, which every reader must still accept. */
+const OPTIONAL_ON_CREATE: Record<Entity, ReadonlySet<string>> = {
+  block: new Set(),
+  link: new Set(),
+  view: new Set(["stack"]),
 }
 
 /**
  * Validate one patch: the fields the entity has, each of the type it holds,
- * every one of them on a `create`, any subset otherwise, and `deleted_at`
+ * every one of them on a `create` (but those `OPTIONAL_ON_CREATE` names), any
+ * subset otherwise, and `deleted_at`
  * only where a tombstone's stamp may ride (a create or a delete). Nothing
  * else is let through — a patch is stored as JSON forever, and the fold
  * spreads it into the row, so an unknown key would become a column that is
@@ -1269,7 +1302,9 @@ function parsePatch(entity: Entity, action: Action, raw: unknown): object | null
     patch[key] = value
   }
   if (action === "create") {
-    for (const key of Object.keys(checks)) if (!(key in patch)) return null
+    for (const key of Object.keys(checks)) {
+      if (!(key in patch) && !OPTIONAL_ON_CREATE[entity].has(key)) return null
+    }
   }
   if (action === "delete") {
     for (const key of Object.keys(patch)) if (key !== "deleted_at") return null

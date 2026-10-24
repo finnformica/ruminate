@@ -6,8 +6,10 @@ import {
   EVENT_VERSION,
   eventStamp,
   fold,
+  foldByStamp,
   linkEntityId,
   projectRows,
+  toViewRows,
   type RuminateEvent,
 } from "../../src/data/events"
 import { encodeHlc } from "../../src/data/hlc"
@@ -25,7 +27,7 @@ import {
   writeRows,
 } from "./event-log"
 import { corpusPullSince, corpusPut } from "./replica-corpus"
-import type { LinkRow, NodeRow } from "./replica-payload"
+import type { LinkRow, NodeRow, ViewRow } from "./replica-payload"
 import { createTenantTestDriver } from "./sqlite-test-driver"
 
 const identityOf = (id: number) => ({ id, login: `u${id}`, name: null })
@@ -925,5 +927,109 @@ describe("by stamp", () => {
     const pulled = await corpusPullSince(alice, 0)
     expect(pulled.nodes[0].text).toBe("A, by an agent")
     expect(await verifyLog(alice)).toMatchObject({ ok: true })
+  })
+})
+
+describe("a view's stack (migrations/0027)", () => {
+  const viewRow = (at: number, extra: Partial<ViewRow> = {}): ViewRow => ({
+    id: "v",
+    root_id: "note",
+    filter: null,
+    sort: null,
+    pinned: true,
+    sort_key: null,
+    updated_at: at,
+    ...extra,
+  })
+  const stackOf = async (driver: SqlDriver) =>
+    (await driver.exec("SELECT stack FROM views WHERE user_id = 111 AND id = 'v'"))[0]?.stack
+
+  it("is set by an update, kept by an update that does not name it, and pulled", async () => {
+    const { driver, alice } = await open()
+    const w = writer()
+    // A create as every client before the field writes it: no `stack`.
+    await append(alice, [w.view("v", "note", true)])
+    expect(await stackOf(driver)).toBeNull()
+    await append(alice, [w.editView("v", { stack: "corpus_root:tasks" })])
+    // An older client changes another field and says nothing of the stack.
+    await append(alice, [w.editView("v", { filter: "type:todo" })])
+    expect(await stackOf(driver)).toBe("corpus_root:tasks")
+
+    const pulled = await corpusPullSince(alice, 0)
+    expect(pulled.views[0]).toMatchObject({ filter: "type:todo", stack: "corpus_root:tasks" })
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, rejected: 0 })
+
+    await append(alice, [w.editView("v", { stack: null })])
+    expect(await stackOf(driver)).toBeNull()
+    expect((await corpusPullSince(alice, 0)).views[0]).not.toHaveProperty("stack")
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, rejected: 0 })
+  })
+
+  it("is kept by a row pushed without it, and cleared by a row that says null", async () => {
+    const { driver, alice } = await open()
+    const ctx = { actor: 111, origin: "replica" as const, device: "tab", now: 5_000 }
+    await writeRows(alice, { nodes: [], links: [], views: [viewRow(1_000, { stack: "a.b" })] }, ctx)
+    expect(await stackOf(driver)).toBe("a.b")
+    // A client that predates 0027 pushes the row it holds, without a stack.
+    await writeRows(
+      alice,
+      { nodes: [], links: [], views: [viewRow(2_000, { filter: "type:todo" })] },
+      ctx,
+    )
+    expect(await stackOf(driver)).toBe("a.b")
+    const update = (await readEvents(alice)).at(-1)!
+    expect(update.patch).toEqual({ filter: "type:todo" })
+    await writeRows(alice, { nodes: [], links: [], views: [viewRow(3_000, { stack: null })] }, ctx)
+    expect(await stackOf(driver)).toBeNull()
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, rejected: 0 })
+  })
+
+  it("is set on a row from before the field by any event that names it", async () => {
+    const { driver, alice } = await open()
+    const a = writer("dev.a")
+    await append(alice, [stampedAt(a.view("v", "note", true), 5_000)])
+    // The stamps a row projected before 0027 holds: none for `stack`.
+    await driver.exec(
+      "UPDATE views SET stamps = json_remove(stamps, '$.stack') WHERE user_id = 111 AND id = 'v'",
+    )
+    // Behind every stamp the row holds, but the first to name the stack.
+    const b = writer("dev.b")
+    await append(alice, [stampedAt(b.editView("v", { stack: "x", filter: "old" }), 4_000)])
+    const [row] = await driver.exec(
+      "SELECT filter, stack, stamps FROM views WHERE user_id = 111 AND id = 'v'",
+    )
+    expect(row).toMatchObject({ filter: null, stack: "x" })
+    expect(JSON.parse(String(row.stamps)).stack).toBe(
+      encodeHlc({ ms: 4_000, counter: 0, device: "dev.b" }),
+    )
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, rejected: 0 })
+  })
+
+  it("lands the same in any order, and the client's fold agrees with the tables", async () => {
+    const a = writer("dev.a")
+    const b = writer("dev.b")
+    const create = [stampedAt(a.view("v", "note", true), 1_000)]
+    const edits = [
+      stampedAt(a.editView("v", { stack: "by.a" }), 3_000),
+      stampedAt(b.editView("v", { stack: "by.b", sort: "text:asc" }), 2_000),
+      stampedAt(b.editView("v", { filter: "type:todo" }), 4_000),
+    ]
+    const results = []
+    for (const order of [edits, [...edits].reverse()]) {
+      const { driver, alice } = await open()
+      await append(alice, create)
+      for (const event of order) await append(alice, [event])
+      expect(await verifyLog(alice)).toMatchObject({ ok: true, rejected: 0 })
+      const views = (await corpusPullSince(alice, 0)).views
+      const folded = toViewRows(foldByStamp(await readEvents(alice)))
+      expect(folded.map(({ seq: _, ...row }) => row)).toEqual(
+        views.map(({ seq: _, ...row }) => row),
+      )
+      results.push(
+        await driver.exec("SELECT filter, sort, stack FROM views WHERE user_id = 111 AND id = 'v'"),
+      )
+    }
+    expect(results[0]).toEqual([{ filter: "type:todo", sort: "text:asc", stack: "by.a" }])
+    expect(results[1]).toEqual(results[0])
   })
 })

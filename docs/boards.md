@@ -454,28 +454,14 @@ follows finds nothing to write, and one <kbd>⌘</kbd> <kbd>Z</kbd> takes the
 row out again — which only unlinks the board (below). Signed out the two
 work on the sample graph, like the rest of the editor.
 
-**The row is the board's own node**, and in an outline it is drawn as a
-card (`board-card.tsx`, the `board` kind in `block-kinds.tsx`), a figure
-like a picture or a link card: the key slot before it is the empty one a
-figure gets, so the card starts where their figures start, and the card
-holds its name — the node's text, rendered and never a textarea: a
-board is named on its own page, and asking to edit the row (a double-click,
-a tap, the arrows walking into it) selects it instead (`uneditable`) — and
-beneath it what the board holds, read live off the graph (`boardCardLine`:
-"12 pictures · Location, Object, Material", "No pictures yet" while it is
-empty, four features named and the rest counted). **Open board** in the
-card's corner — the board's own glyph — opens the board's page; click
-anywhere else and the row is selected, as any row. Selected, the card
-keeps its own ink: the row's selection tints the text it inherits, and a
-name on a card is not a line of the note. The card is a figure in a link card's frame
-(`figure-frame.tsx`, `isFigureType`): it keeps to a side and takes a
-width, from the handles or the row's menu, and those two props sit on the
-board's own node beside its metadata — one card, however many notes it is
-linked in. The row starts folded, whatever the depth setting says
-(`foldRule`, `src/data/view-state.ts`): the card stands for the board's
-outline, which is a chevron away. Listed — a search result, the Views
-page, the palette — a board is still the note row with the board's favicon,
-not the card.
+**The row is the board's own node**, and it is drawn as a block row like
+a note's (Finn, 2026-10-23): the board's icon in the key slot where a
+marker sits, its name as the row's text, which edits as any row's does. It
+folds by the same rule as any row and opens to what the board holds. Focus
+(`f`) opens the board's outline, whose ⋯ menu has **Open board** for its
+page.
+There is no card, and no figure layout. In a list (a search result, the
+palette, Root) it is the same row.
 
 **Removing the row never deletes the board.** <kbd>⌫</kbd> on the row, Cut,
 and **Unlink** in its menu only unlink it: a note is a root of its own, and

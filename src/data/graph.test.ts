@@ -24,6 +24,8 @@ import {
   pathToBlock,
   reconcileSortKeys,
   rollup,
+  rootChildIds,
+  rootView,
   sectionReach,
   sortKeyBetween,
   walkGraph,
@@ -1546,5 +1548,65 @@ describe("sort keys", () => {
       expect([...ordered].sort()).toEqual(ordered)
       expect(new Set(ordered).size).toBe(ordered.length)
     }
+  })
+})
+
+describe("the Root frame's walk (docs/graph-walk.md, decision 5)", () => {
+  const node = (id: string, text: string, type = "text"): NodeRow => ({
+    id,
+    type,
+    text,
+    props: null,
+    updated_at: 0,
+  })
+  const link = (source: string, destination: string, sortKey = "a0"): LinkRow => ({
+    source_id: source,
+    destination_id: destination,
+    kind: "child",
+    sort_key: sortKey,
+    updated_at: 0,
+  })
+  // The root links Cherry; Apple and a board, Banana, are not placed.
+  const graph = buildGraphSnapshot(
+    [
+      node(CORPUS_ROOT_ID, "", "corpus_root"),
+      node("c", "Cherry", NOTE_TYPE),
+      node("a", "Apple", NOTE_TYPE),
+      node("b", "Banana", BOARD_TYPE),
+      node("blk_seed", "Seed"),
+    ],
+    [link(CORPUS_ROOT_ID, "c"), link("a", "blk_seed")],
+  )
+
+  it("lists the notes the root links first, then every other note by title", () => {
+    expect(rootChildIds(graph)).toEqual(["c", "a", "b"])
+    // A block is never a row of Root.
+    expect(rootChildIds(graph)).not.toContain("blk_seed")
+  })
+
+  it("leaves out the notes it is told to (the shared ones)", () => {
+    expect(rootChildIds(graph, new Set(["a"]))).toEqual(["c", "b"])
+  })
+
+  it("needs no root node: a corpus nobody has reordered still has its rows", () => {
+    const bare = buildGraphSnapshot([node("a", "Apple", NOTE_TYPE)], [])
+    expect(rootChildIds(bare)).toEqual(["a"])
+  })
+
+  it("walks the corpus root as a note: its rows are the notes, as their own types", () => {
+    const { doc, collapsed } = rootView(graph, () => false)
+    expect(doc.rootBlockIds).toEqual(["c", "a", "b"])
+    expect(doc.blocks.a.type).toBe(NOTE_TYPE)
+    expect(doc.blocks.b.type).toBe(BOARD_TYPE)
+    // Closed by the rule, a note row is a row with its blocks folded away.
+    expect(doc.blocks.a.children).toEqual(["blk_seed"])
+    expect(doc.blocks.blk_seed).toBeUndefined()
+    expect(collapsed).toEqual(new Set(["a"]))
+  })
+
+  it("expands a note row to its blocks, as any row", () => {
+    const { doc, collapsed } = rootView(graph, (key) => key === "a")
+    expect(doc.blocks.blk_seed?.text).toBe("Seed")
+    expect(collapsed.has("a")).toBe(false)
   })
 })

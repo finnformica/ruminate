@@ -8,8 +8,8 @@ import { sampleViews } from "./sample-graph"
  * **Views** (migrations/0015, docs/metadata.md): the entrypoints into the
  * graph. A view is a node to start at (`root_id`), what of its subgraph to
  * keep (`filter`), how to lay that out (`sort`) and where it sits in the
- * **Views** list (`sort_key`) — the one list the sidebar, the Views page and
- * the palette draw.
+ * **Views** list (`sort_key`) — the one list the sidebar and the palette
+ * draw. A View saves a whole stack of frames (`stack`, `view-stack.ts`).
  *
  * **A node is listed exactly when its row says so** — `pinned`, the
  * column's name on the wire — whatever kind of node it is: a note, a board
@@ -83,6 +83,9 @@ export interface ViewPatch {
   pinned?: boolean
   /** Where the view sits in the Views list (`orderViews`). */
   sort_key?: string | null
+  /** The frames saved below the top one (`ViewRow.stack`, docs/graph-walk.md,
+   * "Views save stacks"); null or `""` = a one-frame View. */
+  stack?: string | null
 }
 
 /** A view write that lands with a batch of ops (`useApplyOps`): the root
@@ -105,7 +108,7 @@ const textOrNull = (value: string | null | undefined, fallback: string | null) =
 /**
  * The row a patch to the view rooted at `rootId` writes: the current row
  * with the patch over it — or, when nothing is left that a row is for (not
- * kept, no filter, no sort, no place in the order), its tombstone, so
+ * kept, no filter, no sort, no place in the order, no stack), its tombstone, so
  * removing a block from Views leaves no empty row behind. `updated_at`
  * always moves past the current row's, because last-writer-wins reads `>=`
  * and a clock that stood still must not make the write a draw.
@@ -125,7 +128,16 @@ export function patchedView(
     sort_key: patch.sort_key !== undefined ? patch.sort_key : (current?.sort_key ?? null),
     updated_at: Math.max(now, (current?.updated_at ?? 0) + 1),
   }
-  if (!next.pinned && next.filter === null && next.sort === null && next.sort_key === null) {
+  // Held only when there is one, as the tables give a row (`toViewRow`).
+  const stack = patch.stack !== undefined ? patch.stack || null : (current?.stack ?? null)
+  if (stack !== null) next.stack = stack
+  if (
+    !next.pinned &&
+    next.filter === null &&
+    next.sort === null &&
+    next.sort_key === null &&
+    stack === null
+  ) {
     return { ...next, deleted_at: next.updated_at }
   }
   return next

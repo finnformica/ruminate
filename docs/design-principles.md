@@ -78,7 +78,7 @@ asks for it.
    fades — perceptually instant.
    Outside the editor "chosen" and "current" are a **wash**: the sidebar's
    active nav row / open note (`.nav-item[aria-current]`, with
-   `-hover`/`-active` steps), the Views page keyboard highlight
+   `-hover`/`-active` steps), the palette's keyboard highlight
    (`.list-highlight`), the calendar's current day and week, and the settings
    pickers (`<Button selected>`) all use `--color-bg-selected` /
    `--color-text-selected` verbatim. Every one of

@@ -316,7 +316,7 @@ unrepresentable by the primary key. `kind` reserves the slot for other edge
 kinds. (Wikilinks and tags were removed as features; `[[...]]` and `#word` in
 text are plain text.)
 
-### `views` (id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at)
+### `views` (id, root_id, filter, sort, pinned, sort_key, stack, updated_at, deleted_at)
 
 **Decided 2026-10-20: a View saves a stack.** `root_id` is the root of the
 **top** frame, the one on screen when the View opens, so a View is still
@@ -332,7 +332,9 @@ a node to start at, what of its subgraph to keep, how to lay it out, whether
 it is in the Views list (`pinned` — the list IS the rows that say so, for a
 note, a board and a block alike; every note and board is created with one,
 `migrations/0021` gave the existing ones theirs) and where it sits in it
-(`sort_key`). Not part of the graph and not derivable from it — a
+(`sort_key`). `stack` (`migrations/0027`) holds the frames a View saves
+below its top frame (docs/graph-walk.md, "Views save stacks"); NULL is a
+one-frame View. Not part of the graph and not derivable from it — a
 view may name a node another tenant owns (a share), which no prop on that
 node could record — so a table of its own, replicated exactly as the other
 two are: per-row last-writer-wins on `updated_at`, a delete as a row carrying
@@ -479,7 +481,8 @@ climbed to the top of the sidebar while you were looking at it.
 
 A **corpus root** supplies the missing edge. It is one node per corpus, typed
 `corpus_root` at the fixed id `corpus_root`, whose `child` links hold the
-notes the user has dragged into an order. Nothing about the mechanism is
+notes the user has dragged into an order: a drag of a row in the Root frame
+(docs/graph-walk.md, decision 5). Nothing about the mechanism is
 note-specific: the keys are the same fractional indices from the same
 `sortKeyBetween`, so moving a note rewrites one link row exactly as moving a
 block does (`src/data/note-order.ts`).
@@ -509,8 +512,8 @@ are all of its call sites:
 - `walkGraph`'s upstream pass: the root would show above a note as its parent.
 
 The sort itself is a preference, not data: **Name** (the default), **Recently
-updated** and **Manual**, one preference for the sidebar's Views list, the
-Views page and the palette, so no two surfaces disagree about where a view
+updated** and **Manual**, one preference for the sidebar's Views list and
+the palette, so no two surfaces disagree about where a view
 is. Manual is two bands — the notes the root holds, then the ones it does
 not, in the name order beneath them.
 

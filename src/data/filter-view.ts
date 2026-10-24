@@ -5,7 +5,9 @@ import type { ViewNarrowing } from "../utils/view-narrowing"
 import {
   ancestorClosure,
   blockView,
+  CORPUS_ROOT_ID,
   noteView,
+  rootView,
   type GraphSnapshot,
   type GraphView,
   type WalkNarrowing,
@@ -101,6 +103,7 @@ export function filteredView(
     keep,
     pivots,
     reach,
+    exclude,
   }: {
     /** The fold rule the rows are drawn by — the narrowed view's own
      * (`useFoldRule` with the narrowing, src/data/view-state.ts). Absent,
@@ -122,6 +125,9 @@ export function filteredView(
     /** `filterReach` of the filter's matches, when the caller holds it;
      * built here when absent. */
     reach?: ReadonlySet<string>
+    /** Notes the Root frame does not list: the ones other people shared
+     * (`rootChildIds`). Read only for the Root frame. */
+    exclude?: ReadonlySet<string>
   } = {},
 ): FilteredView | null {
   const { matched, compare } = narrowing
@@ -136,7 +142,13 @@ export function filteredView(
   const focused = focusBlockId
     ? blockView(focusBlockId, graph, expanded, pivots, walk && { ...walk, keepRoots: true })
     : null
-  const view = focused ?? noteView(noteId, graph, expanded, pivots, walk)
+  // The Root frame (src/data/root-frame.ts) is the walk of the corpus root,
+  // narrowed the same way: its rows are notes, and the filter runs over them all.
+  const view =
+    focused ??
+    (noteId === CORPUS_ROOT_ID
+      ? rootView(graph, expanded, pivots, walk, exclude)
+      : noteView(noteId, graph, expanded, pivots, walk))
   if (!view) return null
   if (matched === null) return { ...view, context: NO_CONTEXT, matches: null }
   // Every row the walk kept is a match, a kept row, or context.

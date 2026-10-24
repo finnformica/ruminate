@@ -31,7 +31,7 @@ export const CACHE_TABLES = {
   view: {
     table: "views",
     key: ["id"],
-    fields: ["root_id", "filter", "sort", "pinned", "sort_key"],
+    fields: ["root_id", "filter", "sort", "pinned", "sort_key", "stack"],
   },
 } as const satisfies Record<
   Entity,

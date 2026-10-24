@@ -9,8 +9,8 @@ import { Button } from "./ui/button"
 import { ResultsEditor } from "./results-editor"
 
 /**
- * **The results block** — what a query resolves to, drawn the one way on
- * the Views page and in the ⌘K palette: the count line ("3 matching blocks
+ * **The results block** — what a query resolves to, as the ⌘K palette
+ * draws it: the count line ("3 matching blocks
  * in 2 notes", "12 results", or that nothing matched), then the rows — the
  * block editor over the matched blocks or notes (`ResultsEditor`) — and,
  * where the surface wants it, a way to the rest.
@@ -41,6 +41,7 @@ export function ResultsList({
   onExitTop,
   onExitBottom,
   initialSelection,
+  rootHints,
 }: {
   /** The full query the results are for — empty when browsing. */
   query: string
@@ -71,6 +72,9 @@ export function ResultsList({
   /** The first row highlighted on mount (the page), or nothing until the
    * keyboard arrives (the palette's lists). */
   initialSelection?: "first" | "none"
+  /** Quiet text after a root row, by root id: the Views list's paths
+   * (`useViewHints`). */
+  rootHints?: ReadonlyMap<string, string>
 }) {
   const { mode, hits, notes, titleMatches, rows: ranked } = results
   const showBlocks = mode === "blocks"
@@ -150,6 +154,7 @@ export function ResultsList({
           onExitTop={onExitTop}
           onExitBottom={onExitBottom}
           initialSelection={initialSelection}
+          rootHints={rootHints}
         />
       </div>
       {more && total > visible ? (

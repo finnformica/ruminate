@@ -69,7 +69,6 @@ function Harness({
   noteId,
   onEditingChange,
   onRequestBoard,
-  onOpenBoard,
   onRequestLink,
 }: {
   initial?: string
@@ -92,7 +91,6 @@ function Harness({
   noteId?: string
   onEditingChange?: (id: string | null) => void
   onRequestBoard?: (request: BoardRequest) => void
-  onOpenBoard?: (id: string) => void
   onRequestLink?: (request: LinkRequest) => void
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? withStarter(parse(initial)))
@@ -118,7 +116,6 @@ function Harness({
         onLinkPreview={onLinkPreview}
         onEditingChange={onEditingChange}
         onRequestBoard={onRequestBoard}
-        onOpenBoard={onOpenBoard}
         onRequestLink={onRequestLink}
       />
       <pre data-testid="serialized">{serialize(doc)}</pre>
@@ -5021,6 +5018,12 @@ describe('a board at a row (docs/boards.md, "A board in a note")', () => {
     Array.from(menu.querySelectorAll("[role=option]")).map((row) =>
       row.getAttribute("data-slash-item"),
     )
+  /** The board's icon in a row's key slot (`NoteFavicon`), or null. */
+  const boardIcon = (container: HTMLElement, id: string) =>
+    container.querySelector(`[data-block-row="${id}"] [data-testid="favicon-board"]`)
+  /** A row's fold chevron, by the label it shows now. */
+  const chevronOf = (container: HTMLElement, id: string, label: "Collapse" | "Expand") =>
+    container.querySelector(`[data-block-row="${id}"] button[aria-label="${label}"]`)!
   const board = (id: string, text: string, children: string[] = []): Block => ({
     id,
     type: "board",
@@ -5040,9 +5043,9 @@ describe('a board at a row (docs/boards.md, "A board in a note")', () => {
     expect(slashRows(getByTestId("slash-menu"))).toEqual(["action:board"])
   })
 
-  it("Board asks for a board after the row, hung off its line, and place puts its card in as one undo step", () => {
+  it("Board asks for a board after the row, hung off its line, and place puts its row in as one undo step", () => {
     const onRequestBoard = vi.fn()
-    const { container, getByTestId, queryByTestId } = render(
+    const { container, getByTestId } = render(
       <Harness initial="- plan" startEditing noteId="n" onRequestBoard={onRequestBoard} />,
     )
     const [planId] = idsOf(container)
@@ -5059,21 +5062,21 @@ describe('a board at a row (docs/boards.md, "A board in a note")', () => {
     // The host made and linked the board; its row goes in, selected, not edited.
     act(() => request.place(board("blk_kitchen000", "Kitchen", ["blk_feature000"])))
     expect(idsOf(container)).toEqual([planId, "blk_kitchen000"])
-    expect(getByTestId("board-card").textContent).toContain("Kitchen")
+    expect(boardIcon(container, "blk_kitchen000")).not.toBeNull()
     expect(highlightedText(container)).toBe("Kitchen")
     expect(container.querySelector("textarea")).toBeNull()
     expect(serializedLines(getByTestId)).toEqual(["- plan ", "Kitchen"])
     // One ⌘Z takes the row out again; one ⇧⌘Z puts it back.
     fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true })
     expect(idsOf(container)).toEqual([planId])
-    expect(queryByTestId("board-card")).toBeNull()
+    expect(boardIcon(container, "blk_kitchen000")).toBeNull()
     fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true, shiftKey: true })
     expect(idsOf(container)).toEqual([planId, "blk_kitchen000"])
   })
 
   it("/link board is the same entry; on a blank row the board takes the row's place", () => {
     const onRequestBoard = vi.fn()
-    const { container, getByTestId } = render(
+    const { container } = render(
       <Harness initial="" startEditing noteId="n" onRequestBoard={onRequestBoard} />,
     )
     const [blankId] = idsOf(container)
@@ -5083,7 +5086,7 @@ describe('a board at a row (docs/boards.md, "A board in a note")', () => {
     expect(request).toMatchObject({ parentId: "n", placement: { replace: blankId } })
     act(() => request.place(board("blk_kitchen000", "Kitchen")))
     expect(idsOf(container)).toEqual(["blk_kitchen000"])
-    expect(getByTestId("board-card")).not.toBeNull()
+    expect(boardIcon(container, "blk_kitchen000")).not.toBeNull()
   })
 
   it("under a block, the board goes under that block", () => {
@@ -5103,46 +5106,55 @@ describe('a board at a row (docs/boards.md, "A board in a note")', () => {
     })
   })
 
-  it("a board's card is never a textarea: editing it selects it, and the arrows pass through", () => {
+  it("a board row is a block row: the board's icon in its key slot, its title edits, it folds", () => {
     const initialDoc: BlockDoc = {
       props: null,
-      rootBlockIds: ["blk_a", "blk_kitchen000", "blk_c"],
+      rootBlockIds: ["blk_a", "blk_kitchen000"],
       blocks: {
         blk_a: { id: "blk_a", type: "text", text: "A", children: [] },
         blk_kitchen000: board("blk_kitchen000", "Kitchen", ["blk_feature000"]),
-        blk_c: { id: "blk_c", type: "text", text: "C", children: [] },
+        blk_feature000: { id: "blk_feature000", type: "text", text: "Room", children: [] },
       },
     }
-    const { container, getByTestId } = render(<Harness initialDoc={initialDoc} noteId="n" />)
-    fireEvent.doubleClick(getByTestId("board-card"))
-    expect(container.querySelector("textarea")).toBeNull()
-    expect(highlightedText(container)).toBe("Kitchen")
-    // Walking down from A in edit mode lands on the card as a selection,
-    // and on down to C as an edit.
+    const { container } = render(<Harness initialDoc={initialDoc} noteId="n" />)
+    // The icon the sidebar and the palette draw, in place of a marker; no card.
+    expect(boardIcon(container, "blk_kitchen000")).not.toBeNull()
+    expect(container.querySelector('[data-testid="board-figure"]')).toBeNull()
+    // It folds and opens as any parent does.
+    expect(idsOf(container)).toEqual(["blk_a", "blk_kitchen000", "blk_feature000"])
+    fireEvent.click(chevronOf(container, "blk_kitchen000", "Collapse"))
+    expect(idsOf(container)).toEqual(["blk_a", "blk_kitchen000"])
+    fireEvent.click(chevronOf(container, "blk_kitchen000", "Expand"))
+    expect(idsOf(container)).toEqual(["blk_a", "blk_kitchen000", "blk_feature000"])
+    // Its title is its text, and edits as any row's does.
     fireEvent.doubleClick(
-      container.querySelector('[data-block-row="blk_a"] [data-testid="block-body"]')!,
+      container.querySelector('[data-block-row="blk_kitchen000"] [data-testid="block-body"]')!,
     )
-    expect(container.querySelector("textarea")!.value).toBe("A")
-    fireEvent.keyDown(container.querySelector("textarea")!, { key: "ArrowDown" })
-    expect(container.querySelector("textarea")).toBeNull()
-    expect(highlightedText(container)).toBe("Kitchen")
-    fireEvent.keyDown(editorRoot(container), { key: "ArrowDown" })
-    expect(highlightedText(container)).toBe("C")
+    expect(container.querySelector("textarea")!.value).toBe("Kitchen")
   })
 
-  it("Open board on the card opens the board", () => {
-    const onOpenBoard = vi.fn()
+  it("a note row is a block row: the note's icon in its key slot, and it folds", () => {
     const initialDoc: BlockDoc = {
       props: null,
-      rootBlockIds: ["blk_kitchen000"],
-      blocks: { blk_kitchen000: board("blk_kitchen000", "Kitchen") },
+      rootBlockIds: ["blk_plan0000000"],
+      blocks: {
+        blk_plan0000000: {
+          id: "blk_plan0000000",
+          type: "note",
+          text: "Plan",
+          children: ["blk_step0000000"],
+        },
+        blk_step0000000: { id: "blk_step0000000", type: "text", text: "Step", children: [] },
+      },
     }
-    const { getByLabelText, getByTestId } = render(
-      <Harness initialDoc={initialDoc} noteId="n" onOpenBoard={onOpenBoard} />,
-    )
-    expect(getByTestId("board-figure")).not.toBeNull()
-    fireEvent.click(getByLabelText("Open board"))
-    expect(onOpenBoard).toHaveBeenCalledWith("blk_kitchen000")
+    const { container } = render(<Harness initialDoc={initialDoc} noteId="n" />)
+    expect(
+      container.querySelector('[data-block-row="blk_plan0000000"] [data-testid="favicon-default"]'),
+    ).not.toBeNull()
+    fireEvent.click(chevronOf(container, "blk_plan0000000", "Collapse"))
+    expect(idsOf(container)).toEqual(["blk_plan0000000"])
+    fireEvent.click(chevronOf(container, "blk_plan0000000", "Expand"))
+    expect(idsOf(container)).toEqual(["blk_plan0000000", "blk_step0000000"])
   })
 })
 

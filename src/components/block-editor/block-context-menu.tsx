@@ -16,7 +16,7 @@ import { Surface } from "../ui/surface"
  * by the editor on any row it owns; the editor supplies the row (`target`)
  * and the actions, this file the menu. A read-only editor has no menu of
  * its own — unless its host says what a row's menu holds (`entriesFor`: the
- * Views page's rows, whose menus are the sidebar's), in which case the
+ * palette's rows, whose menus are the sidebar's), in which case the
  * popup and the sheet draw that list through the same renderers. The
  * actions are the editor's one set (`block-actions.ts`), the same object
  * the selection bar and the keys run, each over the rows the menu is for
@@ -115,6 +115,33 @@ export function BlockContextMenu({
                 scroll no one finds — it may take most of the screen instead. */}
             <div className="grid max-h-[45svh] scroll-py-1 overflow-auto p-1 coarse:max-h-[80svh]">
               {target ? <MenuItems entries={entriesFor(target, actions)} /> : null}
+            </div>
+          </ContextMenu.Popup>
+        </ContextMenu.Positioner>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
+  )
+}
+
+/**
+ * A list row's right-click (or press-and-hold) menu, away from the editor:
+ * the sidebar's Views rows, whose menu is the same list as their ⋯ button.
+ */
+export function RowContextMenu({
+  entries,
+  children,
+}: {
+  entries: readonly MenuEntry[]
+  children: React.ReactNode
+}) {
+  return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger>{children}</ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Positioner className="z-popup outline-none">
+          <ContextMenu.Popup data-testid="row-context-menu" render={popup} style={{ width: 240 }}>
+            <div className="grid max-h-[45svh] scroll-py-1 overflow-auto p-1 coarse:max-h-[80svh]">
+              <MenuItems entries={entries} />
             </div>
           </ContextMenu.Popup>
         </ContextMenu.Positioner>

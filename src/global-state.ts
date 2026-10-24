@@ -250,8 +250,7 @@ export const isBootingAtom = atom((get) => {
 })
 
 /**
- * How the Views list is ordered — the sidebar's, which the Views page and
- * the palette follow, so no two surfaces disagree about where a view is.
+ * How the Views list is ordered — the sidebar's, which the palette follows, so no two surfaces disagree about where a view is.
  *
  * - **title**: A–Z. The default, and stable: nothing moves while you read.
  * - **updated**: most recently changed first. What this used to do always,
@@ -397,8 +396,8 @@ const byEntryUpdatedAt = (a: ViewEntry, b: ViewEntry) => {
  * **The Views list**: the roots whose view row lists them — the user's own
  * notes and boards that are (`listedNotesAtom`), and every block made a
  * view of its own (`blockViewsAtom`) — as one list in the chosen order
- * (`noteSortAtom`): what the sidebar draws under **Views**, the Views page
- * lists, and the palette's Views group holds with nothing typed. Shared
+ * (`noteSortAtom`): what the sidebar draws under **Views**, and the
+ * palette's Views group holds with nothing typed. Shared
  * notes are not here: they are rows in someone else's corpus, listed apart
  * (`sharedNotesAtom`); a block view IN a shared note is, since the view is
  * this user's own.
@@ -641,8 +640,8 @@ export const otherPaneAtom = atom<(() => void) | null>(null)
  * (`src/utils/recents.ts`), under the one storage key, overwritten whole.
  * Read once at load; written through `touchRecentAtom`, which coalesces (a
  * destination is written at most once a second) and writes only when the
- * list changed. The palette and the Views page rank these, with the graph's
- * `updatedAt`, into their **Recent** lists (`useRecentRoots`).
+ * list changed. The palette ranks these, with the graph's `updatedAt`, into
+ * its **Recent** list (`useRecentRoots`).
  */
 export const recentVisitsAtom = atom<readonly RecentVisit[]>(
   loadRecentVisits(typeof localStorage === "undefined" ? null : localStorage),

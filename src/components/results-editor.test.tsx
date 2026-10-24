@@ -10,6 +10,7 @@ import { githubUserAtom, isSignedOutAtom, sampleGraphAtom } from "../global-stat
 import { resultsDoc, resultsToOps, type ResultRoot } from "../hooks/results-doc"
 import { viewRootIdsAtom } from "../data/views"
 import { ResultsEditor } from "./results-editor"
+import type { NodeRow } from "../../worker/handlers/replica-payload"
 
 /** What "Copy link to block" put on the clipboard. */
 const clipboard = vi.hoisted(() => ({ copy: vi.fn() }))
@@ -43,13 +44,13 @@ const RESEARCH = [
 ].join("\n")
 const JOURNAL = ["- in another note", "  id:: blk_elsewhere", ""].join("\n")
 
-async function signedOutStore(notes: Record<string, string>) {
+async function signedOutStore(notes: Record<string, string>, extra: NodeRow[] = []) {
   const store = createStore()
   const unsubscribe = store.sub(githubUserAtom, () => {})
   await vi.waitFor(() => {
     expect(store.get(isSignedOutAtom)).toBe(true)
   })
-  const nodes = []
+  const nodes: NodeRow[] = [...extra]
   const links = []
   for (const [id, markdown] of Object.entries(notes)) {
     const g = docToGraph(id, serialize(parse(markdown)), 1)
@@ -67,12 +68,24 @@ const NOTE_ROOTS: ResultRoot[] = [
 
 const onOpen = vi.fn()
 
-async function renderResults(roots: ResultRoot[], { readOnly = true } = {}) {
+async function renderResults(
+  roots: ResultRoot[],
+  {
+    readOnly = true,
+    rootHints,
+  }: { readOnly?: boolean; rootHints?: ReadonlyMap<string, string> } = {},
+) {
   onOpen.mockClear()
   const { store, unsubscribe } = await signedOutStore({ research: RESEARCH, journal: JOURNAL })
   const rendered = render(
     <Provider store={store}>
-      <ResultsEditor roots={roots} resetKey="q" readOnly={readOnly} onOpen={onOpen} />
+      <ResultsEditor
+        roots={roots}
+        resetKey="q"
+        readOnly={readOnly}
+        onOpen={onOpen}
+        rootHints={rootHints}
+      />
     </Provider>,
   )
   return { store, unsubscribe, ...rendered }
@@ -173,6 +186,19 @@ describe("resultsToOps", () => {
 })
 
 describe("ResultsEditor (browsing the notes list)", () => {
+  it("shows a root's hint after its name — a View's path in the palette — and on no other row", async () => {
+    await renderResults(NOTE_ROOTS, { rootHints: new Map([["research", "Root › Projects"]]) })
+    const hints = () =>
+      Array.from(document.querySelectorAll<HTMLElement>('[data-testid="row-hint"]')).map((hint) => [
+        hint.closest("[data-block-row]")?.getAttribute("data-block-row"),
+        hint.textContent,
+      ])
+    expect(hints()).toEqual([["research", "Root › Projects"]])
+    // Opened, the rows beneath it have none.
+    fireEvent.click(screen.getAllByLabelText("Expand")[0])
+    expect(hints()).toEqual([["research", "Root › Projects"]])
+  })
+
   it("lists every note as a closed root with the editor's chevron, and opens one to its blocks", async () => {
     const { store } = await renderResults(NOTE_ROOTS)
     expect(rowIds()).toEqual(["research", "journal"])

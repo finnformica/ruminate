@@ -9,7 +9,6 @@ import { cx } from "../../utils/cx"
 import { NoteFavicon } from "../note-favicon"
 import { BlockFrame } from "./block-frame"
 import type { BlockEditorApi } from "./block-item"
-import { BoardCard } from "./board-card"
 import { LinkCard } from "./link-card"
 import { CodeHighlight } from "./code-highlight"
 import { CodePanel } from "./code-panel"
@@ -179,7 +178,7 @@ const heading: BlockKind = {
  * A note is a node like any other (docs/graph-schema-v2.md): its `text` is
  * the title, its `props` the metadata, and its children are its top-level
  * blocks. It draws as a row like any other too — which is what lets a note
- * search result, a note in the Views page and a note linked under a block all
+ * search result, a note in the palette and a note linked under a block all
  * be the same row. Its key is its **favicon** (a board's, or the note icon):
  * the one thing about a note that its title does not already say, in the shared 15px marker slot
  * every other type's key sits in. Its text is ordinary body type — the 3xl
@@ -213,29 +212,14 @@ function noteKindOf(block: Block): NoteType {
 }
 
 /**
- * A board is a note root of the other kind. Listed (a search result, the
- * Views page, the palette) it is the note row, its key the board's
- * favicon. As a row of an outline it is a board linked under the block
- * (docs/boards.md, "A board in a note"), a figure like a picture or a
- * link card: its slot is the empty one a figure gets, so its card starts
- * where their figures start, and its content line is drawn as that card
- * (`BoardCard`) — the board's name, rendered inside the card and never a
- * textarea (a board is named on its own page, and asking to edit the row
- * selects it, `uneditable`), with what the board holds beneath.
+ * A board is a note root of the other kind, and draws as one: the same
+ * block row as a note, its key the board's icon (`noteKindOf`), in an
+ * outline as in a list (Finn, 2026-10-23). Its title edits as any row's
+ * text, it folds to what it holds, and focus (`f`) opens it as any row.
+ * There is no card for it: a row is a row, and the icon in the key slot is
+ * the one thing that says what kind of node it is.
  */
-const board: BlockKind = {
-  ...note,
-  slot: (listed) => (listed ? "glyph" : "none"),
-  uneditable: true,
-  typography: (_depth, _block, listed) =>
-    cx(BODY, "font-sans", listed ? "font-bold" : "font-medium"),
-  wrap: (content, context) =>
-    context.listed
-      ? content
-      : figureWrap("board-block", (title, { block, occurrence, api }) => (
-          <BoardCard block={block} occurrence={occurrence} api={api} title={lineOf(title)} />
-        ))(content, context),
-}
+const board: BlockKind = note
 
 export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
   text,

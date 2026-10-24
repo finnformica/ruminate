@@ -81,7 +81,7 @@ export interface BlockEditorApi {
    */
   navigable?: boolean
   /**
-   * The roots are the view's own — a results list's hits, the Views page's
+   * The roots are the view's own — a results list's hits, the palette's
    * notes — not a parent's children (`BlockEditor.fixedRoots`). A kind may
    * draw a root differently for it (a listed note takes a roomier row).
    */
@@ -94,6 +94,12 @@ export interface BlockEditorApi {
    * nothing is filtered.
    */
   context?: ReadonlySet<string>
+  /**
+   * A line of quiet text after a listed root's content, by block id: a
+   * View's path in the palette ("Root › Tasks", `viewPathHint`). Only roots
+   * of a `fixedRoots` editor show one.
+   */
+  rootHints?: ReadonlyMap<string, string>
   /**
    * The outline is a DIFF (`src/data/day-changes.ts`, the calendar): what a
    * period did to each row, drawn as a coloured sign in a gutter of the
@@ -159,9 +165,6 @@ export interface BlockEditorApi {
    * own undo step. Absent where the editor has no note of the reader's own
    * behind it. */
   requestBoard?: (key: string, text?: string) => void
-  /** Open a board's page (a board card's "Open board"). Absent where there
-   * is nowhere to go (a standalone editor). */
-  openBoard?: (id: string) => void
   /** Make a link block of a link in this row's text (docs/links.md): the
    * row itself when its text is nothing but the link, else a new row
    * beneath it. Absent in read-only views. */
@@ -340,6 +343,7 @@ export function BlockItem({
   const slot = slotOf(kind, listed)
   // Kept as context by a filter, not found by it (`BlockEditorApi.context`).
   const dimmed = api.context?.has(block.id) ?? false
+  const hint = listed && depth === 0 ? api.rootHints?.get(block.id) : undefined
   // What a period did to this row, when the outline is a diff (`BlockDiff`).
   const mark = api.diff?.marks.get(block.id)
 
@@ -1115,6 +1119,11 @@ export function BlockItem({
         ) : (
           <BlockContent content={body} />
         )}
+        {hint ? (
+          <span data-testid="row-hint" className="ml-2 text-text-secondary">
+            {hint}
+          </span>
+        ) : null}
       </LinkActionsContext.Provider>
     </div>
   )

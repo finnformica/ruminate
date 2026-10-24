@@ -898,6 +898,57 @@ export function noteView(
 }
 
 /**
+ * **The Root frame's rows** (docs/graph-walk.md, decision 5): every live
+ * note, first the notes the corpus root links, in `sort_key` order, then
+ * all the others by title. The rows the root does not link are added from
+ * the note type, so no backfill of root links is needed. `exclude` leaves
+ * notes out by id: the notes other people shared, which are listed apart.
+ * They are the doc roots of the Root frame's walk (`rootView`).
+ */
+export function rootChildIds(graph: GraphSnapshot, exclude?: ReadonlySet<string>): string[] {
+  const isRow = (id: string) =>
+    isNoteType(graph.nodes.get(id)?.type ?? "") && !(exclude?.has(id) ?? false)
+  const lead: string[] = []
+  const seen = new Set<string>()
+  for (const id of childIdsOf(graph, CORPUS_ROOT_ID)) {
+    if (seen.has(id) || !isRow(id)) continue
+    seen.add(id)
+    lead.push(id)
+  }
+  const rest: { id: string; title: string }[] = []
+  for (const node of graph.nodes.values()) {
+    if (seen.has(node.id) || !isRow(node.id)) continue
+    rest.push({ id: node.id, title: node.text })
+  }
+  rest.sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id))
+  return [...lead, ...rest.map((row) => row.id)]
+}
+
+/**
+ * **The Root frame's view** (docs/graph-walk.md, decision 5): the walk of
+ * the corpus root, as `noteView` walks a note. Its rows are `rootChildIds`,
+ * so a note the root does not link is still a row, and each note row walks
+ * to its blocks by the same rule as any row. The doc has no props: Root's
+ * name is its label (`ROOT_LABEL`), not node text. The corpus root node
+ * may not exist yet (it is made by the first move, `moveNoteOps`): the view
+ * is there all the same.
+ */
+export function rootView(
+  graph: GraphSnapshot,
+  expanded?: ExpandedRule,
+  pivots?: LinkPivots,
+  narrowing?: WalkNarrowing,
+  exclude?: ReadonlySet<string>,
+): GraphView {
+  return walkGraph(rootChildIds(graph, exclude), graph, {
+    expanded,
+    pivots,
+    rootId: CORPUS_ROOT_ID,
+    narrowing,
+  })
+}
+
+/**
  * A block's view — the focused page: the block as the doc's one root, at
  * level 0 (always open; the editor draws it as the view's title), its
  * children the rows at level 1, walked by the same rule as a note is. A view

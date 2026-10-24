@@ -7,7 +7,7 @@ import type { BlockDoc, ChangeHint } from "../../blocks/types"
 import type { Direction } from "../../blocks/view"
 import { imagesEnabled, uploadImage } from "../../data/images"
 import { fetchLinkPreview } from "../../data/link-previews"
-import { childIdsOf, isNoteType } from "../../data/graph"
+import { CORPUS_ROOT_ID, childIdsOf, isNoteType } from "../../data/graph"
 import { deleteBlockOps, deleteSubtreeOps, linkBlockOps, parentCount } from "../../data/ops"
 import { sharedOriginAtom } from "../../data/shared-mode"
 import { useApplyOps } from "../../data/store"
@@ -109,9 +109,10 @@ export function BlockNoteEditor({
   rowRemoval = "unlink",
   context,
   onEditingChange,
-  onOpenBoard,
   pivots,
   onPivot,
+  fixedRoots,
+  movableRoots,
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc, hint?: ChangeHint) => void
@@ -187,12 +188,13 @@ export function BlockNoteEditor({
   context?: ReadonlySet<string>
   /** Told which block is being edited as it changes (`BlockEditor`). */
   onEditingChange?: (id: string | null) => void
-  /** Open a board's page (a board card's "Open board", docs/boards.md).
-   * The page's to give: navigation is its business. */
-  onOpenBoard?: (id: string) => void
   /** The frame's link pivots and the way to set one (`BlockEditor`). */
   pivots?: LinkPivots
   onPivot?: (key: string, id: string, direction: Direction | null) => void
+  /** The roots are the view's, and may only move among themselves: the
+   * Root frame's note rows (`BlockEditor.fixedRoots`, `movableRoots`). */
+  fixedRoots?: boolean
+  movableRoots?: boolean
 }) {
   // A view that may legitimately hold nothing gets no starter: a filter that
   // matched nothing, and the basket, would otherwise show one empty row that
@@ -294,7 +296,10 @@ export function BlockNoteEditor({
   // Board.
   const sharedOrigin = useAtomValue(sharedOriginAtom)
   const openBoardPicker = useSetAtom(boardPickerAtom)
-  const ownNote = noteId !== undefined && !readOnly && !sharedOrigin.has(noteId)
+  // Not in the Root frame either: a board or a link made there needs a note
+  // to be made in, and the corpus root is none.
+  const ownNote =
+    noteId !== undefined && noteId !== CORPUS_ROOT_ID && !readOnly && !sharedOrigin.has(noteId)
   const onRequestBoard = useCallback(
     (request: BoardRequest) => {
       if (noteId !== undefined) openBoardPicker({ noteId, ...request })
@@ -432,13 +437,14 @@ export function BlockNoteEditor({
       onImageUpload={onImageUpload}
       onLinkPreview={onLinkPreview}
       onRequestBoard={ownNote ? onRequestBoard : undefined}
-      onOpenBoard={onOpenBoard}
       onRequestLink={ownNote ? onRequestLink : undefined}
       // The starter is what keeps a block to type in; without it (the
       // basket) the last row may go, and the basket goes with it.
       emptyable={!starter}
       context={context}
       onEditingChange={onEditingChange}
+      fixedRoots={fixedRoots}
+      movableRoots={movableRoots}
     />
   )
 }

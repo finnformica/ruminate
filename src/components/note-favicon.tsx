@@ -1,13 +1,21 @@
 import React from "react"
-import { Note } from "../schema"
+import type { NoteType } from "../schema"
 import { cx } from "../utils/cx"
-import { BoardFillIcon16, BoardIcon16, NoteFillIcon16, NoteIcon16 } from "./icons"
+import {
+  BoardFillIcon16,
+  BoardIcon16,
+  GridFillIcon16,
+  GridIcon16,
+  NoteFillIcon16,
+  NoteIcon16,
+} from "./icons"
 
 type NoteFaviconProps = React.ComponentPropsWithoutRef<"span"> & {
   /** Only the identity and the kind: the icon says which sort of note this
    * is, so a row that knows an id (and derived its kind with `noteTypeOf`)
-   * can draw one without carrying a whole `Note`. */
-  note: Pick<Note, "id" | "type">
+   * can draw one without carrying a whole `Note`. `root` is the corpus root
+   * (`ROOT_FAVICON`, src/data/root-frame.ts). */
+  note: { id: string; type: NoteType | "root" }
   defaultFavicon?: React.ReactNode
   /** The filled variant of each icon — for the note that is current, as the
    * sidebar's nav links swap to theirs. */
@@ -19,8 +27,10 @@ const _defaultFilledFavicon = (
   <NoteFillIcon16 data-testid="favicon-default" className="h-full w-full" />
 )
 
-/** A note's icon: a board for a board (docs/boards.md), the note icon
- * otherwise. */
+/** The icon of a node that is a page: a board for a board (docs/boards.md),
+ * the grid for the Root frame's corpus root, the note icon otherwise. The
+ * one icon component for all three, in a row's key slot, the sidebar and a
+ * page's header. */
 export const NoteFavicon = React.memo(
   ({
     note,
@@ -34,6 +44,9 @@ export const NoteFavicon = React.memo(
     if (note.type === "board") {
       const Icon = filled ? BoardFillIcon16 : BoardIcon16
       icon = <Icon data-testid="favicon-board" />
+    } else if (note.type === "root") {
+      const Icon = filled ? GridFillIcon16 : GridIcon16
+      icon = <Icon data-testid="favicon-root" />
     }
 
     if (!icon) {

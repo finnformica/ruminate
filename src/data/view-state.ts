@@ -2,7 +2,6 @@ import { useAtomValue } from "jotai"
 import React from "react"
 import { expandedByDepth } from "../blocks/default-collapsed"
 import { idOfKey, isWithin, type ExpandedRule } from "../blocks/view"
-import { BOARD_TYPE } from "./graph"
 import { expandedLevelsAtom } from "../global-state"
 
 /**
@@ -121,9 +120,8 @@ export interface HeldFolds {
  * The rule a view descends by: the reader's explicit folds over the depth
  * rule. A key's own entry wins; failing that an entry naming its block id
  * (a fold from before occurrence keys) applies to every occurrence; failing
- * both, a board's row is closed — its card stands for what is beneath it
- * (docs/boards.md, "A board in a note"), and its outline is a chevron away
- * — and the depth rule decides the rest.
+ * both, the depth rule decides. A board's row folds as any row does: it is a
+ * row like a note's (docs/boards.md, "A board in a note").
  */
 export function foldRule(folds: Folds, byDepth: ExpandedRule): ExpandedRule {
   return (key, level, type) => {
@@ -134,7 +132,6 @@ export function foldRule(folds: Folds, byDepth: ExpandedRule): ExpandedRule {
       if (folds.closed.has(id)) return false
       if (folds.open.has(id)) return true
     }
-    if (type === BOARD_TYPE) return false
     return byDepth(key, level, type)
   }
 }
@@ -210,8 +207,7 @@ export function useFoldRule({
   const asked = React.useRef(new Map<string, { level: number; type?: string }>())
   const standing = React.useMemo<ExpandedRule>(() => {
     const byDepth = narrowed ? EVERYTHING_OPEN : expandedByDepth(levels)
-    return (key, level, type) =>
-      type === BOARD_TYPE ? false : (held?.has(idOfKey(key)) ?? false) || byDepth(key, level, type)
+    return (key, level, type) => (held?.has(idOfKey(key)) ?? false) || byDepth(key, level, type)
   }, [narrowed, levels, held])
   const expanded = React.useMemo<ExpandedRule>(() => {
     const rule = foldRule(folds, standing)

@@ -426,6 +426,15 @@ function sameRoots(prev: BlockDoc, next: BlockDoc): boolean {
   )
 }
 
+/** Same roots in any order — a move among them (`movableRoots`). */
+function sameRootSet(prev: BlockDoc, next: BlockDoc): boolean {
+  const ids = new Set(prev.rootBlockIds)
+  return (
+    prev.rootBlockIds.length === next.rootBlockIds.length &&
+    next.rootBlockIds.every((id) => ids.has(id))
+  )
+}
+
 export function BlockEditor({
   doc,
   onChange,
@@ -465,12 +474,13 @@ export function BlockEditor({
   onImageUpload,
   onLinkPreview,
   onRequestBoard,
-  onOpenBoard,
   onRequestLink,
   onActivate,
   fixedRoots = false,
+  movableRoots = false,
   emptyable = false,
   context,
+  rootHints,
   diff,
   onEditingChange,
 }: {
@@ -497,9 +507,6 @@ export function BlockEditor({
    * menu offers no "Board" (a standalone editor, a note someone shared).
    */
   onRequestBoard?: (request: BoardRequest) => void
-  /** Open a board's page (a board card's "Open board"). Absent = the card
-   * offers no way there. */
-  onOpenBoard?: (id: string) => void
   /**
    * Link a block beneath the row, or the row's block beneath another, by
    * name (`LinkRequest`): open the palette as a picker and, downstream,
@@ -511,7 +518,7 @@ export function BlockEditor({
   noteId?: string
   /**
    * What a row's menu holds, where the host decides rather than the editor:
-   * a browsed list (the Views page, the palette) whose rows are notes and
+   * a browsed list (the palette) whose rows are notes and
    * blocks from many notes, each with the menu its sidebar row has. Given,
    * a read-only editor opens the menu on a right-click or a press-and-hold
    * as an editable one does; without it a read-only editor has no menu.
@@ -591,17 +598,24 @@ export function BlockEditor({
   browse?: boolean
   /**
    * Open a row — what Enter and a click do in a read-only view that is
-   * browsed with somewhere to go: the Views page, a search's results.
+   * browsed with somewhere to go: the palette, a search's results.
    */
   onActivate?: (id: string) => void
   /**
    * The roots are the view's own, not a parent's children — a results
-   * list's hits, the Views page's notes — so there is nowhere for a new root
+   * list's hits, the Root frame's notes — so there is nowhere for a new root
    * to go and nothing a removed one leaves. An edit that would add, remove
    * or reorder them is refused with a notice; everything beneath a root
    * edits as it does in its note.
    */
   fixedRoots?: boolean
+  /**
+   * With `fixedRoots`, the roots may still move among themselves: a move
+   * (the keys that move a block) passes, and the caller writes the new order
+   * (the Root frame's notes, `rootToOps`). Adding or removing a root is still
+   * refused.
+   */
+  movableRoots?: boolean
   /**
    * Rows the view keeps only as context — the unmatched ancestors of a
    * filtered view's matches (`src/data/filter-view.ts`), drawn dimmed. The
@@ -609,6 +623,8 @@ export function BlockEditor({
    * navigates exactly as the note does.
    */
   context?: ReadonlySet<string>
+  /** Quiet text after a listed root's content, by id (`BlockEditorApi.rootHints`). */
+  rootHints?: ReadonlyMap<string, string>
   /** The outline is a diff (`BlockEditorApi.diff`): the calendar's day. */
   diff?: BlockDiff
   /**
@@ -810,7 +826,7 @@ export function BlockEditor({
     ? {
         ...rawHistory,
         commit: (prev: BlockDoc, next: BlockDoc, op: BlockOp) => {
-          if (!sameRoots(prev, next)) {
+          if (!sameRoots(prev, next) && !(movableRoots && sameRootSet(prev, next))) {
             toast(FIXED_ROOTS_NOTICE)
             return
           }
@@ -2484,7 +2500,6 @@ export function BlockEditor({
     requestImage: onImageUpload && !readOnly ? requestImage : undefined,
     openImage: (id) => setLightbox(id),
     requestBoard: onRequestBoard && !readOnly ? requestBoard : undefined,
-    openBoard: onOpenBoard,
     linkToBlock: readOnly ? undefined : linkToBlock,
     updateLink: readOnly ? undefined : updateLink,
     linkToInline: readOnly ? undefined : linkToInline,
@@ -2509,6 +2524,7 @@ export function BlockEditor({
     coarsePointer: coarse,
     fixedRoots,
     context,
+    rootHints,
     diff,
     // Browsing: a click opens the row (BlockItem routes a read-only row's
     // click here).

@@ -4,7 +4,7 @@ import { useAtom, useAtomValue, useSetAtom, useStore } from "jotai"
 import React from "react"
 import { blockIndexAtom, graphSnapshotAtom, isSignedOutAtom, notesAtom } from "../global-state"
 import { filteredRollup } from "../data/filter-view"
-import { blockRollup, rollup } from "../data/graph"
+import { CORPUS_ROOT_ID, blockRollup, rollup } from "../data/graph"
 import { receivedSharesAtom, sharePermissions, sharedOriginAtom } from "../data/shared-mode"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { viewNarrowing } from "../utils/view-narrowing"
@@ -100,18 +100,25 @@ interface EditorActions {
    * way to switch. Absent where the view keeps no frame.
    */
   rootPivot?: { upstream: boolean; onToggle: () => void }
+  /**
+   * **Save as view** (docs/graph-walk.md, section 7): save the pane's stack
+   * above Root, up to the frame on screen, as the View of this frame's root.
+   * Absent where there is nothing of the reader's own to save.
+   */
+  onSaveView?: () => void
 }
 
 /**
  * **The note's menu, as entries** (`MenuEntry`, one list for every surface):
  * Copy markdown, Copy ID, Share, Rename, the board entries, then Print,
  * then Delete. The sidebar's ⋯ on a note row draws it (`NoteActionsMenu`), the open note's
- * header draws it with its own extras around it, and the Views page draws
- * it on a right-click of a note's row (`results-editor.tsx`) — so a note has
- * one menu wherever it is met.
+ * header draws it with its own extras around it, a right-click on a View's
+ * row in the sidebar draws it, and so does a right-click on a note's row in
+ * the palette (`results-editor.tsx`) — so a note has one menu wherever it is
+ * met.
  *
  * A hook that returns a builder rather than the entries: the surfaces that
- * list many notes (the Views page) build a list per row at the moment the
+ * list many notes (the palette's results) build a list per row at the moment the
  * menu opens, so what varies per note is read from the store then, not
  * subscribed to per row. Nothing here touches the router, so a surface
  * outside one (a story) can draw the menu too; where deleting should lead
@@ -428,6 +435,14 @@ export function NoteActionsMenu({
             <DropdownMenu.Separator />
           </>
         ) : null}
+        {editor?.onSaveView ? (
+          <>
+            <DropdownMenu.Item icon={<PlusIcon16 />} onClick={editor.onSaveView}>
+              Save as view
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator />
+          </>
+        ) : null}
         {editor?.rootPivot ? (
           <>
             <DropdownMenu.Item
@@ -442,22 +457,28 @@ export function NoteActionsMenu({
         <MenuItems
           entries={[
             ...(reorder ? reorderEntries(reorder) : []),
-            ...entriesFor(noteId, {
-              focusBlockId: editor?.focusBlockId,
-              filter: editor?.filter,
-              onDeleted,
-              ...(surface === "board"
-                ? {
-                    openOutline: () =>
-                      navigate({
-                        to: "/views/$",
-                        params: { _splat: noteId },
-                        search: { query: undefined },
+            // The Root frame's menu has the page's items only: the corpus root
+            // is no note to rename, share, list or delete.
+            ...(noteId === CORPUS_ROOT_ID
+              ? []
+              : entriesFor(noteId, {
+                  focusBlockId: editor?.focusBlockId,
+                  filter: editor?.filter,
+                  onDeleted,
+                  ...(surface === "board"
+                    ? {
+                        openOutline: () =>
+                          navigate({
+                            to: "/views/$",
+                            params: { _splat: noteId },
+                            search: { query: undefined },
+                          }),
+                        openFeatures: onFeatures,
+                      }
+                    : {
+                        openBoard: () => navigate({ to: "/boards/$", params: { _splat: noteId } }),
                       }),
-                    openFeatures: onFeatures,
-                  }
-                : { openBoard: () => navigate({ to: "/boards/$", params: { _splat: noteId } }) }),
-            }),
+                })),
           ]}
         />
         {editor && isDeveloper ? (

@@ -97,6 +97,14 @@ export interface ViewRow {
   /** Server-assigned; see `NodeRow.seq`. Shared with nodes and link, so one
    * cursor covers all three tables. */
   seq?: number
+  /**
+   * The frames the View saves below its top frame (migrations/0027,
+   * docs/graph-walk.md, "Views save stacks"). A row read out of a table holds
+   * it only when it has one: absent = a one-frame View. A row a writer pushes
+   * may say `null` to clear it; one pushed without it (a client that predates
+   * 0027) leaves the held stack as it is (`rowsToEvents`).
+   */
+  stack?: string | null
 }
 
 export type LinkKey = [string, string, string]
@@ -146,6 +154,7 @@ export function toViewRow(row: Record<string, unknown>): ViewRow {
     view.deleted_at = Number(row.deleted_at)
   }
   if (row.seq !== null && row.seq !== undefined) view.seq = Number(row.seq)
+  if (typeof row.stack === "string" && row.stack !== "") view.stack = row.stack
   return view
 }
 
@@ -298,6 +307,7 @@ function parseViewRow(x: unknown): ViewRow | null {
     !(row.sort === null || isString(row.sort)) ||
     typeof row.pinned !== "boolean" ||
     !(row.sort_key === null || isString(row.sort_key)) ||
+    !(row.stack === undefined || row.stack === null || isString(row.stack)) ||
     typeof row.updated_at !== "number" ||
     deletedAt === false
   ) {
@@ -313,6 +323,7 @@ function parseViewRow(x: unknown): ViewRow | null {
     updated_at: row.updated_at,
   }
   if (deletedAt !== undefined) view.deleted_at = deletedAt
+  if (row.stack !== undefined) view.stack = row.stack as string | null
   return view
 }
 

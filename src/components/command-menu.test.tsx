@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
     { params: { _splat: string }; search?: { block?: string } } | undefined,
   // What the query resolves to, injected at `useSearchResults`; the rows
   // themselves are walked out of the mocked graph (see the global-state mock).
+  // The last query the palette searched, as the box composed it.
+  searched: "" as string,
   results: { mode: "notes", hits: [], notes: [], titleMatches: [], rows: [] } as {
     mode: "blocks" | "notes"
     hits: unknown[]
@@ -43,7 +45,10 @@ vi.mock("../hooks/search-results", async (importOriginal) => ({
   // The real module (a picker narrows results with its pure `keepResults`),
   // with the search itself pinned.
   ...(await importOriginal<typeof import("../hooks/search-results")>()),
-  useSearchResults: () => mocks.results,
+  useSearchResults: (query: string) => {
+    mocks.searched = query
+    return mocks.results
+  },
 }))
 vi.mock("../data/store", () => ({ useApplyOps: () => () => {} }))
 // The real module underneath (the block editor behind the rows reads several
@@ -116,6 +121,7 @@ afterEach(cleanup)
 beforeEach(() => {
   mocks.match = { params: { _splat: "note-1" } }
   mocks.navigate.mockClear()
+  mocks.searched = ""
   mocks.results = { mode: "notes", hits: [], notes: [], titleMatches: [], rows: [] }
 })
 
@@ -178,17 +184,16 @@ const pills = () =>
   ).map((pill) => pill.dataset.scope ?? pill.dataset.filter)
 
 describe("⌘P: the open note's headings", () => {
-  it("opens the palette with the note's headings as the query — two pills, an empty line", () => {
+  it("opens the palette with the note's headings as the query — two pills, an empty line", async () => {
     renderMenu()
     pressCmdP()
     expect(commandsInput().value).toBe("")
     expect(pills()).toEqual(["type:heading", "note-1"])
-    // ↵ on the query is the search itself.
+    // The search is the two filters.
+    await waitFor(() => expect(mocks.searched).toBe("type:heading in:note-1"))
+    // ↵ with nothing found opens nothing: there is no results page.
     fireEvent.keyDown(commandsInput(), { key: "Enter" })
-    expect(mocks.navigate).toHaveBeenCalledWith({
-      to: "/",
-      search: { query: "type:heading in:note-1" },
-    })
+    expect(mocks.navigate).not.toHaveBeenCalled()
   })
 
   it("focused on a block, the headings under that block", () => {
@@ -217,15 +222,11 @@ describe("⌘P: the open note's headings", () => {
     expect(pills()).toEqual(["type:heading", "note-1"])
   })
 
-  it("typing narrows the headings: the text joins the two filters", () => {
+  it("typing narrows the headings: the text joins the two filters", async () => {
     renderMenu()
     pressCmdP()
     fireEvent.change(commandsInput(), { target: { value: "alpha" } })
-    fireEvent.keyDown(commandsInput(), { key: "Enter" })
-    expect(mocks.navigate).toHaveBeenCalledWith({
-      to: "/",
-      search: { query: "type:heading in:note-1 alpha" },
-    })
+    await waitFor(() => expect(mocks.searched).toBe("type:heading in:note-1 alpha"))
   })
 
   it("the query goes with the dialog: Escape clears it, Escape again closes, ⌘K reopens empty", () => {
@@ -333,7 +334,7 @@ describe("block results", () => {
   it("shows the count of matched blocks, and the notes they live in — the page's line", async () => {
     await openWithBlocks([NVIDIA, TODO_MILK, TODO_SHIP])
     expect(screen.getByTestId("result-count").textContent).toBe("3 matching blocks in 1 note")
-    // No "See all" item: ↵ on the query is what opens the results view.
+    // No "See all" item: the results are here, and ↵ opens the top one.
     expect(document.querySelector("[cmdk-item]")).toBeNull()
   })
 
@@ -365,12 +366,16 @@ describe("block results", () => {
     }
   })
 
-  it("Enter straight after typing opens the full results view at ?query=", async () => {
-    await openWithBlocks([NVIDIA])
+  it("Enter straight after typing opens the top result: its note, focused on the block", async () => {
+    await openWithBlocks([NVIDIA, TODO_MILK])
     // Nothing arrowed: no item is highlighted, so ↵ is the query's.
     expect(document.querySelector('[cmdk-item][aria-selected="true"]')).toBeNull()
     fireEvent.keyDown(commandsInput(), { key: "Enter" })
-    expect(mocks.navigate).toHaveBeenCalledWith({ to: "/", search: { query: "nvidia" } })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/views/$",
+      params: { _splat: "research" },
+      search: { query: undefined, block: "blk_nvidia" },
+    })
   })
 
   it("Enter on a highlighted item picks the item, not the results view", async () => {
@@ -403,34 +408,29 @@ describe("block results", () => {
     }
   })
 
-  it("inside a note, the search is not scoped to it: Enter carries only what was typed", async () => {
+  it("inside a note, the search is not scoped to it: it carries only what was typed", async () => {
     await openWithBlocks([NVIDIA])
     expect(pills()).toEqual([])
-    fireEvent.keyDown(commandsInput(), { key: "Enter" })
-    expect(mocks.navigate).toHaveBeenCalledWith({ to: "/", search: { query: "nvidia" } })
+    await waitFor(() => expect(mocks.searched).toBe("nvidia"))
   })
 
-  it("a typed in: is lifted out of the line as a pill, and Enter carries it", async () => {
+  it("a typed in: is lifted out of the line as a pill, and the search carries it", async () => {
     await openWithBlocks([NVIDIA])
     const input = commandsInput()
     fireEvent.change(input, { target: { value: "in:other nvidia" } })
     expect(input.value).toBe("nvidia")
     expect(pills()).toEqual(["other"])
-    fireEvent.keyDown(input, { key: "Enter" })
-    expect(mocks.navigate).toHaveBeenCalledWith({
-      to: "/",
-      search: { query: "in:other nvidia" },
-    })
+    await waitFor(() => expect(mocks.searched).toBe("in:other nvidia"))
   })
 
   it("the pill takes its filter out of the query", async () => {
     await openWithBlocks([NVIDIA])
     const input = commandsInput()
     fireEvent.change(input, { target: { value: "in:other nvidia" } })
+    await waitFor(() => expect(mocks.searched).toBe("in:other nvidia"))
     fireEvent.click(screen.getByTestId("query-filters").querySelector("button")!)
     expect(screen.queryByTestId("query-filters")).toBeNull()
-    fireEvent.keyDown(input, { key: "Enter" })
-    expect(mocks.navigate).toHaveBeenCalledWith({ to: "/", search: { query: "nvidia" } })
+    await waitFor(() => expect(mocks.searched).toBe("nvidia"))
   })
 
   it("`in:` offers the open note first, so scoping to it is one pick", () => {

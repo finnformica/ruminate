@@ -76,7 +76,7 @@ export async function corpusPullFull(tenant: TenantDb): Promise<ReplicaCorpusBod
   ).map(toLinkRow)
   const views = (
     await all.exec(
-      "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at, seq " +
+      "SELECT id, root_id, filter, sort, pinned, sort_key, stack, updated_at, deleted_at, seq " +
         "FROM views " +
         "WHERE user_id = :tenant /* includes-deleted: replication carries tombstones */",
     )
@@ -129,7 +129,7 @@ export async function corpusPullSince(
   ).map(toLinkRow)
   const views = (
     await all.exec(
-      "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at, seq " +
+      "SELECT id, root_id, filter, sort, pinned, sort_key, stack, updated_at, deleted_at, seq " +
         "FROM views " +
         "WHERE user_id = :tenant AND seq > ?1 " +
         "/* includes-deleted: a tombstoned row IS the change being pulled */",
