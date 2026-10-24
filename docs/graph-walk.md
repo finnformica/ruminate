@@ -50,7 +50,7 @@ The words used below:
   (text and sections-only) and folds. The URL holds it (section 6).
 - **Root** — the `corpus_root` node. The frame rooted there, the **Root
   frame**, lists every note. It is at the base of every pane's stack. Its
-  label is "Root" (`ROOT_LABEL`, `src/data/root-frame.ts`). The URL does not
+  label is "Notes" (`ROOT_LABEL`, `src/data/root-frame.ts`). The URL does not
   write it and a View does not save it: every reader puts it back at the
   base.
 
@@ -75,7 +75,7 @@ The words used below:
    View gives Root and that frame.
 3. **Root is always the base.** The pane's base frame is the Root frame, the
    list of all notes (decision 5). A note opened from search, a link or the
-   calendar opens as Root › note.
+   calendar opens as Notes › note.
 4. **Focus pushes a frame.** The new frame is rooted at the focused block.
    Its filter, pivots and folds are the defaults (decision 1).
 5. **Pop restores the frame below** as it was: its root, selection,
@@ -99,7 +99,7 @@ The words used below:
    the headings only.
 3. Finn selects the heading "Decisions" and presses `f`. A frame is pushed,
    rooted at "Decisions", with no filter, no sections-only, no pivots and
-   no folds. The crumbs read "Root › Project X › Decisions".
+   no folds. The crumbs read "Notes › Project X › Decisions".
 4. Finn puts an up pivot on one row, to see the other notes that hold it,
    and folds two rows.
 5. Finn presses `⇧F` (or Back). The pane pops to "Project X", with
@@ -175,12 +175,13 @@ The words used below:
    - "No View" means no listed `views` row. Such a note is in no other
      list: not the sidebar's Views. Search, Recent, the calendar and a link
      still open the note itself, because they open a node, not a list. They
-     open it as Root › note.
+     open it as Notes › note.
    - Views are bookmarks. They are not rows in the Root frame: a View can
-     point at any depth (Root › Tasks › Todos).
-   - There is no Views page. The sidebar has one entry, "Root", first, then
+     point at any depth (Notes › Tasks › Todos).
+   - There is no Views page. The sidebar has one entry, "Notes", first, then
      the Views list. Finn chose the label (2026-10-22): "Root"
-     (`ROOT_LABEL`). `/` opens the Root frame.
+     (`ROOT_LABEL`), renamed to "Notes" (2026-10-24). `/` opens the Root
+     frame.
 
 6. **Editing inside an inbound pivot behaves as editing does today** on an
    up row (docs/graph-schema-v2.md, "Upstream"). 3.8 records each case.
@@ -707,12 +708,12 @@ Status: **Decided 2026-10-20** (Finn's proposal, made after the first
 decisions). A View saves a stack of frames. A one-frame View is the simple
 case.
 
-**Why.** Finn's "Todos" View is the path he walks: Root › Tasks › Todos.
-"Root" is the Root frame (the list of all notes). Opening the View restores
+**Why.** Finn's "Todos" View is the path he walks: Notes › Tasks › Todos.
+"Notes" is the Root frame (the list of all notes). Opening the View restores
 all three frames, so:
 
 - the breadcrumb shows the path he used, not a path the app picks;
-- `⇧F` and Back pop to "Tasks", then to "Root", as if he had walked
+- `⇧F` and Back pop to "Tasks", then to "Notes", as if he had walked
   there;
 - the saved path picks the parent of a block with many parents. If "Todos"
   is held by "Tasks" and by "Projects", the View says "Tasks".
@@ -763,7 +764,7 @@ unlinked or be deleted. On open, check the stack from the top down:
 2. Keep each lower frame while its root still reaches the root of the frame
    above it (`pathToBlock`, `src/data/graph.ts`).
 3. At the first frame that fails, drop it and every frame below it. The
-   stack then opens as Root › the frames that still hold › the top.
+   stack then opens as Notes › the frames that still hold › the top.
 4. Show the graph path to the top root in the breadcrumb, as path crumbs:
    the shortest chain that `pathToBlock` finds from the top frame's note.
 
@@ -772,7 +773,7 @@ stack as it is then.
 
 **The sidebar** shows the View's name, which is its top root's title or
 text, as today. After the name it shows the path as a hint: the roots of
-the frames below, from Root, for example "Todos" with "Root › Tasks", in the
+the frames below, from Notes, for example "Todos" with "Notes › Tasks", in the
 secondary colour and clipped to fit. A one-frame View has no hint. The
 palette draws the same list (`viewEntriesAtom`) with the same hint
 (`viewPathHint`, `useViewHints`).

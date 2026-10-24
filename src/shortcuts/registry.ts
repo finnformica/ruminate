@@ -370,7 +370,7 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
   {
     combos: [APP_SHORTCUTS.goRoot],
     scope: "global",
-    description: "Go to Root, the list of every note (press g, then v)",
+    description: "Go to Notes, the list of every note (press g, then v)",
     group: "Navigation",
   },
   {
