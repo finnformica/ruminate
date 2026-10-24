@@ -299,13 +299,13 @@
  * hangs into the page gutter, so the outline reads as indented beneath it
  * rather than the title as one more row at the text column. The page says
  * how far (`--note-header-pull`, set on its padded wrapper; unset means the
- * header keeps the column): 27px — the key slot and its gap — sets the
- * outline in beneath the title's text by exactly that, and stands the
- * title's `#` over the rows' chevron column, with the title's own surface
- * reaching 31px into the gutter — the wide (40px) gutter has it, the
- * 16–20px ones on a narrow page do not, so there the header stays at the
- * text column. The block rows never take the variable: the text column is
- * theirs and does not move. */
+ * header keeps the column): 24px, at every width — the rows' chevron-to-key
+ * distance (`INDENT`, block-item.tsx) — moves the title's `#` from the key
+ * slot onto the rows' chevron column, centre on centre, and the crumbs to
+ * the column's left edge, so the header and the top-level chevrons share
+ * one column on a phone, a wide page and each pane of a split. The block
+ * rows never take the variable: the text column is theirs and does not
+ * move. */
 .note-header {
   margin-left: calc(-1 * var(--note-header-pull, 0px));
 }

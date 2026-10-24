@@ -122,10 +122,10 @@ export function NoteTitle({
     // few pixels a side at 3xl — so a selected title's ring stands as far
     // from its # as a heading row's does. `note-header` then hangs
     // the whole h1 into the page gutter by as much as the page allows
-    // (`--note-header-pull`, block-editor.css): on a wide page that is 27px,
-    // the key slot and its gap, so the outline reads as set in beneath the
-    // title by exactly that, and the title's # stands over the rows'
-    // chevron column.
+    // (`--note-header-pull`, block-editor.css): 24px, the rows'
+    // chevron-to-key distance, so the outline reads as set in beneath the
+    // title by exactly that, and the title's # stands centred over the
+    // rows' chevron column.
     <h1 className="note-header relative font-content text-3xl font-bold leading-tight tracking-[-0.02em] [overflow-wrap:anywhere]">
       {/* The hanging # inherits the h1's full typography — same size as the title. */}
       <Hash className="pointer-events-none absolute left-[29px] top-0 flex w-[15px] justify-center" />
@@ -201,10 +201,12 @@ export function NoteTitle({
             }
           }}
           className={cx(
-            // -mx-0.5 + pl-[54px]/pr-0.5 keep the text at the block text column
-            // (pl-[52px]) while the highlight surface gains the same 2px reach
-            // as a selected block line.
-            "-mx-0.5 rounded py-0 pl-[54px] pr-0.5 outline-none transition-colors duration-100",
+            // The highlight surface takes back the header pull, less the 2px
+            // reach of a selected block line: it starts where a row's surface
+            // does, just before the chevron column the # now stands in, so it
+            // never reaches past a narrow page's gutter. The padding gives the
+            // pull back, so the text stays at the field's pl-[52px].
+            "-mr-0.5 ml-[calc(var(--note-header-pull,0px)-2px)] rounded py-0 pl-[calc(54px-var(--note-header-pull,0px))] pr-0.5 outline-none transition-colors duration-100",
             readOnly ? "cursor-default" : "cursor-text",
             // Same selection treatment as a block (see .block-highlight).
             selected && "bg-bg-secondary block-highlight",

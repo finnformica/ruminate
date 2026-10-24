@@ -57,7 +57,7 @@ function PageHarness({ focusRootId }: { focusRootId?: string }) {
     ),
   )
   return (
-    <div className="[--note-header-pull:27px]" style={{ maxWidth: 700, padding: 40 }}>
+    <div className="[--note-header-pull:24px]" style={{ maxWidth: 700, padding: 40 }}>
       <div className="flex flex-col gap-3">
         {focusRootId ? null : (
           <NoteTitle

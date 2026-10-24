@@ -971,9 +971,9 @@ function NotePage({
         <div ref={containerRef} className="@container">
           {/* --note-header-pull: how far the title, focus breadcrumb and focus
             title hang into the gutter (`.note-header`, block-editor.css) —
-            the full marker-slot offset, but only once the gutter is 40px, as
-            the hanging # needs the room. */}
-          <div className="p-4 @[480px]:p-5 @[640px]:p-10 @[640px]:[--note-header-pull:27px]">
+            the rows' chevron-to-key distance at every width, so the title's
+            # and the crumbs stand over the top-level chevrons in any pane. */}
+          <div className="p-4 [--note-header-pull:24px] @[480px]:p-5 @[640px]:p-10">
             <div
               className={cx(
                 "flex flex-col gap-8",
