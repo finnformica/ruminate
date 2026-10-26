@@ -4038,6 +4038,52 @@ describe("BlockEditor inline links", () => {
     expect(serializedLines(getByTestId)).toEqual(["a <->"])
   })
 
+  /** Types `steps` into the textarea one value at a time; a `null` step is a
+   * Backspace (its key, then the text without the character before the end). */
+  async function typeSteps(textarea: HTMLTextAreaElement, steps: (string | null)[]) {
+    for (const step of steps) {
+      if (step === null) fireEvent.keyDown(textarea, { key: "Backspace" })
+      const value = step ?? textarea.value.slice(0, -1)
+      await act(async () => {
+        fireEvent.change(textarea, { target: { value } })
+      })
+    }
+  }
+
+  it("Backspace straight after an arrow gives back the ->, and undo the arrow", async () => {
+    const { container, getByTestId } = render(<Harness initial="a" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    await typeSteps(textarea, ["a -", "a ->", null])
+    expect(serializedLines(getByTestId)).toEqual(["a ->"])
+    expect(textarea.selectionStart).toBe(4)
+    fireEvent.keyDown(textarea, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["a →"])
+  })
+
+  it("Backspace straight after ↔ gives back the <->", async () => {
+    const { container, getByTestId } = render(<Harness initial="a" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    await typeSteps(textarea, ["a <", "a <-", "a ←>", null])
+    expect(serializedLines(getByTestId)).toEqual(["a <->"])
+  })
+
+  it("a later Backspace deletes the whole arrow", async () => {
+    const { container, getByTestId } = render(<Harness initial="a" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    await typeSteps(textarea, ["a -", "a ->", "a →x", null, null])
+    expect(serializedLines(getByTestId)).toEqual(["a "])
+  })
+
+  it("Backspace after the caret moved deletes the whole arrow", async () => {
+    const { container, getByTestId } = render(<Harness initial="a" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    await typeSteps(textarea, ["a -", "a ->"])
+    fireEvent.keyDown(textarea, { key: "ArrowLeft" })
+    fireEvent.keyDown(textarea, { key: "ArrowRight" })
+    await typeSteps(textarea, [null])
+    expect(serializedLines(getByTestId)).toEqual(["a "])
+  })
+
   it("a deletion that leaves the caret after -> does not turn it", async () => {
     const { container, getByTestId } = render(<Harness initial="a" startEditing />)
     const textarea = container.querySelector("textarea")! as HTMLTextAreaElement

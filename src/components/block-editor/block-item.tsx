@@ -288,6 +288,16 @@ export function BlockItem({
   const runEdges = selected ? api.selectionRunEdges.get(occurrence.key) : undefined
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const pendingCaret = useRef<number | null>(null)
+  // The arrow just typed (src/blocks/arrows.ts), while the next key may still
+  // take it back: the text with the arrow and the caret after it, and the
+  // text as typed and its caret. Any other key, a click or another change
+  // clears it.
+  const arrowBack = useRef<{
+    text: string
+    caret: number
+    typed: string
+    typedCaret: number
+  } | null>(null)
   // Where a finger actually came down on this row: the pointerdown's point,
   // which the browser never adjusts. The click that follows may be moved —
   // a phone snaps a near miss onto the nearest control (a todo's checkbox
@@ -561,6 +571,23 @@ export function BlockItem({
     const el = event.currentTarget
     const newBody = el.value
     const caret = el.selectionStart
+    // Backspace straight after an arrow appeared gives back the text as
+    // typed (`->`), as Word does, as its own undo step; a later Backspace
+    // deletes the arrow. Read from the change, not the key, as a phone's
+    // keyboard often does not name its Backspace. Each arrow is one character.
+    const back = arrowBack.current
+    arrowBack.current = null
+    if (
+      back !== null &&
+      body === back.text &&
+      caret === back.caret - 1 &&
+      newBody === back.text.slice(0, caret) + back.text.slice(back.caret)
+    ) {
+      pendingCaret.current = back.typedCaret
+      api.onBlockChange(block.id, { text: back.typed }, "structural")
+      syncSlash(back.typed, back.typedCaret)
+      return
+    }
     // The typing shortcut: a marker typed at the very start of the text
     // switches the block's type, *replacing* the current one (checkbox → `- `
     // becomes a bullet, → `1. ` an ordered item, → `# ` a heading, and so on),
@@ -607,6 +634,12 @@ export function BlockItem({
       api.onBlockChange(block.id, { text }, "structural")
     } else if (arrow !== null) {
       pendingCaret.current = arrow.caret
+      arrowBack.current = {
+        text,
+        caret: arrow.caret,
+        typed: arrow.typed,
+        typedCaret: arrow.typed.length - (text.length - arrow.caret),
+      }
       api.onBlockChange(block.id, { text }, "text", arrow.typed)
     } else {
       api.onBlockChange(block.id, { text })
@@ -616,6 +649,11 @@ export function BlockItem({
 
   const handleEditKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     const el = event.currentTarget
+    // Any key but Backspace ends the chance to take an arrow back (a key a
+    // phone does not name may be its Backspace; a letter clears it anyway).
+    if (event.key !== "Backspace" && event.key !== "Unidentified" && event.keyCode !== 229) {
+      arrowBack.current = null
+    }
     // While the slash menu is open it owns the navigation keys; everything
     // else falls through to the textarea (typing narrows the menu).
     if (slashOpen && slash && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -1072,9 +1110,10 @@ export function BlockItem({
             syncSlash(event.currentTarget.value, event.currentTarget.selectionStart)
           }
         }}
-        onClick={(event) =>
+        onClick={(event) => {
+          arrowBack.current = null
           syncSlash(event.currentTarget.value, event.currentTarget.selectionStart)
-        }
+        }}
         onPaste={handlePaste}
         // Leaving the field ends the edit — unless it is the window that
         // went (a tab switch, another app): the browser brings focus back
