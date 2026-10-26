@@ -1,15 +1,25 @@
 /**
  * Arrows, as Notion types them: `->` becomes `→`, `<-` becomes `←`, `<->`
- * becomes `↔` and `=>` becomes `⇒`. The text holds the arrow itself, so a
- * copy, a search and an export all keep it.
+ * becomes `↔`, `=>` becomes `⇒`, `<=` becomes `⇐` and `<=>` becomes `⇔`.
+ * The text holds the arrow itself, so a copy, a search and an export all
+ * keep it.
  *
  * `<-` turns into `←` as its `-` is typed, so `<->` is reached as `←` and
- * then `>`; that, and a `<-` left as typed (an undo), both make `↔`.
+ * then `>`; that, and a `<-` left as typed (an undo), both make `↔`. `<=>`
+ * is reached the same way, through `⇐`. `undo` is what the reader typed,
+ * when the rule's own text is not.
+ *
+ * `drawn: false`: not drawn in text stored as typed (`drawArrows`), where
+ * `<=` was most likely written as "at most". `<=>` is drawn, so it does not
+ * show as `<⇒`.
  */
-const ARROWS: { typed: string; arrow: string }[] = [
+const ARROWS: { typed: string; arrow: string; undo?: string; drawn?: false }[] = [
   { typed: "<->", arrow: "↔" },
-  { typed: "←>", arrow: "↔" },
+  { typed: "←>", arrow: "↔", undo: "<->" },
+  { typed: "<=>", arrow: "⇔" },
+  { typed: "⇐>", arrow: "⇔", undo: "<=>" },
   { typed: "<-", arrow: "←" },
+  { typed: "<=", arrow: "⇐", drawn: false },
   { typed: "->", arrow: "→" },
   { typed: "=>", arrow: "⇒" },
 ]
@@ -43,7 +53,7 @@ export function arrowOfTyped(
   return {
     text: lead + rule.arrow + after,
     caret: lead.length + rule.arrow.length,
-    typed: rule.typed === "←>" ? lead + "<->" + after : text,
+    typed: rule.undo !== undefined ? lead + rule.undo + after : text,
   }
 }
 
@@ -53,5 +63,8 @@ export function arrowOfTyped(
  * row. Code is the caller's to leave out.
  */
 export function drawArrows(text: string): string {
-  return ARROWS.reduce((drawn, { typed, arrow }) => drawn.replaceAll(typed, arrow), text)
+  return ARROWS.filter((rule) => rule.drawn !== false).reduce(
+    (drawn, { typed, arrow }) => drawn.replaceAll(typed, arrow),
+    text,
+  )
 }

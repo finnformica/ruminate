@@ -4067,6 +4067,23 @@ describe("BlockEditor inline links", () => {
     expect(serializedLines(getByTestId)).toEqual(["a <->"])
   })
 
+  it("a typed <=> is written as ⇔; Cmd+Z, or Backspace, gives back the <=>", async () => {
+    const undone = render(<Harness initial="a" startEditing />)
+    let textarea = undone.container.querySelector("textarea")! as HTMLTextAreaElement
+    await typeSteps(textarea, ["a <", "a <="])
+    expect(serializedLines(undone.getByTestId)).toEqual(["a ⇐"])
+    await typeSteps(textarea, ["a ⇐>"])
+    expect(serializedLines(undone.getByTestId)).toEqual(["a ⇔"])
+    fireEvent.keyDown(textarea, { key: "z", metaKey: true })
+    expect(serializedLines(undone.getByTestId)).toEqual(["a <=>"])
+    cleanup()
+
+    const backspaced = render(<Harness initial="a" startEditing />)
+    textarea = backspaced.container.querySelector("textarea")! as HTMLTextAreaElement
+    await typeSteps(textarea, ["a <", "a <=", "a ⇐>", null])
+    expect(serializedLines(backspaced.getByTestId)).toEqual(["a <=>"])
+  })
+
   it("a later Backspace deletes the whole arrow", async () => {
     const { container, getByTestId } = render(<Harness initial="a" startEditing />)
     const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
@@ -4097,17 +4114,17 @@ describe("BlockEditor inline links", () => {
     expect(serializedLines(getByTestId)).toEqual(["a ->"])
   })
 
-  it("a -> typed in a code block stays as typed", async () => {
+  it("a -> or <= typed in a code block stays as typed", async () => {
     const { container, getByTestId } = render(
       <Harness initial={"```\nlet f = a\n```"} startEditing />,
     )
     const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
-    for (const value of ["let f = a-", "let f = a->"]) {
+    for (const value of ["let f = a-", "let f = a->", "let f = a-> <", "let f = a-> <="]) {
       await act(async () => {
         fireEvent.change(textarea, { target: { value } })
       })
     }
-    expect(serializedLines(getByTestId).join("\n")).toContain("let f = a->")
+    expect(serializedLines(getByTestId).join("\n")).toContain("let f = a-> <=")
   })
 
   it("a name with a common ending is an address too: google.com, then a space", async () => {

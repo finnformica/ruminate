@@ -15,6 +15,12 @@ describe("arrowOfTyped", () => {
     expect(typedAtEnd("a ←>")).toEqual({ text: "a ↔", caret: 3, typed: "a <->" })
   })
 
+  it("turns <= into ⇐, and ⇐ then > into ⇔, the typed <=> what an undo gives back", () => {
+    expect(typedAtEnd("a <=")).toEqual({ text: "a ⇐", caret: 3, typed: "a <=" })
+    expect(typedAtEnd("a ⇐>")).toEqual({ text: "a ⇔", caret: 3, typed: "a <=>" })
+    expect(typedAtEnd("a <=>")).toEqual({ text: "a ⇔", caret: 3, typed: "a <=>" })
+  })
+
   it("turns a <-> left as typed into ↔", () => {
     expect(typedAtEnd("a <->")).toEqual({ text: "a ↔", caret: 3, typed: "a <->" })
   })
@@ -32,11 +38,13 @@ describe("arrowOfTyped", () => {
 
   it("leaves an arrow in a code span, and turns one after it", () => {
     expect(typedAtEnd("call `a->")).toBeNull()
+    expect(typedAtEnd("call `a<=")).toBeNull()
     expect(typedAtEnd("call `a->b` ->")?.text).toBe("call `a->b` →")
   })
 
   it("leaves an arrow in $$…$$ maths, and turns one after it", () => {
     expect(typedAtEnd("$$a ->")).toBeNull()
+    expect(typedAtEnd("$$a <=")).toBeNull()
     expect(typedAtEnd("$$a$$ ->")?.text).toBe("$$a$$ →")
   })
 })
@@ -44,5 +52,9 @@ describe("arrowOfTyped", () => {
 describe("drawArrows", () => {
   it("draws each arrow stored as typed, <-> as one arrow", () => {
     expect(drawArrows("a -> b <- c <-> d => e")).toBe("a → b ← c ↔ d ⇒ e")
+  })
+
+  it("draws <=> as one arrow, and leaves a stored <= as written", () => {
+    expect(drawArrows("a <=> b, x <= 5")).toBe("a ⇔ b, x <= 5")
   })
 })
