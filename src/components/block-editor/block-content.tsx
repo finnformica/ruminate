@@ -6,6 +6,7 @@ import rehypeKatex from "rehype-katex"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import type { Processor } from "unified"
+import { drawArrows } from "../../blocks/arrows"
 import { isWebUrl } from "../../blocks/link"
 import { cx } from "../../utils/cx"
 import { CopyCodeButton } from "./copy-code"
@@ -74,15 +75,15 @@ function remarkDisplayMathLines() {
 }
 
 /**
- * `->` is drawn as an arrow (`→`) in the rendered text. The stored text keeps
- * the two characters, so the textarea and a markdown export show `->` as
- * typed. Code is never touched: a code span, and inline maths, which is a
- * `code` element until KaTeX sets it (this runs first).
+ * Text stored with its arrows as typed (`->`, `<->`, from before the editor
+ * typed the arrows in, `src/blocks/arrows.ts`) is drawn with the arrows.
+ * Code is never touched: a code span, and inline maths, which is a `code`
+ * element until KaTeX sets it (this runs first).
  */
 function rehypeArrows() {
   const visit = (node: HastRoot | Element) => {
     for (const child of node.children) {
-      if (child.type === "text") child.value = child.value.replaceAll("->", "→")
+      if (child.type === "text") child.value = drawArrows(child.value)
       else if (child.type === "element" && child.tagName !== "code" && child.tagName !== "pre") {
         visit(child)
       }

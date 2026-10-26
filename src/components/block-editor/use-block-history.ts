@@ -7,7 +7,9 @@ import type { BlockDoc, ChangeHint } from "../../blocks/types"
  *
  * - `commit(current, next, op)` records `current` then applies `next`. The
  *   blocks `next` brings in that the graph does not know (`knownBlock`) are
- *   the step's creations, remembered with it.
+ *   the step's creations, remembered with it. `typed` is the doc as typed,
+ *   before a typing shortcut rewrote it (an arrow): the run of edits takes
+ *   it in, and it is a step of its own, so one undo gives the typed text back.
  * - `undo()` / `redo()` restore a snapshot (and return it, or `null`). An undo
  *   hands the save the undone step's creations as `discard`, so taking back a
  *   duplicate or a paste deletes the copies rather than stranding them in
@@ -22,11 +24,12 @@ export function useBlockHistory(
   const historyRef = useRef(emptyHistory())
 
   const commit = useCallback(
-    (current: BlockDoc, next: BlockDoc, op: BlockOp) => {
+    (current: BlockDoc, next: BlockDoc, op: BlockOp, typed?: BlockDoc) => {
       const created = Object.keys(next.blocks).filter(
         (id) => !(id in current.blocks) && !knownBlock(id),
       )
       historyRef.current = record(historyRef.current, current, op, created)
+      if (typed) historyRef.current = record(historyRef.current, typed, { type: "structural" })
       onChange(next)
     },
     [onChange, knownBlock],

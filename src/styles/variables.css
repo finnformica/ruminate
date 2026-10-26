@@ -163,7 +163,7 @@
   --color-syntax-green: var(--green-11);
 
   /* Font families */
-  --font-family-sans: "iA Writer Quattro", system-ui, sans-serif;
+  --font-family-sans: "Inter Arrows", "iA Writer Quattro", system-ui, sans-serif;
   --font-family-sans-mono: "iA Writer Mono", monospace;
   --font-family-serif: "Literata Variable", Georgia, serif;
   --font-family-serif-mono: "Monaspace Xenon", monospace;

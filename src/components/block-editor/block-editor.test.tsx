@@ -4007,6 +4007,63 @@ describe("BlockEditor inline links", () => {
     expect(serializedLines(getByTestId)).toEqual(["see https://www.e.com/x"])
   })
 
+  it("a typed -> is written as →, and one undo gives back the ->", async () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    for (const value of ["a", "a -", "a ->"]) {
+      await act(async () => {
+        fireEvent.change(textarea, { target: { value } })
+      })
+    }
+    expect(serializedLines(getByTestId)).toEqual(["a →"])
+    expect(textarea.selectionStart).toBe(3)
+    fireEvent.keyDown(textarea, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["a ->"])
+  })
+
+  it("a typed <-> is written as ↔, and one undo gives back the <->", async () => {
+    const { container, getByTestId } = render(<Harness initial="a" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    for (const value of ["a <", "a <-"]) {
+      await act(async () => {
+        fireEvent.change(textarea, { target: { value } })
+      })
+    }
+    expect(serializedLines(getByTestId)).toEqual(["a ←"])
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "a ←>" } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["a ↔"])
+    fireEvent.keyDown(textarea, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["a <->"])
+  })
+
+  it("a deletion that leaves the caret after -> does not turn it", async () => {
+    const { container, getByTestId } = render(<Harness initial="a" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    // A paste of `a ->b` writes it as pasted; deleting the `b` keeps the `->`.
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "a ->b" } })
+    })
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "a ->" } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["a ->"])
+  })
+
+  it("a -> typed in a code block stays as typed", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={"```\nlet f = a\n```"} startEditing />,
+    )
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    for (const value of ["let f = a-", "let f = a->"]) {
+      await act(async () => {
+        fireEvent.change(textarea, { target: { value } })
+      })
+    }
+    expect(serializedLines(getByTestId).join("\n")).toContain("let f = a->")
+  })
+
   it("a name with a common ending is an address too: google.com, then a space", async () => {
     const { container, getByTestId } = render(<Harness initial="" startEditing />)
     const textarea = container.querySelector("textarea")! as HTMLTextAreaElement

@@ -57,6 +57,11 @@ describe("BlockContent arrows", () => {
     expect(link?.getAttribute("href")).not.toContain("→")
   })
 
+  it("draws <-> stored as typed as one two-way arrow", () => {
+    const { container } = render(<BlockContent content="near <-> far" />)
+    expect(container.textContent).toBe("near ↔ far")
+  })
+
   it("leaves -> in a code span as typed", () => {
     const { container } = render(<BlockContent content="Call `a->b` -> done" />)
     expect(container.querySelector("code")?.firstChild?.textContent).toBe("a->b")

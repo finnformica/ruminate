@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ChangeEvent, ClipboardEvent, CSSProperties, KeyboardEvent } from "react"
 import { cx } from "../../utils/cx"
 import type { Block, BlockDoc } from "../../blocks/types"
+import { arrowOfTyped } from "../../blocks/arrows"
 import { linkifyPastedText, linkifyTypedAddress } from "../../blocks/link"
 import { leadingMarker } from "../../blocks/markers"
 import { defOf } from "../../blocks/registry"
@@ -138,9 +139,11 @@ export interface BlockEditorApi {
   /**
    * Change a block's text and/or type. Text edits coalesce into one undo
    * step; pass `"structural"` for a change that must stand alone (a
-   * slash-menu pick, so one undo puts the typed `/phrase` back).
+   * slash-menu pick, so one undo puts the typed `/phrase` back). `typed` is
+   * the text as typed before a typing shortcut rewrote it (an arrow): the
+   * text edit ends there, and one undo gives it back.
    */
-  onBlockChange: (id: string, patch: BlockPatch, op?: "text" | "structural") => void
+  onBlockChange: (id: string, patch: BlockPatch, op?: "text" | "structural", typed?: string) => void
   /** Replace the row with blocks imported from pasted markdown, placing the
    * caret. `exact` is Ruminate's own copy, whose tree is kept as it was;
    * anything else is sectioned under its headings (`sectionUnderHeadings`). */
@@ -576,7 +579,25 @@ export function BlockItem({
     // its host (docs/links.md), as a paste is; the caret follows. Not in a
     // code block, where an address is code.
     const linked = typed === null && type !== "code" ? linkifyTypedAddress(newBody, caret) : null
-    const text = typed !== null ? typed.text : linked !== null ? linked.text : newBody
+    // An arrow typed (`->`, `<-`, `<->`, `=>`, src/blocks/arrows.ts) is
+    // written as the arrow, as Notion does. Only for one character typed at
+    // the caret — not a deletion that leaves the caret after `->` — and not
+    // in a code block.
+    const oneTyped =
+      newBody.length === body.length + 1 &&
+      newBody.slice(0, caret - 1) + newBody.slice(caret) === body
+    const arrow =
+      typed === null && linked === null && type !== "code" && oneTyped
+        ? arrowOfTyped(newBody, caret)
+        : null
+    const text =
+      typed !== null
+        ? typed.text
+        : linked !== null
+          ? linked.text
+          : arrow !== null
+            ? arrow.text
+            : newBody
     if (typed !== null) {
       // The marker left the visible text; keep the caret relative to it.
       pendingCaret.current = Math.max(0, caret - (newBody.length - text.length))
@@ -584,6 +605,9 @@ export function BlockItem({
     } else if (linked !== null) {
       pendingCaret.current = linked.caret
       api.onBlockChange(block.id, { text }, "structural")
+    } else if (arrow !== null) {
+      pendingCaret.current = arrow.caret
+      api.onBlockChange(block.id, { text }, "text", arrow.typed)
     } else {
       api.onBlockChange(block.id, { text })
     }
