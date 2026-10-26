@@ -2533,13 +2533,14 @@ export function BlockEditor({
     edit,
     toggleCollapse,
     setFocus,
-    onBlockChange: (id, patch, op = "text") => {
+    onBlockChange: (id, patch, op = "text", typed) => {
       const next = updateBlock(doc, id, patch)
       if (next === doc) return
       history.commit(
         doc,
         next,
         op === "structural" ? { type: "structural" } : { type: "text", blockId: id },
+        typed === undefined ? undefined : updateBlock(doc, id, { text: typed }),
       )
     },
     onPaste: (key, before, pasted, after, exact) => {

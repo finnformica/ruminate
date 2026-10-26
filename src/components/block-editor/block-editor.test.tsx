@@ -4007,6 +4007,126 @@ describe("BlockEditor inline links", () => {
     expect(serializedLines(getByTestId)).toEqual(["see https://www.e.com/x"])
   })
 
+  it("a typed -> is written as →, and one undo gives back the ->", async () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    for (const value of ["a", "a -", "a ->"]) {
+      await act(async () => {
+        fireEvent.change(textarea, { target: { value } })
+      })
+    }
+    expect(serializedLines(getByTestId)).toEqual(["a →"])
+    expect(textarea.selectionStart).toBe(3)
+    fireEvent.keyDown(textarea, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["a ->"])
+  })
+
+  it("a typed <-> is written as ↔, and one undo gives back the <->", async () => {
+    const { container, getByTestId } = render(<Harness initial="a" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    for (const value of ["a <", "a <-"]) {
+      await act(async () => {
+        fireEvent.change(textarea, { target: { value } })
+      })
+    }
+    expect(serializedLines(getByTestId)).toEqual(["a ←"])
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "a ←>" } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["a ↔"])
+    fireEvent.keyDown(textarea, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["a <->"])
+  })
+
+  /** Types `steps` into the textarea one value at a time; a `null` step is a
+   * Backspace (its key, then the text without the character before the end). */
+  async function typeSteps(textarea: HTMLTextAreaElement, steps: (string | null)[]) {
+    for (const step of steps) {
+      if (step === null) fireEvent.keyDown(textarea, { key: "Backspace" })
+      const value = step ?? textarea.value.slice(0, -1)
+      await act(async () => {
+        fireEvent.change(textarea, { target: { value } })
+      })
+    }
+  }
+
+  it("Backspace straight after an arrow gives back the ->, and undo the arrow", async () => {
+    const { container, getByTestId } = render(<Harness initial="a" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    await typeSteps(textarea, ["a -", "a ->", null])
+    expect(serializedLines(getByTestId)).toEqual(["a ->"])
+    expect(textarea.selectionStart).toBe(4)
+    fireEvent.keyDown(textarea, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["a →"])
+  })
+
+  it("Backspace straight after ↔ gives back the <->", async () => {
+    const { container, getByTestId } = render(<Harness initial="a" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    await typeSteps(textarea, ["a <", "a <-", "a ←>", null])
+    expect(serializedLines(getByTestId)).toEqual(["a <->"])
+  })
+
+  it("a typed <=> is written as ⇔; Cmd+Z, or Backspace, gives back the <=>", async () => {
+    const undone = render(<Harness initial="a" startEditing />)
+    let textarea = undone.container.querySelector("textarea")! as HTMLTextAreaElement
+    await typeSteps(textarea, ["a <", "a <="])
+    expect(serializedLines(undone.getByTestId)).toEqual(["a ⇐"])
+    await typeSteps(textarea, ["a ⇐>"])
+    expect(serializedLines(undone.getByTestId)).toEqual(["a ⇔"])
+    fireEvent.keyDown(textarea, { key: "z", metaKey: true })
+    expect(serializedLines(undone.getByTestId)).toEqual(["a <=>"])
+    cleanup()
+
+    const backspaced = render(<Harness initial="a" startEditing />)
+    textarea = backspaced.container.querySelector("textarea")! as HTMLTextAreaElement
+    await typeSteps(textarea, ["a <", "a <=", "a ⇐>", null])
+    expect(serializedLines(backspaced.getByTestId)).toEqual(["a <=>"])
+  })
+
+  it("a later Backspace deletes the whole arrow", async () => {
+    const { container, getByTestId } = render(<Harness initial="a" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    await typeSteps(textarea, ["a -", "a ->", "a →x", null, null])
+    expect(serializedLines(getByTestId)).toEqual(["a "])
+  })
+
+  it("Backspace after the caret moved deletes the whole arrow", async () => {
+    const { container, getByTestId } = render(<Harness initial="a" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    await typeSteps(textarea, ["a -", "a ->"])
+    fireEvent.keyDown(textarea, { key: "ArrowLeft" })
+    fireEvent.keyDown(textarea, { key: "ArrowRight" })
+    await typeSteps(textarea, [null])
+    expect(serializedLines(getByTestId)).toEqual(["a "])
+  })
+
+  it("a deletion that leaves the caret after -> does not turn it", async () => {
+    const { container, getByTestId } = render(<Harness initial="a" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    // A paste of `a ->b` writes it as pasted; deleting the `b` keeps the `->`.
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "a ->b" } })
+    })
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "a ->" } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["a ->"])
+  })
+
+  it("a -> or <= typed in a code block stays as typed", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={"```\nlet f = a\n```"} startEditing />,
+    )
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    for (const value of ["let f = a-", "let f = a->", "let f = a-> <", "let f = a-> <="]) {
+      await act(async () => {
+        fireEvent.change(textarea, { target: { value } })
+      })
+    }
+    expect(serializedLines(getByTestId).join("\n")).toContain("let f = a-> <=")
+  })
+
   it("a name with a common ending is an address too: google.com, then a space", async () => {
     const { container, getByTestId } = render(<Harness initial="" startEditing />)
     const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
