@@ -10,9 +10,7 @@
 // each pull request a clone of production to preview against instead:
 //
 //   1. gate      — no open PR for this branch → no preview at all (exit 0);
-//                 GitHub unreachable or rate-limited → preview anyway;
-//                 an orca/* branch skips the gate, because Orca always
-//                 opens a PR for its branches a few minutes after pushing
+//                 GitHub unreachable or rate-limited → preview anyway
 //   2. fingerprint the branch's migrations, and main's
 //   3. choose    — same as main → the shared clone; otherwise this branch's own
 //   4. reuse or rebuild the clone (production → export → import)
@@ -35,7 +33,6 @@ import { fileURLToPath } from "node:url"
 import {
   PRODUCTION_DATABASE,
   chooseDatabase,
-  isOrcaBranch,
   migrationsFingerprint,
   openPullBranches,
   previewSlug,
@@ -79,28 +76,24 @@ if (!branch || branch === "HEAD") fail("cannot tell which branch this is (WORKER
 // -----------------------------------------------------------------------------
 
 step(`branch ${branch}`)
-if (isOrcaBranch(branch)) {
-  step(`${branch} is an orca/* branch; Orca always opens a PR for it, so skipping the gate`)
+const ownPulls = await github(
+  `/repos/${REPO}/pulls?state=open&head=${encodeURIComponent(`finnformica:${branch}`)}`,
+)
+if (ownPulls === null) {
+  // Without a token the lookup is anonymous, and GitHub's anonymous limit
+  // (60 calls an hour per address) is shared by every Workers Builds customer
+  // behind Cloudflare's egress address — so a 403 here is the normal case,
+  // not an outage. Failing the build on it is the wrong way round: the
+  // preview runs against a clone of production, never production itself, so
+  // a preview nobody asked for costs one version upload, whereas a PR left
+  // without one reads as a successful build with no link to show for it.
+  // Only a clear "no open PR" skips the upload.
+  step(`GitHub cannot be asked whether ${branch} has a PR; previewing anyway`)
+} else if (openPullBranches(ownPulls).length === 0) {
+  step(`no open PR for ${branch}; skipping preview`)
+  process.exit(0)
 } else {
-  const ownPulls = await github(
-    `/repos/${REPO}/pulls?state=open&head=${encodeURIComponent(`finnformica:${branch}`)}`,
-  )
-  if (ownPulls === null) {
-    // Without a token the lookup is anonymous, and GitHub's anonymous limit
-    // (60 calls an hour per address) is shared by every Workers Builds customer
-    // behind Cloudflare's egress address — so a 403 here is the normal case,
-    // not an outage. Failing the build on it is the wrong way round: the
-    // preview runs against a clone of production, never production itself, so
-    // a preview nobody asked for costs one version upload, whereas a PR left
-    // without one reads as a successful build with no link to show for it.
-    // Only a clear "no open PR" skips the upload.
-    step(`GitHub cannot be asked whether ${branch} has a PR; previewing anyway`)
-  } else if (openPullBranches(ownPulls).length === 0) {
-    step(`no open PR for ${branch}; skipping preview`)
-    process.exit(0)
-  } else {
-    step(`open PR found for ${branch}`)
-  }
+  step(`open PR found for ${branch}`)
 }
 
 // -----------------------------------------------------------------------------
