@@ -1,8 +1,9 @@
 import { useNavigate, useRouter } from "@tanstack/react-router"
-import { useStore } from "jotai"
+import { atom, useAtomValue, useStore } from "jotai"
 import React from "react"
+import { isBoard } from "../data/boards"
 import { goTo, layoutFromSearch, layoutToSearch, withPane, type FocusFrame } from "../data/panes"
-import { notesAtom } from "../global-state"
+import { graphSnapshotAtom, notesAtom } from "../global-state"
 import type { NoteId } from "../schema"
 
 /**
@@ -38,7 +39,8 @@ export function useOpenInPane() {
 
 /**
  * Where a note opens: a board (docs/boards.md) on its board page, every
- * other note on its outline — focused on a block when one is given. The one
+ * other note on its outline — focused on a block when one is given, unless
+ * that block is a board, which opens on its own board page. The one
  * place that decides, so the sidebar, the Root frame and the palette agree.
  * While the page is split, the note opens in the pane with the keyboard
  * (`useOpenInPane`).
@@ -49,6 +51,9 @@ export function useOpenNote() {
   const store = useStore()
   return React.useCallback(
     (noteId: NoteId, block?: string) => {
+      if (block && isBoard(store.get(graphSnapshotAtom), block)) {
+        return navigate({ to: "/boards/$", params: { _splat: block } })
+      }
       if (store.get(notesAtom).get(noteId)?.type === "board") {
         return navigate({ to: "/boards/$", params: { _splat: noteId } })
       }
@@ -88,5 +93,37 @@ export function useOpenFramesInPane() {
       return true
     },
     [navigate, router],
+  )
+}
+
+/**
+ * A board is never a focused frame (docs/boards.md): a focus on one opens
+ * its board page instead, as a new history entry, so Back returns to the
+ * view the reader left. The returned `opensBoard(id)` does that and says
+ * whether it did, for the note page's focus moves (a key, the block menu,
+ * a crumb) to try first. A link to a board block (Copy link, an old URL)
+ * opens the board in the link's place; in a split the pane keeps it, as the
+ * board page has no panes.
+ */
+export function useBoardFocus(focusBlockId: string | null, split: boolean) {
+  const navigate = useNavigate()
+  const store = useStore()
+  const focusesBoard = useAtomValue(
+    React.useMemo(
+      () => atom((get) => focusBlockId !== null && isBoard(get(graphSnapshotAtom), focusBlockId)),
+      [focusBlockId],
+    ),
+  )
+  React.useEffect(() => {
+    if (!focusesBoard || focusBlockId === null || split) return
+    void navigate({ to: "/boards/$", params: { _splat: focusBlockId }, replace: true })
+  }, [focusesBoard, focusBlockId, split, navigate])
+  return React.useCallback(
+    (id: string | null): boolean => {
+      if (id === null || !isBoard(store.get(graphSnapshotAtom), id)) return false
+      void navigate({ to: "/boards/$", params: { _splat: id } })
+      return true
+    },
+    [navigate, store],
   )
 }
