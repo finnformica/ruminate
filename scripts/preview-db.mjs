@@ -72,6 +72,18 @@ export function previewDatabaseName(branch) {
   return `${PREVIEW_PREFIX}${previewSlug(branch)}`
 }
 
+/** Orca pushes a branch before it opens that branch's pull request, so the
+ * gate's "no open PR yet" reading is wrong for the branch's first build.
+ * Orca always opens one, so its branches skip the gate instead of asking
+ * GitHub.
+ *
+ * @param {string} branch
+ * @returns {boolean}
+ */
+export function isOrcaBranch(branch) {
+  return branch.startsWith("orca/")
+}
+
 /**
  * Which clone a branch previews against. Migrations identical to main's mean
  * the branch changes no schema, so it shares the one clone every such branch

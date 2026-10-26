@@ -15,6 +15,7 @@ import {
   PRODUCTION_DATABASE,
   SHARED_PREVIEW_DATABASE,
   chooseDatabase,
+  isOrcaBranch,
   migrationsFingerprint,
   openPullBranches,
   previewDatabaseName,
@@ -58,6 +59,18 @@ describe("previewSlug", () => {
 
   it("a branch with no usable characters still names a database", () => {
     expect(previewSlug("///")).toMatch(/^[0-9a-f]{6}$/)
+  })
+})
+
+describe("isOrcaBranch", () => {
+  it("is true for a branch under orca/", () => {
+    expect(isOrcaBranch("orca/preview-for-orca-branches-53650c")).toBe(true)
+  })
+
+  it("is false for any other branch", () => {
+    expect(isOrcaBranch("spike/event-sourcing")).toBe(false)
+    expect(isOrcaBranch("main")).toBe(false)
+    expect(isOrcaBranch("not-orca/x")).toBe(false)
   })
 })
 

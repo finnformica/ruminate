@@ -37,7 +37,10 @@ whether <branch> has a PR; previewing anyway`) and carries on, because a
    a PR left without one reads as a successful build with no link to show for
    it. The gate is decided per push, so a branch pushed before its PR is
    opened gets no preview until its next push; until then Cloudflare's PR
-   comment shows a successful build with no preview link.
+   comment shows a successful build with no preview link. An `orca/*` branch
+   skips the gate and always previews, because Orca always opens a PR for a
+   branch it pushes, a few minutes after the push — so that branch's first
+   build would otherwise always read as "no open PR yet" and skip the preview.
 2. **Fingerprint.** A SHA-256 over the sorted `migrations/*.sql` names and
    contents, for the branch and for `origin/main`.
 3. **Choose the clone.**
