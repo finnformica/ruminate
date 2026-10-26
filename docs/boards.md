@@ -40,6 +40,16 @@ outline of a board is one click away (**Open note** in the board's ⋯ menu,
 way: a doc carries a note's text and props, never its kind, so an edit to a
 board's outline leaves it a board (`partsToOps`, `src/data/ops.ts`).
 
+A board is never a **focused frame**. Focusing a board row — F or ⌘. on
+it, the block menu, the phone's edit bar, a crumb on the path down to a
+block inside it, a palette result, a Root row — opens its board page, as
+a new history entry, so Back returns to the view as it was
+(`useBoardFocus`, `src/hooks/open-note.ts`). A link to a board block
+(`/views/<note>?block=<board>`, as **Copy link** writes it) opens the
+board in the link's place. In a split the pane keeps such a link as a
+focus: the board page has no panes. The board's own outline
+(`/views/<board>`, **Open note**) is not a focus, and stays.
+
 Until 2026-W41 a board was a `note` row whose props carried `board: true`;
 migrations/0020 retyped every such row. While that migration has yet to run
 where a build is pointed, the old shape is still read as a board through one
