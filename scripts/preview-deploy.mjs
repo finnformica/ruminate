@@ -367,7 +367,7 @@ function mainMigrationsFromGit() {
   if (tree === null) return null
   const files = []
   for (const filePath of tree.split("\n").filter((line) => line.endsWith(".sql"))) {
-    const content = gitOutput(["show", `origin/main:${filePath}`])
+    const content = gitBlob(`origin/main:${filePath}`)
     if (content === null) return null
     files.push({ name: path.basename(filePath), content })
   }
@@ -381,6 +381,25 @@ function gitOutput(args) {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).replace(/\n$/, "")
+  } catch {
+    return null
+  }
+}
+
+/** A file's content at a ref (`git show <ref>:<path>`), exactly as the file
+ * has it. Unlike `gitOutput`, this does not strip a trailing newline: that
+ * newline is the file's own last byte, not formatting git added, and
+ * stripping it here made every migration's content on main one byte short
+ * of the branch's own `readFileSync` — so every branch's fingerprint
+ * mismatched main's, even with no migrations changed, and every PR got its
+ * own D1 clone instead of sharing one. */
+function gitBlob(ref) {
+  try {
+    return execFileSync("git", ["show", ref], {
+      cwd: ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
   } catch {
     return null
   }
