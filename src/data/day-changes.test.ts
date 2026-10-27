@@ -2,17 +2,34 @@ import { describe, expect, it } from "vitest"
 import type { Block, BlockDoc } from "../blocks/types"
 import {
   changedBeneath,
-  changesIn,
-  daysWithChanges,
+  changesIn as changesInKeyed,
+  daysWithChanges as daysWithChangesKeyed,
   diffWords,
   foldContext,
   localDayOf,
   periodMatcher,
-  sittingsIn,
+  sittingsIn as sittingsInKeyed,
   type DiffMark,
   type NoteChange,
 } from "./day-changes"
 import { EVENT_VERSION, linkEntityId, type LoggedEvent } from "./events"
+import type { LoggedKeyEvent } from "./key-events"
+import { keyed } from "./store-test-support"
+
+/** The fixtures are written in the old shape; the calendar reads the
+ * per-key log (`keyed`). A log already read per key passes through. */
+const asKeyed = (log: readonly (LoggedEvent | LoggedKeyEvent)[]): LoggedKeyEvent[] =>
+  log.length > 0 && "key" in log[0] ? (log as LoggedKeyEvent[]) : keyed(log as LoggedEvent[])
+const changesIn = (log: readonly (LoggedEvent | LoggedKeyEvent)[], periodId: string, tz: number) =>
+  changesInKeyed(asKeyed(log), periodId, tz)
+const daysWithChanges = (log: readonly (LoggedEvent | LoggedKeyEvent)[], tz: number) =>
+  daysWithChangesKeyed(asKeyed(log), tz)
+const sittingsIn = (
+  log: readonly (LoggedEvent | LoggedKeyEvent)[],
+  periodId: string,
+  tz: number,
+  options?: { gapMs?: number },
+) => sittingsInKeyed(asKeyed(log), periodId, tz, options)
 
 /** Milliseconds for a UTC instant. */
 const utc = (iso: string) => Date.parse(iso)
@@ -93,9 +110,10 @@ function writer(tz: number | null = 0, device = "dev.tab") {
   }
 }
 
-/** Ids collide across writers; give the whole log one seq order. */
+/** Ids collide across writers; give the whole log one seq order — and read
+ * it per key, as the calendar reads the log (`keyed`). */
 const placed = (log: LoggedEvent[]) =>
-  log.map((event, index) => ({ ...event, id: `e${index}`, seq: index + 1 }))
+  keyed(log.map((event, index) => ({ ...event, id: `e${index}`, seq: index + 1 })))
 
 /**
  * A change's outline as the reader sees it: one line per row, in order,
@@ -434,7 +452,7 @@ describe("changesIn", () => {
         w.snapshot(utc("2026-10-08T11:00:00Z"), "gone", "old", "n", utc("2026-10-08T11:00:00Z")),
         w.snapshot(utc("2026-10-06T11:00:00Z"), "n", "Plans", null),
       ]
-      expect(daysWithChanges(nothingWritten, 0)).toEqual(new Set())
+      expect(daysWithChanges(placed(nothingWritten), 0)).toEqual(new Set())
     })
 
     it("lists the seeded rows as the replica's own sittings, ahead of the day's edits", () => {

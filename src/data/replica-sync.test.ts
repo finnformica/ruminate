@@ -7,13 +7,13 @@ import {
   type NodeRow,
   type ViewRow,
 } from "../../worker/handlers/replica-payload"
+import { linkEntityId } from "./events"
 import {
-  EVENT_VERSION,
-  linkEntityId,
-  parseEventsPayload,
-  type EventsPutResult,
-  type RuminateEvent,
-} from "./events"
+  KEY_EVENT_VERSION,
+  parseKeyEventsPayload,
+  type KeyEvent,
+  type KeyEventsPutResult,
+} from "./key-events"
 import {
   isReplicaDrasticallyBehind,
   startReplicaSync,
@@ -37,32 +37,36 @@ interface RecordedRequest {
   authorization: string | null
   keepalive: boolean
   rows: ReturnType<typeof parseReplicaPayload> | null
-  events: ReturnType<typeof parseEventsPayload> | null
+  events: ReturnType<typeof parseKeyEventsPayload> | null
 }
 
 let minted = 0
-/** A block's create, as the runtime would make it. */
-const create = (id: string, text = id, at = 1): RuminateEvent => ({
+/** A block's create, as the runtime would make it: the liveness row alone
+ * stands for the gesture here (the loop carries rows, whatever they say). */
+const create = (id: string, text = id, at = 1): KeyEvent => ({
   id: `evt_${(minted += 1)}`,
   entity: "block",
   entity_id: id,
   action: "create",
-  patch: { type: id.startsWith("blk_") ? "text" : "note", text, props: null, notes_id: null },
+  key: "",
+  value: null,
   batch: `bat_${minted}`,
   device: "dev.tab",
+  cause: text,
   at,
-  v: EVENT_VERSION,
+  v: KEY_EVENT_VERSION,
 })
-const edit = (id: string, text: string, at = 1): RuminateEvent => ({
+const edit = (id: string, text: string, at = 1): KeyEvent => ({
   id: `evt_${(minted += 1)}`,
   entity: "block",
   entity_id: id,
-  action: "update",
-  patch: { text },
+  action: "set",
+  key: "text",
+  value: text,
   batch: `bat_${minted}`,
   device: "dev.tab",
   at,
-  v: EVENT_VERSION,
+  v: KEY_EVENT_VERSION,
 })
 const node = (id: string, text = id): NodeRow => ({
   id,
@@ -109,7 +113,7 @@ function createTestServer() {
         requests.push(record)
         throw new TypeError("Failed to fetch")
       }
-      const payload = parseEventsPayload(JSON.parse(String(init?.body)))
+      const payload = parseKeyEventsPayload(JSON.parse(String(init?.body)))
       record.events = payload
       requests.push(record)
       if (failure !== undefined) return new Response("{}", { status: failure })
@@ -122,7 +126,7 @@ function createTestServer() {
         }
         if (event.entity !== "block") continue
         const held = remoteNodes.get(event.entity_id)
-        const patch = event.patch as Partial<NodeRow>
+        const patch = event.action === "set" ? { [event.key]: event.value } : {}
         remoteNodes.set(event.entity_id, {
           ...(held ?? node(event.entity_id)),
           ...patch,
@@ -130,11 +134,15 @@ function createTestServer() {
         } as NodeRow)
       }
       if (payload.cursor !== undefined) remoteCursor = payload.cursor
-      const result: EventsPutResult = {
+      const result: KeyEventsPutResult = {
         ok: true,
         appended,
         stale: 0,
-        seqs: payload.events.map((event) => [event.id, log.get(event.id) as number]),
+        seqs: payload.events.map((event) => [
+          event.id,
+          log.get(event.id) as number,
+          log.get(event.id) as number,
+        ]),
         cursor: payload.cursor ?? null,
       }
       return new Response(JSON.stringify(result), { status: 200 })
@@ -225,13 +233,13 @@ function createTestAuth() {
 
 /** The store's log, as the loop sees it: unpushed until stamped. */
 function createTestStore() {
-  const events: { event: RuminateEvent; seq: number | null }[] = []
+  const events: { event: KeyEvent; seq: number | null }[] = []
   const stamped: [string, number][] = []
   return {
     events,
     stamped,
     getUnpushedEvents: async () => events.filter((e) => e.seq === null).map((e) => e.event),
-    markEventsPushed: async (seqs: readonly (readonly [string, number])[]) => {
+    markEventsPushed: async (seqs: readonly (readonly [string, number, (number | null)?])[]) => {
       for (const [id, seq] of seqs) {
         stamped.push([id, seq])
         const held = events.find((e) => e.event.id === id)
@@ -239,7 +247,7 @@ function createTestStore() {
       }
     },
     /** What the runtime does after a flush: the events are in the log. */
-    add: (...made: RuminateEvent[]) => {
+    add: (...made: KeyEvent[]) => {
       for (const event of made) events.push({ event, seq: null })
     },
     unpushed: () => events.filter((e) => e.seq === null).map((e) => e.event.id),
@@ -272,7 +280,7 @@ function createTestSync(
   })
   handles.push(handle)
   /** A flush landed: these events are in the log, and these notes/views touched. */
-  const save = (noteIds: string[], events: RuminateEvent[], viewIds: string[] = []) => {
+  const save = (noteIds: string[], events: KeyEvent[], viewIds: string[] = []) => {
     store.add(...events)
     handle.notifyChange(noteIds, viewIds)
   }
@@ -398,7 +406,7 @@ describe("replica sync queue", () => {
         return new Response(JSON.stringify({ ...status, replica_cursor: null }), { status: 200 })
       }
       // Either door: the answer carries no cursor.
-      const body = (await response.json()) as EventsPutResult
+      const body = (await response.json()) as KeyEventsPutResult
       return new Response(JSON.stringify({ ...body, cursor: null }), { status: 200 })
     }) as typeof fetch
     const { handle, save } = createTestSync(
@@ -639,18 +647,21 @@ describe("views ride the push", () => {
     sort_key: "a0",
     updated_at: 100,
   }
-  const viewEvent = (action: "create" | "update", patch: object, at = 100): RuminateEvent =>
-    ({
+  const viewEvent = (action: "create" | "update", patch: object, at = 100): KeyEvent => {
+    const [key, value] = action === "create" ? ["", null] : Object.entries(patch)[0]
+    return {
       id: `evt_${(minted += 1)}`,
       entity: "view",
       entity_id: view.id,
-      action,
-      patch,
+      action: action === "create" ? "create" : "set",
+      key,
+      value,
       batch: `bat_${minted}`,
       device: "dev.tab",
       at,
-      v: EVENT_VERSION,
-    }) as RuminateEvent
+      v: KEY_EVENT_VERSION,
+    }
+  }
 
   it("pushes a queued view's event like any other", async () => {
     const { handle, server, save } = createTestSync({})

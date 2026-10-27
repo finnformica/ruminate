@@ -5,7 +5,6 @@ import { parse } from "../blocks/parse"
 import { createBlockIndexer, type BlockHit } from "../utils/block-search"
 import {
   eventStamp,
-  foldByStamp,
   linkEntityId,
   rowsToEvents,
   toGraphSnapshot,
@@ -14,6 +13,7 @@ import {
   type RuminateEvent,
 } from "./events"
 import { derivedStamps } from "./fold-cache"
+import { assembleStamped, foldKeysByStamp, type KeyEvent, type LoggedKeyEvent } from "./key-events"
 import { docToGraph } from "./graph"
 import { encodeHlc } from "./hlc"
 import { createNotesBuilder } from "./note-meta"
@@ -21,7 +21,7 @@ import { docToOps } from "./ops"
 import type { SqlDriver, SqlStatement } from "./sql-driver"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import { CACHE_STAMPS_KEY, openSqlNoteStore } from "./sql-note-store"
-import { applyOpsToStore } from "./store-test-support"
+import { applyOpsToStore, keyed } from "./store-test-support"
 
 /**
  * The client's tables as a cache of the fold (docs/event-only-sync.md, "The
@@ -71,7 +71,7 @@ function logBuilder() {
   }
   const log: LoggedEvent[] = []
   return {
-    push(write: RowWrite): LoggedEvent[] {
+    push(write: RowWrite): LoggedKeyEvent[] {
       const events = rowsToEvents(held, write, {
         batch: `bat_${log.length}`,
         device: "dev.tab",
@@ -84,17 +84,18 @@ function logBuilder() {
       for (const link of write.links) {
         held.links.set(linkEntityId(link.source_id, link.destination_id, link.kind), link)
       }
-      return placed
+      return keyed(placed)
     },
     get log() {
-      return log
+      return keyed(log)
     },
   }
 }
 
 /** Event `n` of another device's log, at seq n + 1: the first three create a
- * block each, the rest edit them in turn. */
-function pulled(n: number): LoggedEvent {
+ * block each, the rest edit them in turn. Per key, as the pull serves it. */
+const pulled = (...ns: number[]): LoggedKeyEvent[] => keyed(ns.map(pulledEvent))
+function pulledEvent(n: number): LoggedEvent {
   const id = `blk_${n % 3}`
   return {
     id: `evt_p_${n}`,
@@ -133,7 +134,7 @@ describe("the cache", () => {
     const log = (await store.eventLog()).map(({ pending, ...event }) =>
       pending ? { ...event, seq: undefined } : event,
     )
-    const fold = foldByStamp(log)
+    const fold = assembleStamped(foldKeysByStamp(log as KeyEvent[]))
     expect(await store.getGraph()).toEqual(toGraphSnapshot(fold))
     expect(await store.foldOfLog()).toEqual(fold)
     expect((await store.getGraph()).nodes.get("blk_aaaaaaaaaa")?.text).toBe("buy oat milk")
@@ -142,7 +143,7 @@ describe("the cache", () => {
   it("a batch writes exactly the rows it names", async () => {
     const { driver } = recording()
     const store = await openSqlNoteStore(driver)
-    await store.applyPulledEvents([pulled(0), pulled(1), pulled(2)])
+    await store.applyPulledEvents(pulled(0, 1, 2))
     const rows = async () =>
       new Map(
         (await driver.exec("SELECT id, text, updated_at, seq, stamps FROM nodes")).map((row) => [
@@ -152,7 +153,7 @@ describe("the cache", () => {
       )
     const before = await rows()
 
-    await store.applyPulledEvents([pulled(3), pulled(6)])
+    await store.applyPulledEvents(pulled(3, 6))
     const after = await rows()
     const changed = [...after.keys()].filter((id) => after.get(id) !== before.get(id))
     expect(changed).toEqual(["blk_0"])
@@ -170,17 +171,17 @@ describe("the cache", () => {
   it("a failed batch rolls back the append and the rows together", async () => {
     const { driver, failNextBatch } = recording()
     const store = await openSqlNoteStore(driver)
-    await store.applyPulledEvents([pulled(0)])
+    await store.applyPulledEvents(pulled(0))
     const before = { rows: await store.getAllRows(), log: await store.eventLog() }
 
     failNextBatch()
-    await expect(store.applyPulledEvents([pulled(3)])).rejects.toThrow()
+    await expect(store.applyPulledEvents(pulled(3))).rejects.toThrow()
     expect(await store.getAllRows()).toEqual(before.rows)
     expect(await store.eventLog()).toEqual(before.log)
   })
 
   it("a page out of order gives the same rows, and an event sent again changes nothing", async () => {
-    const events = Array.from({ length: 12 }, (_, n) => pulled(n))
+    const events = pulled(...Array.from({ length: 12 }, (_, n) => n))
     const inOrder = await openSqlNoteStore(createNodeSqlDriver())
     await inOrder.applyPulledEvents(events)
     const shuffled = await openSqlNoteStore(createNodeSqlDriver())
@@ -196,11 +197,11 @@ describe("the cache", () => {
 
   it("holds an entity an update reached before its create, and reads it only once created", async () => {
     const store = await openSqlNoteStore(createNodeSqlDriver())
-    await store.applyPulledEvents([pulled(3)]) // an update of blk_0, before its create
+    await store.applyPulledEvents(pulled(3)) // an update of blk_0, before its create
     expect((await store.getGraph()).nodes.has("blk_0")).toBe(false)
     expect((await store.getAllRows()).nodes).toEqual([])
 
-    await store.applyPulledEvents([pulled(0)]) // the create, with an older stamp
+    await store.applyPulledEvents(pulled(0)) // the create, with an older stamp
     expect((await store.getGraph()).nodes.get("blk_0")).toMatchObject({
       type: "paragraph",
       text: "t3",
@@ -215,7 +216,7 @@ describe("the cache", () => {
     await applyOpsToStore(store, [{ ...typed, text: "xy" }])
     await applyOpsToStore(store, [{ ...typed, text: "xyz" }])
     expect((await store.getGraph()).nodes.get("blk_aaaaaaaaaa")?.text).toBe("xyz")
-    const fold = foldByStamp(await store.unpushedEvents())
+    const fold = assembleStamped(foldKeysByStamp(await store.unpushedEvents()))
     expect(toGraphSnapshot(fold).nodes.get("blk_aaaaaaaaaa")?.text).toBe("xyz")
   })
 
@@ -223,8 +224,8 @@ describe("the cache", () => {
     const store = await openSqlNoteStore(createNodeSqlDriver())
     const doc = { ...parse("- one\n  id:: blk_aaaaaaaaaa\n"), props: null }
     await applyOpsToStore(store, docToOps("a", doc, await store.getGraph()))
-    const queued: RuminateEvent[] = await store.unpushedEvents()
-    await store.markEventsPushed(queued.map((event, i) => [event.id, 50 + i] as const))
+    const queued: KeyEvent[] = await store.unpushedEvents()
+    await store.markEventsPushed(queued.map((event, i) => [event.id, 50 + i, 50 + i] as const))
     // A later local edit, still unplaced, keeps the row's seq.
     await applyOpsToStore(store, [{ op: "setText", id: "blk_aaaaaaaaaa", text: "two" }])
     const node = (await store.getGraph()).nodes.get("blk_aaaaaaaaaa")
@@ -385,20 +386,22 @@ describe("the stamp fill", () => {
   it("lets the row's own last event apply again with no change", async () => {
     const { store } = await upgraded()
     const before = await store.getAllRows()
-    await store.applyPulledEvents([
-      {
-        id: "evt_old",
-        seq: 3,
-        batch: "bat_old",
-        device: "",
-        at: 10,
-        v: 1,
-        entity: "block",
-        entity_id: "a",
-        action: "update",
-        patch: { text: "A" },
-      } as LoggedEvent,
-    ])
+    await store.applyPulledEvents(
+      keyed([
+        {
+          id: "evt_old",
+          seq: 3,
+          batch: "bat_old",
+          device: "",
+          at: 10,
+          v: 1,
+          entity: "block",
+          entity_id: "a",
+          action: "update",
+          patch: { text: "A" },
+        } as LoggedEvent,
+      ]),
+    )
     expect(await store.getAllRows()).toEqual(before)
   })
 })
@@ -414,7 +417,7 @@ describe("search from the cache (ES-8)", () => {
     await store.applyPulledEvents(builder.push(docToGraph("note-a", NOTE_A_EDITED, 30)))
 
     const fromCache = await store.getGraph()
-    const fromWholeLog = toGraphSnapshot(foldByStamp(builder.log))
+    const fromWholeLog = toGraphSnapshot(assembleStamped(foldKeysByStamp(builder.log)))
     expect(fromCache).toEqual(fromWholeLog)
 
     // Nothing about search is stored: the note list and the block index are

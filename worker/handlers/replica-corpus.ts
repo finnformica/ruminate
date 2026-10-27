@@ -23,7 +23,11 @@
 import type { TenantDb } from "../tenancy-db"
 import { appendClientEvents, appendClientKeyEvents, writeRows } from "./event-log"
 import type { EventsPutPayload, EventsPutResult } from "../../src/data/events"
-import type { BlockValueRow, KeyEventsPutPayload } from "../../src/data/key-events"
+import type {
+  BlockValueRow,
+  KeyEventsPutPayload,
+  KeyEventsPutResult,
+} from "../../src/data/key-events"
 import {
   toLinkRow,
   toNodeRow,
@@ -229,17 +233,6 @@ export async function corpusPutEvents(
     cursorStatements(payload.cursor),
   )
   return { ok: true, ...landed, cursor: payload.cursor ?? null }
-}
-
-/** Body of a successful per-key `PUT /api/replica/events`: as
- * `EventsPutResult`, each `seqs` entry adding the old log's seq of the
- * event the key event mirrors. */
-export interface KeyEventsPutResult {
-  ok: true
-  appended: number
-  stale: number
-  seqs: [id: string, seq: number, eventSeq: number | null][]
-  cursor: string | null
 }
 
 /** `corpusPutEvents` for a push of KEY EVENTS (`opsToKeyEvents`,

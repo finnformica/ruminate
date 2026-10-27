@@ -1,8 +1,9 @@
 import { parseISO } from "date-fns"
 import type { Block, BlockDoc } from "../blocks/types"
 import { isValidDateString, isValidWeekString, toDateStringUtc, toWeekString } from "../utils/date"
-import { fold, projectRows, type LoggedEvent, type LogState } from "./events"
+import { projectRows, type LogState } from "./events"
 import { buildGraphSnapshot, isNoteType, noteDoc, type GraphSnapshot } from "./graph"
+import { assembleLogState, canonicalJson, foldKeys, type LoggedKeyEvent } from "./key-events"
 import { emittedNoteTitle } from "./note-identity"
 import { keyOf } from "../blocks/view"
 
@@ -11,6 +12,12 @@ import { keyOf } from "../blocks/view"
  * as its outline with what the day did to it marked block by block
  * (docs/event-sourcing.md). Pure: the log in, the changes out; the block
  * editor draws the result in its read-only mode (`BlockEditor.diff`).
+ *
+ * The log is the per-key one (docs/event-sourcing.md, "Per-key events"):
+ * one row per key, each naming the old-shaped event it mirrors (`event`).
+ * The rows of one event are read as one edit — counted once, placed by the
+ * event's seq — and a block whose props keys changed is marked with the
+ * keys that did (`DiffMark`, `keys`).
  *
  * ## Whose day
  *
@@ -81,7 +88,8 @@ export interface WordSegment {
 export type DiffMark =
   | { kind: "added" }
   | { kind: "removed" }
-  | { kind: "changed"; words: WordSegment[] }
+  /** A reworded row, and — when its props changed — the keys that did. */
+  | { kind: "changed"; words: WordSegment[]; keys?: string[] }
   /** A synthetic row standing for `count` unchanged rows above the next
    * change, below the last, or between two (`foldContext`). */
   | { kind: "fold"; count: number; position: FoldPosition }
@@ -125,28 +133,59 @@ export interface Sitting {
 
 /** The batch the replica seeds the log with (`planReconcile`). */
 const SNAPSHOT_BATCH = "snapshot"
-const isSnapshot = (event: LoggedEvent) => event.batch === SNAPSHOT_BATCH
+const isSnapshot = (event: LoggedKeyEvent) => event.batch === SNAPSHOT_BATCH
+/** The old-shaped event a row is one key of: what the calendar counts as one
+ * edit. A row this device made and has not pushed names none yet; its batch
+ * and entity stand in (one gesture, one entity). */
+const editOf = (event: LoggedKeyEvent) =>
+  event.event ?? `${event.batch}\x1f${event.entity}\x1f${event.entity_id}`
+
+/**
+ * The log with each row's reading decided (`Read`): the rows of a snapshot
+ * create that stands for a tombstone, or for a note's own row, are known
+ * only from the rows beside them — the tombstone from the create's value,
+ * the note from its `set type` — so they are found once, up front.
+ */
+interface Read {
+  /** The snapshot creates of rows that were already deleted. */
+  tombstones: Set<string>
+  /** The snapshot creates of notes' own rows. */
+  notes: Set<string>
+}
+function readLog(log: readonly LoggedKeyEvent[]): Read {
+  const tombstones = new Set<string>()
+  const notes = new Set<string>()
+  for (const event of log) {
+    if (!isSnapshot(event) || event.entity !== "block") continue
+    if (event.action === "create" && typeof event.value === "number") tombstones.add(editOf(event))
+    if (event.action === "set" && event.key === "type" && isNoteType(String(event.value))) {
+      notes.add(editOf(event))
+    }
+  }
+  return { tombstones, notes }
+}
 /** A snapshot of a row that was already deleted: not a row the day wrote. */
-const isTombstoneSnapshot = (event: LoggedEvent) =>
-  isSnapshot(event) && typeof (event.patch as { deleted_at?: unknown }).deleted_at === "number"
+const isTombstoneSnapshot = (read: Read, event: LoggedKeyEvent) =>
+  isSnapshot(event) && read.tombstones.has(editOf(event))
 /** The snapshot of a note's own row. Its stamp is the note's last save, not
  * a day anything was written: the note is placed at the very beginning of
  * history, so its rows are found on their own days. */
-const isNoteSnapshot = (event: LoggedEvent) =>
-  isSnapshot(event) &&
-  event.entity === "block" &&
-  isNoteType(String((event.patch as { type?: unknown }).type))
+const isNoteSnapshot = (read: Read, event: LoggedKeyEvent) =>
+  isSnapshot(event) && event.entity === "block" && read.notes.has(editOf(event))
 /** An event the calendar reads as something written: not a view's row, and
  * not a snapshot that stands for no day's writing. */
-const isWriting = (event: LoggedEvent) =>
-  event.entity !== "view" && !isTombstoneSnapshot(event) && !isNoteSnapshot(event)
+const isWriting = (read: Read, event: LoggedKeyEvent) =>
+  event.entity !== "view" && !isTombstoneSnapshot(read, event) && !isNoteSnapshot(read, event)
+
+/** How many edits a run of rows is: one per old-shaped event. */
+const editsIn = (run: readonly LoggedKeyEvent[]) => new Set(run.map(editOf)).size
 
 /** A pause longer than this ends a sitting (`sittingsIn`). */
 const SITTING_GAP_MS = 30 * 60_000
 
 /** The day an event fell on for its writer — in its own zone when it says
  * one, else the viewer's. `YYYY-MM-DD`. */
-export function localDayOf(event: Pick<LoggedEvent, "at" | "tz">, viewerTz: number): string {
+export function localDayOf(event: Pick<LoggedKeyEvent, "at" | "tz">, viewerTz: number): string {
   const offsetMs = (event.tz ?? viewerTz) * 60_000
   return toDateStringUtc(new Date(event.at + offsetMs))
 }
@@ -164,10 +203,10 @@ export function periodMatcher(periodId: string): ((day: string) => boolean) | nu
  * saved on, then the edits by seq — seq within each. Snapshots always hold
  * lower seqs than edits, so the fold — which applies by seq — agrees. */
 const byPlace =
-  (viewerTz: number) =>
-  (a: LoggedEvent, b: LoggedEvent): number => {
-    const tierA = isNoteSnapshot(a) ? 0 : isSnapshot(a) ? 1 : 2
-    const tierB = isNoteSnapshot(b) ? 0 : isSnapshot(b) ? 1 : 2
+  (read: Read, viewerTz: number) =>
+  (a: LoggedKeyEvent, b: LoggedKeyEvent): number => {
+    const tierA = isNoteSnapshot(read, a) ? 0 : isSnapshot(a) ? 1 : 2
+    const tierB = isNoteSnapshot(read, b) ? 0 : isSnapshot(b) ? 1 : 2
     if (tierA !== tierB) return tierA - tierB
     if (tierA === 1) {
       const dayA = localDayOf(a, viewerTz)
@@ -179,29 +218,32 @@ const byPlace =
 
 /** Every day (in the viewer's zone, or the writer's where it said) something
  * was written on — what the calendar dots. A view's row is not writing. */
-export function daysWithChanges(log: readonly LoggedEvent[], viewerTz: number): Set<string> {
+export function daysWithChanges(log: readonly LoggedKeyEvent[], viewerTz: number): Set<string> {
+  const read = readLog(log)
   const days = new Set<string>()
-  for (const event of log) if (isWriting(event)) days.add(localDayOf(event, viewerTz))
+  for (const event of log) if (isWriting(read, event)) days.add(localDayOf(event, viewerTz))
   return days
 }
 
 /** The changes a period's events made (see the module header). */
 export function changesIn(
-  log: readonly LoggedEvent[],
+  log: readonly LoggedKeyEvent[],
   periodId: string,
   viewerTz: number,
 ): PeriodChanges {
   const inPeriod = periodMatcher(periodId)
-  const sorted = [...log].sort(byPlace(viewerTz))
+  const read = readLog(log)
+  const sorted = [...log].sort(byPlace(read, viewerTz))
   const earliest =
     sorted.length === 0 ? null : sorted.map((event) => localDayOf(event, viewerTz)).sort()[0]
   if (inPeriod === null) return { events: 0, notes: [], earliest }
   const periodEvents = sorted.filter(
-    (event) => (!isSnapshot(event) || isWriting(event)) && inPeriod(localDayOf(event, viewerTz)),
+    (event) =>
+      (!isSnapshot(event) || isWriting(read, event)) && inPeriod(localDayOf(event, viewerTz)),
   )
   if (periodEvents.length === 0) return { events: 0, notes: [], earliest }
-  const notes = changesOf(sorted, periodEvents, byPlace(viewerTz))
-  return { events: periodEvents.length, notes, earliest }
+  const notes = changesOf(sorted, periodEvents, byPlace(read, viewerTz))
+  return { events: editsIn(periodEvents), notes, earliest }
 }
 
 /**
@@ -210,7 +252,7 @@ export function changesIn(
  * own — what it found, against what it left. The day as it happened.
  */
 export function sittingsIn(
-  log: readonly LoggedEvent[],
+  log: readonly LoggedKeyEvent[],
   periodId: string,
   viewerTz: number,
   options: { gapMs?: number } = {},
@@ -218,12 +260,14 @@ export function sittingsIn(
   const inPeriod = periodMatcher(periodId)
   if (inPeriod === null) return []
   const gapMs = options.gapMs ?? SITTING_GAP_MS
-  const sorted = [...log].sort(byPlace(viewerTz))
+  const read = readLog(log)
+  const sorted = [...log].sort(byPlace(read, viewerTz))
   const periodEvents = sorted.filter(
-    (event) => (!isSnapshot(event) || isWriting(event)) && inPeriod(localDayOf(event, viewerTz)),
+    (event) =>
+      (!isSnapshot(event) || isWriting(read, event)) && inPeriod(localDayOf(event, viewerTz)),
   )
   // The seeded rows come first (`byPlace`), as the replica's own sittings.
-  const runs: LoggedEvent[][] = []
+  const runs: LoggedKeyEvent[][] = []
   for (const event of periodEvents) {
     const run = runs.at(-1)
     const last = run?.at(-1)
@@ -235,17 +279,17 @@ export function sittingsIn(
   }
   return runs.map((run) => ({
     at: run[0].at,
-    until: (run.at(-1) as LoggedEvent).at,
+    until: (run.at(-1) as LoggedKeyEvent).at,
     tz: run[0].tz ?? null,
     device: deviceOf(run[0]),
-    events: run.length,
-    notes: changesOf(sorted, run, byPlace(viewerTz)),
+    events: editsIn(run),
+    notes: changesOf(sorted, run, byPlace(read, viewerTz)),
   }))
 }
 
 /** The device half of `<device>.<tab>`: two tabs of one browser are one
  * writer for the purposes of a sitting. */
-const deviceOf = (event: LoggedEvent) => event.device.split(".")[0]
+const deviceOf = (event: LoggedKeyEvent) => event.device.split(".")[0]
 
 /**
  * The notes a run of events changed, each as the difference between the
@@ -253,14 +297,14 @@ const deviceOf = (event: LoggedEvent) => event.device.split(".")[0]
  * that fold with the run — and only the run — applied on top.
  */
 function changesOf(
-  sorted: readonly LoggedEvent[],
-  run: readonly LoggedEvent[],
-  place: (a: LoggedEvent, b: LoggedEvent) => number,
+  sorted: readonly LoggedKeyEvent[],
+  run: readonly LoggedKeyEvent[],
+  place: (a: LoggedKeyEvent, b: LoggedKeyEvent) => number,
 ): NoteChange[] {
   const first = run[0]
   const before = sorted.filter((event) => place(event, first) < 0)
-  const graphBefore = graphOf(fold(before))
-  const graphAfter = graphOf(fold([...before, ...run]))
+  const graphBefore = graphOf(assembleLogState(foldKeys(before)))
+  const graphAfter = graphOf(assembleLogState(foldKeys([...before, ...run])))
 
   const touched = new Set<string>()
   for (const event of run) {
@@ -363,8 +407,15 @@ function noteChange(
     if (was.type !== block.type) {
       marks.set(id, { kind: "added" })
       retyped.set(id, was)
-    } else if (was.text !== block.text) {
-      marks.set(id, { kind: "changed", words: diffWords(was.text, block.text) })
+    } else {
+      const keys = changedKeys(was.props ?? null, block.props ?? null)
+      if (was.text !== block.text || keys.length > 0) {
+        marks.set(id, {
+          kind: "changed",
+          words: diffWords(was.text, block.text),
+          ...(keys.length > 0 ? { keys } : {}),
+        })
+      }
     }
     if (newParents.size > 0) arrived.set(id, newParents)
   }
@@ -387,6 +438,22 @@ function noteChange(
     doc,
     marks,
   }
+}
+
+/** The props keys whose value differs between two blocks, sorted: what a
+ * changed row names when its words did not change (`DiffMark`, `keys`). */
+export function changedKeys(
+  before: Readonly<Record<string, unknown>> | null,
+  after: Readonly<Record<string, unknown>> | null,
+): string[] {
+  const live = (props: Readonly<Record<string, unknown>> | null) =>
+    Object.entries(props ?? {}).filter(([, value]) => value !== null && value !== undefined)
+  const a = new Map(live(before))
+  const b = new Map(live(after))
+  const keys = new Set([...a.keys(), ...b.keys()])
+  return [...keys]
+    .filter((key) => canonicalJson(a.get(key) ?? null) !== canonicalJson(b.get(key) ?? null))
+    .sort()
 }
 
 const countMarks = (marks: ReadonlyMap<string, DiffMark>, kind: DiffMark["kind"]) =>

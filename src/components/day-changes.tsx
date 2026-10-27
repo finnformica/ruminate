@@ -19,7 +19,7 @@ import {
   databaseModeStatusAtom,
   eventLogVersionAtom,
 } from "../data/database-mode"
-import type { LoggedEvent } from "../data/events"
+import type { LoggedKeyEvent } from "../data/key-events"
 import { isMintedNoteId } from "../data/note-identity"
 import { useStuck } from "../hooks/in-view"
 import { useFoldRule } from "../data/view-state"
@@ -40,12 +40,12 @@ const noop = () => {}
  * (`eventLogVersionAtom`): what the calendar folds its days from
  * (docs/event-sourcing.md). Null signed out, and while the store is opening.
  */
-export function useEventLog(): LoggedEvent[] | null {
+export function useEventLog(): LoggedKeyEvent[] | null {
   const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const { status } = useAtomValue(databaseModeStatusAtom)
   const version = useAtomValue(eventLogVersionAtom)
   const ready = isDatabaseMode && status === "ready"
-  const [log, setLog] = React.useState<LoggedEvent[] | null>(null)
+  const [log, setLog] = React.useState<LoggedKeyEvent[] | null>(null)
   React.useEffect(() => {
     if (!ready) return
     let cancelled = false
@@ -62,7 +62,7 @@ export function useEventLog(): LoggedEvent[] | null {
 /** The days something was written on, or a note names in a date-valued
  * property (`useDateMarks`), and the weeks holding them — what the calendar
  * dots. */
-export function useCalendarMarks(log: LoggedEvent[] | null): ReadonlySet<string> {
+export function useCalendarMarks(log: LoggedKeyEvent[] | null): ReadonlySet<string> {
   const dates = useDateMarks()
   return React.useMemo(() => {
     const marked = new Set(dates)
@@ -86,7 +86,7 @@ export function useCalendarMarks(log: LoggedEvent[] | null): ReadonlySet<string>
  * Folded from the device's copy of the event log, so it is read-only by
  * nature.
  */
-export function DayChanges({ periodId, log }: { periodId: string; log: LoggedEvent[] | null }) {
+export function DayChanges({ periodId, log }: { periodId: string; log: LoggedKeyEvent[] | null }) {
   const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const [view, setView] = useAtom(calendarChangesViewAtom)
   const isWeek = isValidWeekString(periodId)
@@ -134,9 +134,9 @@ export function DayChanges({ periodId, log }: { periodId: string; log: LoggedEve
       ) : changes.notes.length === 0 ? (
         <p className="text-text-secondary">{emptyLine(changes, periodId, isWeek)}</p>
       ) : view === "timeline" ? (
-        <Timeline log={log as LoggedEvent[]} periodId={periodId} />
+        <Timeline log={log as LoggedKeyEvent[]} periodId={periodId} />
       ) : isWeek ? (
-        <WeekByNote log={log as LoggedEvent[]} weekId={periodId} />
+        <WeekByNote log={log as LoggedKeyEvent[]} weekId={periodId} />
       ) : (
         <NoteList notes={changes.notes} />
       )}
@@ -173,7 +173,7 @@ function emptyLine(changes: PeriodChanges, periodId: string, isWeek: boolean): s
 
 /** A week by note: each day with changes under its own heading, and one line
  * for the days without. */
-function WeekByNote({ log, weekId }: { log: LoggedEvent[]; weekId: string }) {
+function WeekByNote({ log, weekId }: { log: LoggedKeyEvent[]; weekId: string }) {
   const viewerTz = writerTimezone()
   const days = React.useMemo(() => {
     const start = startOfISOWeek(parseISO(weekId))
@@ -221,7 +221,7 @@ function listDays(names: string[]): string {
 
 /** The period in order: one group per sitting, headed by when it was —
  * on the writer's clock, with the zone where it is not the reader's. */
-function Timeline({ log, periodId }: { log: LoggedEvent[]; periodId: string }) {
+function Timeline({ log, periodId }: { log: LoggedKeyEvent[]; periodId: string }) {
   const viewerTz = writerTimezone()
   const isWeek = isValidWeekString(periodId)
   const sittings = React.useMemo(

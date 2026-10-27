@@ -665,11 +665,11 @@ export function assembleStamped(state: StampedState): StampedState {
     for (const [key, stamp] of Object.entries(block.stamps)) {
       if (!isPropsRegister(key) && stamp !== undefined) stamps[key] = stamp
     }
+    // A block's `props` is a field of the old shape whatever it holds: null
+    // for no keys, as a row reads it.
+    fields.props = derivedProps(block.fields)
     const propsStamp = propsStampOf(block.stamps)
-    if (propsStamp !== undefined) {
-      fields.props = derivedProps(block.fields)
-      stamps.props = propsStamp
-    }
+    if (propsStamp !== undefined) stamps.props = propsStamp
     blocks.set(id, { ...block, fields, stamps })
   }
   return { ...state, blocks: blocks as unknown as StampedState["blocks"] }
@@ -1144,6 +1144,17 @@ export interface KeyEventsPutPayload {
   cursor?: string
 }
 
+/** Body of a successful per-key `PUT /api/replica/events`: as
+ * `EventsPutResult`, each `seqs` entry adding the old log's seq of the
+ * event the key event mirrors — the order the row cursors count in. */
+export interface KeyEventsPutResult {
+  ok: true
+  appended: number
+  stale: number
+  seqs: [id: string, seq: number, eventSeq: number | null][]
+  cursor: string | null
+}
+
 /** The most key events one push may carry. */
 export const MAX_KEY_EVENTS_PER_PUT = 2_000
 
@@ -1199,9 +1210,9 @@ export function parseStoredKeyEvent(
     batch: raw.batch,
     device: raw.device,
     ...(raw.cause === null || raw.cause === undefined ? {} : { cause: raw.cause }),
-    ...(raw.base_seq === null || raw.base_seq === undefined
-      ? {}
-      : { base_seq: Number(raw.base_seq) }),
+    // Null is "the writer did not say" (`EventEnvelope.base_seq`), kept as
+    // the old store read it back.
+    base_seq: raw.base_seq === null || raw.base_seq === undefined ? null : Number(raw.base_seq),
     ...(raw.ref_seq !== null && raw.ref_seq !== undefined
       ? { ref_seq: Number(raw.ref_seq) }
       : raw.action === "restore"

@@ -1,11 +1,12 @@
-import { opsToEvents, type EventContext, type RuminateEvent } from "./events"
+import type { EventContext, LoggedEvent, RuminateEvent } from "./events"
 import { encodeHlc, tickHlc, type Hlc } from "./hlc"
+import { expandLog, opsToKeyEvents, type KeyEvent, type LoggedKeyEvent } from "./key-events"
 import type { NoteStore } from "./note-store"
 import type { Op } from "./ops"
 
 // What the runtime does to a batch of ops before the store sees it, for tests
 // that drive a store directly: translate them against the store's own live
-// graph (`opsToEvents`) and apply the events. The envelope is a test's — one
+// graph (`opsToKeyEvents`) and apply the events. The envelope is a test's — one
 // device, ids numbered — so an assertion can name an event.
 
 let minted = 0
@@ -33,8 +34,30 @@ export async function applyOpsToStore(
   store: NoteStore,
   ops: readonly Op[],
   ctx: EventContext = testEventContext(),
-): Promise<RuminateEvent[]> {
-  const events = opsToEvents(await store.getGraph(), ops, ctx)
+): Promise<KeyEvent[]> {
+  const events = opsToKeyEvents(await store.getGraph(), ops, ctx)
   await store.applyEvents(events)
   return events
+}
+
+/**
+ * Old-shaped placed events as the per-key log serves them (`expandLog`):
+ * each row numbered after its event — seq `<event seq> * 100 + <row>`, so
+ * the rows keep the events' order and a cursor past an event's rows is past
+ * the event — and carrying what the replica stamps on a pulled row. For
+ * fixtures written in the old shape.
+ */
+export function keyed(events: readonly LoggedEvent[]): LoggedKeyEvent[] {
+  const byId = new Map(events.map((event) => [event.id, event]))
+  return expandLog(events as RuminateEvent[]).map((row) => {
+    const source = byId.get(row.event as string) as LoggedEvent
+    const ordinal = Number(row.id.split("#").pop())
+    return {
+      ...row,
+      seq: (row.event_seq ?? 0) * 100 + ordinal,
+      ...(source.origin !== undefined ? { origin: source.origin } : {}),
+      ...(source.actor !== undefined ? { actor: source.actor } : {}),
+      ...(source.received_at !== undefined ? { received_at: source.received_at } : {}),
+    }
+  })
 }
