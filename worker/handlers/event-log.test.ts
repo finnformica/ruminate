@@ -16,13 +16,14 @@ import { encodeHlc } from "../../src/data/hlc"
 import type { SqlDriver } from "../../src/data/sql-driver"
 import { ensureTenantMeta, forTenant, type TenantDb } from "../tenancy-db"
 import migration0028 from "../../migrations/0028_events_log.sql?raw"
-import { expandLog, type KeyEvent } from "../../src/data/key-events"
+import { collapseKeyEvents, expandLog, type KeyEvent } from "../../src/data/key-events"
 import {
   appendClientEvents,
   appendClientKeyEvents,
   appendEvents,
   corpusAt,
   planEventAppend,
+  planKeyAppend,
   planLogFill,
   planReconcile,
   readEvents,
@@ -1382,6 +1383,33 @@ describe("the per-key log", () => {
     } finally {
       setEventLogRollup("new")
     }
+  })
+
+  it("cuts an append into runs that fit without parting a create from its keys", async () => {
+    const { driver, alice } = await open()
+    const dev = keyWriter("dev.a")
+    const events = [
+      ...dev.block("note", {}),
+      ...dev.block("a", { size: 40 }),
+      dev.row("link", "note|a|child", "create", "", null),
+      dev.row("link", "note|a|child", "set", "source_id", "note"),
+      dev.row("link", "note|a|child", "set", "destination_id", "a"),
+      dev.row("link", "note|a|child", "set", "kind", "child"),
+      dev.row("link", "note|a|child", "set", "sort_key", "a0"),
+    ]
+    const { events: old, eventOf } = collapseKeyEvents(events, () => null)
+    // Each row names the event it mirrors, as `appendKeyEvents` has it.
+    const mirrored = events.map((event) => ({ ...event, event: eventOf.get(event.id) }))
+    const ctx = { appendId: "x", actor: 111, origin: "replica" as const, client: null, now: 1 }
+    // A limit so small every group is its own run: the hardest case for order.
+    const statements = planKeyAppend(mirrored, old, eventOf, ctx, 1)
+    expect(statements).toHaveLength(9 * 3)
+    await alice.includingDeleted().batch([...planReconcile(ctx), ...statements])
+    expect(await driver.exec("SELECT sort_key FROM link WHERE user_id = 111")).toEqual([
+      { sort_key: "a0" },
+    ])
+    expect((await readKeyEvents(alice)).map((row) => row.seq)).toEqual(events.map((_, i) => i + 1))
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, events: 3, keyEvents: 14 })
   })
 
   it("serves the per-key log by its own seq, one entity's too", async () => {

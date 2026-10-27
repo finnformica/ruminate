@@ -1848,13 +1848,47 @@ function planKeyChunk(
 }
 
 /**
+ * Cut key events into runs under `maxBytes`, as `chunksBySize` does, with
+ * one rule more: the rows of one old-shaped event (`eventOf`) stay in one
+ * run, together, in the order they came. A chunk's INSERT writes a created
+ * row from the rows it holds, so a link's `create` cut from its `set
+ * sort_key` would be a row with no key. Groups come out in first-seen
+ * order, which is the old events' order (`collapseKeyEvents`).
+ */
+function chunksByGroup(
+  events: readonly KeyEvent[],
+  eventOf: ReadonlyMap<string, string>,
+  maxBytes: number,
+): KeyEvent[][] {
+  const groups = new Map<string, KeyEvent[]>()
+  for (const event of events) {
+    const id = eventOf.get(event.id) ?? event.id
+    const group = groups.get(id)
+    if (group) group.push(event)
+    else groups.set(id, [event])
+  }
+  const chunks: KeyEvent[][] = []
+  let size = 0
+  for (const group of groups.values()) {
+    const bytes = group.reduce((sum, event) => sum + JSON.stringify(event).length, 0)
+    if (chunks.length === 0 || size + bytes > maxBytes) {
+      chunks.push([])
+      size = 0
+    }
+    chunks[chunks.length - 1].push(...group)
+    size += bytes
+  }
+  return chunks
+}
+
+/**
  * Plan one append of key events and the old-shaped events they fold to:
  * both logs, then the projection the rollup reads. Under the old rollup the
  * old events project as they always have (`planChunk`), and `block_values`
  * still takes the keys by stamp, so a later flip finds it current. Chunked
  * under D1's bound-value cap like `planEventAppend`.
  */
-function planKeyAppend(
+export function planKeyAppend(
   events: readonly KeyEvent[],
   old: readonly RuminateEvent[],
   eventOf: ReadonlyMap<string, string>,
@@ -1864,10 +1898,7 @@ function planKeyAppend(
   const firstOf = new Map<string, RuminateEvent>()
   for (const event of old) firstOf.set(event.id, event)
   const mirrored = new Set(eventOf.values())
-  const chunks = chunksBySize(
-    events as unknown as RuminateEvent[],
-    maxBytes,
-  ) as unknown as KeyEvent[][]
+  const chunks = chunksByGroup(events, eventOf, maxBytes)
   if (chunks.length === 0) chunks.push([])
   const placed = new Set<string>()
   return chunks.flatMap((chunk, index) => {
