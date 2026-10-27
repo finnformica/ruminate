@@ -18,7 +18,7 @@ import {
   assembleStamped,
   canonicalJson,
   coalesceTypingKeys,
-  collapseKeyEvents,
+  editsOf,
   derivedProps,
   expandEvent,
   expandLog,
@@ -286,43 +286,48 @@ describe("the folds", () => {
   })
 })
 
-describe("collapseKeyEvents", () => {
-  it("folds a group of key rows back to the old event it came from, props included", () => {
+describe("editsOf", () => {
+  it("names the edit each row belongs to: the old event it was read out of", () => {
     const w = writer()
     const create = w.block("a", { title: "T", size: 40 })
     const update = w.setProps("a", { title: "T2", size: 40 })
     const rows = [...expandEvent(create, null), ...expandEvent(update, { title: "T", size: 40 })]
-    const { events, eventOf } = collapseKeyEvents(rows, () => null)
-    expect(events.map((event) => event.id)).toEqual([create.id, update.id])
-    expect(events[0].patch).toEqual({
-      type: "text",
-      text: "a",
-      notes_id: "note",
-      props: JSON.stringify({ size: 40, title: "T" }),
-    })
-    expect(events[1].patch).toEqual({ props: JSON.stringify({ size: 40, title: "T2" }) })
-    expect(eventOf.get(rows[0].id)).toBe(create.id)
-    expect(eventOf.get(rows.at(-1)!.id)).toBe(update.id)
+    const edits = editsOf(rows)
+    expect(edits.get(rows[0].id)).toBe(create.id)
+    expect(edits.get(rows.at(-1)!.id)).toBe(update.id)
+    expect(new Set(edits.values())).toEqual(new Set([create.id, update.id]))
   })
 
-  it("reads a client's rows against the props the replica holds, and takes the first id", () => {
+  it("groups a client's rows by batch and entity, a create with its sets, a delete on its own", () => {
     const rows = opsToKeyEvents(
       buildGraphSnapshot(
         [{ id: "a", type: "text", text: "A", props: '{"k":1,"j":2}', updated_at: 1, seq: 4 }],
         [],
       ),
-      [{ op: "setProps", id: "a", props: '{"k":2}' }],
+      [
+        { op: "setProps", id: "a", props: '{"k":2}' },
+        { op: "create", id: "b", type: "text", text: "B", props: null, notesId: "a" },
+        { op: "delete", id: "a" },
+      ],
       context(),
     )
-    expect(shape(rows)).toEqual(["set props.k=2", "unset props.j"])
-    const { events } = collapseKeyEvents(rows, () => ({ k: 1, j: 2, elsewhere: true }))
-    expect(events).toHaveLength(1)
-    expect(events[0]).toMatchObject({
-      id: rows[0].id,
-      action: "update",
-      base_seq: 4,
-      patch: { props: JSON.stringify({ elsewhere: true, k: 2 }) },
-    })
+    expect(shape(rows)).toEqual([
+      "set props.k=2",
+      "unset props.j",
+      "create ",
+      'set type="text"',
+      'set text="B"',
+      'set notes_id="a"',
+      "delete ",
+    ])
+    const edits = editsOf(rows)
+    const ids = rows.map((row) => edits.get(row.id))
+    // The update's two rows are one edit; b's create and its sets another;
+    // the delete a third.
+    expect(ids[0]).toBe(rows[0].id)
+    expect(ids[1]).toBe(rows[0].id)
+    expect(ids.slice(2, 6).every((id) => id === rows[2].id)).toBe(true)
+    expect(ids[6]).toBe(rows[6].id)
   })
 })
 

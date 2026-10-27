@@ -72,6 +72,9 @@ export interface CorpusMigrations {
   /** migrations/0024: the stamp column on the event log — required in
    * `"columns"` mode. The local store adds the same column (`LOCAL_V11_SQL`). */
   eventHlc?: string
+  /** migrations/0025: the stamps of the projections — required in `"columns"`
+   * mode. The local store's cache rows take the same column (`LOCAL_V13_SQL`). */
+  projectionStamps?: string
   /** migrations/0027: a View's saved stack — required in `"columns"` mode. The
    * local store adds the same column (`LOCAL_V14_SQL`). */
   viewStack?: string
@@ -79,12 +82,15 @@ export interface CorpusMigrations {
    * `"columns"` mode. The local store gets its own, single-tenant pair
    * (`LOCAL_V15_SQL`). */
   eventsLog?: string
+  /** migrations/0029: `nodes.props` dropped — required in `"columns"` mode.
+   * The local store drops the same column (`LOCAL_V16_SQL`). */
+  dropNodeProps?: string
 }
 
 /** Which v3 shape the ladder should produce (see the module header). */
 export type CorpusTenancy = "single" | "columns"
 
-const CORPUS_SCHEMA_VERSION = 15
+const CORPUS_SCHEMA_VERSION = 16
 
 /**
  * The single-tenant v5 step: the `views` table (migrations/0015) — the
@@ -325,6 +331,19 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '15');
 `
 
 /**
+ * The single-tenant v16 step: `nodes.props` goes (migrations/0029,
+ * docs/event-sourcing.md, "The cut-over"). A block's props are its rows of
+ * `delta_mat_values`, written beside its cache row since v15; every read of
+ * a block derives the column from them (`NODE_PROPS`, sql-note-store.ts).
+ * The cache re-pulls once more (`CACHE_GENERATION`, database-mode.ts), so
+ * no row is read between the drop and the fold that fills its keys.
+ */
+const LOCAL_V16_SQL = `
+ALTER TABLE nodes DROP COLUMN props;
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '16');
+`
+
+/**
  * The single-tenant v4 step: `notes_id` on nodes (migrations/0006) and nothing
  * else — no backfill, because the local store is a cache and re-pulls the
  * note ids the replica computed (`CACHE_GENERATION`, database-mode.ts).
@@ -495,8 +514,21 @@ async function applyV12(driver: SqlDriver, tenancy: CorpusTenancy): Promise<void
   if (tenancy === "single") await driver.execScript(LOCAL_V12_SQL)
 }
 
-async function applyV13(driver: SqlDriver, tenancy: CorpusTenancy): Promise<void> {
-  if (tenancy === "single") await driver.execScript(LOCAL_V13_SQL)
+async function applyV13(
+  driver: SqlDriver,
+  migrations: CorpusMigrations,
+  tenancy: CorpusTenancy,
+): Promise<void> {
+  if (tenancy === "single") {
+    await driver.execScript(LOCAL_V13_SQL)
+    return
+  }
+  if (!migrations.projectionStamps) {
+    throw new Error(
+      'ensureCorpusSchema: "columns" tenancy needs migrations.projectionStamps (0025)',
+    )
+  }
+  await driver.execScript(migrations.projectionStamps)
 }
 
 async function applyV14(
@@ -529,6 +561,21 @@ async function applyV15(
   await driver.execScript(migrations.eventsLog)
 }
 
+async function applyV16(
+  driver: SqlDriver,
+  migrations: CorpusMigrations,
+  tenancy: CorpusTenancy,
+): Promise<void> {
+  if (tenancy === "single") {
+    await driver.execScript(LOCAL_V16_SQL)
+    return
+  }
+  if (!migrations.dropNodeProps) {
+    throw new Error('ensureCorpusSchema: "columns" tenancy needs migrations.dropNodeProps (0029)')
+  }
+  await driver.execScript(migrations.dropNodeProps)
+}
+
 /**
  * Every local step that has shipped, by the version it leaves behind — for
  * `corpus-schema.test.ts`, which pins a hash of each. A step that has reached
@@ -549,6 +596,7 @@ export const SHIPPED_LOCAL_STEPS: Readonly<Record<number, string>> = {
   13: LOCAL_V13_SQL,
   14: LOCAL_V14_SQL,
   15: LOCAL_V15_SQL,
+  16: LOCAL_V16_SQL,
 }
 
 type Step = (
@@ -571,9 +619,10 @@ const STEPS: readonly [number, Step][] = [
   [10, (driver, _migrations, tenancy) => applyV10(driver, tenancy)],
   [11, applyV11],
   [12, (driver, _migrations, tenancy) => applyV12(driver, tenancy)],
-  [13, (driver, _migrations, tenancy) => applyV13(driver, tenancy)],
+  [13, applyV13],
   [14, applyV14],
   [15, applyV15],
+  [16, applyV16],
 ]
 
 /**

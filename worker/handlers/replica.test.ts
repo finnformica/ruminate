@@ -3,10 +3,11 @@
 import { describe, expect, it } from "vitest"
 import migration0008 from "../../migrations/0008_note_type.sql?raw"
 import { rowsToEvents } from "../../src/data/events"
+import { expandLog } from "../../src/data/key-events"
 import type { SqlDriver } from "../../src/data/sql-driver"
 import { ensureTenantMeta, forTenant, type TenantDb } from "../tenancy-db"
 import type { Env } from "../types"
-import { planEventAppend, planReconcile } from "./event-log"
+import { planKeyAppend, planReconcile } from "./event-log"
 import { corpusPullFull, corpusPullSince, corpusPut, corpusStatus } from "./replica-corpus"
 import {
   REPLICA_PROTOCOL_HEADERS,
@@ -128,22 +129,24 @@ describe("the planned write", () => {
     { batch: "apd", device: "tab", now: NOW },
   )
 
+  const keys = expandLog(events)
+
   it("every statement names its tenant with the :tenant token, never a parameter", () => {
-    const statements = [...planReconcile(write), ...planEventAppend(events, write)]
-    expect(statements).toHaveLength(11)
+    const statements = [...planReconcile(write), ...planKeyAppend(keys, write)]
+    expect(statements).toHaveLength(16)
     for (const statement of statements) {
       expect(statement.sql).toContain("user_id")
       expect(statement.sql).toContain(":tenant")
     }
     // The one user id among the parameters is the ACTOR — who wrote, recorded
     // beside the event — and never which tenant's rows are written.
-    const [append, ...projections] = planEventAppend(events, write)
+    const [append, ...projections] = planKeyAppend(keys, write)
     expect(append.params).toContain(111)
     for (const statement of projections) expect(statement.params).not.toContain(111)
   })
 
   it("plans nothing to append for a write that changes nothing", () => {
-    expect(planEventAppend([], write)).toEqual([])
+    expect(planKeyAppend([], write)).toEqual([])
   })
 })
 
@@ -163,8 +166,11 @@ async function openTenant(id: number, existing?: SqlDriver): Promise<TenantDb> {
 
 /**
  * Attach the sequence the replica would have assigned. `rowsToEvents`
- * derives deletes first, then nodes, then links, and each event takes the
- * next value — so a push of two nodes and one link lays down 1, 2, 3.
+ * derives deletes first, then nodes, then views, then links, and each row
+ * of each event takes the next value — a block's create is four rows (its
+ * liveness, type, text and note id), a view's six, a link's five — and a
+ * row takes the seq of its last. So a push of two nodes and one link lays
+ * down 4, 8 and 13.
  */
 const withSeq = <T>(row: T, seq: number): T & { seq: number } => ({ ...row, seq })
 
@@ -189,11 +195,11 @@ describe("corpus operations over the real D1 schema", () => {
     // The cursor is the row sequence now, NOT the client's push cursor ("42"):
     // the two were conflated, and only one of them can order a pull.
     expect(await corpusPullFull(tenant)).toEqual({
-      nodes: [withSeq(nodes[0], 1), withSeq(nodes[1], 2)],
-      links: [withSeq(links[0], 3)],
+      nodes: [withSeq(nodes[0], 4), withSeq(nodes[1], 8)],
+      links: [withSeq(links[0], 13)],
       views: [],
       delta_mat_values: [],
-      cursor: "3",
+      cursor: "13",
     })
   })
 
@@ -212,11 +218,11 @@ describe("corpus operations over the real D1 schema", () => {
     const body = await corpusPullSince(tenant, Number(cursor))
     // Exhaustive: the unchanged note and link must not ride along in any shape.
     expect(body).toEqual({
-      nodes: [withSeq({ ...nodes[1], text: "A2", updated_at: 301 }, 4)],
+      nodes: [withSeq({ ...nodes[1], text: "A2", updated_at: 301 }, 14)],
       links: [],
       views: [],
       delta_mat_values: [],
-      cursor: "4",
+      cursor: "14",
     })
   })
 
@@ -234,14 +240,14 @@ describe("corpus operations over the real D1 schema", () => {
     await corpusPut(tenant, { nodes: [skewed], links: [] }, NOW)
 
     const body = await corpusPullSince(tenant, Number(cursor))
-    expect(body.nodes).toEqual([withSeq(skewed, 4)])
+    expect(body.nodes).toEqual([withSeq(skewed, 17)])
   })
 
   it("since equal to the newest seq returns no changes (strict >), and no cursor", async () => {
     const tenant = await openTenant(1)
     await corpusPut(tenant, { nodes, links }, NOW)
     // Nothing newer means nothing to say: the client keeps the cursor it has.
-    expect(await corpusPullSince(tenant, 3)).toEqual({
+    expect(await corpusPullSince(tenant, 13)).toEqual({
       nodes: [],
       links: [],
       views: [],
@@ -383,14 +389,14 @@ describe("soft deletes at the replica", () => {
     // THE property that makes dropping the key lists safe: the tombstone is
     // itself the change a since-pull returns, carrying its stamp — the client
     // needs nothing else to learn about the deletion.
-    const since = await corpusPullSince(tenant, 3)
+    const since = await corpusPullSince(tenant, 13)
     expect(since.nodes).toEqual([
-      withSeq({ ...rows.nodes[1], updated_at: 200, deleted_at: 200 }, 4),
+      withSeq({ ...rows.nodes[1], updated_at: 200, deleted_at: 200 }, 14),
     ])
     // …and the link to it is retained, untouched — though a link into a
     // tombstoned node is not part of the graph anyone can see, so it stops
     // counting alongside the node.
-    expect(pulled.links).toEqual([withSeq(rows.links[0], 3)])
+    expect(pulled.links).toEqual([withSeq(rows.links[0], 13)])
     expect((await corpusStatus(tenant)).counts).toEqual({ nodes: 1, links: 0, pages: 1 })
   })
 
@@ -409,7 +415,7 @@ describe("soft deletes at the replica", () => {
     )
     const pulled = await corpusPullFull(tenant)
     const revived = pulled.nodes.find((row) => row.id === "blk_a000000000")
-    expect(revived).toEqual(withSeq({ ...rows.nodes[1], text: "back", updated_at: 300 }, 5))
+    expect(revived).toEqual(withSeq({ ...rows.nodes[1], text: "back", updated_at: 300 }, 16))
     expect((await corpusStatus(tenant)).counts.nodes).toBe(2)
   })
 
@@ -727,7 +733,7 @@ describe("tenant scoping — the adversarial suite", () => {
     const alice = (await (
       await get(env, "alice-token", "/api/replica/notes")
     ).json()) as ReplicaCorpusBody
-    expect(alice.nodes).toEqual(aliceRows.nodes.map((row, i) => withSeq(row, i + 1)))
+    expect(alice.nodes).toEqual(aliceRows.nodes.map((row, i) => withSeq(row, 4 * (i + 1))))
     // Both tenants now hold the same id — proof the composite key is per-tenant.
     const rows = await driver.exec(
       "SELECT user_id, text FROM nodes WHERE id = 'blk_noteaaaaaa' ORDER BY user_id",
@@ -825,15 +831,15 @@ describe("tenant scoping — the adversarial suite", () => {
       )
       expect(response.status).toBe(200)
       const { events, cursor } = (await (
-        await get(env, "alice-token", "/api/replica/events")
+        await get(env, "alice-token", "/api/replica/events-log")
       ).json()) as { events: Record<string, unknown>[]; cursor: number }
-      expect(events.map((event) => `${event.entity}.${event.action}`)).toEqual([
-        "block.create",
-        "block.create",
-        "view.create",
-        "link.create",
-      ])
-      expect(cursor).toBe(4)
+      // Four rows per block, six for the view, five for the link.
+      expect(
+        events
+          .filter((event) => event.key === "")
+          .map((event) => `${event.entity}.${event.action}`),
+      ).toEqual(["block.create", "block.create", "view.create", "link.create"])
+      expect(cursor).toBe(19)
       expect(events[0]).toMatchObject({
         actor: 111,
         origin: "replica",
@@ -853,13 +859,13 @@ describe("tenant scoping — the adversarial suite", () => {
         env,
         github,
       )
-      const { events } = (await (await get(env, "alice-token", "/api/replica/events")).json()) as {
-        events: { device: string }[]
-      }
+      const { events } = (await (
+        await get(env, "alice-token", "/api/replica/events-log")
+      ).json()) as { events: { device: string }[] }
       expect(events[0].device).toBe("unknown")
     })
 
-    it("a push of key events lands, answers each row's place in both logs, and is served back per key", async () => {
+    it("a push of key events lands, answers each row's place in the log, and is served back per key", async () => {
       const { env } = await testEnv()
       const row = (n: number, action: string, key: string, value: unknown) => ({
         id: `key_${n}`,
@@ -895,7 +901,7 @@ describe("tenant scoping — the adversarial suite", () => {
         ok: true,
         appended: 5,
         stale: 0,
-        seqs: [1, 2, 3, 4, 5].map((seq) => [`key_${seq}`, seq, 1]),
+        seqs: [1, 2, 3, 4, 5].map((seq) => [`key_${seq}`, seq]),
         cursor: "c9",
       })
       const served = (await (await get(env, "alice-token", "/api/replica/events-log")).json()) as {
@@ -910,24 +916,19 @@ describe("tenant scoping — the adversarial suite", () => {
         "set notes_id",
         "set props.align",
       ])
-      expect(served.events[4]).toMatchObject({
-        value: "left",
-        event: "key_1",
-        event_seq: 1,
-        actor: 111,
-      })
+      expect(served.events[4]).toMatchObject({ value: "left", event: "key_1", actor: 111 })
+      expect(served.events[4].event_seq).toBeUndefined()
       // The pull carries the block's keys.
       const pulled = (await (await get(env, "alice-token", "/api/replica/notes")).json()) as {
         delta_mat_values: Record<string, unknown>[]
       }
       expect(pulled.delta_mat_values).toEqual([
-        expect.objectContaining({ block_id: "blk_a", key: "align", value: '"left"', seq: 1 }),
+        expect.objectContaining({ block_id: "blk_a", key: "align", value: '"left"', seq: 5 }),
       ])
-      // The verify reads all three.
+      // The verify reads the log, the tables and the keys.
       expect(await (await get(env, "alice-token", "/api/replica/verify")).json()).toMatchObject({
         ok: true,
-        rollup: "new",
-        logs: [],
+        keyEvents: 5,
         deltaMatValues: [],
       })
     })
@@ -991,23 +992,31 @@ describe("tenant scoping — the adversarial suite", () => {
       const edited = { ...aliceRows.nodes[1], text: "rewritten", updated_at: 200 }
       await push(env, "alice-token", { nodes: [edited], links: [] })
 
-      const then = (await (await get(env, "alice-token", "/api/replica/at?seq=4")).json()) as {
+      // The first push was 19 rows: the moment at its end.
+      const then = (await (await get(env, "alice-token", "/api/replica/at?seq=19")).json()) as {
         seq: number
         nodes: { id: string; text: string }[]
       }
-      expect(then.seq).toBe(4)
+      expect(then.seq).toBe(19)
       expect(then.nodes.find((row) => row.id === "blk_secret0001")?.text).toBe("alice's secret")
 
       const history = (await (
-        await get(env, "alice-token", "/api/replica/events?entity=block&entity_id=blk_secret0001")
-      ).json()) as { events: { action: string; patch: { text?: string } }[] }
-      expect(history.events.map((event) => [event.action, event.patch.text])).toEqual([
-        ["create", "alice's secret"],
-        ["update", "rewritten"],
+        await get(
+          env,
+          "alice-token",
+          "/api/replica/events-log?entity=block&entity_id=blk_secret0001",
+        )
+      ).json()) as { events: { action: string; key: string; value: unknown }[] }
+      expect(history.events.map((event) => [event.action, event.key, event.value])).toEqual([
+        ["create", "", null],
+        ["set", "type", "text"],
+        ["set", "text", "alice's secret"],
+        ["set", "notes_id", null],
+        ["set", "text", "rewritten"],
       ])
 
       const verdict = await (await get(env, "alice-token", "/api/replica/verify")).json()
-      expect(verdict).toMatchObject({ ok: true, events: 5, rejected: 0 })
+      expect(verdict).toMatchObject({ ok: true, keyEvents: 20, rejected: 0 })
     })
 
     it("restores by appending — for the tenant, and only with a well-formed request", async () => {
@@ -1020,17 +1029,17 @@ describe("tenant scoping — the adversarial suite", () => {
       // Bob naming Alice's block restores nothing: it is not in HIS log.
       const bob = await post(env, "bob-token", "/api/replica/restore", {
         block: "blk_secret0001",
-        seq: 4,
+        seq: 19,
       })
       expect(await bob.json()).toEqual({ ok: true, events: 0 })
 
       const ok = await post(env, "alice-token", "/api/replica/restore", {
         block: "blk_secret0001",
-        seq: 4,
+        seq: 19,
       })
       expect(await ok.json()).toEqual({ ok: true, events: 1 })
       const pulled = (await (
-        await get(env, "alice-token", "/api/replica/notes?since=5")
+        await get(env, "alice-token", "/api/replica/notes?since=20")
       ).json()) as {
         nodes: { id: string; text: string }[]
       }
@@ -1069,23 +1078,26 @@ describe("tenant scoping — the adversarial suite", () => {
         appended: 2,
         stale: 0,
         seqs: [
-          ["evt_1", 1],
-          ["evt_2", 2],
+          ["evt_1", 4],
+          ["evt_2", 5],
         ],
         cursor: "bob-c1",
       })
-      const bobs = (await (await get(env, "bob-token", "/api/replica/events")).json()) as {
+      const bobs = (await (await get(env, "bob-token", "/api/replica/events-log")).json()) as {
         events: Record<string, unknown>[]
       }
-      expect(bobs.events.map((e) => [e.id, e.device, e.tz, e.actor])).toEqual([
+      expect(bobs.events.map((e) => [e.event, e.device, e.tz, e.actor])).toEqual([
+        ["evt_1", "dev12345.tab001", -300, 222],
+        ["evt_1", "dev12345.tab001", -300, 222],
+        ["evt_1", "dev12345.tab001", -300, 222],
         ["evt_1", "dev12345.tab001", -300, 222],
         ["evt_2", "hdr00000.tab999", -300, 222],
       ])
       // Alice's log is Alice's: nothing of Bob's reached it.
-      const alices = (await (await get(env, "alice-token", "/api/replica/events")).json()) as {
-        events: { id: string }[]
+      const alices = (await (await get(env, "alice-token", "/api/replica/events-log")).json()) as {
+        events: { event: string }[]
       }
-      expect(alices.events.map((e) => e.id)).not.toContain("evt_1")
+      expect(alices.events.map((e) => e.event)).not.toContain("evt_1")
       // And the row is Bob's to pull, with the cursor he stamped.
       const pulled = (await (await get(env, "bob-token", "/api/replica/notes")).json()) as {
         nodes: { id: string; text: string }[]
@@ -1273,8 +1285,8 @@ describe("migrations/0008 — the stored note-root type value", () => {
   // real schema proves.
   const seedNode = (driver: SqlDriver, tenant: number, id: string, type: string, seq: number) =>
     driver.exec(
-      "INSERT INTO nodes (user_id, id, type, text, props, updated_at, seq) " +
-        "VALUES (?1, ?2, ?3, ?2, NULL, 100, ?4)",
+      "INSERT INTO nodes (user_id, id, type, text, updated_at, seq) " +
+        "VALUES (?1, ?2, ?3, ?2, 100, ?4)",
       [tenant, id, type, seq],
     )
   const seedLink = (driver: SqlDriver, tenant: number, source: string, seq: number) =>

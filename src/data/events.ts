@@ -1130,6 +1130,13 @@ export function rowsToEvents(
 // Restore
 // -----------------------------------------------------------------------------
 
+/** The two states a restore is planned between: the log folded up to the
+ * moment named, and folded whole. */
+export interface RestoreStates {
+  then: LogState
+  now: LogState
+}
+
 /**
  * The `restore` events that return one entity to its state as of `asOfSeq`.
  * Empty when it is already there; null when it did not exist then.
@@ -1139,15 +1146,15 @@ export function rowsToEvents(
  * pull, and the history shows that it happened and what it returned to.
  */
 export function planRestore(
-  events: readonly RuminateEvent[],
+  states: RestoreStates,
   entity: Entity,
   entityId: string,
   asOfSeq: number,
   ctx: EventContext,
 ): RuminateEvent[] | null {
-  const then = tableOf(stateAt(events, asOfSeq), entity).get(entityId)
+  const then = tableOf(states.then, entity).get(entityId)
   if (!then || then.deleted) return null
-  const now = tableOf(fold(events), entity).get(entityId)
+  const now = tableOf(states.now, entity).get(entityId)
   if (!now) return null
   const patch = differing(then.fields, now.fields)
   if (!now.deleted && Object.keys(patch).length === 0) return []
@@ -1173,12 +1180,12 @@ export function planRestore(
  * away (the block may now also sit somewhere it did not before).
  */
 export function planRestoreSubtree(
-  events: readonly RuminateEvent[],
+  states: RestoreStates,
   blockId: string,
   asOfSeq: number,
   ctx: EventContext,
 ): RuminateEvent[] {
-  const then = stateAt(events, asOfSeq)
+  const then = states.then
   const childrenThen = new Map<string, EntityState<LinkFields>[]>()
   const parentsThen = new Map<string, EntityState<LinkFields>[]>()
   for (const link of then.links.values()) {
@@ -1193,7 +1200,7 @@ export function planRestoreSubtree(
 
   const out: RuminateEvent[] = []
   const restore = (entity: Entity, id: string) => {
-    out.push(...(planRestore(events, entity, id, asOfSeq, ctx) ?? []))
+    out.push(...(planRestore(states, entity, id, asOfSeq, ctx) ?? []))
   }
   const linkIdOf = (link: EntityState<LinkFields>) =>
     linkEntityId(link.fields.source_id, link.fields.destination_id, link.fields.kind)

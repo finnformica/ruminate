@@ -225,7 +225,7 @@ describe("the cache", () => {
     const doc = { ...parse("- one\n  id:: blk_aaaaaaaaaa\n"), props: null }
     await applyOpsToStore(store, docToOps("a", doc, await store.getGraph()))
     const queued: KeyEvent[] = await store.unpushedEvents()
-    await store.markEventsPushed(queued.map((event, i) => [event.id, 50 + i, 50 + i] as const))
+    await store.markEventsPushed(queued.map((event, i) => [event.id, 50 + i] as const))
     // A later local edit, still unplaced, keeps the row's seq.
     await applyOpsToStore(store, [{ op: "setText", id: "blk_aaaaaaaaaa", text: "two" }])
     const node = (await store.getGraph()).nodes.get("blk_aaaaaaaaaa")

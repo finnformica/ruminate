@@ -21,7 +21,7 @@
 // runs is the one a reader sees.
 
 import type { TenantDb } from "../tenancy-db"
-import { appendClientEvents, appendClientKeyEvents, writeRows } from "./event-log"
+import { appendClientEvents, appendClientKeyEvents, NODE_PROPS, writeRows } from "./event-log"
 import type { EventsPutPayload, EventsPutResult } from "../../src/data/events"
 import type {
   DeltaMatValueRow,
@@ -68,7 +68,8 @@ export async function corpusPullFull(tenant: TenantDb): Promise<ReplicaCorpusBod
   const all = tenant.includingDeleted()
   const nodes = (
     await all.exec(
-      "SELECT id, type, text, props, updated_at, deleted_at, notes_id, seq FROM nodes " +
+      `SELECT id, type, text, ${NODE_PROPS("nodes.id")} AS props, updated_at, deleted_at, ` +
+        "notes_id, seq FROM nodes " +
         "WHERE user_id = :tenant /* includes-deleted: replication carries tombstones */",
     )
   ).map(toNodeRow)
@@ -138,8 +139,8 @@ export async function corpusPullSince(
   const all = tenant.includingDeleted()
   const nodes = (
     await all.exec(
-      "SELECT id, type, text, props, updated_at, deleted_at, notes_id, seq FROM nodes " +
-        "WHERE user_id = :tenant AND seq > ?1 " +
+      `SELECT id, type, text, ${NODE_PROPS("nodes.id")} AS props, updated_at, deleted_at, ` +
+        "notes_id, seq FROM nodes WHERE user_id = :tenant AND seq > ?1 " +
         "/* includes-deleted: a tombstoned row IS the change being pulled */",
       [since],
     )

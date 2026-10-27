@@ -22,6 +22,7 @@ import migration0024 from "../../migrations/0024_event_hlc.sql?raw"
 import migration0025 from "../../migrations/0025_projection_stamps.sql?raw"
 import migration0027 from "../../migrations/0027_view_stack.sql?raw"
 import migration0028 from "../../migrations/0028_events_log.sql?raw"
+import migration0029 from "../../migrations/0029_drop_node_props.sql?raw"
 import migration0003 from "../../migrations/0003_control_plane.sql?raw"
 import migration0010 from "../../migrations/0010_user_email.sql?raw"
 import migration0011 from "../../migrations/0011_user_email_required.sql?raw"
@@ -86,11 +87,11 @@ export function createTestSqlDriver(): SqlDriver {
 }
 
 /**
- * A database in the **exact shape production D1 is in**: the real 0001 + 0002
- * + 0004 files, applied by the shared ladder in its `"columns"` mode, then
- * the D1-only 0025. Nothing
- * in the worker suites hand-writes corpus DDL, so a schema change that would
- * break the deployed database breaks the tests first.
+ * A database in the **exact shape production D1 is in**: the real migration
+ * files, applied by the shared ladder in its `"columns"` mode, in the order
+ * D1 applies them. Nothing in the worker suites hand-writes corpus DDL, so a
+ * schema change that would break the deployed database breaks the tests
+ * first.
  */
 export async function createTenantTestDriver(): Promise<SqlDriver> {
   const driver = createTestSqlDriver()
@@ -108,14 +109,22 @@ export async function createTenantTestDriver(): Promise<SqlDriver> {
       noteViews: migration0021,
       events: migration0023,
       eventHlc: migration0024,
+      projectionStamps: migration0025,
       viewStack: migration0027,
       eventsLog: migration0028,
+      dropNodeProps: migration0029,
     },
     "columns",
   )
-  // D1 only: the browser's tables do not resolve by stamp, so the shared
-  // ladder has no local step to pair this one with.
-  await driver.execScript(migration0025)
+  return driver
+}
+
+/**
+ * The corpus as the data migrations before 0029 met it: `nodes.props` put
+ * back, empty. For the suites that run 0015 or 0020 against rows with props.
+ */
+export async function withNodeProps(driver: SqlDriver): Promise<SqlDriver> {
+  await driver.execScript("ALTER TABLE nodes ADD COLUMN props TEXT")
   return driver
 }
 

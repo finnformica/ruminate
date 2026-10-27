@@ -1,7 +1,6 @@
 import { eventStamp, type Entity, type RuminateEvent, type StampedEntity } from "./events"
 import { parseProps } from "./graph"
 import {
-  derivedProps,
   isPropsRegister,
   propNameOf,
   propsRegister,
@@ -29,8 +28,11 @@ import type { SqlStatement, SqlValue } from "./sql-driver"
  *   the live keys derive to (`derivedProps`, keys sorted), and its `props`
  *   stamp the highest of theirs. A row written with one `props` stamp and
  *   no keys (a repair, the stamp fill) reads every entry of its props at
- *   that stamp. Each key is also a row of `delta_mat_values`, the mirror of the
- *   replica's read model, written beside the block's row.
+ *   that stamp. Each key is a row of `delta_mat_values`, the mirror of the
+ *   replica's read model, written beside the block's row — and since
+ *   schema v16 the only place the value lives: `nodes` has no `props`
+ *   column, and a cache row is read with the column derived from its keys
+ *   (`NODE_PROPS`, sql-note-store.ts).
  * - **Created** means `stamps.alive` is there: a create (or the stamp fill)
  *   set it. An entity an update reached before its create is held with no
  *   `alive` stamp, and as a tombstone, so no read of live rows sees it, and
@@ -173,14 +175,14 @@ export function cacheRowStatements(
 ): SqlStatement[] {
   const { table, key, fields } = CACHE_TABLES[entity]
   const isKey = (column: string) => (key as readonly string[]).includes(column)
-  const columns = [...new Set([...key, ...fields])]
+  // A block's props are not a column: its keys go to `delta_mat_values`.
+  const columns = [...new Set([...key, ...fields])].filter((column) => column !== "props")
   const all = [...columns, "updated_at", "deleted_at", "seq", "stamps"]
   const rowOf = ([id, value]: readonly [string, AnyEntity]): SqlValue[] => {
     const keyOf = keyValues(entity, id)
     const values = columns.map((column) => {
       const at = (key as readonly string[]).indexOf(column)
       if (at >= 0) return keyOf[at]
-      if (column === "props") return derivedProps(value.fields)
       return column in value.fields ? toSql(value.fields[column]) : (FILLER[column] ?? null)
     })
     // A tombstone, or an entity no create has reached: neither is live.

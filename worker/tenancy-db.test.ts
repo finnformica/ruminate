@@ -27,8 +27,8 @@ const seed = (
   tenant.batch([
     {
       sql:
-        "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at) " +
-        "VALUES (:tenant, ?1, 'text', ?2, NULL, ?3, ?4)",
+        "INSERT INTO nodes (user_id, id, type, text, updated_at, deleted_at) " +
+        "VALUES (:tenant, ?1, 'text', ?2, ?3, ?4)",
       params: [id, text, updatedAt, deletedAt],
     },
   ])
@@ -114,8 +114,8 @@ describe("the runtime guard", () => {
       alice.batch([
         {
           sql:
-            "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at) " +
-            "VALUES (:tenant, 'ok', 'text', 'ok', NULL, 1, NULL)",
+            "INSERT INTO nodes (user_id, id, type, text, updated_at, deleted_at) " +
+            "VALUES (:tenant, 'ok', 'text', 'ok', 1, NULL)",
           params: [],
         },
         { sql: "DELETE FROM nodes WHERE user_id = :tenant", params: [] },

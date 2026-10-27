@@ -138,11 +138,7 @@ function createTestServer() {
         ok: true,
         appended,
         stale: 0,
-        seqs: payload.events.map((event) => [
-          event.id,
-          log.get(event.id) as number,
-          log.get(event.id) as number,
-        ]),
+        seqs: payload.events.map((event) => [event.id, log.get(event.id) as number]),
         cursor: payload.cursor ?? null,
       }
       return new Response(JSON.stringify(result), { status: 200 })
