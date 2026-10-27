@@ -2,43 +2,12 @@ import { useNavigate, useRouter } from "@tanstack/react-router"
 import { atom, useAtomValue, useStore } from "jotai"
 import React from "react"
 import { isBoard } from "../data/boards"
-import { goTo, layoutFromSearch, layoutToSearch, withPane, type FocusFrame } from "../data/panes"
+import { layoutFromSearch, layoutToSearch, withPane, type FocusFrame } from "../data/panes"
 import { rootFrame } from "../data/root-frame"
 import { restoreViewFrames } from "../data/view-stack"
 import { viewByRootAtom } from "../data/views"
 import { graphSnapshotAtom, notesAtom } from "../global-state"
 import type { NoteId } from "../schema"
-
-/**
- * Open a note, or a block in one, in the pane with the keyboard while the
- * page is split (docs/split-view.md): pushed onto that pane's focus stack,
- * the other pane left as it is. Returns whether it did — false when the page
- * is not a split note page, and the caller goes on as it would.
- */
-export function useOpenInPane() {
-  const navigate = useNavigate()
-  const router = useRouter()
-  return React.useCallback(
-    (noteId: NoteId, block?: string): boolean => {
-      const page = router.state.matches.find((match) => match.routeId === "/_appRoot/views_/$")
-      const pageNote = (page?.params as { _splat?: string } | undefined)?._splat
-      if (!page || !pageNote) return false
-      const layout = layoutFromSearch(pageNote, page.search as Record<string, unknown>)
-      if (layout.panes.length < 2) return false
-      const move = goTo(layout.panes[layout.active], { noteId, root: block ?? null }, null)
-      if (!move) return true
-      const { noteId: first, search } = layoutToSearch(withPane(layout, layout.active, move.pane))
-      void navigate({
-        to: "/views/$",
-        params: { _splat: first },
-        // Each frame's narrowing and folds travel with the layout.
-        search: { query: undefined, ...search },
-      })
-      return true
-    },
-    [navigate, router],
-  )
-}
 
 /**
  * Where the palette opens a note: a board (docs/boards.md) on its board
