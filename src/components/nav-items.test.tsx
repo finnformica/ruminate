@@ -11,6 +11,10 @@ import type { Note } from "../schema"
 // Everything the surrounding chrome wants is stubbed.
 const mocks = vi.hoisted(() => ({
   pathname: "/",
+  navigate: vi.fn(),
+  // The page the router is on (`useOpenFramesInPane`): none, or a split
+  // note page (`onSplitPage`).
+  matches: [] as unknown[],
 }))
 
 vi.mock("@tanstack/react-router", () => ({
@@ -20,8 +24,11 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
   useLocation: () => ({ pathname: mocks.pathname }),
-  useNavigate: () => vi.fn(),
-  useRouter: () => ({ history: { back: vi.fn(), forward: vi.fn() } }),
+  useNavigate: () => mocks.navigate,
+  useRouter: () => ({
+    history: { back: vi.fn(), forward: vi.fn() },
+    state: { matches: mocks.matches },
+  }),
 }))
 vi.mock("../hooks/note", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../hooks/note")>()),
@@ -69,6 +76,8 @@ import {
   type NoteSort,
 } from "../global-state"
 import { buildGraphSnapshot, CHILD_KIND, type GraphSnapshot } from "../data/graph"
+import { layoutFromSearch, layoutToSearch, type PaneLayout } from "../data/panes"
+import { isRootFrame, rootFrame } from "../data/root-frame"
 import { viewsAtom, viewMapOf } from "../data/views"
 import { NavItems } from "./nav-items"
 
@@ -89,6 +98,8 @@ const noteOf = (id: string, name: string): Note =>
 afterEach(cleanup)
 beforeEach(() => {
   mocks.pathname = "/"
+  mocks.navigate.mockReset()
+  mocks.matches = []
 })
 
 type BlockViewRow = { id: string; noteId: string; text: string; type: BlockType; note: Note }
@@ -530,5 +541,41 @@ describe("the sidebar's bottom block", () => {
     expect(changelog.textContent).toContain("Changelog")
     expect(changelog.textContent).not.toContain("What's new")
     expect(changelog.textContent?.toUpperCase()).toContain("C")
+  })
+})
+
+describe("a shared note's row in a split", () => {
+  /** The router on a note page with `layout` in its URL. */
+  const onSplitPage = (layout: PaneLayout) => {
+    const { noteId, search } = layoutToSearch(layout)
+    mocks.matches = [{ routeId: "/_appRoot/views_/$", params: { _splat: noteId }, search }]
+  }
+
+  it("restarts the stack of the pane with the keyboard: Root › the note, the other pane as it is", () => {
+    // The left pane on Alpha; the right pane, with the keyboard, two frames deep in Bravo.
+    onSplitPage({
+      panes: [
+        { frames: [rootFrame(), { noteId: "a", root: null, selected: null }] },
+        {
+          frames: [
+            rootFrame(),
+            { noteId: "b", root: null, selected: null },
+            { noteId: "b", root: "blk_b1", selected: null },
+          ],
+        },
+      ],
+      active: 1,
+    })
+    renderSidebar({ notes: THREE, shared: [noteOf("s", "Shared one")] })
+    fireEvent.click(screen.getByText("Shared one"))
+    const { params, search } = mocks.navigate.mock.lastCall![0]
+    const layout = layoutFromSearch(params._splat, search)
+    const stackOf = (frames: PaneLayout["panes"][number]["frames"]) =>
+      frames.map((f) => (isRootFrame(f) ? "Root" : (f.root ?? f.noteId)))
+    expect(layout.panes.map((pane) => stackOf(pane.frames))).toEqual([
+      ["Root", "a"],
+      ["Root", "s"],
+    ])
+    expect(layout.active).toBe(1)
   })
 })

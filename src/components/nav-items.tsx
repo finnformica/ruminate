@@ -22,7 +22,7 @@ import { appUpdateAtom } from "../hooks/app-update"
 import { usePending } from "../hooks/pending"
 import { useReorderViews } from "../hooks/views"
 import { useDragReorder } from "../hooks/drag-reorder"
-import { useOpenFramesInPane, useOpenInPane } from "../hooks/open-note"
+import { useOpenFramesInPane } from "../hooks/open-note"
 import { shareOwnerName } from "../data/shares"
 import type { Note } from "../schema"
 import { typeGlyph } from "../blocks/registry"
@@ -862,7 +862,6 @@ function NoteNavItem({
   className?: string
 }) {
   const openFramesInPane = useOpenFramesInPane()
-  const openInPane = useOpenInPane()
   // A board's row opens its board page (docs/boards.md), with nothing to
   // say about focus; every other note's its outline.
   if (note.type === "board") {
@@ -907,9 +906,13 @@ function NoteNavItem({
       onClick={(event) => {
         if (event.defaultPrevented) return
         // A split page opens it in the pane with the keyboard instead.
-        // A View restores its stack there; a shared note is pushed on it.
-        const open = () => (target ? openFramesInPane(target.frames) : openInPane(note.id))
-        if (isPlainClick(event) && open()) event.preventDefault()
+        // A View restores its stack there; a shared note restarts it, as
+        // Root › the note.
+        const frames = target?.frames ?? [
+          rootFrame(),
+          { noteId: note.id, root: null, selected: null },
+        ]
+        if (isPlainClick(event) && openFramesInPane(frames)) event.preventDefault()
         onNavigate?.()
       }}
     >

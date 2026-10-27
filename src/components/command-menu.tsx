@@ -1,5 +1,5 @@
 import { useMatch, useNavigate } from "@tanstack/react-router"
-import { useOpenNote } from "../hooks/open-note"
+import { useOpenNote, useOpenView } from "../hooks/open-note"
 import { parseDate } from "chrono-node"
 import { Command } from "cmdk"
 import { useAtom, useAtomValue } from "jotai"
@@ -66,6 +66,7 @@ const NAVIGATION_KEYS = new Set(["ArrowUp", "ArrowDown", "Home", "End"])
 export function CommandMenu() {
   const navigate = useNavigate()
   const openNote = useOpenNote()
+  const openView = useOpenView()
   const createNote = useCreateNote()
   // The request the palette is a picker for, if any (`usePalettePicker`).
   const [request, setRequest] = useAtom(paletteRequestAtom)
@@ -317,7 +318,8 @@ export function CommandMenu() {
     return true
   }, [query, picking, textRow, text, pick, openTopResult])
 
-  // Open a result: the note, or the note focused on the block — or, for a
+  // Open a result: the note, or the note focused on the block, as the only
+  // frame above Root (a pick restarts the stack, `useOpenNote`) — or, for a
   // picker, hand it back as the pick.
   const openResult = useCallback(
     (noteId: string, blockId?: string) => {
@@ -329,6 +331,18 @@ export function CommandMenu() {
       void openNote(noteId, blockId)
     },
     [picking, pick, leave, openNote],
+  )
+  // Open a View row: its saved stack, in place of the pane's (`useOpenView`).
+  const openViewResult = useCallback(
+    (noteId: string, blockId?: string) => {
+      if (picking) {
+        pick(blockId ? { kind: "block", noteId, blockId } : { kind: "note", noteId })
+        return
+      }
+      leave()
+      void openView(noteId, blockId)
+    },
+    [picking, pick, leave, openView],
   )
 
   // cmdk reports every change of the highlighted item here — both the user
@@ -504,7 +518,7 @@ export function CommandMenu() {
                   limit={NUM_VISIBLE_RESULTS}
                   readOnly
                   initialSelection="none"
-                  onOpen={openResult}
+                  onOpen={openViewResult}
                   focusFirstSignal={recentRoots.length > 0 ? viewsFirstSignal : focusFirstSignal}
                   onExitTop={recentRoots.length > 0 ? viewsToRecent : takeBackFromRows}
                 />

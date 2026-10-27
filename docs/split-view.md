@@ -82,9 +82,13 @@ interface PaneLayout {
   and a pop restores them. An up pivot on the frame's own root pushes a
   frame (`pivotRoot`), so Back returns to the view as it was.
 - **Across notes.** A frame names its note, so one stack can hold views from
-  more than one note. While the page is split, a note opened from the sidebar,
-  the palette or the Root frame opens in the active pane, as a push
-  (`useOpenInPane`, `src/hooks/open-note.ts`).
+  more than one note. While the page is split, a note opened from the Root
+  frame opens in the active pane, as a push. A pick in the palette and a
+  shared note's row in the sidebar also open in the active pane, but they
+  restart that pane's stack: Root, then the pick (`useOpenNote`,
+  docs/graph-walk.md section 1). A View, from the sidebar or the palette,
+  replaces the active pane's stack with its own. All of these go through
+  `useOpenFramesInPane` (`src/hooks/open-note.ts`).
 - **Layout.** `openBeside` opens a view in a new pane, or pushes it onto the
   next pane's stack when there is no room for one. `closePane` removes a pane
   (never the last one). `activate` moves the keyboard. `MAX_PANES` is 2.
