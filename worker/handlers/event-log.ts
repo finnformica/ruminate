@@ -73,7 +73,23 @@ import {
   type RowWrite,
   type RuminateEvent,
 } from "../../src/data/events"
+import { parseProps } from "../../src/data/graph"
 import { decodeHlc, encodeHlc, tickHlc, type Hlc } from "../../src/data/hlc"
+import {
+  assembleLogState,
+  canonicalJson,
+  collapseKeyEvents,
+  derivedProps,
+  expandEvent,
+  foldKeys,
+  isPropsRegister,
+  keyEventStamp,
+  keyStateAt,
+  parseStoredKeyEvent,
+  propNameOf,
+  type KeyEvent,
+  type LoggedKeyEvent,
+} from "../../src/data/key-events"
 import type { SqlStatement, SqlValue } from "../../src/data/sql-driver"
 import type { TenantDb } from "../tenancy-db"
 import {
@@ -109,6 +125,24 @@ interface AppendContext {
   now: number
   appendId: string
 }
+
+/**
+ * Which log the rollup reads (docs/event-sourcing.md, "Per-key events"):
+ * `new`, the per-key `events_log`, projects each block's props key by key
+ * and derives `nodes.props` from `block_values`; `old` projects the old
+ * `events` as before. Both logs are written either way, so a revert is a
+ * flip of `EVENT_LOG_ROLLUP` in the dashboard, no deploy. The Worker sets
+ * it from the environment on every request (`setEventLogRollup`,
+ * worker/index.ts); the default is the new log.
+ */
+export type Rollup = "new" | "old"
+let rollup: Rollup = "new"
+export function setEventLogRollup(value: Rollup): void {
+  rollup = value
+}
+export const eventLogRollup = (): Rollup => rollup
+export const rollupOf = (env: { EVENT_LOG_ROLLUP?: string }): Rollup =>
+  env.EVENT_LOG_ROLLUP === "old" ? "old" : "new"
 
 /** What a writer may say about itself: short, plain, and never trusted for
  * anything but the record. Anything else is dropped rather than stored. */
@@ -203,7 +237,8 @@ export function planReconcile(ctx: { now: number; appendId: string }): SqlStatem
 /** Reconcile on its own — for a read of the log by a tenant who has not
  * written since 0023, whose log would otherwise be empty. */
 export async function reconcileLog(tenant: TenantDb, now: number = Date.now()): Promise<void> {
-  await tenant.includingDeleted().batch(planReconcile({ now, appendId: mintAppendId() }))
+  const ctx = { now, appendId: mintAppendId() }
+  await tenant.includingDeleted().batch([...planReconcile(ctx), ...planLogFill(ctx)])
 }
 
 // -----------------------------------------------------------------------------
@@ -516,6 +551,29 @@ function chunksBySize(events: readonly RuminateEvent[], maxBytes: number): Rumin
   return chunks
 }
 
+/** The one statement that appends old-shaped events to `events`. */
+function insertEventsStatement(events: readonly RuminateEvent[], ctx: AppendContext): SqlStatement {
+  return {
+    sql:
+      "INSERT INTO events (user_id, seq, id, entity, entity_id, action, patch, v, batch, " +
+      "origin, device, client, cause, actor, base_seq, ref_seq, at, tz, hlc, received_at, " +
+      "append) SELECT :tenant, " +
+      "(SELECT COALESCE(MAX(seq), 0) FROM events WHERE user_id = :tenant) + j.key + 1, " +
+      "json_extract(j.value, '$.id'), json_extract(j.value, '$.entity'), " +
+      "json_extract(j.value, '$.entity_id'), json_extract(j.value, '$.action'), " +
+      "json_extract(j.value, '$.patch'), json_extract(j.value, '$.v'), " +
+      "json_extract(j.value, '$.batch'), ?5, json_extract(j.value, '$.device'), ?6, " +
+      "json_extract(j.value, '$.cause'), ?4, json_extract(j.value, '$.base_seq'), " +
+      "json_extract(j.value, '$.ref_seq'), json_extract(j.value, '$.at'), " +
+      "json_extract(j.value, '$.tz'), json_extract(j.value, '$.hlc'), ?2, ?3 " +
+      "FROM json_each(?1) AS j WHERE true " +
+      "ON CONFLICT (user_id, id) DO NOTHING",
+    params: [JSON.stringify(events), ctx.now, ctx.appendId, ctx.actor, ctx.origin, ctx.client],
+  }
+}
+
+/** The old rollup's projection of a chunk of old-shaped events (the
+ * `events` insert comes first, from `insertEventsStatement`). */
 function planChunk(
   events: readonly RuminateEvent[],
   ctx: { actor: number; origin: EventOrigin; client: string | null; now: number; appendId: string },
@@ -527,23 +585,7 @@ function planChunk(
   const created = "json_type(j.value, '$.created') = 'object'"
 
   return [
-    {
-      sql:
-        "INSERT INTO events (user_id, seq, id, entity, entity_id, action, patch, v, batch, " +
-        "origin, device, client, cause, actor, base_seq, ref_seq, at, tz, hlc, received_at, " +
-        "append) SELECT :tenant, " +
-        "(SELECT COALESCE(MAX(seq), 0) FROM events WHERE user_id = :tenant) + j.key + 1, " +
-        "json_extract(j.value, '$.id'), json_extract(j.value, '$.entity'), " +
-        "json_extract(j.value, '$.entity_id'), json_extract(j.value, '$.action'), " +
-        "json_extract(j.value, '$.patch'), json_extract(j.value, '$.v'), " +
-        "json_extract(j.value, '$.batch'), ?5, json_extract(j.value, '$.device'), ?6, " +
-        "json_extract(j.value, '$.cause'), ?4, json_extract(j.value, '$.base_seq'), " +
-        "json_extract(j.value, '$.ref_seq'), json_extract(j.value, '$.at'), " +
-        "json_extract(j.value, '$.tz'), json_extract(j.value, '$.hlc'), ?2, ?3 " +
-        "FROM json_each(?1) AS j WHERE true " +
-        "ON CONFLICT (user_id, id) DO NOTHING",
-      params: [JSON.stringify(events), ctx.now, ctx.appendId, ctx.actor, ctx.origin, ctx.client],
-    },
+    insertEventsStatement(events, ctx),
 
     // Blocks → nodes
     {
@@ -633,11 +675,61 @@ export async function appendEvents(
   events: readonly RuminateEvent[],
   ctx: WriteContext,
   extra: SqlStatement[] = [],
+  current?: HeldRows,
 ): Promise<void> {
-  const append = appendContext(ctx)
-  await tenant
-    .includingDeleted()
-    .batch([...planReconcile(append), ...planEventAppend(events, append), ...extra])
+  const held = current ?? (await readCurrent(tenant, writeNaming(events)))
+  const keys = expandAgainst(events, held)
+  // An event that reads as no change per key (a props patch that only
+  // reorders keys) is still an event the writer sent: it is recorded in the
+  // old log, with no key rows, so its push is answered.
+  const mirrored = new Set(keys.map((key) => key.event))
+  const eventless = events.filter((event) => !mirrored.has(event.id))
+  await appendKeyEvents(tenant, keys, ctx, extra, held, eventless)
+}
+
+/** The rows a run of old-shaped events names, as a `RowWrite` for `readCurrent`. */
+function writeNaming(events: readonly { entity: Entity; entity_id: string }[]): RowWrite {
+  const nodeIds = new Set<string>()
+  const linkKeys = new Set<string>()
+  const viewIds = new Set<string>()
+  for (const event of events) {
+    if (event.entity === "block") nodeIds.add(event.entity_id)
+    else if (event.entity === "link") linkKeys.add(event.entity_id)
+    else viewIds.add(event.entity_id)
+  }
+  return {
+    nodes: [],
+    links: [],
+    deleteNodes: [...nodeIds],
+    deleteLinks: [...linkKeys].map((key) => key.split("|") as [string, string, string]),
+    views: [...viewIds].map((id) => ({ id }) as ViewRow),
+  }
+}
+
+/** A held row's live props as a map, or null. */
+const propsMapOfRow = (row: NodeRow | undefined): Record<string, unknown> | null =>
+  row === undefined ? null : parseProps(row.props)
+
+/**
+ * The per-key reading of old-shaped events against the rows the replica
+ * holds (`expandEvent`): each block's props before an event are the held
+ * row's, then what the events before it in the run left. The rows carry
+ * the old event's stamp, so they resolve exactly as it would have.
+ */
+function expandAgainst(events: readonly RuminateEvent[], held: HeldRows): KeyEvent[] {
+  const prior = new Map<string, Record<string, unknown> | null>()
+  const out: KeyEvent[] = []
+  for (const event of events) {
+    const before = prior.has(event.entity_id)
+      ? prior.get(event.entity_id)!
+      : propsMapOfRow(held.nodes.get(event.entity_id))
+    out.push(...expandEvent(event, before))
+    if (event.entity === "block") {
+      const props = (event.patch as { props?: string | null }).props
+      if (props !== undefined) prior.set(event.entity_id, parseProps(props))
+    }
+  }
+  return out
 }
 
 // -----------------------------------------------------------------------------
@@ -694,30 +786,16 @@ export async function appendClientEvents(
   ctx: WriteContext,
   extra: SqlStatement[] = [],
 ): Promise<{ appended: number; stale: number; seqs: [string, number][] }> {
-  const nodeIds = new Set<string>()
-  const linkKeys = new Set<string>()
-  const viewIds = new Set<string>()
-  for (const event of events) {
-    if (event.entity === "block") nodeIds.add(event.entity_id)
-    else if (event.entity === "link") linkKeys.add(event.entity_id)
-    else viewIds.add(event.entity_id)
-  }
-  const current = await readCurrent(tenant, {
-    nodes: [],
-    links: [],
-    deleteNodes: [...nodeIds],
-    deleteLinks: [...linkKeys].map((key) => key.split("|") as [string, string, string]),
-    views: [...viewIds].map((id) => ({ id }) as ViewRow),
-  })
+  const current = await readCurrent(tenant, writeNaming(events))
   // An event the log already holds (a retry after a lost answer) is neither
   // stale nor new, whatever has happened to its row since: it is answered
   // with the seq it has.
-  const held = await heldSeqs(tenant, events)
+  const held = await heldSeqs(tenant, "events", events)
   const unknown = events.filter((event) => !held.has(event.id))
   const stale = staleEvents(current, unknown)
   const fresh = unknown.filter((event) => !stale.has(event))
-  await appendEvents(tenant, fresh, ctx, extra)
-  const after = await heldSeqs(tenant, events)
+  await appendEvents(tenant, fresh, ctx, extra, current)
+  const after = await heldSeqs(tenant, "events", events)
   return { appended: fresh.length, stale: stale.size, seqs: [...after.entries()] }
 }
 
@@ -725,12 +803,13 @@ export async function appendClientEvents(
  * (yet) appended. One primary-key seek per id, driven from the JSON. */
 async function heldSeqs(
   tenant: TenantDb,
-  events: readonly RuminateEvent[],
+  table: "events" | "events_log",
+  events: readonly { id: string }[],
 ): Promise<Map<string, number>> {
   if (events.length === 0) return new Map()
   const rows = await tenant.exec(
-    "SELECT e.id, e.seq FROM json_each(?1) AS j " +
-      "JOIN events e ON e.user_id = :tenant AND e.id = j.value",
+    `SELECT e.id, e.seq FROM json_each(?1) AS j JOIN ${table} e ` +
+      "ON e.user_id = :tenant AND e.id = j.value",
     [JSON.stringify(events.map((event) => event.id))],
   )
   return new Map(rows.map((row) => [String(row.id), Number(row.seq)]))
@@ -744,6 +823,9 @@ async function heldSeqs(
  * (`stamps`, by `<entity>\x1f<id>`; null on a row from before 0025). */
 interface HeldRows extends CurrentRows {
   stamps: Map<string, Record<string, string> | null>
+  /** The stamp `block_values` holds for each (block, key) the write names,
+   * by `<block id>\x1f<key>`: what a per-key event is stale against. */
+  keyStamps: Map<string, string>
 }
 
 const parseStamps = (value: SqlValue | undefined): Record<string, string> | null =>
@@ -763,6 +845,7 @@ async function readCurrent(tenant: TenantDb, write: RowWrite): Promise<HeldRows>
   const viewIds = (write.views ?? []).map((view) => view.id)
 
   const stamps = new Map<string, Record<string, string> | null>()
+  const keyStamps = new Map<string, string>()
   const nodes = new Map<string, NodeRow>()
   if (nodeIds.length > 0) {
     const rows = await all.exec(
@@ -776,6 +859,14 @@ async function readCurrent(tenant: TenantDb, write: RowWrite): Promise<HeldRows>
       const row = toNodeRow(raw)
       nodes.set(row.id, row)
       stamps.set(`block\x1f${row.id}`, parseStamps(raw.stamps))
+    }
+    const keyRows = await all.exec(
+      "SELECT b.block_id, b.key, b.hlc FROM json_each(?1) AS j " +
+        "JOIN block_values b ON b.user_id = :tenant AND b.block_id = j.value",
+      [JSON.stringify(nodeIds)],
+    )
+    for (const raw of keyRows) {
+      keyStamps.set(`${String(raw.block_id)}\x1f${String(raw.key)}`, String(raw.hlc))
     }
   }
   const links = new Map<string, LinkRow>()
@@ -810,7 +901,7 @@ async function readCurrent(tenant: TenantDb, write: RowWrite): Promise<HeldRows>
       stamps.set(`view\x1f${row.id}`, parseStamps(raw.stamps))
     }
   }
-  return { nodes, links, views, stamps }
+  return { nodes, links, views, stamps, keyStamps }
 }
 
 /**
@@ -873,8 +964,13 @@ export async function writeRows(
     cause: ctx.cause,
     now: append.now,
   }).map((event) => ({ ...event, hlc: stamp() }))
-  const statements = [...planReconcile(append), ...planEventAppend(events, append), ...extra]
-  await tenant.includingDeleted().batch(statements)
+  await appendKeyEvents(
+    tenant,
+    expandAgainst(events, current),
+    { ...ctx, ...append },
+    extra,
+    current,
+  )
   return { events: events.length }
 }
 
@@ -1015,7 +1111,11 @@ export async function corpusAt(
     seq = row === undefined || row.seq === null ? 0 : Number(row.seq)
   }
   seq = Math.min(Math.max(seq, bounds.earliest?.seq ?? 0), bounds.latest)
-  return { seq, ...projectRows(fold(await readLog(tenant, seq))), ...bounds }
+  const state =
+    rollup === "new"
+      ? assembleLogState(keyStateAt(await readKeyLog(tenant, seq), seq))
+      : fold(await readLog(tenant, seq))
+  return { seq, ...projectRows(state), ...bounds }
 }
 
 /**
@@ -1054,10 +1154,24 @@ export async function restoreSubtree(
 
 export interface LogVerdict {
   ok: boolean
+  /** Which log the rollup read, and the tables were checked against. */
+  rollup: Rollup
   events: number
-  rows: { nodes: number; links: number; views: number }
-  /** Rows the fold and the tables disagree about, by table. A healthy log has none. */
+  keyEvents: number
+  rows: { nodes: number; links: number; views: number; blockValues: number }
+  /** Rows the fold of the log in force and the tables disagree about, by
+   * table. A healthy log has none. */
   drift: { nodes: string[]; links: string[]; views: string[] }
+  /** `block_values` against the per-key fold: the (block, key) pairs that
+   * differ, as `<block id> <key>`. */
+  blockValues: string[]
+  /**
+   * The two logs against each other, each folded by seq: the entities whose
+   * rows differ. By design the per-key log can keep a key the old log's
+   * whole-props patch would have lost; such an entity is listed here and
+   * does not fail `ok`.
+   */
+  logs: string[]
   rejected: number
 }
 
@@ -1173,13 +1287,1045 @@ const canonStamps = (stamps: Record<string, string> | null) =>
  * Does folding the log still yield the tables — every field, every stamp?
  * Drift is this architecture's failure mode — a row written around the log,
  * a projection statement that disagrees with the fold — and it is silent, so
- * it is checked rather than assumed. Reads the whole log and the whole
- * corpus: a diagnostic, never something a request does on its way past.
+ * it is checked rather than assumed. Reads both logs and the whole corpus:
+ * a diagnostic, never something a request does on its way past.
+ *
+ * Three checks (docs/event-sourcing.md, "Per-key events"): the tables
+ * against the fold of the log the rollup reads (`drift`, which decides
+ * `ok`); `block_values` against the per-key fold (`blockValues`, also in
+ * `ok`); and the two logs against each other, by seq (`logs`, reported
+ * only). A block's `props` is compared as a value, not as a string: the two
+ * folds spell the same keys in different orders. Under the new rollup the
+ * `props` stamp is not compared — a row from the old rollup holds the
+ * stamp of its last whole-props event, where the key rows hold their own.
  */
 export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
   await reconcileLog(tenant)
+  const seedCtx = appendContext({ actor: tenant.userId, origin: "system" })
+  await seedBlockValues(tenant, seedCtx)
   const all = tenant.includingDeleted()
   const log = await readLog(tenant)
+  const keyLog = await readKeyLog(tenant)
+  const legacy = await legacyReader(tenant)
+  const { nodes, links, views } = legacy.rows
+  const { stamps } = legacy
+  const linkKey = (row: LinkRow) => linkEntityId(row.source_id, row.destination_id, row.kind)
+  const valueRows = await all.exec(
+    "SELECT block_id, key, value, hlc FROM block_values WHERE user_id = :tenant",
+  )
+
+  const byKeys = projectKeyLog(keyLog, legacy.of)
+  const bySeq = projectLog(log, legacy.of)
+  const active = rollup === "new" ? assembleProjection(byKeys.tables) : bySeq.tables
+  const folded = projectRows({
+    blocks: active.block,
+    links: active.link,
+    views: active.view,
+  } as unknown as Parameters<typeof projectRows>[0])
+
+  const skipProps = rollup === "new"
+  const canon = (row: object, held: Record<string, string> | null | undefined) =>
+    JSON.stringify([
+      Object.entries(row)
+        .filter(([, value]) => value !== undefined && value !== null)
+        .map(([key, value]) =>
+          key === "props" ? [key, canonicalJson(parseProps(String(value)) ?? {})] : [key, value],
+        )
+        .sort(([a], [b]) => (a < b ? -1 : 1)),
+      canonStamps(held ?? null)?.filter(([name]) => !(skipProps && name === "props")) ?? null,
+    ])
+  const compare = <T extends object>(
+    entity: Entity,
+    held: T[],
+    want: T[],
+    keyOf: (row: T) => string,
+  ) => {
+    const wanted = new Map(
+      want.map((row) => [keyOf(row), canon(row, active[entity].get(keyOf(row))?.stamps)]),
+    )
+    const drift: string[] = []
+    for (const row of held) {
+      const key = keyOf(row)
+      if (wanted.get(key) !== canon(row, stamps.get(`${entity}\x1f${key}`))) drift.push(key)
+      wanted.delete(key)
+    }
+    return [...drift, ...wanted.keys()]
+  }
+  const drift = {
+    nodes: compare("block", nodes, folded.nodes, (row) => row.id),
+    links: compare("link", links, folded.links, linkKey),
+    views: compare("view", views, folded.views, (row) => row.id),
+  }
+
+  // block_values against the per-key fold: every created block's keys.
+  const wantedValues = new Map<string, string>()
+  for (const [id, block] of byKeys.tables.block) {
+    for (const [register, stamp] of Object.entries(block.stamps ?? {})) {
+      if (!isPropsRegister(register)) continue
+      const value = block.fields[register]
+      wantedValues.set(
+        `${id} ${propNameOf(register)}`,
+        `${value === null || value === undefined ? "" : canonicalJson(value)}@${stamp}`,
+      )
+    }
+  }
+  const blockValues: string[] = []
+  for (const raw of valueRows) {
+    const key = `${String(raw.block_id)} ${String(raw.key)}`
+    const value = raw.value === null ? "" : canonicalJson(JSON.parse(String(raw.value)))
+    if (wantedValues.get(key) !== `${value}@${String(raw.hlc)}`) blockValues.push(key)
+    wantedValues.delete(key)
+  }
+  blockValues.push(...wantedValues.keys())
+
+  // The two logs against each other, by seq.
+  const oldRows = projectRows(fold(log))
+  const keyRows = projectRows(assembleLogState(foldKeys(keyLog)))
+  const logs: string[] = []
+  const rowCanon = (row: object) =>
+    JSON.stringify(
+      Object.entries(row)
+        .filter(([key, value]) => value !== undefined && value !== null && key !== "updated_at")
+        .map(([key, value]) =>
+          key === "props" ? [key, canonicalJson(parseProps(String(value)) ?? {})] : [key, value],
+        )
+        .sort(([a], [b]) => (a < b ? -1 : 1)),
+    )
+  const compareLogs = <T extends object>(
+    name: Entity,
+    a: T[],
+    b: T[],
+    keyOf: (row: T) => string,
+  ) => {
+    const other = new Map(b.map((row) => [keyOf(row), rowCanon(row)]))
+    for (const row of a) {
+      const key = keyOf(row)
+      if (other.get(key) !== rowCanon(row)) logs.push(`${name} ${key}`)
+      other.delete(key)
+    }
+    for (const key of other.keys()) logs.push(`${name} ${key}`)
+  }
+  compareLogs("block", oldRows.nodes, keyRows.nodes, (row) => row.id)
+  compareLogs("link", oldRows.links, keyRows.links, linkKey)
+  compareLogs("view", oldRows.views, keyRows.views, (row) => row.id)
+
+  return {
+    ok:
+      drift.nodes.length + drift.links.length + drift.views.length === 0 &&
+      blockValues.length === 0,
+    rollup,
+    events: log.length,
+    keyEvents: keyLog.length,
+    rows: {
+      nodes: nodes.length,
+      links: links.length,
+      views: views.length,
+      blockValues: valueRows.length,
+    },
+    drift,
+    blockValues,
+    logs,
+    rejected: rollup === "new" ? byKeys.rejected : bySeq.rejected,
+  }
+}
+
+// -----------------------------------------------------------------------------
+// The per-key log (docs/event-sourcing.md, "Per-key events"; migrations/0028)
+// -----------------------------------------------------------------------------
+
+/** The GLOB pair that is `KEY_PATTERN` (src/data/key-events.ts) in SQL. */
+const KEY_GLOB = "GLOB '[A-Za-z_]*' AND {k} NOT GLOB '*[^A-Za-z0-9_.:-]*' AND length({k}) <= 128"
+const keyGlob = (k: string) => `${k} ${KEY_GLOB.replaceAll("{k}", k)}`
+
+/**
+ * The fill: every `events` row of the tenant that `events_log` does not
+ * mirror yet, read per key — the migration's backfill, scoped to one tenant
+ * and run in every write's batch after the reconcile, so a snapshot and a
+ * straggler the old Worker appended during a rollout are both read per key
+ * before anything projects. `expandEvent` is the same reading in TypeScript;
+ * `event-log.test.ts` pins the two together. Then `block_values` takes the
+ * filled props keys by stamp, so a block's keys are current whichever door
+ * its events came through.
+ */
+export function planLogFill(ctx: { now: number; appendId: string }): SqlStatement[] {
+  return [
+    {
+      sql:
+        "INSERT INTO events_log (user_id, seq, id, entity, entity_id, action, key, value, v, " +
+        "batch, origin, device, client, cause, actor, base_seq, ref_seq, at, tz, hlc, " +
+        "received_at, append, event_id, event_seq) " +
+        "WITH pending AS (SELECT e.*, " +
+        "CASE WHEN e.entity = 'block' AND json_type(e.patch, '$.props') = 'text' " +
+        "AND json_valid(json_extract(e.patch, '$.props')) " +
+        "THEN json_extract(e.patch, '$.props') END AS props_new, " +
+        "CASE WHEN e.entity = 'block' AND json_type(e.patch, '$.props') IS NOT NULL " +
+        "THEN 1 ELSE 0 END AS names_props, " +
+        "(SELECT CASE WHEN json_type(p.patch, '$.props') = 'text' " +
+        "AND json_valid(json_extract(p.patch, '$.props')) " +
+        "THEN json_extract(p.patch, '$.props') END FROM events p " +
+        "WHERE p.user_id = :tenant AND p.entity = 'block' AND p.entity_id = e.entity_id " +
+        "AND p.seq < e.seq AND json_type(p.patch, '$.props') IS NOT NULL " +
+        "ORDER BY p.seq DESC LIMIT 1) AS props_prior " +
+        "FROM events e WHERE e.user_id = :tenant AND NOT EXISTS " +
+        "(SELECT 1 FROM events_log l WHERE l.user_id = :tenant AND l.event_id = e.id)), " +
+        "columns AS (SELECT 'block' AS entity, 'type' AS name, 1 AS ordinal " +
+        "UNION ALL SELECT 'block', 'text', 2 UNION ALL SELECT 'block', 'notes_id', 3 " +
+        "UNION ALL SELECT 'link', 'source_id', 1 UNION ALL SELECT 'link', 'destination_id', 2 " +
+        "UNION ALL SELECT 'link', 'kind', 3 UNION ALL SELECT 'link', 'sort_key', 4 " +
+        "UNION ALL SELECT 'view', 'root_id', 1 UNION ALL SELECT 'view', 'filter', 2 " +
+        "UNION ALL SELECT 'view', 'sort', 3 UNION ALL SELECT 'view', 'pinned', 4 " +
+        "UNION ALL SELECT 'view', 'sort_key', 5 UNION ALL SELECT 'view', 'stack', 6), " +
+        "expanded AS (" +
+        "SELECT p.*, 0 AS ordinal, p.action AS k_action, '' AS k, " +
+        "CASE WHEN json_type(p.patch, '$.deleted_at') = 'integer' " +
+        "THEN json_extract(p.patch, '$.deleted_at') ELSE 'null' END AS val " +
+        "FROM pending p WHERE p.action <> 'update' " +
+        "UNION ALL SELECT p.*, c.ordinal, 'set', c.name, p.patch -> ('$.' || c.name) " +
+        "FROM pending p JOIN columns c ON c.entity = p.entity " +
+        "WHERE json_type(p.patch, '$.' || c.name) IS NOT NULL " +
+        "UNION ALL SELECT p.*, 10, 'set', 'props.' || n.key, p.props_new -> n.fullkey " +
+        "FROM pending p, json_each(p.props_new) AS n " +
+        `WHERE p.names_props AND n.type <> 'null' AND ${keyGlob("n.key")} ` +
+        "AND (p.props_prior IS NULL OR (p.props_prior -> n.fullkey) IS NULL " +
+        "OR (p.props_prior -> n.fullkey) = 'null' " +
+        "OR (p.props_prior -> n.fullkey) <> (p.props_new -> n.fullkey)) " +
+        "UNION ALL SELECT p.*, 11, 'unset', 'props.' || o.key, 'null' " +
+        "FROM pending p, json_each(p.props_prior) AS o " +
+        `WHERE p.names_props AND o.type <> 'null' AND ${keyGlob("o.key")} ` +
+        "AND (p.props_new IS NULL OR (p.props_new -> o.fullkey) IS NULL " +
+        "OR (p.props_new -> o.fullkey) = 'null')) " +
+        "SELECT :tenant, " +
+        "(SELECT COALESCE(MAX(l.seq), 0) FROM events_log l WHERE l.user_id = :tenant) " +
+        "+ ROW_NUMBER() OVER (ORDER BY r.seq, r.ordinal, r.k), " +
+        "r.id || '#' || (ROW_NUMBER() OVER (PARTITION BY r.id ORDER BY r.ordinal, r.k) - 1), " +
+        "r.entity, r.entity_id, r.k_action, r.k, r.val, 2, r.batch, r.origin, r.device, " +
+        "r.client, r.cause, r.actor, r.base_seq, r.ref_seq, r.at, r.tz, r.hlc, r.received_at, " +
+        "?1, r.id, r.seq FROM expanded r WHERE true ON CONFLICT DO NOTHING",
+      params: [ctx.appendId],
+    },
+    {
+      // The filled props keys, into the read model by stamp, in seq order so
+      // two fills of one key in this batch land the later one.
+      sql: filledKeysUpsert("l.batch <> 'snapshot'", "WHERE excluded.hlc > block_values.hlc"),
+      params: [ctx.appendId],
+    },
+    {
+      // A snapshot's keys land whatever the row held: the row was written
+      // around the log and its stamps went with it (`planReconcile`), so its
+      // keys read as the snapshot says, as the row's other registers do.
+      sql: filledKeysUpsert("l.batch = 'snapshot'", ""),
+      params: [ctx.appendId],
+    },
+  ]
+}
+
+/** The upsert of the props keys the fill of this append read, by stamp or
+ * unconditionally (`when`), for the rows `only` selects. */
+const filledKeysUpsert = (only: string, when: string) =>
+  "INSERT INTO block_values (user_id, block_id, key, value, hlc, seq, updated_at) " +
+  "SELECT :tenant, l.entity_id, substr(l.key, 7), " +
+  "CASE WHEN l.action = 'set' THEN l.value END, " +
+  `COALESCE(l.hlc, ${derivedStamp("l.at", "COALESCE(l.event_seq, 0)")}), ` +
+  "COALESCE(l.event_seq, 0), l.at FROM events_log l " +
+  `WHERE l.user_id = :tenant AND l.append = ?1 AND l.entity = 'block' AND ${only} ` +
+  "AND l.key GLOB 'props.*' ORDER BY l.seq " +
+  "ON CONFLICT (user_id, block_id, key) DO UPDATE SET value = excluded.value, " +
+  `hlc = excluded.hlc, seq = excluded.seq, updated_at = excluded.updated_at ${when}`.trimEnd()
+
+/** The stamp a key event not yet placed resolves by, in its place in the
+ * append (`unplacedStamp`). Every key event a client pushes carries one. */
+const unplacedKeyStamp = (event: KeyEvent, rank = 0) =>
+  event.hlc ?? eventStamp({ at: event.at, seq: UNPLACED_SEQ + rank } as RuminateEvent)
+
+/** One (block, key) a run sets, with its winner. `hlc` is the row's own
+ * stamp, null when it has none: the SQL then derives one from the event it
+ * mirrors (`stampOf`), as `keyEventStamp` derives it. */
+interface KeyWinner {
+  block: string
+  key: string
+  /** The value as JSON text; null for an unset. */
+  value: string | null
+  stamp: string
+  hlc: string | null
+  event: string
+  at: number
+}
+
+/** The net effect of a run of key events on one entity, by stamp: as
+ * `StampedChange`, with a block's props as one winner per key. */
+interface KeyChange extends StampedChange {
+  keys: KeyWinner[]
+}
+
+/**
+ * `stampedChanges` for key events: each column register's winner, each
+ * block's props key's winner, and liveness, by stamp. `eventOf` names the
+ * old-shaped event each key event was folded into (`collapseKeyEvents`):
+ * the row takes that event's `seq`, and the projection applies a change
+ * only when that event was inserted by this append.
+ */
+function stampedKeyChanges(
+  events: readonly KeyEvent[],
+  eventOf: ReadonlyMap<string, string>,
+): KeyChange[] {
+  const net = new Map<string, KeyChange>()
+  events.forEach((event, rank) => {
+    const stamp = unplacedKeyStamp(event, rank)
+    const old = eventOf.get(event.id) ?? event.id
+    const key = `${event.entity}\x1f${event.entity_id}`
+    let change = net.get(key)
+    if (!change) {
+      change = {
+        entity: event.entity,
+        entity_id: event.entity_id,
+        created: null,
+        set: {},
+        keys: [],
+        alive: null,
+        top: { event: old, at: event.at, stamp },
+        last_event: old,
+      }
+      net.set(key, change)
+    }
+    change.last_event = old
+    const hlc = event.hlc ?? null
+    const top = { event: old, at: event.at, stamp, hlc }
+    if (stamp > change.top.stamp) change.top = top
+    if (change.created && stamp > change.created.top.stamp) change.created.top = top
+    if (event.action === "set" || event.action === "unset") {
+      if (isPropsRegister(event.key)) {
+        const name = propNameOf(event.key)
+        const held = change.keys.find((winner) => winner.key === name)
+        const value = event.action === "set" ? JSON.stringify(event.value) : null
+        const winner = {
+          block: event.entity_id,
+          key: name,
+          value,
+          stamp,
+          hlc,
+          event: old,
+          at: event.at,
+        }
+        if (!held) change.keys.push(winner)
+        else if (stamp > held.stamp) Object.assign(held, winner)
+      } else {
+        const winner = { value: event.value, event: old, stamp, hlc }
+        if (stamp > (change.set[event.key]?.stamp ?? "")) change.set[event.key] = winner
+        if (change.created && stamp > (change.created.fields[event.key]?.stamp ?? "")) {
+          change.created.fields[event.key] = winner
+        }
+      }
+      return
+    }
+    const tombstone = typeof event.value === "number" ? event.value : null
+    const alive = event.action === "restore" || (event.action === "create" && tombstone === null)
+    const aliveWinner: AliveWinner & { hlc: string | null } = {
+      alive,
+      deleted_at: alive ? null : (tombstone ?? event.at),
+      event: old,
+      stamp,
+      hlc,
+    }
+    if (event.action === "create" && change.created === null) {
+      change.created = { fields: {}, alive: aliveWinner, top }
+    }
+    if (stamp > (change.alive?.stamp ?? "")) change.alive = aliveWinner
+    if (change.created && stamp > change.created.alive.stamp) change.created.alive = aliveWinner
+  })
+  return [...net.values()]
+}
+
+/** The stamp a winner resolves by: the key row's own (`hlc`), or — for a
+ * row read out of an event without one — the one that event derives, found
+ * by its id (`stampOf`), as `keyEventStamp` derives it on every reader. */
+const winnerStamp = (source: string, path: string) =>
+  `COALESCE(json_extract(${source}, '${path}.hlc'), ` +
+  `${stampOf(`json_extract(${source}, '${path}.event')`)})`
+
+/** `changesAs` for key changes: the stamps of a run's winners resolve from
+ * the key rows themselves (`winnerStamp`), not from the old event alone. */
+const keyChangesAs = (entity: Entity, ...keys: string[]) =>
+  "WITH j AS MATERIALIZED (SELECT c.value AS value" +
+  keys.map((key) => `, json_extract(c.value, '$.${key}') AS ${key}`).join("") +
+  registersOf(entity)
+    .filter((name) => entity !== "block" || name !== "props")
+    .map((name) => {
+      const path = name === "alive" ? "$.alive" : `$.set.${name}`
+      return `, ${winnerStamp("c.value", path)} AS s_${name}`
+    })
+    .join("") +
+  `, ${winnerStamp("c.value", "$.top")} AS s_top` +
+  ", json_type(c.value, '$.keys') = 'array' AND json_array_length(c.value, '$.keys') > 0 AS touches_keys" +
+  " FROM json_each(?1) AS c) "
+
+/** A created row's register stamps, from the change itself. */
+const createdKeyStamps = (entity: Entity) =>
+  "json_object(" +
+  RESOLVED[entity]
+    .filter((name) => entity !== "block" || name !== "props")
+    .map((name) => `'${name}', ${winnerStamp("j.value", `$.created.fields.${name}`)}`)
+    .join(", ") +
+  `, 'alive', ${winnerStamp("j.value", "$.created.alive")})`
+
+/** A block's `props` as its key rows say: the live keys in sorted order, or
+ * NULL for none — `derivedProps` in SQL. */
+const propsFromKeys = (blockId: string) =>
+  "(SELECT NULLIF(json_group_object(b.key, json(b.value)), '{}') FROM (SELECT key, value " +
+  `FROM block_values WHERE user_id = :tenant AND block_id = ${blockId} AND value IS NOT NULL ` +
+  "ORDER BY key) AS b)"
+/** The stamp of a block's props register: the highest of its keys'. */
+const propsStampFromKeys = (blockId: string) =>
+  `(SELECT MAX(hlc) FROM block_values WHERE user_id = :tenant AND block_id = ${blockId})`
+
+/** The upsert of a run's key winners (`KeyWinner[]` as `?1`) into
+ * `block_values`, by stamp, for the events this append inserted. */
+const KEY_WINNERS_UPSERT =
+  "INSERT INTO block_values (user_id, block_id, key, value, hlc, seq, updated_at) " +
+  "SELECT :tenant, json_extract(j.value, '$.block'), json_extract(j.value, '$.key'), " +
+  `json_extract(j.value, '$.value'), ${winnerStamp("j.value", "$")}, ` +
+  "(SELECT e.seq FROM events e WHERE e.user_id = :tenant " +
+  "AND e.id = json_extract(j.value, '$.event')), json_extract(j.value, '$.at') " +
+  "FROM json_each(?1) AS j WHERE EXISTS (SELECT 1 FROM events e WHERE e.user_id = :tenant " +
+  "AND e.id = json_extract(j.value, '$.event') AND e.append = ?2) " +
+  "ON CONFLICT (user_id, block_id, key) DO UPDATE SET value = excluded.value, " +
+  "hlc = excluded.hlc, seq = excluded.seq, updated_at = excluded.updated_at " +
+  "WHERE excluded.hlc > block_values.hlc"
+
+/** The block registers that resolve from the row itself under the new rollup. */
+const BLOCK_COLUMNS = ["type", "text", "notes_id"] as const
+
+/**
+ * The new rollup's projection of a chunk of key events: both logs appended,
+ * `block_values` upserted key by key by stamp, then the rows — a block's
+ * `props` derived from its key rows, its other registers by stamp as before.
+ */
+function planKeyChunk(
+  events: readonly KeyEvent[],
+  old: readonly RuminateEvent[],
+  eventOf: ReadonlyMap<string, string>,
+  ctx: AppendContext,
+): SqlStatement[] {
+  const changes = stampedKeyChanges(events, eventOf)
+  const params = (json: string): SqlValue[] => [json, ctx.appendId]
+  const created = "json_type(j.value, '$.created') = 'object'"
+  const keyWinners = changes.flatMap((change) => change.keys)
+  const blockFields = BLOCK_COLUMNS.map((name) => field("nodes", name)).join(", ")
+  const blockHeld = BLOCK_COLUMNS.map((name) => heldStamp("nodes", name))
+  const blockStampsAfter =
+    "stamps = json_object(" +
+    [...BLOCK_COLUMNS, "alive"]
+      .map(
+        (name) =>
+          `'${name}', NULLIF(CASE WHEN ${wins("nodes", name)} THEN j.s_${name} ` +
+          `ELSE ${heldStamp("nodes", name)} END, '')`,
+      )
+      .join(", ") +
+    `, 'props', CASE WHEN j.touches_keys THEN ${propsStampFromKeys("nodes.id")} ` +
+    `ELSE NULLIF(${heldStamp("nodes", "props")}, '') END` +
+    ", 'legacy', CASE WHEN nodes.stamps IS NULL THEN nodes.seq " +
+    "ELSE json_extract(nodes.stamps, '$.legacy') END)"
+  // The run's top beats every held register: the columns and liveness as
+  // held, and the keys as they stand after this append's upsert, so `>=`.
+  const blockUpdatedAt =
+    `updated_at = CASE WHEN j.s_top > MAX(${[...blockHeld, heldStamp("nodes", "alive")].join(", ")}) ` +
+    `AND j.s_top >= COALESCE(${propsStampFromKeys("nodes.id")}, '') ` +
+    "THEN json_extract(j.value, '$.top.at') ELSE nodes.updated_at END"
+
+  return [
+    insertEventsStatement(old, ctx),
+    {
+      sql:
+        "INSERT INTO events_log (user_id, seq, id, entity, entity_id, action, key, value, v, " +
+        "batch, origin, device, client, cause, actor, base_seq, ref_seq, at, tz, hlc, " +
+        "received_at, append, event_id, event_seq) SELECT :tenant, " +
+        "(SELECT COALESCE(MAX(seq), 0) FROM events_log WHERE user_id = :tenant) + j.key + 1, " +
+        "json_extract(j.value, '$.id'), json_extract(j.value, '$.entity'), " +
+        "json_extract(j.value, '$.entity_id'), json_extract(j.value, '$.action'), " +
+        "json_extract(j.value, '$.key'), " +
+        "COALESCE(j.value -> '$.value', 'null'), json_extract(j.value, '$.v'), " +
+        "json_extract(j.value, '$.batch'), ?5, json_extract(j.value, '$.device'), ?6, " +
+        "json_extract(j.value, '$.cause'), ?4, json_extract(j.value, '$.base_seq'), " +
+        "json_extract(j.value, '$.ref_seq'), json_extract(j.value, '$.at'), " +
+        "json_extract(j.value, '$.tz'), json_extract(j.value, '$.hlc'), ?2, ?3, " +
+        "json_extract(j.value, '$.event'), " +
+        "(SELECT e.seq FROM events e WHERE e.user_id = :tenant " +
+        "AND e.id = json_extract(j.value, '$.event')) " +
+        "FROM json_each(?1) AS j WHERE true ON CONFLICT (user_id, id) DO NOTHING",
+      params: [JSON.stringify(events), ctx.now, ctx.appendId, ctx.actor, ctx.origin, ctx.client],
+    },
+
+    // Keys → block_values, by stamp
+    {
+      sql: KEY_WINNERS_UPSERT,
+      params: params(JSON.stringify(keyWinners)),
+    },
+
+    // Blocks → nodes
+    {
+      sql:
+        "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at, notes_id, " +
+        "seq, stamps) SELECT :tenant, json_extract(j.value, '$.entity_id'), " +
+        `${createdField("type")}, ${createdField("text")}, ` +
+        `${propsFromKeys("json_extract(j.value, '$.entity_id')")}, ` +
+        "json_extract(j.value, '$.created.top.at'), " +
+        "json_extract(j.value, '$.created.alive.deleted_at'), " +
+        `${createdField("notes_id")}, ${SEQ_OF_LAST_EVENT}, ` +
+        // A block with no key yet holds its create's stamp for `props`, as
+        // the old rollup would: the old door's stale check reads it.
+        `json_set(${createdKeyStamps("block")}, '$.props', ` +
+        `COALESCE(${propsStampFromKeys("json_extract(j.value, '$.entity_id')")}, ` +
+        `${winnerStamp("j.value", "$.created.alive")})) ` +
+        "FROM json_each(?1) AS j " +
+        `WHERE ${created} AND ${INSERTED_BY_THIS_APPEND} ` +
+        "ON CONFLICT (user_id, id) DO NOTHING",
+      params: params(changesFor(changes, "block")),
+    },
+    {
+      sql:
+        keyChangesAs("block", "entity_id") +
+        `UPDATE nodes SET ${blockFields}, ` +
+        `props = CASE WHEN j.touches_keys THEN ${propsFromKeys("nodes.id")} ELSE nodes.props END, ` +
+        `${tombstone("nodes")}, ${blockStampsAfter}, ${blockUpdatedAt}, ` +
+        `seq = ${SEQ_OF_LAST_EVENT} ` +
+        "FROM j WHERE nodes.user_id = :tenant AND nodes.id = j.entity_id " +
+        `AND ${INSERTED_BY_THIS_APPEND} AND ${notJustInserted("nodes")} ` +
+        "/* includes-deleted: an event may edit or restore a tombstoned block */",
+      params: params(changesFor(changes, "block")),
+    },
+
+    // Links → link
+    {
+      sql:
+        "INSERT INTO link (user_id, source_id, destination_id, kind, sort_key, updated_at, " +
+        "deleted_at, seq, stamps) SELECT :tenant, json_extract(j.value, '$.source_id'), " +
+        "json_extract(j.value, '$.destination_id'), json_extract(j.value, '$.kind'), " +
+        `${createdField("sort_key")}, json_extract(j.value, '$.created.top.at'), ` +
+        "json_extract(j.value, '$.created.alive.deleted_at'), " +
+        `${SEQ_OF_LAST_EVENT}, ${createdKeyStamps("link")} FROM json_each(?1) AS j ` +
+        `WHERE ${created} AND ${INSERTED_BY_THIS_APPEND} ` +
+        "ON CONFLICT (user_id, source_id, destination_id, kind) DO NOTHING",
+      params: params(changesFor(changes, "link")),
+    },
+    {
+      sql:
+        keyChangesAs("link", "source_id", "destination_id", "kind") +
+        `UPDATE link SET ${field("link", "sort_key")}, ${tombstone("link")}, ` +
+        `${stampsAfter("link", "link")}, ${updatedAt("link", "link")}, ` +
+        `seq = ${SEQ_OF_LAST_EVENT} ` +
+        "FROM j WHERE link.user_id = :tenant AND link.source_id = j.source_id " +
+        "AND link.destination_id = j.destination_id AND link.kind = j.kind " +
+        `AND ${INSERTED_BY_THIS_APPEND} AND ${notJustInserted("link")} ` +
+        "/* includes-deleted: re-linking a pair revives its tombstoned row */",
+      params: params(changesFor(changes, "link")),
+    },
+
+    // Views → views
+    {
+      sql:
+        "INSERT INTO views (user_id, id, root_id, filter, sort, pinned, sort_key, stack, " +
+        "updated_at, deleted_at, seq, stamps) SELECT :tenant, " +
+        "json_extract(j.value, '$.entity_id'), " +
+        `${createdField("root_id")}, ${createdField("filter")}, ${createdField("sort")}, ` +
+        `COALESCE(${createdField("pinned")}, 0), ${createdField("sort_key")}, ` +
+        `${createdField("stack")}, ` +
+        "json_extract(j.value, '$.created.top.at'), " +
+        "json_extract(j.value, '$.created.alive.deleted_at'), " +
+        `${SEQ_OF_LAST_EVENT}, ${createdKeyStamps("view")} FROM json_each(?1) AS j ` +
+        `WHERE ${created} AND ${INSERTED_BY_THIS_APPEND} ` +
+        "ON CONFLICT (user_id, id) DO NOTHING",
+      params: params(changesFor(changes, "view")),
+    },
+    {
+      sql:
+        keyChangesAs("view", "entity_id") +
+        `UPDATE views SET ${RESOLVED.view.map((name) => field("views", name)).join(", ")}, ` +
+        `${tombstone("views")}, ${stampsAfter("views", "view")}, ${updatedAt("views", "view")}, ` +
+        `seq = ${SEQ_OF_LAST_EVENT} ` +
+        "FROM j WHERE views.user_id = :tenant AND views.id = j.entity_id " +
+        `AND ${INSERTED_BY_THIS_APPEND} AND ${notJustInserted("views")}`,
+      params: params(changesFor(changes, "view")),
+    },
+  ]
+}
+
+/**
+ * Plan one append of key events and the old-shaped events they fold to:
+ * both logs, then the projection the rollup reads. Under the old rollup the
+ * old events project as they always have (`planChunk`), and `block_values`
+ * still takes the keys by stamp, so a later flip finds it current. Chunked
+ * under D1's bound-value cap like `planEventAppend`.
+ */
+export function planKeyAppend(
+  events: readonly KeyEvent[],
+  old: readonly RuminateEvent[],
+  eventOf: ReadonlyMap<string, string>,
+  ctx: AppendContext,
+  maxBytes: number = MAX_PARAM_BYTES,
+): SqlStatement[] {
+  const firstOf = new Map<string, RuminateEvent>()
+  for (const event of old) firstOf.set(event.id, event)
+  const mirrored = new Set(eventOf.values())
+  const chunks = chunksBySize(
+    events as unknown as RuminateEvent[],
+    maxBytes,
+  ) as unknown as KeyEvent[][]
+  if (chunks.length === 0) chunks.push([])
+  const placed = new Set<string>()
+  return chunks.flatMap((chunk, index) => {
+    // An old event with no key rows (`appendEvents`) rides in the first chunk.
+    const olds: RuminateEvent[] = index === 0 ? old.filter((event) => !mirrored.has(event.id)) : []
+    for (const event of chunk) {
+      const id = eventOf.get(event.id)
+      if (id === undefined || placed.has(id)) continue
+      const first = firstOf.get(id)
+      if (first) {
+        olds.push(first)
+        placed.add(id)
+      }
+    }
+    if (rollup === "new") return planKeyChunk(chunk, olds, eventOf, ctx)
+    const keyWinners = stampedKeyChanges(chunk, eventOf).flatMap((change) => change.keys)
+    return [
+      ...planChunk(olds, ctx),
+      {
+        sql:
+          "INSERT INTO events_log (user_id, seq, id, entity, entity_id, action, key, value, v, " +
+          "batch, origin, device, client, cause, actor, base_seq, ref_seq, at, tz, hlc, " +
+          "received_at, append, event_id, event_seq) SELECT :tenant, " +
+          "(SELECT COALESCE(MAX(seq), 0) FROM events_log WHERE user_id = :tenant) + j.key + 1, " +
+          "json_extract(j.value, '$.id'), json_extract(j.value, '$.entity'), " +
+          "json_extract(j.value, '$.entity_id'), json_extract(j.value, '$.action'), " +
+          "json_extract(j.value, '$.key'), " +
+          "COALESCE(j.value -> '$.value', 'null'), json_extract(j.value, '$.v'), " +
+          "json_extract(j.value, '$.batch'), ?5, json_extract(j.value, '$.device'), ?6, " +
+          "json_extract(j.value, '$.cause'), ?4, json_extract(j.value, '$.base_seq'), " +
+          "json_extract(j.value, '$.ref_seq'), json_extract(j.value, '$.at'), " +
+          "json_extract(j.value, '$.tz'), json_extract(j.value, '$.hlc'), ?2, ?3, " +
+          "json_extract(j.value, '$.event'), " +
+          "(SELECT e.seq FROM events e WHERE e.user_id = :tenant " +
+          "AND e.id = json_extract(j.value, '$.event')) " +
+          "FROM json_each(?1) AS j WHERE true ON CONFLICT (user_id, id) DO NOTHING",
+        params: [JSON.stringify(chunk), ctx.now, ctx.appendId, ctx.actor, ctx.origin, ctx.client],
+      },
+      {
+        sql: KEY_WINNERS_UPSERT,
+        params: [JSON.stringify(keyWinners), ctx.appendId],
+      },
+    ]
+  })
+}
+
+/** The `meta` key that says a tenant's `block_values` were seeded. */
+const BLOCK_VALUES_SEEDED = "block_values_seeded"
+
+/**
+ * Land key events: fold them to the old shape against the rows held
+ * (`collapseKeyEvents`), reconcile and fill, seed `block_values` the first
+ * time, then append both logs and project — one atomic batch for the
+ * append; the seed, once per tenant, reads the log first and so takes a
+ * batch of its own ahead of it.
+ */
+async function appendKeyEvents(
+  tenant: TenantDb,
+  events: readonly KeyEvent[],
+  ctx: WriteContext,
+  extra: SqlStatement[] = [],
+  current?: HeldRows,
+  eventless: readonly RuminateEvent[] = [],
+): Promise<void> {
+  const append = appendContext(ctx)
+  const held = current ?? (await readCurrent(tenant, writeNaming(events)))
+  const { events: old, eventOf } = collapseKeyEvents(events, (id) =>
+    propsMapOfRow(held.nodes.get(id)),
+  )
+  const mirrored = events.map((event) => ({ ...event, event: eventOf.get(event.id) }))
+  const seeded = await seedBlockValues(tenant, append)
+  const statements = [
+    ...(seeded ? [] : planReconcile(append)),
+    ...(seeded ? [] : planLogFill(append)),
+    ...planKeyAppend(mirrored, [...old, ...eventless], eventOf, append),
+    ...extra,
+  ]
+  await tenant.includingDeleted().batch(statements)
+}
+
+/**
+ * Seed a tenant's `block_values` once, from the per-key fold with the
+ * legacy rule (`projectKeyLog`): exactly the rows `verify` expects. Runs the
+ * reconcile and the fill first, in a batch of their own, so the fold reads
+ * every event there is. Returns whether it ran (the caller's batch then
+ * needs no reconcile of its own).
+ */
+async function seedBlockValues(tenant: TenantDb, ctx: AppendContext): Promise<boolean> {
+  const [flag] = await tenant.exec(
+    `SELECT value FROM meta WHERE user_id = :tenant AND key = '${BLOCK_VALUES_SEEDED}'`,
+  )
+  if (flag) return false
+  const all = tenant.includingDeleted()
+  await all.batch([...planReconcile(ctx), ...planLogFill(ctx)])
+  const log = await readKeyLog(tenant)
+  const legacy = await legacyReader(tenant)
+  const { tables } = projectKeyLog(log, legacy.of)
+  const rows: unknown[] = []
+  for (const [id, block] of tables.block) {
+    for (const [register, stamp] of Object.entries(block.stamps ?? {})) {
+      if (!isPropsRegister(register)) continue
+      const value = block.fields[register]
+      rows.push({
+        block: id,
+        key: propNameOf(register),
+        value: value === null || value === undefined ? null : JSON.stringify(value),
+        stamp,
+        seq: block.keySeq[register] ?? block.seq,
+        at: block.keyAt[register] ?? block.at,
+      })
+    }
+  }
+  const statements: SqlStatement[] = []
+  const ROWS = 2_000
+  for (let i = 0; i < rows.length; i += ROWS) {
+    statements.push({
+      sql:
+        "INSERT INTO block_values (user_id, block_id, key, value, hlc, seq, updated_at) " +
+        "SELECT :tenant, json_extract(j.value, '$.block'), json_extract(j.value, '$.key'), " +
+        "json_extract(j.value, '$.value'), json_extract(j.value, '$.stamp'), " +
+        "json_extract(j.value, '$.seq'), json_extract(j.value, '$.at') " +
+        "FROM json_each(?1) AS j WHERE true " +
+        "ON CONFLICT (user_id, block_id, key) DO UPDATE SET value = excluded.value, " +
+        "hlc = excluded.hlc, seq = excluded.seq, updated_at = excluded.updated_at",
+      params: [JSON.stringify(rows.slice(i, i + ROWS))],
+    })
+  }
+  statements.push({
+    sql:
+      "INSERT INTO meta (user_id, key, value) VALUES (:tenant, ?1, ?2) " +
+      "ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value",
+    params: [BLOCK_VALUES_SEEDED, String(ctx.now)],
+  })
+  await all.batch(statements)
+  return true
+}
+
+/**
+ * Which key events a push lands, by stamp per key (`staleEvents`, per key):
+ * a `set` or `unset` is stale when the key it names already holds a stamp
+ * at least as high — a column's in the row's `stamps`, a props key's in
+ * `block_values` — and a liveness row when `alive` does. A key no row has
+ * been set on has no stamp, so any set of it lands.
+ */
+function staleKeyEvents(current: HeldRows, events: readonly KeyEvent[]): Set<KeyEvent> {
+  const stale = new Set<KeyEvent>()
+  for (const event of events) {
+    const row =
+      event.entity === "block"
+        ? current.nodes.get(event.entity_id)
+        : event.entity === "link"
+          ? current.links.get(event.entity_id)
+          : current.views.get(event.entity_id)
+    if (row === undefined) continue
+    const stamps = current.stamps.get(`${event.entity}\x1f${event.entity_id}`) ?? null
+    const stamp = unplacedKeyStamp(event)
+    let held: string
+    if (event.action === "set" || event.action === "unset") {
+      if (isPropsRegister(event.key)) {
+        held = current.keyStamps.get(`${event.entity_id}\x1f${propNameOf(event.key)}`) ?? ""
+      } else if (!RESOLVED[event.entity].includes(event.key)) {
+        // A link's key columns: set by its create, never changed.
+        held = ""
+      } else {
+        held = heldStampOf(stamps, event.key, row)
+      }
+    } else {
+      held = heldStampOf(stamps, "alive", row)
+    }
+    if (stamp <= held) stale.add(event)
+  }
+  return stale
+}
+
+/** What a push of key events is answered with: each event's `seq` in
+ * `events_log`, and the `seq` in `events` of the event it mirrors. */
+export interface KeyEventsLanded {
+  appended: number
+  stale: number
+  seqs: [id: string, seq: number, eventSeq: number | null][]
+}
+
+/**
+ * Land a push of KEY EVENTS — the door a client of this build uses
+ * (`opsToKeyEvents`): the per-key `appendClientEvents`. Stale events are
+ * dropped by the rule of the rollup in force — per key under the new one,
+ * per field of the old-shaped event each folds to under the old — the rest
+ * are appended to both logs and projected in one batch, and a re-sent
+ * event is answered with the seq it has.
+ */
+export async function appendClientKeyEvents(
+  tenant: TenantDb,
+  events: readonly KeyEvent[],
+  ctx: WriteContext,
+  extra: SqlStatement[] = [],
+): Promise<KeyEventsLanded> {
+  const current = await readCurrent(tenant, writeNaming(events))
+  const held = await heldSeqs(tenant, "events_log", events)
+  const unknown = events.filter((event) => !held.has(event.id))
+  let stale: Set<KeyEvent>
+  if (rollup === "new") {
+    stale = staleKeyEvents(current, unknown)
+  } else {
+    const collapsed = collapseKeyEvents(unknown, (id) => propsMapOfRow(current.nodes.get(id)))
+    const staleOld = new Set([...staleEvents(current, collapsed.events)].map((event) => event.id))
+    stale = new Set(unknown.filter((event) => staleOld.has(collapsed.eventOf.get(event.id) ?? "")))
+  }
+  const fresh = unknown.filter((event) => !stale.has(event))
+  if (fresh.length > 0 || extra.length > 0) {
+    await appendKeyEvents(tenant, fresh, ctx, extra, current)
+  }
+  const after = await heldKeySeqs(tenant, events)
+  return { appended: fresh.length, stale: stale.size, seqs: after }
+}
+
+/** Each key event's place in both logs, by id — absent when not appended. */
+async function heldKeySeqs(
+  tenant: TenantDb,
+  events: readonly KeyEvent[],
+): Promise<[string, number, number | null][]> {
+  if (events.length === 0) return []
+  const rows = await tenant.exec(
+    "SELECT l.id, l.seq, l.event_seq FROM json_each(?1) AS j " +
+      "JOIN events_log l ON l.user_id = :tenant AND l.id = j.value",
+    [JSON.stringify(events.map((event) => event.id))],
+  )
+  return rows.map((row) => [
+    String(row.id),
+    Number(row.seq),
+    row.event_seq === null ? null : Number(row.event_seq),
+  ])
+}
+
+// -----------------------------------------------------------------------------
+// Reading the per-key log
+// -----------------------------------------------------------------------------
+
+const KEY_EVENT_COLUMNS =
+  "id, seq, entity, entity_id, action, key, value, v, batch, origin, device, client, cause, " +
+  "actor, base_seq, ref_seq, at, tz, hlc, received_at, event_id, event_seq"
+
+/** A key event as the log holds it. */
+export type StoredKeyEvent = LoggedKeyEvent & {
+  seq: number
+  origin: EventOrigin
+  client: string | null
+  actor: number
+  received_at: number
+}
+
+/** The per-key log after `since` (its own seq), oldest first, optionally
+ * one entity's; `upTo` bounds by the OLD log's seq, the moments `/at` and
+ * a restore name. A row that does not parse is logged and skipped. */
+export async function readKeyEvents(
+  tenant: TenantDb,
+  options: {
+    since?: number
+    upTo?: number
+    limit?: number
+    entity?: string
+    entityId?: string
+  } = {},
+): Promise<StoredKeyEvent[]> {
+  const { since = 0, upTo = Number.MAX_SAFE_INTEGER, limit = 1000, entity, entityId } = options
+  const rows =
+    entity !== undefined && entityId !== undefined
+      ? await tenant.exec(
+          `SELECT ${KEY_EVENT_COLUMNS} FROM events_log WHERE user_id = :tenant AND entity = ?1 ` +
+            "AND entity_id = ?2 AND seq > ?3 AND COALESCE(event_seq, 0) <= ?4 " +
+            "ORDER BY seq LIMIT ?5",
+          [entity, entityId, since, upTo, limit],
+        )
+      : await tenant.exec(
+          `SELECT ${KEY_EVENT_COLUMNS} FROM events_log WHERE user_id = :tenant AND seq > ?1 ` +
+            "AND COALESCE(event_seq, 0) <= ?2 ORDER BY seq LIMIT ?3",
+          [since, upTo, limit],
+        )
+  const out: StoredKeyEvent[] = []
+  for (const row of rows) {
+    const event = parseStoredKeyEvent(row as Record<string, unknown>) as StoredKeyEvent | null
+    if (event !== null) {
+      event.client = row.client === null ? null : String(row.client)
+      out.push(event)
+    }
+  }
+  return out
+}
+
+/** The whole per-key log up to `upTo` (the old log's seq), paged. */
+async function readKeyLog(
+  tenant: TenantDb,
+  upTo = Number.MAX_SAFE_INTEGER,
+): Promise<StoredKeyEvent[]> {
+  const log: StoredKeyEvent[] = []
+  let since = 0
+  for (;;) {
+    const rows = await tenant.exec(
+      `SELECT ${KEY_EVENT_COLUMNS} FROM events_log WHERE user_id = :tenant AND seq > ?1 ` +
+        "AND COALESCE(event_seq, 0) <= ?2 ORDER BY seq LIMIT ?3",
+      [since, upTo, PAGE],
+    )
+    for (const row of rows) {
+      const event = parseStoredKeyEvent(row as Record<string, unknown>) as StoredKeyEvent | null
+      if (event !== null) {
+        event.client = row.client === null ? null : String(row.client)
+        log.push(event)
+      }
+    }
+    if (rows.length < PAGE) return log
+    since = Number(rows[rows.length - 1].seq)
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Verify, per key
+// -----------------------------------------------------------------------------
+
+/** One entity as the per-key projection holds it: every register — a
+ * column, a `props.<name>`, with null for an unset key — and its stamp. */
+interface KeyProjection extends Projection {
+  /** The old log's seq and the writer's clock of the event that last set
+   * each register, for `block_values`. */
+  keySeq: Record<string, number>
+  keyAt: Record<string, number>
+}
+
+/**
+ * `projectLog` for the per-key log: the tables the new rollup keeps, by the
+ * rules `planKeyChunk` keeps. Up to the seq a row was projected to by the
+ * old rule (`legacyOf`) each row applies by seq; after it each register —
+ * a block's props key by key — by stamp, every register starting from the
+ * stamp the row's last legacy event derives. A row's `seq` and `at` are
+ * the old log's, as the tables hold them.
+ */
+export function projectKeyLog(
+  log: readonly StoredKeyEvent[],
+  legacyOf: (entity: Entity, id: string) => number,
+): { tables: Record<Entity, Map<string, KeyProjection>>; rejected: number } {
+  const tables: Record<Entity, Map<string, KeyProjection>> = {
+    block: new Map(),
+    link: new Map(),
+    view: new Map(),
+  }
+  let rejected = 0
+  for (const event of [...log].sort((a, b) => a.seq - b.seq)) {
+    const table = tables[event.entity]
+    const held = table.get(event.entity_id)
+    if (held === undefined && event.action !== "create") {
+      rejected += 1
+      continue
+    }
+    const eseq = event.event_seq ?? event.seq
+    const legacy = eseq <= legacyOf(event.entity, event.entity_id)
+    const row: KeyProjection = held ?? {
+      fields: {},
+      deleted: false,
+      deleted_at: null,
+      seq: 0,
+      at: 0,
+      stamps: legacy ? null : {},
+      keySeq: {},
+      keyAt: {},
+    }
+    const tombstone = typeof event.value === "number" ? event.value : null
+    const alive =
+      event.action === "set" || event.action === "unset"
+        ? null
+        : event.action === "delete"
+          ? false
+          : event.action === "restore" || tombstone === null
+    const deletedAt = alive ? null : (tombstone ?? event.at)
+
+    if (legacy) {
+      row.at = event.at
+      if (event.action === "set") row.fields[event.key] = event.value
+      else if (event.action === "unset") delete row.fields[event.key]
+      if (alive !== null) {
+        row.deleted = !alive
+        row.deleted_at = deletedAt
+      }
+      if (event.action === "set" || event.action === "unset") {
+        row.keySeq[event.key] = eseq
+        row.keyAt[event.key] = event.at
+      }
+    } else {
+      const stamps =
+        row.stamps ??
+        Object.fromEntries(
+          [...registersOf(event.entity), ...Object.keys(row.fields)]
+            .filter((name) => name !== "props")
+            .map((name) => [name, rowStamp(row.at, row.seq)]),
+        )
+      const stamp = keyEventStamp(event)
+      const top = Object.values(stamps).reduce((a, b) => (b > a ? b : a), "")
+      if (event.action === "set" || event.action === "unset") {
+        const name = event.key
+        if (!isPropsRegister(name) && !RESOLVED[event.entity].includes(name)) {
+          if (!(name in row.fields)) row.fields[name] = event.value
+        } else if (stamp > (stamps[name] ?? "")) {
+          row.fields[name] = event.action === "set" ? event.value : null
+          stamps[name] = stamp
+          row.keySeq[name] = eseq
+          row.keyAt[name] = event.at
+        }
+      } else if (stamp > (stamps.alive ?? "")) {
+        row.deleted = !alive
+        row.deleted_at = deletedAt
+        stamps.alive = stamp
+      }
+      if (stamp > top) row.at = event.at
+      row.stamps = stamps
+    }
+    row.seq = Math.max(row.seq, eseq)
+    table.set(event.entity_id, row)
+  }
+  return { tables, rejected }
+}
+
+/** The rows a per-key projection holds, in the old projection's shape:
+ * `props` derived from the key registers, its stamp the highest of theirs. */
+function assembleProjection(
+  tables: Record<Entity, Map<string, KeyProjection>>,
+): Record<Entity, Map<string, Projection>> {
+  const out: Record<Entity, Map<string, Projection>> = {
+    block: new Map(),
+    link: tables.link,
+    view: tables.view,
+  }
+  for (const [id, block] of tables.block) {
+    const fields: Record<string, unknown> = {}
+    for (const [name, value] of Object.entries(block.fields)) {
+      if (!isPropsRegister(name)) fields[name] = value
+    }
+    fields.props = derivedProps(block.fields)
+    let stamps: Record<string, string> | null = null
+    if (block.stamps !== null) {
+      stamps = {}
+      let propsStamp: string | undefined
+      for (const [name, stamp] of Object.entries(block.stamps)) {
+        if (isPropsRegister(name)) {
+          if (propsStamp === undefined || stamp > propsStamp) propsStamp = stamp
+        } else stamps[name] = stamp
+      }
+      if (propsStamp !== undefined) stamps.props = propsStamp
+    }
+    out.block.set(id, { ...block, fields, stamps })
+  }
+  return out
+}
+
+/** Each row's stamps and seq, for the seq the old rule projected it to. */
+async function legacyReader(tenant: TenantDb): Promise<{
+  of: (entity: Entity, id: string) => number
+  stamps: Map<string, Record<string, string> | null>
+  rows: { nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }
+}> {
+  const all = tenant.includingDeleted()
   const nodeRows = await all.exec(
     "SELECT id, type, text, props, updated_at, deleted_at, notes_id, seq, stamps FROM nodes " +
       "WHERE user_id = :tenant /* includes-deleted: the fold holds tombstones too */",
@@ -1196,8 +2342,6 @@ export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
   const links = linkRows.map(toLinkRow)
   const views = viewRows.map(toViewRow)
   const linkKey = (row: LinkRow) => linkEntityId(row.source_id, row.destination_id, row.kind)
-
-  // Each row's stamps and seq, for the seq the old rule projected it to.
   const stamps = new Map<string, Record<string, string> | null>()
   const rowSeq = new Map<string, number | undefined>()
   const note = (key: string, raw: Record<string, SqlValue>, seq: number | undefined) => {
@@ -1207,7 +2351,7 @@ export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
   nodeRows.forEach((raw, i) => note(`block\x1f${nodes[i].id}`, raw, nodes[i].seq))
   linkRows.forEach((raw, i) => note(`link\x1f${linkKey(links[i])}`, raw, links[i].seq))
   viewRows.forEach((raw, i) => note(`view\x1f${views[i].id}`, raw, views[i].seq))
-  const legacyOf = (entity: Entity, id: string) => {
+  const of = (entity: Entity, id: string) => {
     const key = `${entity}\x1f${id}`
     if (!stamps.has(key)) return 0
     // A row with no stamps has been projected by the old rule up to its own
@@ -1216,48 +2360,5 @@ export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
     if (held === null || held === undefined) return Number(rowSeq.get(key) ?? 0)
     return Number(held.legacy ?? 0)
   }
-
-  const { tables, rejected } = projectLog(log, legacyOf)
-  const folded = projectRows({
-    blocks: tables.block,
-    links: tables.link,
-    views: tables.view,
-  } as unknown as Parameters<typeof projectRows>[0])
-
-  const canon = (row: object, held: Record<string, string> | null | undefined) =>
-    JSON.stringify([
-      Object.entries(row)
-        .filter(([, value]) => value !== undefined && value !== null)
-        .sort(([a], [b]) => (a < b ? -1 : 1)),
-      canonStamps(held ?? null),
-    ])
-  const compare = <T extends object>(
-    entity: Entity,
-    held: T[],
-    want: T[],
-    keyOf: (row: T) => string,
-  ) => {
-    const wanted = new Map(
-      want.map((row) => [keyOf(row), canon(row, tables[entity].get(keyOf(row))?.stamps)]),
-    )
-    const drift: string[] = []
-    for (const row of held) {
-      const key = keyOf(row)
-      if (wanted.get(key) !== canon(row, stamps.get(`${entity}\x1f${key}`))) drift.push(key)
-      wanted.delete(key)
-    }
-    return [...drift, ...wanted.keys()]
-  }
-  const drift = {
-    nodes: compare("block", nodes, folded.nodes, (row) => row.id),
-    links: compare("link", links, folded.links, linkKey),
-    views: compare("view", views, folded.views, (row) => row.id),
-  }
-  return {
-    ok: drift.nodes.length + drift.links.length + drift.views.length === 0,
-    events: log.length,
-    rows: { nodes: nodes.length, links: links.length, views: views.length },
-    drift,
-    rejected,
-  }
+  return { of, stamps, rows: { nodes, links, views } }
 }

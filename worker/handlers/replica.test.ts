@@ -192,6 +192,7 @@ describe("corpus operations over the real D1 schema", () => {
       nodes: [withSeq(nodes[0], 1), withSeq(nodes[1], 2)],
       links: [withSeq(links[0], 3)],
       views: [],
+      block_values: [],
       cursor: "3",
     })
   })
@@ -214,6 +215,7 @@ describe("corpus operations over the real D1 schema", () => {
       nodes: [withSeq({ ...nodes[1], text: "A2", updated_at: 301 }, 4)],
       links: [],
       views: [],
+      block_values: [],
       cursor: "4",
     })
   })
@@ -243,6 +245,7 @@ describe("corpus operations over the real D1 schema", () => {
       nodes: [],
       links: [],
       views: [],
+      block_values: [],
       cursor: null,
     })
   })
@@ -267,6 +270,7 @@ describe("corpus operations over the real D1 schema", () => {
       nodes: [],
       links: [],
       views: [],
+      block_values: [],
       cursor: null,
     })
   })
@@ -675,6 +679,7 @@ describe("tenant scoping — the adversarial suite", () => {
       nodes: [],
       links: [],
       views: [],
+      block_values: [],
       cursor: null,
       replica_id: "production",
     })
@@ -692,6 +697,7 @@ describe("tenant scoping — the adversarial suite", () => {
       nodes: [],
       links: [],
       views: [],
+      block_values: [],
       cursor: null,
       replica_id: "production",
     })

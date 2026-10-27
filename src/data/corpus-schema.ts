@@ -75,12 +75,16 @@ export interface CorpusMigrations {
   /** migrations/0027: a View's saved stack — required in `"columns"` mode. The
    * local store adds the same column (`LOCAL_V14_SQL`). */
   viewStack?: string
+  /** migrations/0028: the per-key event log and `block_values` — required in
+   * `"columns"` mode. The local store gets its own, single-tenant pair
+   * (`LOCAL_V15_SQL`). */
+  eventsLog?: string
 }
 
 /** Which v3 shape the ladder should produce (see the module header). */
 export type CorpusTenancy = "single" | "columns"
 
-const CORPUS_SCHEMA_VERSION = 14
+const CORPUS_SCHEMA_VERSION = 15
 
 /**
  * The single-tenant v5 step: the `views` table (migrations/0015) — the
@@ -261,6 +265,66 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '14');
 `
 
 /**
+ * The single-tenant v15 step: the per-key event log and the per-key read
+ * model of a block's props (migrations/0028, docs/event-sourcing.md,
+ * "Per-key events"). `events_log` is the device's log in the new shape —
+ * what this device did, one row per key, the push queue (`seq` NULL until
+ * placed), and everyone else's rows by the events pull; `event_seq` is the
+ * old log's seq of the event a row mirrors, the order the row cursors count
+ * in. `block_values` mirrors the replica's read model, written beside each
+ * block's cache row. The old `events` table stays as it is, unread. The
+ * cache re-pulls (`CACHE_GENERATION`, database-mode.ts): its rows must hold
+ * a stamp per key.
+ */
+const LOCAL_V15_SQL = `
+CREATE TABLE events_log (
+  id          TEXT PRIMARY KEY,
+  seq         INTEGER,
+  entity      TEXT NOT NULL CHECK (entity IN ('block', 'link', 'view')),
+  entity_id   TEXT NOT NULL,
+  action      TEXT NOT NULL CHECK (action IN ('create', 'set', 'unset', 'delete', 'restore')),
+  key         TEXT NOT NULL CHECK (
+                CASE WHEN action IN ('set', 'unset')
+                  THEN key GLOB '[A-Za-z_]*'
+                    AND key NOT GLOB '*[^A-Za-z0-9_.:-]*'
+                    AND length(key) <= 134
+                  ELSE key = ''
+                END),
+  value       TEXT NOT NULL CHECK (json_valid(value)),
+  v           INTEGER NOT NULL DEFAULT 2,
+  batch       TEXT NOT NULL,
+  device      TEXT NOT NULL,
+  cause       TEXT,
+  base_seq    INTEGER,
+  ref_seq     INTEGER,
+  at          INTEGER NOT NULL,
+  tz          INTEGER,
+  hlc         TEXT,
+  origin      TEXT,
+  actor       INTEGER,
+  received_at INTEGER,
+  event_id    TEXT,
+  event_seq   INTEGER,
+  position    INTEGER NOT NULL
+);
+CREATE INDEX events_log_unpushed ON events_log (seq, position);
+CREATE INDEX events_log_entity ON events_log (entity, entity_id);
+CREATE TABLE block_values (
+  block_id   TEXT NOT NULL,
+  key        TEXT NOT NULL CHECK (
+               key GLOB '[A-Za-z_]*'
+               AND key NOT GLOB '*[^A-Za-z0-9_.:-]*'
+               AND length(key) <= 128),
+  value      TEXT CHECK (value IS NULL OR json_valid(value)),
+  hlc        TEXT NOT NULL,
+  seq        INTEGER,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (block_id, key)
+);
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '15');
+`
+
+/**
  * The single-tenant v4 step: `notes_id` on nodes (migrations/0006) and nothing
  * else — no backfill, because the local store is a cache and re-pulls the
  * note ids the replica computed (`CACHE_GENERATION`, database-mode.ts).
@@ -284,6 +348,8 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '3');
 /** Drop everything either migration creates, so an incompatible schema can be
  * rebuilt from scratch — safe because a corpus can be re-pulled/re-pushed. */
 const RESET_SQL = `
+DROP TABLE IF EXISTS block_values;
+DROP TABLE IF EXISTS events_log;
 DROP TABLE IF EXISTS snapshots;
 DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS views;
@@ -448,6 +514,21 @@ async function applyV14(
   await driver.execScript(migrations.viewStack)
 }
 
+async function applyV15(
+  driver: SqlDriver,
+  migrations: CorpusMigrations,
+  tenancy: CorpusTenancy,
+): Promise<void> {
+  if (tenancy === "single") {
+    await driver.execScript(LOCAL_V15_SQL)
+    return
+  }
+  if (!migrations.eventsLog) {
+    throw new Error('ensureCorpusSchema: "columns" tenancy needs migrations.eventsLog (0028)')
+  }
+  await driver.execScript(migrations.eventsLog)
+}
+
 /**
  * Every local step that has shipped, by the version it leaves behind — for
  * `corpus-schema.test.ts`, which pins a hash of each. A step that has reached
@@ -467,6 +548,7 @@ export const SHIPPED_LOCAL_STEPS: Readonly<Record<number, string>> = {
   12: LOCAL_V12_SQL,
   13: LOCAL_V13_SQL,
   14: LOCAL_V14_SQL,
+  15: LOCAL_V15_SQL,
 }
 
 type Step = (
@@ -491,6 +573,7 @@ const STEPS: readonly [number, Step][] = [
   [12, (driver, _migrations, tenancy) => applyV12(driver, tenancy)],
   [13, (driver, _migrations, tenancy) => applyV13(driver, tenancy)],
   [14, applyV14],
+  [15, applyV15],
 ]
 
 /**
