@@ -72,10 +72,18 @@ The words used below:
    `note`.
 2. **Open a View.** The pane's stack becomes Root, then the View's saved
    frames, base first, with the top frame on screen (section 7). A one-frame
-   View gives Root and that frame.
+   View gives Root and that frame. The View's frames replace the stack; they
+   are not pushed on it. This is so from the sidebar and from the palette.
 3. **Root is always the base.** The pane's base frame is the Root frame, the
    list of all notes (decision 5). A note opened from search, a link or the
    calendar opens as Notes › note.
+   - **A palette pick restarts the stack.** A note, a block, a date or a
+     recent place picked in the ⌘K palette is the only frame above Root:
+     Notes › the pick. The old frames go. While the page is split, a note,
+     a block or a recent place restarts the stack of the pane with the
+     keyboard (`useOpenNote`, `src/hooks/open-note.ts`). The date item and
+     **Create new note** open the whole page on their note, so the split
+     closes. A View row in the palette opens the View's stack (rule 2).
 4. **Focus pushes a frame.** The new frame is rooted at the focused block.
    Its filter, pivots and folds are the defaults (decision 1).
 5. **Pop restores the frame below** as it was: its root, selection,
@@ -776,7 +784,8 @@ text, as today. After the name it shows the path as a hint: the roots of
 the frames below, from Notes, for example "Todos" with "Notes › Tasks", in the
 secondary colour and clipped to fit. A one-frame View has no hint. The
 palette draws the same list (`viewEntriesAtom`) with the same hint
-(`viewPathHint`, `useViewHints`).
+(`viewPathHint`, `useViewHints`). A palette View row opens the same restored stack
+(`useOpenView`).
 
 **Manage a View** in the sidebar: a right-click (or a press and hold) on its
 row opens the same menu as its ⋯ button: Rename, Move up and Move down in

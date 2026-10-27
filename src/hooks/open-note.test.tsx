@@ -14,14 +14,20 @@ import {
   goAbove,
   goTo,
   goVia,
+  layoutFromSearch,
+  layoutToSearch,
   paneOf,
   pathOfKey,
   popTo,
+  type FocusFrame,
   type FocusMove,
   type Pane,
+  type PaneLayout,
 } from "../data/panes"
+import { isRootFrame, rootFrame } from "../data/root-frame"
+import { viewMapOf, viewsAtom, type ViewRow } from "../data/views"
 import { sampleGraphAtom } from "../global-state"
-import { useBoardFocus, useOpenNote } from "./open-note"
+import { useBoardFocus, useOpenNote, useOpenView } from "./open-note"
 
 /**
  * A focus on a board block opens the board (docs/boards.md), at every way
@@ -29,11 +35,12 @@ import { useBoardFocus, useOpenNote } from "./open-note"
  * other block is focused as before.
  */
 
-const mocks = vi.hoisted(() => ({ navigate: vi.fn() }))
+const mocks = vi.hoisted(() => ({ navigate: vi.fn(), matches: [] as unknown[] }))
 vi.mock("@tanstack/react-router", async (original) => ({
   ...(await original<typeof import("@tanstack/react-router")>()),
   useNavigate: () => mocks.navigate,
-  useRouter: () => ({ state: { matches: [] } }),
+  // The page the router is on: none, or a note page (`splitPage`).
+  useRouter: () => ({ state: { matches: mocks.matches } }),
 }))
 
 Element.prototype.scrollIntoView = vi.fn()
@@ -46,6 +53,7 @@ globalThis.ResizeObserver = class {
 afterEach(() => {
   cleanup()
   mocks.navigate.mockReset()
+  mocks.matches = []
 })
 
 const PLAIN = "blk_plain00000"
@@ -65,13 +73,14 @@ const OUTLINE = [
 
 /** Note `n` with a plain block and a board block (Hall, its own `board`
  * node, with a block under it). The editor's doc and the graph agree. */
-function setup() {
+function setup(views: ViewRow[] = []) {
   const doc: BlockDoc = parse(OUTLINE)
   doc.blocks[BOARD] = { ...doc.blocks[BOARD], type: BOARD_TYPE }
   const g = docToGraph("n", serialize(parse(OUTLINE)), 1)
   const nodes = g.nodes.map((node) => (node.id === BOARD ? { ...node, type: BOARD_TYPE } : node))
   const store = createStore()
   store.set(sampleGraphAtom, buildGraphSnapshot(nodes, g.links))
+  store.set(viewsAtom, viewMapOf(views))
   const wrapper = ({ children }: { children: React.ReactNode }) => (
     <Provider store={store}>{children}</Provider>
   )
@@ -243,5 +252,122 @@ describe("the palette (useOpenNote)", () => {
       params: { _splat: "n" },
       search: { query: undefined, block: PLAIN },
     })
+  })
+})
+
+/** A View row rooted at `rootId`, with the stack it saves. */
+const viewRow = (rootId: string, stack?: string): ViewRow => ({
+  id: rootId,
+  root_id: rootId,
+  filter: null,
+  sort: null,
+  pinned: true,
+  sort_key: null,
+  updated_at: 1,
+  ...(stack ? { stack } : {}),
+})
+
+const frame = (root: string | null): FocusFrame => ({ noteId: "n", root, selected: null })
+
+/** The router on a note page with `layout` in its URL. */
+function onPage(layout: PaneLayout) {
+  const { noteId, search } = layoutToSearch(layout)
+  mocks.matches = [{ routeId: "/_appRoot/views_/$", params: { _splat: noteId }, search }]
+}
+
+/** The layout the last navigation leads to, read back as the page reads it. */
+function navigatedLayout(): PaneLayout {
+  const { params, search } = mocks.navigate.mock.lastCall![0]
+  return layoutFromSearch(params._splat, search)
+}
+
+/** Each frame of a pane, as "Root" or its root ("n" for the whole note). */
+const stackOf = (pane: Pane) =>
+  pane.frames.map((f) => (isRootFrame(f) ? "Root" : (f.root ?? f.noteId)))
+
+/** Two panes, the keyboard in the second: Root › n › Plain beside Root › Under. */
+const SPLIT: PaneLayout = {
+  panes: [
+    { frames: [rootFrame(), frame(UNDER)] },
+    { frames: [rootFrame(), frame(null), frame(PLAIN)] },
+  ],
+  active: 1,
+}
+
+describe("a palette pick restarts the stack", () => {
+  it("a note, in one pane: Root › the note, the old frames gone", () => {
+    const { wrapper } = setup()
+    onPage({ panes: [{ frames: [rootFrame(), frame(null), frame(PLAIN)] }], active: 0 })
+    const { result } = renderHook(() => useOpenNote(), { wrapper })
+    void result.current("n")
+    expect(stackOf(navigatedLayout().panes[0])).toEqual(["Root", "n"])
+  })
+
+  it("a block, in one pane: Root › the block", () => {
+    const { wrapper } = setup()
+    onPage({ panes: [{ frames: [rootFrame(), frame(null), frame(PLAIN)] }], active: 0 })
+    const { result } = renderHook(() => useOpenNote(), { wrapper })
+    void result.current("n", UNDER)
+    expect(stackOf(navigatedLayout().panes[0])).toEqual(["Root", UNDER])
+  })
+
+  it("a note, in a split: the active pane restarts, the other pane is left as it is", () => {
+    const { wrapper } = setup()
+    onPage(SPLIT)
+    const { result } = renderHook(() => useOpenNote(), { wrapper })
+    void result.current("n")
+    const layout = navigatedLayout()
+    expect(layout.panes.map(stackOf)).toEqual([
+      ["Root", UNDER],
+      ["Root", "n"],
+    ])
+    expect(layout.active).toBe(1)
+  })
+
+  it("a block, in a split: the active pane restarts on the block", () => {
+    const { wrapper } = setup()
+    onPage(SPLIT)
+    const { result } = renderHook(() => useOpenNote(), { wrapper })
+    void result.current("n", UNDER)
+    expect(navigatedLayout().panes.map(stackOf)).toEqual([
+      ["Root", UNDER],
+      ["Root", UNDER],
+    ])
+  })
+
+  it("the view on screen, in a split: the stack beneath it goes too", () => {
+    const { wrapper } = setup()
+    onPage(SPLIT)
+    const { result } = renderHook(() => useOpenNote(), { wrapper })
+    void result.current("n", PLAIN)
+    expect(stackOf(navigatedLayout().panes[1])).toEqual(["Root", PLAIN])
+  })
+
+  it("a View, in one pane: its saved stack, in place of the old frames", () => {
+    // The View "Under plain" saves the whole note beneath it.
+    const { wrapper } = setup([viewRow(UNDER, "n")])
+    onPage({ panes: [{ frames: [rootFrame(), frame(PLAIN)] }], active: 0 })
+    const { result } = renderHook(() => useOpenView(), { wrapper })
+    void result.current("n", UNDER)
+    expect(stackOf(navigatedLayout().panes[0])).toEqual(["Root", "n", UNDER])
+  })
+
+  it("a View, in a split: its saved stack in the active pane, the other pane as it is", () => {
+    const { wrapper } = setup([viewRow(UNDER, "n")])
+    onPage(SPLIT)
+    const { result } = renderHook(() => useOpenView(), { wrapper })
+    void result.current("n", UNDER)
+    expect(navigatedLayout().panes.map(stackOf)).toEqual([
+      ["Root", UNDER],
+      ["Root", "n", UNDER],
+    ])
+  })
+
+  it("a View with no saved stack opens as a note does: Root › its root", () => {
+    const { wrapper } = setup([viewRow(PLAIN)])
+    onPage({ panes: [{ frames: [rootFrame(), frame(null), frame(UNDER)] }], active: 0 })
+    const { result } = renderHook(() => useOpenView(), { wrapper })
+    void result.current("n", PLAIN)
+    expect(stackOf(navigatedLayout().panes[0])).toEqual(["Root", PLAIN])
   })
 })

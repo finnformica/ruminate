@@ -104,6 +104,8 @@ vi.mock("../global-state", async (importOriginal) => {
   }
 })
 
+import { layoutFromSearch } from "../data/panes"
+import { viewMapOf, viewsAtom } from "../data/views"
 import { recentVisitsAtom, sortedNotesAtom, viewRootsAtom } from "../global-state"
 import { CommandMenu } from "./command-menu"
 import { isCommandMenuOpenAtom, paletteRequestAtom, type PaletteRequest } from "./palette"
@@ -401,6 +403,22 @@ describe("block results", () => {
     expect(mocks.navigate).not.toHaveBeenCalledWith(expect.objectContaining({ to: "/" }))
   })
 
+  it("the date item restarts the stack: the day alone above Root, the old frames gone", async () => {
+    // On a note focused two frames deep.
+    mocks.match = { params: { _splat: "note-1" }, search: { block: "blk_gpus" } }
+    renderMenu({ open: true })
+    const input = commandsInput()
+    fireEvent.change(input, { target: { value: "tomorrow" } })
+    await waitFor(() => {
+      expect(screen.getByText("Date")).toBeTruthy()
+    })
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    fireEvent.keyDown(input, { key: "Enter" })
+    const [{ search }] = mocks.navigate.mock.lastCall!
+    // A whole search, not a patch of the old one: no `stack`, no `block`.
+    expect(search).toEqual({ query: undefined })
+  })
+
   it("no group of jumps or note actions: the palette finds notes and blocks", () => {
     renderMenu({ open: true })
     for (const label of ["Jump to", "Note actions", "Settings", "Copy note markdown"]) {
@@ -695,6 +713,34 @@ describe("note results", () => {
       params: { _splat: "journal" },
       search: { query: undefined, block: "blk_ship" },
     })
+  })
+
+  it("a View row opens the View's saved stack, in place of the stack on screen", () => {
+    // The View "nvidia" saves the heading "Semiconductors" beneath it.
+    const research = makeNote("research")
+    const nvidia = { id: "blk_nvidia", noteId: "research", text: "nvidia", note: research }
+    const { store } = renderMenu({ open: true, notes: [research], blockViews: [nvidia] })
+    store.set(
+      viewsAtom,
+      viewMapOf([
+        {
+          id: "blk_nvidia",
+          root_id: "blk_nvidia",
+          filter: null,
+          sort: null,
+          pinned: true,
+          sort_key: null,
+          updated_at: 1,
+          stack: "research:blk_semis",
+        },
+      ]),
+    )
+    fireEvent.keyDown(commandsInput(), { key: "ArrowDown" })
+    fireEvent.keyDown(editor(), { key: "Enter" })
+    const [{ params, search }] = mocks.navigate.mock.lastCall!
+    expect(search.query).toBeUndefined()
+    const frames = layoutFromSearch(params._splat, search).panes[0].frames
+    expect(frames.map((frame) => frame.root)).toEqual([null, "blk_semis", "blk_nvidia"])
   })
 
   it("a heading block view is a row like the notes beside it: body scale, no breathing room", () => {
