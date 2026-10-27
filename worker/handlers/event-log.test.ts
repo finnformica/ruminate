@@ -1177,7 +1177,7 @@ describe("the per-key log", () => {
     })
     expect(await propsOf(driver, "a")).toEqual({ align: "left", size: 40 })
     expect(
-      await driver.exec("SELECT key, value FROM block_values WHERE user_id = 111 ORDER BY key"),
+      await driver.exec("SELECT key, value FROM delta_mat_values WHERE user_id = 111 ORDER BY key"),
     ).toEqual([
       { key: "align", value: '"left"' },
       { key: "size", value: "40" },
@@ -1215,7 +1215,7 @@ describe("the per-key log", () => {
       size: 80,
     })
     const verdict = await verifyLog(alice)
-    expect(verdict).toMatchObject({ ok: true, logs: [], blockValues: [] })
+    expect(verdict).toMatchObject({ ok: true, logs: [], deltaMatValues: [] })
     // The same two edits through the old door, as whole-props patches: the
     // laptop's older patch would set no field and is dropped.
     const { driver: driver2, alice: bob } = await open()
@@ -1258,7 +1258,7 @@ describe("the per-key log", () => {
     ).toBeNull()
     expect(
       await driver.exec(
-        "SELECT key, value FROM block_values WHERE user_id = 111 AND block_id = 'a'",
+        "SELECT key, value FROM delta_mat_values WHERE user_id = 111 AND block_id = 'a'",
       ),
     ).toEqual([{ key: "size", value: null }])
     expect(await verifyLog(alice)).toMatchObject({ ok: true })
@@ -1316,7 +1316,7 @@ describe("the per-key log", () => {
     expect(await verifyLog(alice)).toMatchObject({ ok: true })
   })
 
-  it("seeds block_values once from the per-key fold, so a tenant from before the log verifies", async () => {
+  it("seeds delta_mat_values once from the per-key fold, so a tenant from before the log verifies", async () => {
     const { driver, alice } = await open()
     const w = writer()
     const ctx = { appendId: "x", actor: 111, origin: "replica" as const, client: null, now: 1 }
@@ -1336,19 +1336,19 @@ describe("the per-key log", () => {
         ),
       )
     await driver.exec("DELETE FROM events_log WHERE user_id = 111")
-    expect(await driver.exec("SELECT COUNT(*) AS n FROM block_values WHERE user_id = 111")).toEqual(
-      [{ n: 0 }],
-    )
+    expect(
+      await driver.exec("SELECT COUNT(*) AS n FROM delta_mat_values WHERE user_id = 111"),
+    ).toEqual([{ n: 0 }])
     expect(await verifyLog(alice)).toMatchObject({ ok: true, keyEvents: 10 })
     expect(
-      await driver.exec("SELECT key, value FROM block_values WHERE user_id = 111 ORDER BY key"),
+      await driver.exec("SELECT key, value FROM delta_mat_values WHERE user_id = 111 ORDER BY key"),
     ).toEqual([
       { key: "align", value: '"left"' },
       { key: "size", value: "40" },
     ])
     expect(
       await driver.exec(
-        "SELECT value FROM meta WHERE user_id = 111 AND key = 'block_values_seeded'",
+        "SELECT value FROM meta WHERE user_id = 111 AND key = 'delta_mat_values_seeded'",
       ),
     ).toHaveLength(1)
     // A later key event projects from the seeded keys.

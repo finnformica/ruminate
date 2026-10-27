@@ -6,7 +6,7 @@ import {
   propNameOf,
   propsRegister,
   propsStampOf,
-  type BlockValueRow,
+  type DeltaMatValueRow,
 } from "./key-events"
 import type { SqlStatement, SqlValue } from "./sql-driver"
 
@@ -29,7 +29,7 @@ import type { SqlStatement, SqlValue } from "./sql-driver"
  *   the live keys derive to (`derivedProps`, keys sorted), and its `props`
  *   stamp the highest of theirs. A row written with one `props` stamp and
  *   no keys (a repair, the stamp fill) reads every entry of its props at
- *   that stamp. Each key is also a row of `block_values`, the mirror of the
+ *   that stamp. Each key is also a row of `delta_mat_values`, the mirror of the
  *   replica's read model, written beside the block's row.
  * - **Created** means `stamps.alive` is there: a create (or the stamp fill)
  *   set it. An entity an update reached before its create is held with no
@@ -165,7 +165,7 @@ function stampsColumn(entity: Entity, value: AnyEntity): string {
  * answered meanwhile (`markEventsPushed`, outside the runtime's queue) may
  * have raised it — and stays NULL until an event is placed, so a row never
  * placed has no `seq`, as the read-outs agree (the first ES-4 difference).
- * A block's keys go to `block_values` beside its row.
+ * A block's keys go to `delta_mat_values` beside its row.
  */
 export function cacheRowStatements(
   entity: Entity,
@@ -214,14 +214,14 @@ export function cacheRowStatements(
       params: chunk.flatMap(rowOf),
     })
   }
-  if (entity === "block") statements.push(...blockValueStatements(entries))
+  if (entity === "block") statements.push(...deltaMatValueStatements(entries))
   return statements
 }
 
-/** The `block_values` rows of a block's registers, as the replica keeps
+/** The `delta_mat_values` rows of a block's registers, as the replica keeps
  * them: one per key, unset keys as tombstones (a NULL value with a stamp). */
-function blockValuesOf(id: string, value: AnyEntity): BlockValueRow[] {
-  const out: BlockValueRow[] = []
+function deltaMatValuesOf(id: string, value: AnyEntity): DeltaMatValueRow[] {
+  const out: DeltaMatValueRow[] = []
   for (const [name, stamp] of Object.entries(value.stamps)) {
     if (!isPropsRegister(name) || stamp === undefined) continue
     const held = value.fields[name]
@@ -240,21 +240,21 @@ function blockValuesOf(id: string, value: AnyEntity): BlockValueRow[] {
 /** Keys per statement: six columns each, well under the parameter bound. */
 const KEYS_PER_WRITE = 1_000
 
-function blockValueStatements(
+function deltaMatValueStatements(
   entries: readonly (readonly [id: string, value: AnyEntity])[],
 ): SqlStatement[] {
-  const rows = entries.flatMap(([id, value]) => blockValuesOf(id, value))
+  const rows = entries.flatMap(([id, value]) => deltaMatValuesOf(id, value))
   const statements: SqlStatement[] = []
   for (let i = 0; i < rows.length; i += KEYS_PER_WRITE) {
     const chunk = rows.slice(i, i + KEYS_PER_WRITE)
     statements.push({
       // tenant-exempt: the local store is one user per browser profile.
       sql:
-        "INSERT INTO block_values (block_id, key, value, hlc, seq, updated_at) VALUES " +
+        "INSERT INTO delta_mat_values (block_id, key, value, hlc, seq, updated_at) VALUES " +
         chunk.map(() => "(?, ?, ?, ?, ?, ?)").join(", ") +
         " ON CONFLICT (block_id, key) DO UPDATE SET value = excluded.value, " +
         "hlc = excluded.hlc, seq = NULLIF(MAX(COALESCE(excluded.seq, 0), " +
-        "COALESCE(block_values.seq, 0)), 0), updated_at = excluded.updated_at",
+        "COALESCE(delta_mat_values.seq, 0)), 0), updated_at = excluded.updated_at",
       params: chunk.flatMap((row) => [
         row.block_id,
         row.key,

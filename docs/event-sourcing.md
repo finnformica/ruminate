@@ -510,7 +510,7 @@ variable in the dashboard, with no deploy and nothing lost. Code:
 `src/data/key-events.ts` (the vocabulary, the validation, the folds,
 ops → key events, the expansion of an old event and the collapse back),
 `worker/handlers/event-log.ts` (the fill, the per-key stale check and
-projection, `block_values`, verify), `src/data/fold-cache.ts` and
+projection, `delta_mat_values`, verify), `src/data/fold-cache.ts` and
 `src/data/sql-note-store.ts` (the device's per-key log and cache),
 `migrations/0028_events_log.sql`.
 
@@ -553,11 +553,11 @@ The CHECKs hold every row to that: `json_valid(value)`, `action` one of the
 five, `entity` one of the three, and a key that matches `KEY_PATTERN` —
 letters, digits, `_`, `.`, `:` and `-`, starting with a letter or `_`, at
 most 128 long (`props.` and 128 for a props register) — or `""` on a
-liveness row. The same pattern is a CHECK on `block_values.key`.
+liveness row. The same pattern is a CHECK on `delta_mat_values.key`.
 
 ### The read model
 
-`block_values (user_id, block_id, key, value, hlc, seq, updated_at)`,
+`delta_mat_values (user_id, block_id, key, value, hlc, seq, updated_at)`,
 primary key `(user_id, block_id, key)`: one row per key of a block's props
 with its current value as JSON, or NULL for a key that was unset — the
 tombstone keeps the key's stamp, so an older set that arrives later loses
@@ -566,8 +566,8 @@ in sorted order as one JSON object, or NULL for none (`derivedProps`), so
 the ~37 readers of `props` read what they always did; comparing props is by
 value, never by string, because the two logs spell the same keys in
 different orders (`propsEqual`). The Worker seeds a tenant's rows once, from
-the per-key fold with the legacy rule (`seedBlockValues`, under the
-`block_values_seeded` meta key), on the tenant's first write or verify
+the per-key fold with the legacy rule (`seedDeltaMatValues`, under the
+`delta_mat_values_seeded` meta key), on the tenant's first write or verify
 after the deploy, so the rows are exactly the fold's.
 
 ### The rollup, per key
@@ -578,7 +578,7 @@ after the deploy, so the rows are exactly the fold's.
   `assembleStamped` give the state in the old shape, props assembled, so
   every reader of a `LogState` or a `StampedState` reads it.
 - **Projection** (`planKeyChunk`). Both logs appended, then the keys a run
-  sets upserted into `block_values` by stamp, then the rows: a block's
+  sets upserted into `delta_mat_values` by stamp, then the rows: a block's
   `props` derived from its key rows, its `props` stamp the highest of their
   stamps, its other registers by stamp as before. An entity's row takes the
   seq of the last old-shaped event that touched it. A row's `updated_at`
@@ -586,12 +586,12 @@ after the deploy, so the rows are exactly the fold's.
   as they stand after the upsert.
 - **Stale** (`staleKeyEvents`). A `set` or `unset` is dropped when the key
   it names already holds a stamp at least as high — a column's in the row's
-  `stamps`, a props key's in `block_values` — and a liveness row when
+  `stamps`, a props key's in `delta_mat_values` — and a liveness row when
   `alive` does. A key no row has set has no stamp, so any set of it lands.
   So the laptop's older alignment lands beside the phone's newer size.
 - **Under the old rollup** the old-shaped events project as they always
   have, and the stale check is the old one, per field of the event each
-  group of key rows folds to. `block_values` still takes the keys by stamp,
+  group of key rows folds to. `delta_mat_values` still takes the keys by stamp,
   so a later flip finds it current.
 
 ### Two shapes, both written
@@ -635,7 +635,7 @@ skipped (`parseStoredKeyEvent`), never thrown over.
 
 `GET /api/replica/verify` reads both logs and the whole corpus and reports
 three things: `drift`, the tables against the fold of the log the rollup
-reads (which decides `ok`); `blockValues`, the key rows against the per-key
+reads (which decides `ok`); `deltaMatValues`, the key rows against the per-key
 fold, value and stamp (also in `ok`); and `logs`, the two logs against each
 other by seq, reported only — by design the per-key log can keep a key the
 old log's whole-props patch would have lost, and such an entity is listed
@@ -649,9 +649,9 @@ The device's log is `events_log` (schema v15, `LOCAL_V15_SQL`), one row per
 key, the push queue as before (`seq` NULL until placed, `event_seq` the old
 log's seq of the event a placed row mirrors, which the rows' `seq` takes).
 Each cache row holds a stamp per register in `stamps`, a block's props keys
-among them, and `block_values` mirrors the replica's read model beside it.
+among them, and `delta_mat_values` mirrors the replica's read model beside it.
 The pull reads the per-key log (`GET /api/replica/events-log`), and the row
-pull carries `block_values` for the fold check to compare. The old `events`
+pull carries `delta_mat_values` for the fold check to compare. The old `events`
 table stays, unread. The cache re-pulls once (generation 10). The calendar
 folds the per-key log, counts the rows of one old-shaped event as one edit,
 and marks a row whose props keys changed with the keys that did.

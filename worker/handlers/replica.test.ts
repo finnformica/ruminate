@@ -192,7 +192,7 @@ describe("corpus operations over the real D1 schema", () => {
       nodes: [withSeq(nodes[0], 1), withSeq(nodes[1], 2)],
       links: [withSeq(links[0], 3)],
       views: [],
-      block_values: [],
+      delta_mat_values: [],
       cursor: "3",
     })
   })
@@ -215,7 +215,7 @@ describe("corpus operations over the real D1 schema", () => {
       nodes: [withSeq({ ...nodes[1], text: "A2", updated_at: 301 }, 4)],
       links: [],
       views: [],
-      block_values: [],
+      delta_mat_values: [],
       cursor: "4",
     })
   })
@@ -245,7 +245,7 @@ describe("corpus operations over the real D1 schema", () => {
       nodes: [],
       links: [],
       views: [],
-      block_values: [],
+      delta_mat_values: [],
       cursor: null,
     })
   })
@@ -270,7 +270,7 @@ describe("corpus operations over the real D1 schema", () => {
       nodes: [],
       links: [],
       views: [],
-      block_values: [],
+      delta_mat_values: [],
       cursor: null,
     })
   })
@@ -679,7 +679,7 @@ describe("tenant scoping — the adversarial suite", () => {
       nodes: [],
       links: [],
       views: [],
-      block_values: [],
+      delta_mat_values: [],
       cursor: null,
       replica_id: "production",
     })
@@ -697,7 +697,7 @@ describe("tenant scoping — the adversarial suite", () => {
       nodes: [],
       links: [],
       views: [],
-      block_values: [],
+      delta_mat_values: [],
       cursor: null,
       replica_id: "production",
     })
@@ -918,9 +918,9 @@ describe("tenant scoping — the adversarial suite", () => {
       })
       // The pull carries the block's keys.
       const pulled = (await (await get(env, "alice-token", "/api/replica/notes")).json()) as {
-        block_values: Record<string, unknown>[]
+        delta_mat_values: Record<string, unknown>[]
       }
-      expect(pulled.block_values).toEqual([
+      expect(pulled.delta_mat_values).toEqual([
         expect.objectContaining({ block_id: "blk_a", key: "align", value: '"left"', seq: 1 }),
       ])
       // The verify reads all three.
@@ -928,7 +928,7 @@ describe("tenant scoping — the adversarial suite", () => {
         ok: true,
         rollup: "new",
         logs: [],
-        blockValues: [],
+        deltaMatValues: [],
       })
     })
 

@@ -77,7 +77,7 @@ const PROPS_PREFIX = "props."
 /**
  * What a props key may be: a word of letters, digits, `_`, `.`, `:` and `-`,
  * starting with a letter or `_`, at most 128 long. The same pattern is a
- * CHECK on `events_log.key` and `block_values.key` (migrations/0028), spelled
+ * CHECK on `events_log.key` and `delta_mat_values.key` (migrations/0028), spelled
  * as two GLOBs there. Every key the app writes (docs/metadata.md, the figure
  * and link props) matches; an agent's key that does not is refused at write.
  */
@@ -1228,9 +1228,9 @@ export function parseStoredKeyEvent(
 // Rows the per-key fold projects to
 // -----------------------------------------------------------------------------
 
-/** One row of `block_values`: a block's key, its value (null = unset, the
+/** One row of `delta_mat_values`: a block's key, its value (null = unset, the
  * tombstone of a key), and the stamp and place of the event that set it. */
-export interface BlockValueRow {
+export interface DeltaMatValueRow {
   block_id: string
   key: string
   value: string | null

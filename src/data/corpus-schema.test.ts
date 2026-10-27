@@ -60,7 +60,7 @@ describe("the migrations that have shipped", () => {
       12: "49490fc8d460ce99",
       13: "2bed56f75635ceed",
       14: "134c78d5eee39fd1",
-      15: "a7be65cfb2a2b2b4",
+      15: "d69c8d3a054e43c4",
     }
     expect(await hashes(SHIPPED_LOCAL_STEPS), RULE).toEqual(pinned)
   })
@@ -94,7 +94,7 @@ describe("the migrations that have shipped", () => {
       "0024_event_hlc.sql": "1fb7422eeca1484c",
       "0025_projection_stamps.sql": "bfcd10e563ac2297",
       "0027_view_stack.sql": "a1ff2261695d72e0",
-      "0028_events_log.sql": "349b2c8e1a01cca3",
+      "0028_events_log.sql": "b7649809942dad65",
     }
     const files = Object.fromEntries(
       Object.entries(MIGRATION_FILES).map(([path, sql]) => [path.split("/").pop()!, sql]),

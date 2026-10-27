@@ -16,7 +16,7 @@
 import type { NoteId } from "../../src/schema"
 
 /** One row of the `nodes` table. */
-import type { BlockValueRow } from "../../src/data/key-events"
+import type { DeltaMatValueRow } from "../../src/data/key-events"
 
 export interface NodeRow {
   id: string
@@ -252,7 +252,7 @@ export interface ReplicaCorpusBody {
   /** The per-key read model of the blocks' props (migrations/0028): every
    * row on a full pull, the rows past the cursor on an incremental one.
    * Optional on the wire for the sake of older Workers. */
-  block_values?: BlockValueRow[]
+  delta_mat_values?: DeltaMatValueRow[]
   /** The replica cursor at pull time (meta `replica_cursor`); the client
    * stores it and sends it back as `?since=` on the next incremental pull. */
   cursor: string | null

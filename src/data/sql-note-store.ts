@@ -24,7 +24,7 @@ import {
   coalesceTypingKeys,
   foldKeysByStamp,
   parseStoredKeyEvent,
-  type BlockValueRow,
+  type DeltaMatValueRow,
   type KeyEvent,
   type LoggedKeyEvent,
 } from "./key-events"
@@ -52,7 +52,7 @@ export const CACHE_STAMPS_KEY = "cache_stamps"
  * per-key events of the replica's log. Each lands in one transaction:
  * appended to `events_log`, and applied to the cache rows of the entities
  * it names, register by register by stamp (`foldKeysByStamp`,
- * `fold-cache.ts`), a block's keys to `block_values` beside its row. Each
+ * `fold-cache.ts`), a block's keys to `delta_mat_values` beside its row. Each
  * row keeps the stamp of each register (`stamps`), so it is the fold of its
  * entity's events, in any order, and an event applied twice changes
  * nothing. No other row is read, and nothing is folded again: a read is an
@@ -156,7 +156,7 @@ export async function openSqlNoteStore(
         }
         statements.push({
           sql:
-            "UPDATE block_values SET seq = ?1 WHERE (seq IS NULL OR seq < ?1) AND block_id = " +
+            "UPDATE delta_mat_values SET seq = ?1 WHERE (seq IS NULL OR seq < ?1) AND block_id = " +
             "(SELECT entity_id FROM events_log WHERE id = ?2 AND entity = 'block')",
           params: [eventSeq, id],
         })
@@ -178,7 +178,7 @@ export async function openSqlNoteStore(
 
     getRowsOf: (keys) => loadRowsOf(driver, keys),
 
-    getBlockValuesOf: (ids) => loadBlockValuesOf(driver, ids),
+    getDeltaMatValuesOf: (ids) => loadDeltaMatValuesOf(driver, ids),
 
     childLinksOf: (ids) =>
       readChunked(driver, ids, LIVE_LINKS, "source_id", toLinkRow, ORDER_LINKS),
@@ -238,7 +238,7 @@ export async function openSqlNoteStore(
         // tenant-exempt: as above.
         { sql: "DELETE FROM events_log" },
         // tenant-exempt: as above.
-        { sql: "DELETE FROM block_values" },
+        { sql: "DELETE FROM delta_mat_values" },
       ])
     },
 
@@ -525,15 +525,15 @@ async function loadFoldOfLog(driver: SqlDriver, keys?: EntityKeys): Promise<Stam
   return assembleStamped(foldKeysByStamp(events))
 }
 
-/** The `block_values` rows of the named blocks (`NoteStore.getBlockValuesOf`). */
-async function loadBlockValuesOf(
+/** The `delta_mat_values` rows of the named blocks (`NoteStore.getDeltaMatValuesOf`). */
+async function loadDeltaMatValuesOf(
   driver: SqlDriver,
   ids: readonly string[],
-): Promise<BlockValueRow[]> {
-  const out: BlockValueRow[] = []
+): Promise<DeltaMatValueRow[]> {
+  const out: DeltaMatValueRow[] = []
   for (const chunk of inChunks([...new Set(ids)])) {
     const rows = await driver.exec(
-      "SELECT block_id, key, value, hlc, seq, updated_at FROM block_values WHERE block_id IN " +
+      "SELECT block_id, key, value, hlc, seq, updated_at FROM delta_mat_values WHERE block_id IN " +
         `(${chunk.map(() => "?").join(", ")})`,
       chunk,
     )

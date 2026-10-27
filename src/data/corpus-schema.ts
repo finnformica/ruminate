@@ -75,7 +75,7 @@ export interface CorpusMigrations {
   /** migrations/0027: a View's saved stack — required in `"columns"` mode. The
    * local store adds the same column (`LOCAL_V14_SQL`). */
   viewStack?: string
-  /** migrations/0028: the per-key event log and `block_values` — required in
+  /** migrations/0028: the per-key event log and `delta_mat_values` — required in
    * `"columns"` mode. The local store gets its own, single-tenant pair
    * (`LOCAL_V15_SQL`). */
   eventsLog?: string
@@ -271,7 +271,7 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '14');
  * what this device did, one row per key, the push queue (`seq` NULL until
  * placed), and everyone else's rows by the events pull; `event_seq` is the
  * old log's seq of the event a row mirrors, the order the row cursors count
- * in. `block_values` mirrors the replica's read model, written beside each
+ * in. `delta_mat_values` mirrors the replica's read model, written beside each
  * block's cache row. The old `events` table stays as it is, unread. The
  * cache re-pulls (`CACHE_GENERATION`, database-mode.ts): its rows must hold
  * a stamp per key.
@@ -309,7 +309,7 @@ CREATE TABLE events_log (
 );
 CREATE INDEX events_log_unpushed ON events_log (seq, position);
 CREATE INDEX events_log_entity ON events_log (entity, entity_id);
-CREATE TABLE block_values (
+CREATE TABLE delta_mat_values (
   block_id   TEXT NOT NULL,
   key        TEXT NOT NULL CHECK (
                key GLOB '[A-Za-z_]*'
@@ -348,7 +348,7 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '3');
 /** Drop everything either migration creates, so an incompatible schema can be
  * rebuilt from scratch — safe because a corpus can be re-pulled/re-pushed. */
 const RESET_SQL = `
-DROP TABLE IF EXISTS block_values;
+DROP TABLE IF EXISTS delta_mat_values;
 DROP TABLE IF EXISTS events_log;
 DROP TABLE IF EXISTS snapshots;
 DROP TABLE IF EXISTS events;

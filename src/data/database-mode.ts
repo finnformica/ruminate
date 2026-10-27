@@ -16,13 +16,13 @@ import {
   type EntityKeys,
   type EventContext,
 } from "./events"
-import { blockValueDifferences, foldCheckKey, foldDifferences } from "./fold-check"
+import { deltaMatValueDifferences, foldCheckKey, foldDifferences } from "./fold-check"
 import {
   coalesceTypingKeys,
   keyEventStamp,
   opsToKeyEvents,
   viewChangeToKeyEvents,
-  type BlockValueRow,
+  type DeltaMatValueRow,
   type KeyEvent,
   type LoggedKeyEvent,
 } from "./key-events"
@@ -334,9 +334,9 @@ interface DatabaseModeRuntime {
   /** The replica's rows the pulls brought since the last fold check, by key
    * (`foldCheckKey`): the check compares each with its cache row. */
   replicaRows: { nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }
-  /** The replica's `block_values` rows the pulls brought since the last
+  /** The replica's `delta_mat_values` rows the pulls brought since the last
    * fold check: compared with the cache's. */
-  replicaValues: BlockValueRow[]
+  replicaValues: DeltaMatValueRow[]
 }
 
 let runtime: DatabaseModeRuntime | null = null
@@ -841,7 +841,7 @@ function holdReplicaRows(activation: DatabaseModeRuntime, body: ReplicaChangesBo
   held.nodes.push(...body.nodes)
   held.links.push(...body.links)
   held.views.push(...body.views)
-  activation.replicaValues.push(...(body.block_values ?? []))
+  activation.replicaValues.push(...(body.delta_mat_values ?? []))
 }
 
 /** Queue a fold check of what batches touched, at most one per
@@ -914,7 +914,7 @@ async function checkFold(activation: DatabaseModeRuntime) {
       }
       const [cached, cachedValues, unpushed, cursor] = await Promise.all([
         store.getRowsOf(replicaKeys),
-        store.getBlockValuesOf([...new Set(pulledValues.map((row) => row.block_id))]),
+        store.getDeltaMatValuesOf([...new Set(pulledValues.map((row) => row.block_id))]),
         store.unpushedEvents(),
         store.getMeta(PULL_CURSOR_KEY),
       ])
@@ -935,7 +935,7 @@ async function checkFold(activation: DatabaseModeRuntime) {
       found.push(...[...differences.values()].map((line) => `replica ${line}`))
       // The replica's key rows against the cache's, for the blocks it brought.
       const broughtBlocks = new Set(pulledValues.map((row) => row.block_id))
-      const valueDifferences = blockValueDifferences(
+      const valueDifferences = deltaMatValueDifferences(
         cachedValues.filter((row) => broughtBlocks.has(row.block_id)),
         pulledValues,
         REPLICA_SIDES,

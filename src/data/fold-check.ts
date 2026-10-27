@@ -1,6 +1,6 @@
 import type { LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
 import { linkEntityId, type Entity } from "./events"
-import { canonicalJson, propsEqual, type BlockValueRow } from "./key-events"
+import { canonicalJson, propsEqual, type DeltaMatValueRow } from "./key-events"
 
 /**
  * The fold check (docs/event-only-sync.md, "The cache"): the client's tables
@@ -46,26 +46,26 @@ function differingFields(fold: object, tables: object): string[] {
 }
 
 /**
- * Where two sets of `block_values` rows differ, one line per (block, key):
+ * Where two sets of `delta_mat_values` rows differ, one line per (block, key):
  * `block blk_1 align: value`. A row's value is compared as JSON, its stamp
  * as is; `seq` and `updated_at` are not compared (`IGNORED`, and the
  * writer's clock). `skip` leaves out a block the check cannot judge yet.
  */
-export function blockValueDifferences(
-  first: readonly BlockValueRow[],
-  second: readonly BlockValueRow[],
+export function deltaMatValueDifferences(
+  first: readonly DeltaMatValueRow[],
+  second: readonly DeltaMatValueRow[],
   sides: FoldCheckSides,
   skip: (entity: Entity, id: string) => boolean = () => false,
 ): Map<string, string> {
   const out = new Map<string, string>()
-  const keyOf = (row: BlockValueRow) => `${row.block_id} ${row.key}`
-  const byKey = (rows: readonly BlockValueRow[]) => new Map(rows.map((row) => [keyOf(row), row]))
+  const keyOf = (row: DeltaMatValueRow) => `${row.block_id} ${row.key}`
+  const byKey = (rows: readonly DeltaMatValueRow[]) => new Map(rows.map((row) => [keyOf(row), row]))
   const a = byKey(first)
   const b = byKey(second)
-  const valueOf = (row: BlockValueRow) =>
+  const valueOf = (row: DeltaMatValueRow) =>
     row.value === null ? "" : canonicalJson(JSON.parse(row.value) as unknown)
   for (const key of new Set([...a.keys(), ...b.keys()])) {
-    const row = a.get(key) ?? (b.get(key) as BlockValueRow)
+    const row = a.get(key) ?? (b.get(key) as DeltaMatValueRow)
     if (skip("block", row.block_id)) continue
     const label = `block ${key}`
     const x = a.get(key)

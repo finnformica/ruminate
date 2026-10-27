@@ -24,7 +24,7 @@ import type { TenantDb } from "../tenancy-db"
 import { appendClientEvents, appendClientKeyEvents, writeRows } from "./event-log"
 import type { EventsPutPayload, EventsPutResult } from "../../src/data/events"
 import type {
-  BlockValueRow,
+  DeltaMatValueRow,
   KeyEventsPutPayload,
   KeyEventsPutResult,
 } from "../../src/data/key-events"
@@ -86,16 +86,22 @@ export async function corpusPullFull(tenant: TenantDb): Promise<ReplicaCorpusBod
         "WHERE user_id = :tenant /* includes-deleted: replication carries tombstones */",
     )
   ).map(toViewRow)
-  const blockValues = (
+  const deltaMatValues = (
     await all.exec(
-      "SELECT block_id, key, value, hlc, seq, updated_at FROM block_values WHERE user_id = :tenant",
+      "SELECT block_id, key, value, hlc, seq, updated_at FROM delta_mat_values WHERE user_id = :tenant",
     )
-  ).map(toBlockValueRow)
-  return { nodes, links, views, block_values: blockValues, cursor: cursorOf(nodes, links, views) }
+  ).map(toDeltaMatValueRow)
+  return {
+    nodes,
+    links,
+    views,
+    delta_mat_values: deltaMatValues,
+    cursor: cursorOf(nodes, links, views),
+  }
 }
 
-/** One `block_values` row as the wire carries it. */
-const toBlockValueRow = (row: Record<string, unknown>): BlockValueRow => ({
+/** One `delta_mat_values` row as the wire carries it. */
+const toDeltaMatValueRow = (row: Record<string, unknown>): DeltaMatValueRow => ({
   block_id: String(row.block_id),
   key: String(row.key),
   value: row.value === null ? null : String(row.value),
@@ -158,14 +164,20 @@ export async function corpusPullSince(
   ).map(toViewRow)
   // The key rows of the blocks pulled: a block's `seq` is its last event's,
   // and so is each of its keys' at most, so the same cursor bounds both.
-  const blockValues = (
+  const deltaMatValues = (
     await all.exec(
-      "SELECT block_id, key, value, hlc, seq, updated_at FROM block_values " +
+      "SELECT block_id, key, value, hlc, seq, updated_at FROM delta_mat_values " +
         "WHERE user_id = :tenant AND seq > ?1",
       [since],
     )
-  ).map(toBlockValueRow)
-  return { nodes, links, views, block_values: blockValues, cursor: cursorOf(nodes, links, views) }
+  ).map(toDeltaMatValueRow)
+  return {
+    nodes,
+    links,
+    views,
+    delta_mat_values: deltaMatValues,
+    cursor: cursorOf(nodes, links, views),
+  }
 }
 
 /**

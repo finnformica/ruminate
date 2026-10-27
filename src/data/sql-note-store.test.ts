@@ -17,7 +17,7 @@ import type { ViewRow } from "./views"
 
 /** Undo the v13 step on a current store, to build an older one by hand. */
 /** What step v15 adds, taken away: a store as it was at v14. */
-const UNDO_V15 = "DROP TABLE events_log; DROP TABLE block_values;"
+const UNDO_V15 = "DROP TABLE events_log; DROP TABLE delta_mat_values;"
 /** What step v14 adds, taken away: a store as it was at v13. */
 const UNDO_V14 = UNDO_V15 + "ALTER TABLE views DROP COLUMN stack;"
 const UNDO_V13 =
@@ -222,7 +222,7 @@ describe("openSqlNoteStore", () => {
       // The v1 tables are gone and v5's `views` and v9's `events` are there —
       // the ladder ran to the top, not just to 0002.
     ).toEqual([
-      { name: "block_values" },
+      { name: "delta_mat_values" },
       { name: "events" },
       { name: "events_log" },
       { name: "link" },

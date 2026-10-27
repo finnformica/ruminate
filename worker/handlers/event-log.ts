@@ -129,7 +129,7 @@ interface AppendContext {
 /**
  * Which log the rollup reads (docs/event-sourcing.md, "Per-key events"):
  * `new`, the per-key `events_log`, projects each block's props key by key
- * and derives `nodes.props` from `block_values`; `old` projects the old
+ * and derives `nodes.props` from `delta_mat_values`; `old` projects the old
  * `events` as before. Both logs are written either way, so a revert is a
  * flip of `EVENT_LOG_ROLLUP` in the dashboard, no deploy. The Worker sets
  * it from the environment on every request (`setEventLogRollup`,
@@ -822,7 +822,7 @@ async function heldSeqs(
  * (`stamps`, by `<entity>\x1f<id>`; null on a row from before 0025). */
 interface HeldRows extends CurrentRows {
   stamps: Map<string, Record<string, string> | null>
-  /** The stamp `block_values` holds for each (block, key) the write names,
+  /** The stamp `delta_mat_values` holds for each (block, key) the write names,
    * by `<block id>\x1f<key>`: what a per-key event is stale against. */
   keyStamps: Map<string, string>
 }
@@ -861,7 +861,7 @@ async function readCurrent(tenant: TenantDb, write: RowWrite): Promise<HeldRows>
     }
     const keyRows = await all.exec(
       "SELECT b.block_id, b.key, b.hlc FROM json_each(?1) AS j " +
-        "JOIN block_values b ON b.user_id = :tenant AND b.block_id = j.value",
+        "JOIN delta_mat_values b ON b.user_id = :tenant AND b.block_id = j.value",
       [JSON.stringify(nodeIds)],
     )
     for (const raw of keyRows) {
@@ -1157,13 +1157,13 @@ export interface LogVerdict {
   rollup: Rollup
   events: number
   keyEvents: number
-  rows: { nodes: number; links: number; views: number; blockValues: number }
+  rows: { nodes: number; links: number; views: number; deltaMatValues: number }
   /** Rows the fold of the log in force and the tables disagree about, by
    * table. A healthy log has none. */
   drift: { nodes: string[]; links: string[]; views: string[] }
-  /** `block_values` against the per-key fold: the (block, key) pairs that
+  /** `delta_mat_values` against the per-key fold: the (block, key) pairs that
    * differ, as `<block id> <key>`. */
-  blockValues: string[]
+  deltaMatValues: string[]
   /**
    * The two logs against each other, each folded by seq: the entities whose
    * rows differ. By design the per-key log can keep a key the old log's
@@ -1291,7 +1291,7 @@ const canonStamps = (stamps: Record<string, string> | null) =>
  *
  * Three checks (docs/event-sourcing.md, "Per-key events"): the tables
  * against the fold of the log the rollup reads (`drift`, which decides
- * `ok`); `block_values` against the per-key fold (`blockValues`, also in
+ * `ok`); `delta_mat_values` against the per-key fold (`deltaMatValues`, also in
  * `ok`); and the two logs against each other, by seq (`logs`, reported
  * only). A block's `props` is compared as a value, not as a string: the two
  * folds spell the same keys in different orders. Under the new rollup the
@@ -1301,7 +1301,7 @@ const canonStamps = (stamps: Record<string, string> | null) =>
 export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
   await reconcileLog(tenant)
   const seedCtx = appendContext({ actor: tenant.userId, origin: "system" })
-  await seedBlockValues(tenant, seedCtx)
+  await seedDeltaMatValues(tenant, seedCtx)
   const all = tenant.includingDeleted()
   const log = await readLog(tenant)
   const keyLog = await readKeyLog(tenant)
@@ -1310,7 +1310,7 @@ export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
   const { stamps } = legacy
   const linkKey = (row: LinkRow) => linkEntityId(row.source_id, row.destination_id, row.kind)
   const valueRows = await all.exec(
-    "SELECT block_id, key, value, hlc FROM block_values WHERE user_id = :tenant",
+    "SELECT block_id, key, value, hlc FROM delta_mat_values WHERE user_id = :tenant",
   )
 
   const byKeys = projectKeyLog(keyLog, legacy.of)
@@ -1356,7 +1356,7 @@ export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
     views: compare("view", views, folded.views, (row) => row.id),
   }
 
-  // block_values against the per-key fold: every created block's keys.
+  // delta_mat_values against the per-key fold: every created block's keys.
   const wantedValues = new Map<string, string>()
   for (const [id, block] of byKeys.tables.block) {
     for (const [register, stamp] of Object.entries(block.stamps ?? {})) {
@@ -1368,14 +1368,14 @@ export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
       )
     }
   }
-  const blockValues: string[] = []
+  const deltaMatValues: string[] = []
   for (const raw of valueRows) {
     const key = `${String(raw.block_id)} ${String(raw.key)}`
     const value = raw.value === null ? "" : canonicalJson(JSON.parse(String(raw.value)))
-    if (wantedValues.get(key) !== `${value}@${String(raw.hlc)}`) blockValues.push(key)
+    if (wantedValues.get(key) !== `${value}@${String(raw.hlc)}`) deltaMatValues.push(key)
     wantedValues.delete(key)
   }
-  blockValues.push(...wantedValues.keys())
+  deltaMatValues.push(...wantedValues.keys())
 
   // The two logs against each other, by seq.
   const oldRows = projectRows(fold(log))
@@ -1411,7 +1411,7 @@ export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
   return {
     ok:
       drift.nodes.length + drift.links.length + drift.views.length === 0 &&
-      blockValues.length === 0,
+      deltaMatValues.length === 0,
     rollup,
     events: log.length,
     keyEvents: keyLog.length,
@@ -1419,10 +1419,10 @@ export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
       nodes: nodes.length,
       links: links.length,
       views: views.length,
-      blockValues: valueRows.length,
+      deltaMatValues: valueRows.length,
     },
     drift,
-    blockValues,
+    deltaMatValues,
     logs,
     rejected: rollup === "new" ? byKeys.rejected : bySeq.rejected,
   }
@@ -1442,7 +1442,7 @@ const keyGlob = (k: string) => `${k} ${KEY_GLOB.replaceAll("{k}", k)}`
  * and run in every write's batch after the reconcile, so a snapshot and a
  * straggler the old Worker appended during a rollout are both read per key
  * before anything projects. `expandEvent` is the same reading in TypeScript;
- * `event-log.test.ts` pins the two together. Then `block_values` takes the
+ * `event-log.test.ts` pins the two together. Then `delta_mat_values` takes the
  * filled props keys by stamp, so a block's keys are current whichever door
  * its events came through.
  */
@@ -1505,7 +1505,7 @@ export function planLogFill(ctx: { now: number; appendId: string }): SqlStatemen
     {
       // The filled props keys, into the read model by stamp, in seq order so
       // two fills of one key in this batch land the later one.
-      sql: filledKeysUpsert("l.batch <> 'snapshot'", "WHERE excluded.hlc > block_values.hlc"),
+      sql: filledKeysUpsert("l.batch <> 'snapshot'", "WHERE excluded.hlc > delta_mat_values.hlc"),
       params: [ctx.appendId],
     },
     {
@@ -1521,7 +1521,7 @@ export function planLogFill(ctx: { now: number; appendId: string }): SqlStatemen
 /** The upsert of the props keys the fill of this append read, by stamp or
  * unconditionally (`when`), for the rows `only` selects. */
 const filledKeysUpsert = (only: string, when: string) =>
-  "INSERT INTO block_values (user_id, block_id, key, value, hlc, seq, updated_at) " +
+  "INSERT INTO delta_mat_values (user_id, block_id, key, value, hlc, seq, updated_at) " +
   "SELECT :tenant, l.entity_id, substr(l.key, 7), " +
   "CASE WHEN l.action = 'set' THEN l.value END, " +
   `COALESCE(l.hlc, ${derivedStamp("l.at", "COALESCE(l.event_seq, 0)")}), ` +
@@ -1670,16 +1670,16 @@ const createdKeyStamps = (entity: Entity) =>
  * NULL for none — `derivedProps` in SQL. */
 const propsFromKeys = (blockId: string) =>
   "(SELECT NULLIF(json_group_object(b.key, json(b.value)), '{}') FROM (SELECT key, value " +
-  `FROM block_values WHERE user_id = :tenant AND block_id = ${blockId} AND value IS NOT NULL ` +
+  `FROM delta_mat_values WHERE user_id = :tenant AND block_id = ${blockId} AND value IS NOT NULL ` +
   "ORDER BY key) AS b)"
 /** The stamp of a block's props register: the highest of its keys'. */
 const propsStampFromKeys = (blockId: string) =>
-  `(SELECT MAX(hlc) FROM block_values WHERE user_id = :tenant AND block_id = ${blockId})`
+  `(SELECT MAX(hlc) FROM delta_mat_values WHERE user_id = :tenant AND block_id = ${blockId})`
 
 /** The upsert of a run's key winners (`KeyWinner[]` as `?1`) into
- * `block_values`, by stamp, for the events this append inserted. */
+ * `delta_mat_values`, by stamp, for the events this append inserted. */
 const KEY_WINNERS_UPSERT =
-  "INSERT INTO block_values (user_id, block_id, key, value, hlc, seq, updated_at) " +
+  "INSERT INTO delta_mat_values (user_id, block_id, key, value, hlc, seq, updated_at) " +
   "SELECT :tenant, json_extract(j.value, '$.block'), json_extract(j.value, '$.key'), " +
   `json_extract(j.value, '$.value'), ${winnerStamp("j.value", "$")}, ` +
   "(SELECT e.seq FROM events e WHERE e.user_id = :tenant " +
@@ -1688,14 +1688,14 @@ const KEY_WINNERS_UPSERT =
   "AND e.id = json_extract(j.value, '$.event') AND e.append = ?2) " +
   "ON CONFLICT (user_id, block_id, key) DO UPDATE SET value = excluded.value, " +
   "hlc = excluded.hlc, seq = excluded.seq, updated_at = excluded.updated_at " +
-  "WHERE excluded.hlc > block_values.hlc"
+  "WHERE excluded.hlc > delta_mat_values.hlc"
 
 /** The block registers that resolve from the row itself under the new rollup. */
 const BLOCK_COLUMNS = ["type", "text", "notes_id"] as const
 
 /**
  * The new rollup's projection of a chunk of key events: both logs appended,
- * `block_values` upserted key by key by stamp, then the rows — a block's
+ * `delta_mat_values` upserted key by key by stamp, then the rows — a block's
  * `props` derived from its key rows, its other registers by stamp as before.
  */
 function planKeyChunk(
@@ -1753,7 +1753,7 @@ function planKeyChunk(
       params: [JSON.stringify(events), ctx.now, ctx.appendId, ctx.actor, ctx.origin, ctx.client],
     },
 
-    // Keys → block_values, by stamp
+    // Keys → delta_mat_values, by stamp
     {
       sql: KEY_WINNERS_UPSERT,
       params: params(JSON.stringify(keyWinners)),
@@ -1884,7 +1884,7 @@ function chunksByGroup(
 /**
  * Plan one append of key events and the old-shaped events they fold to:
  * both logs, then the projection the rollup reads. Under the old rollup the
- * old events project as they always have (`planChunk`), and `block_values`
+ * old events project as they always have (`planChunk`), and `delta_mat_values`
  * still takes the keys by stamp, so a later flip finds it current. Chunked
  * under D1's bound-value cap like `planEventAppend`.
  */
@@ -1945,12 +1945,12 @@ export function planKeyAppend(
   })
 }
 
-/** The `meta` key that says a tenant's `block_values` were seeded. */
-const BLOCK_VALUES_SEEDED = "block_values_seeded"
+/** The `meta` key that says a tenant's `delta_mat_values` were seeded. */
+const DELTA_MAT_VALUES_SEEDED = "delta_mat_values_seeded"
 
 /**
  * Land key events: fold them to the old shape against the rows held
- * (`collapseKeyEvents`), reconcile and fill, seed `block_values` the first
+ * (`collapseKeyEvents`), reconcile and fill, seed `delta_mat_values` the first
  * time, then append both logs and project — one atomic batch for the
  * append; the seed, once per tenant, reads the log first and so takes a
  * batch of its own ahead of it.
@@ -1969,7 +1969,7 @@ async function appendKeyEvents(
     propsMapOfRow(held.nodes.get(id)),
   )
   const mirrored = events.map((event) => ({ ...event, event: eventOf.get(event.id) }))
-  const seeded = await seedBlockValues(tenant, append)
+  const seeded = await seedDeltaMatValues(tenant, append)
   const statements = [
     ...(seeded ? [] : planReconcile(append)),
     ...(seeded ? [] : planLogFill(append)),
@@ -1980,15 +1980,15 @@ async function appendKeyEvents(
 }
 
 /**
- * Seed a tenant's `block_values` once, from the per-key fold with the
+ * Seed a tenant's `delta_mat_values` once, from the per-key fold with the
  * legacy rule (`projectKeyLog`): exactly the rows `verify` expects. Runs the
  * reconcile and the fill first, in a batch of their own, so the fold reads
  * every event there is. Returns whether it ran (the caller's batch then
  * needs no reconcile of its own).
  */
-async function seedBlockValues(tenant: TenantDb, ctx: AppendContext): Promise<boolean> {
+async function seedDeltaMatValues(tenant: TenantDb, ctx: AppendContext): Promise<boolean> {
   const [flag] = await tenant.exec(
-    `SELECT value FROM meta WHERE user_id = :tenant AND key = '${BLOCK_VALUES_SEEDED}'`,
+    `SELECT value FROM meta WHERE user_id = :tenant AND key = '${DELTA_MAT_VALUES_SEEDED}'`,
   )
   if (flag) return false
   const all = tenant.includingDeleted()
@@ -2016,7 +2016,7 @@ async function seedBlockValues(tenant: TenantDb, ctx: AppendContext): Promise<bo
   for (let i = 0; i < rows.length; i += ROWS) {
     statements.push({
       sql:
-        "INSERT INTO block_values (user_id, block_id, key, value, hlc, seq, updated_at) " +
+        "INSERT INTO delta_mat_values (user_id, block_id, key, value, hlc, seq, updated_at) " +
         "SELECT :tenant, json_extract(j.value, '$.block'), json_extract(j.value, '$.key'), " +
         "json_extract(j.value, '$.value'), json_extract(j.value, '$.stamp'), " +
         "json_extract(j.value, '$.seq'), json_extract(j.value, '$.at') " +
@@ -2030,7 +2030,7 @@ async function seedBlockValues(tenant: TenantDb, ctx: AppendContext): Promise<bo
     sql:
       "INSERT INTO meta (user_id, key, value) VALUES (:tenant, ?1, ?2) " +
       "ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value",
-    params: [BLOCK_VALUES_SEEDED, String(ctx.now)],
+    params: [DELTA_MAT_VALUES_SEEDED, String(ctx.now)],
   })
   await all.batch(statements)
   return true
@@ -2040,7 +2040,7 @@ async function seedBlockValues(tenant: TenantDb, ctx: AppendContext): Promise<bo
  * Which key events a push lands, by stamp per key (`staleEvents`, per key):
  * a `set` or `unset` is stale when the key it names already holds a stamp
  * at least as high — a column's in the row's `stamps`, a props key's in
- * `block_values` — and a liveness row when `alive` does. A key no row has
+ * `delta_mat_values` — and a liveness row when `alive` does. A key no row has
  * been set on has no stamp, so any set of it lands.
  */
 function staleKeyEvents(current: HeldRows, events: readonly KeyEvent[]): Set<KeyEvent> {
@@ -2220,7 +2220,7 @@ async function readKeyLog(
  * column, a `props.<name>`, with null for an unset key — and its stamp. */
 interface KeyProjection extends Projection {
   /** The old log's seq and the writer's clock of the event that last set
-   * each register, for `block_values`. */
+   * each register, for `delta_mat_values`. */
   keySeq: Record<string, number>
   keyAt: Record<string, number>
 }

@@ -1,7 +1,7 @@
 import type { GraphDiff, LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
 import type { EntityKeys, StampedState } from "./events"
 import type { GraphSnapshot } from "./graph"
-import type { BlockValueRow, KeyEvent, LoggedKeyEvent } from "./key-events"
+import type { DeltaMatValueRow, KeyEvent, LoggedKeyEvent } from "./key-events"
 
 /**
  * The storage contract behind the `src/data` seam: a row store for the
@@ -72,9 +72,9 @@ export interface NoteStore {
   /** The cache rows of the named entities, tombstones too: what the replica's
    * pulled rows are compared with. */
   getRowsOf(keys: EntityKeys): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }>
-  /** The `block_values` rows of the named blocks: what the replica's pulled
+  /** The `delta_mat_values` rows of the named blocks: what the replica's pulled
    * key rows are compared with. */
-  getBlockValuesOf(ids: readonly string[]): Promise<BlockValueRow[]>
+  getDeltaMatValuesOf(ids: readonly string[]): Promise<DeltaMatValueRow[]>
   /** The lazy reads of the walk (docs/event-only-sync.md, "Lazy reads"):
    * the live child links of the named nodes, by `link_source`, in sibling
    * order; the live child links into them, by `link_destination` (an up

@@ -37,7 +37,7 @@
 -- that does not match the pattern is left out rather than fail the
 -- migration; `GET /api/replica/verify` reports the block it was on.
 --
--- ## block_values
+-- ## delta_mat_values
 --
 -- The per-key read model of a block's props: one row per (block, key) with
 -- the key's current value as JSON, or NULL for a key that was unset (the
@@ -46,7 +46,7 @@
 -- the old log's seq and the writer's clock of that event. `nodes.props` is
 -- derived from these rows under the new rollup. No backfill here: the
 -- Worker seeds a tenant's rows once, from the per-key fold, on its first
--- write or verify (`seedBlockValues`), so the rows are exactly the fold's.
+-- write or verify (`seedDeltaMatValues`), so the rows are exactly the fold's.
 
 CREATE TABLE events_log (
   user_id     INTEGER NOT NULL,
@@ -98,7 +98,7 @@ BEGIN
   SELECT RAISE(ABORT, 'events_log is append-only');
 END;
 
-CREATE TABLE block_values (
+CREATE TABLE delta_mat_values (
   user_id    INTEGER NOT NULL,
   block_id   TEXT NOT NULL,
   key        TEXT NOT NULL CHECK (
@@ -112,7 +112,7 @@ CREATE TABLE block_values (
   PRIMARY KEY (user_id, block_id, key)
 );
 
-CREATE INDEX block_values_seq ON block_values (user_id, seq);
+CREATE INDEX delta_mat_values_seq ON delta_mat_values (user_id, seq);
 
 -- The backfill: every `events` row that `events_log` does not mirror yet,
 -- read per key. The same statement, scoped to one tenant, is `planLogFill`.
