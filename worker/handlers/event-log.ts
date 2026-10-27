@@ -140,7 +140,6 @@ let rollup: Rollup = "new"
 export function setEventLogRollup(value: Rollup): void {
   rollup = value
 }
-export const eventLogRollup = (): Rollup => rollup
 export const rollupOf = (env: { EVENT_LOG_ROLLUP?: string }): Rollup =>
   env.EVENT_LOG_ROLLUP === "old" ? "old" : "new"
 
@@ -1855,7 +1854,7 @@ function planKeyChunk(
  * still takes the keys by stamp, so a later flip finds it current. Chunked
  * under D1's bound-value cap like `planEventAppend`.
  */
-export function planKeyAppend(
+function planKeyAppend(
   events: readonly KeyEvent[],
   old: readonly RuminateEvent[],
   eventOf: ReadonlyMap<string, string>,
@@ -2203,7 +2202,7 @@ interface KeyProjection extends Projection {
  * stamp the row's last legacy event derives. A row's `seq` and `at` are
  * the old log's, as the tables hold them.
  */
-export function projectKeyLog(
+function projectKeyLog(
   log: readonly StoredKeyEvent[],
   legacyOf: (entity: Entity, id: string) => number,
 ): { tables: Record<Entity, Map<string, KeyProjection>>; rejected: number } {

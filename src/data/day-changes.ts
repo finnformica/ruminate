@@ -442,7 +442,7 @@ function noteChange(
 
 /** The props keys whose value differs between two blocks, sorted: what a
  * changed row names when its words did not change (`DiffMark`, `keys`). */
-export function changedKeys(
+function changedKeys(
   before: Readonly<Record<string, unknown>> | null,
   after: Readonly<Record<string, unknown>> | null,
 ): string[] {

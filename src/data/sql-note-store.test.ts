@@ -401,7 +401,7 @@ describe("openSqlNoteStore", () => {
         '\'{"type":"paragraph","text":"queued","props":null,"notes_id":null}\', ' +
         "1, 'b1', 'd1', 100, 1);",
     )
-    const store = await openSqlNoteStore(driver)
+    await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
       { value: "15" },
     ])

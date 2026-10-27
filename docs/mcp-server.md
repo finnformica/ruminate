@@ -115,7 +115,11 @@ An agent works in the notes you already have: there is no tool to create one.
 `read_note`, `get_block` and the traversal tools hand back **the stored row**: id, `type`
 (`ul`, `h1`, `todo`…), marker-free `text`, the `props` object, `childIds`, `updatedAt`.
 The writers take the same shape — `create_blocks` takes `{ text, type?, props?, children? }`,
-`update_block` takes fields.
+`update_block` takes fields. For metadata it takes `props` (the whole
+object, replaced) or `set_props` and `unset_props` (keys to set, merged into
+what the block holds, and keys to remove): the per-key form is the cheap
+one, and the only keys named become events (docs/event-sourcing.md,
+"Per-key events").
 
 Markdown appears nowhere in this API, in either direction. That matches the app, where
 the graph is truth and markdown is an import/export format at the edges

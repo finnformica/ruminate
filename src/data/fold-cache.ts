@@ -220,7 +220,7 @@ export function cacheRowStatements(
 
 /** The `block_values` rows of a block's registers, as the replica keeps
  * them: one per key, unset keys as tombstones (a NULL value with a stamp). */
-export function blockValuesOf(id: string, value: AnyEntity): BlockValueRow[] {
+function blockValuesOf(id: string, value: AnyEntity): BlockValueRow[] {
   const out: BlockValueRow[] = []
   for (const [name, stamp] of Object.entries(value.stamps)) {
     if (!isPropsRegister(name) || stamp === undefined) continue

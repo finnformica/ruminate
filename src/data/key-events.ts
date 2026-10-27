@@ -69,10 +69,10 @@ import type { Op } from "./ops"
 /** The shape per-key events are written in; the old log writes `1`. */
 export const KEY_EVENT_VERSION = 2
 
-export type KeyAction = "create" | "set" | "unset" | "delete" | "restore"
+type KeyAction = "create" | "set" | "unset" | "delete" | "restore"
 
 /** The register a props entry lives in: `props.<name>`. */
-export const PROPS_PREFIX = "props."
+const PROPS_PREFIX = "props."
 
 /**
  * What a props key may be: a word of letters, digits, `_`, `.`, `:` and `-`,
@@ -85,7 +85,7 @@ export const KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$/
 
 /** The registers of each entity that are columns of its row. A block's
  * other registers are its `props.*` keys. */
-export const COLUMN_REGISTERS: Record<Entity, readonly string[]> = {
+const COLUMN_REGISTERS: Record<Entity, readonly string[]> = {
   block: ["type", "text", "notes_id"],
   link: ["source_id", "destination_id", "kind", "sort_key"],
   view: ["root_id", "filter", "sort", "pinned", "sort_key", "stack"],
@@ -679,24 +679,6 @@ export function assembleStamped(state: StampedState): StampedState {
 // Ops → key events (the client's write path)
 // -----------------------------------------------------------------------------
 
-/** The entities a batch of key events names, by kind. */
-export function entitiesOf(events: readonly KeyEvent[]): {
-  blocks: Set<string>
-  links: Set<string>
-  views: Set<string>
-} {
-  const keys = { blocks: new Set<string>(), links: new Set<string>(), views: new Set<string>() }
-  for (const event of events) {
-    ;(event.entity === "block"
-      ? keys.blocks
-      : event.entity === "link"
-        ? keys.links
-        : keys.views
-    ).add(event.entity_id)
-  }
-  return keys
-}
-
 /**
  * The key events a batch of ops amounts to, against the snapshot it was
  * planned on (`opsToEvents`, per key). A block's `set*` ops fold into the
@@ -907,7 +889,7 @@ const nullableInteger = z.int().nullable()
  * writes it in (`src/blocks/figure.ts`, `image.ts`, `link.ts`, the note's
  * metadata in docs/metadata.md). Other keys are allowed with any JSON
  * value, held to `KEY_PATTERN`. */
-export const BLOCK_PROP_SCHEMAS = {
+const BLOCK_PROP_SCHEMAS = {
   note: z.object({
     title: z.string().optional(),
     font: z.string().optional(),
@@ -1027,7 +1009,7 @@ const liveness = { key: z.literal(""), value: z.int().nullable() }
 
 /** The schema of one key event: the envelope, and by action what key and
  * value it may carry, the value held to the register's shape. */
-export const keyEventSchema = envelopeSchema
+const keyEventSchema = envelopeSchema
   .and(
     z.discriminatedUnion("action", [
       z.object({ action: z.literal("create"), ...liveness }),
@@ -1255,26 +1237,4 @@ export interface BlockValueRow {
   hlc: string
   seq?: number
   updated_at: number
-}
-
-/** The `block_values` rows a per-key state holds: one per `props.*`
- * register of every created block, unset keys too. */
-export function blockValueRows(state: StampedState): BlockValueRow[] {
-  const out: BlockValueRow[] = []
-  for (const [id, block] of state.blocks as unknown as Map<string, AnyStamped>) {
-    if (!block.created) continue
-    for (const [key, stamp] of Object.entries(block.stamps)) {
-      if (!isPropsRegister(key) || stamp === undefined) continue
-      const value = block.fields[key]
-      out.push({
-        block_id: id,
-        key: propNameOf(key),
-        value: value === null || value === undefined ? null : JSON.stringify(value),
-        hlc: stamp,
-        ...(block.seq > 0 ? { seq: block.seq } : {}),
-        updated_at: block.at,
-      })
-    }
-  }
-  return out
 }

@@ -840,6 +840,54 @@ describe("create_blocks", () => {
     expect(task.props).toEqual({ flagged: true })
   })
 
+  it("update_block changes one metadata key at a time with set_props and unset_props", async () => {
+    await run(harness, grantOf({}), "create_blocks", {
+      parent_id: BETA,
+      blocks: [{ type: "image", text: "pic", props: { align: "left", size: 40, custom: 1 } }],
+    })
+    const pic = (await run(harness, grantOf({}), "read_note", { note_id: BETA })).blocks.find(
+      (block: any) => block.text === "pic",
+    )
+    // One key set: the others stay as they were.
+    await run(harness, grantOf({}), "update_block", { block_id: pic.id, set_props: { size: 60 } })
+    let block = await run(harness, grantOf({}), "get_block", { block_id: pic.id })
+    expect(block.props).toEqual({ align: "left", size: 60, custom: 1 })
+    // One key removed, one set, in one call.
+    await run(harness, grantOf({}), "update_block", {
+      block_id: pic.id,
+      set_props: { align: "right" },
+      unset_props: ["custom"],
+    })
+    block = await run(harness, grantOf({}), "get_block", { block_id: pic.id })
+    expect(block.props).toEqual({ align: "right", size: 60 })
+    // The change is recorded per key: only the keys named became events.
+    const keys = await harness
+      .tenant(USER)
+      .exec(
+        "SELECT action, key, value FROM events_log WHERE user_id = :tenant AND entity_id = ?1 " +
+          "AND key LIKE 'props.%' ORDER BY seq",
+        [pic.id],
+      )
+    expect(keys.slice(-3)).toEqual([
+      { action: "set", key: "props.size", value: "60" },
+      { action: "set", key: "props.align", value: '"right"' },
+      { action: "unset", key: "props.custom", value: "null" },
+    ])
+    // A key that is not one, or a known key of the wrong shape, is refused.
+    expect(
+      await refuse(harness, grantOf({}), "update_block", {
+        block_id: pic.id,
+        set_props: { "bad key": 1 },
+      }),
+    ).toMatch(/Metadata refused/)
+    expect(
+      await refuse(harness, grantOf({}), "update_block", {
+        block_id: pic.id,
+        set_props: { align: "middle" },
+      }),
+    ).toMatch(/Metadata refused/)
+  })
+
   it("gives a new block the note it was written in", async () => {
     const data = await run(harness, grantOf({}), "create_blocks", {
       parent_id: BETA,
