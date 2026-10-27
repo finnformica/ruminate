@@ -11,6 +11,7 @@ import { viewNarrowing } from "../utils/view-narrowing"
 import { developerDebugPreferenceAtom, useIsDeveloper } from "../hooks/is-developer"
 import { useNoteShare } from "../hooks/share"
 import { useMakeBoard, useMakeNote } from "../hooks/board"
+import { useMakeTracker } from "../hooks/tracker"
 import { useRenameNote } from "../hooks/note"
 import { UNLIST_VIEW, useWriteView } from "../hooks/views"
 import { LISTED_VIEW, viewByRootAtom } from "../data/views"
@@ -25,6 +26,7 @@ import {
   ArrowDownIcon16,
   ArrowUpIcon16,
   BoardIcon16,
+  TrackerIcon16,
   CopyIcon16,
   EditIcon16,
   ListIcon16,
@@ -151,6 +153,7 @@ export function useNoteMenuEntries() {
   const requestDelete = useSetAtom(deleteNoteDialogAtom)
   const openShare = useSetAtom(shareDialogAtom)
   const makeBoard = useMakeBoard()
+  const makeTracker = useMakeTracker()
   const makeNote = useMakeNote()
   const writeView = useWriteView()
   // Subscribed, not read as the menu opens: a sidebar row draws its menu
@@ -171,6 +174,11 @@ export function useNoteMenuEntries() {
         openOutline?: () => void
         /** Opens the board's Features editor: the board page's own. */
         openFeatures?: () => void
+        /** Opens the note's tracker page (docs/trackers.md), where the
+         * surface can do so. */
+        openTracker?: () => void
+        /** Opens the tracker's Series editor: the tracker page's own. */
+        openSeries?: () => void
       } = {},
     ) => {
       const shareId = jotaiStore.get(sharedOriginAtom).get(noteId)
@@ -222,17 +230,18 @@ export function useNoteMenuEntries() {
       const canBoard = verbs === null && !!(options.openBoard || options.openOutline)
       // On the board itself the way across is to the outline, and a board
       // made a note is opened there, since the board page refuses a note.
+      // A tracker's entries are the same shape (docs/trackers.md).
       const boardEntries: MenuEntry[] = !canBoard
         ? []
-        : kind === "board"
+        : kind === "tracker"
           ? [
-              ...(options.openFeatures
+              ...(options.openSeries
                 ? [
                     {
                       kind: "item" as const,
-                      label: "Features",
+                      label: "Series",
                       icon: <ListIcon16 />,
-                      onSelect: () => options.openFeatures?.(),
+                      onSelect: () => options.openSeries?.(),
                     },
                   ]
                 : []),
@@ -245,9 +254,9 @@ export function useNoteMenuEntries() {
                   }
                 : {
                     kind: "item",
-                    label: "Open board",
-                    icon: <BoardIcon16 />,
-                    onSelect: () => options.openBoard?.(),
+                    label: "Open tracker",
+                    icon: <TrackerIcon16 />,
+                    onSelect: () => options.openTracker?.(),
                   },
               {
                 kind: "item",
@@ -259,19 +268,67 @@ export function useNoteMenuEntries() {
                 },
               },
             ]
-          : kind === "note" && options.openBoard
+          : kind === "board"
             ? [
+                ...(options.openFeatures
+                  ? [
+                      {
+                        kind: "item" as const,
+                        label: "Features",
+                        icon: <ListIcon16 />,
+                        onSelect: () => options.openFeatures?.(),
+                      },
+                    ]
+                  : []),
+                options.openOutline
+                  ? {
+                      kind: "item",
+                      label: "Open note",
+                      icon: <NoteIcon16 />,
+                      onSelect: () => options.openOutline?.(),
+                    }
+                  : {
+                      kind: "item",
+                      label: "Open board",
+                      icon: <BoardIcon16 />,
+                      onSelect: () => options.openBoard?.(),
+                    },
                 {
                   kind: "item",
-                  label: "Make this a board",
-                  icon: <BoardIcon16 />,
+                  label: "Make this a note",
+                  icon: <NoteIcon16 />,
                   onSelect: () => {
-                    makeBoard(noteId)
-                    options.openBoard?.()
+                    makeNote(noteId)
+                    options.openOutline?.()
                   },
                 },
               ]
-            : []
+            : kind === "note" && options.openBoard
+              ? [
+                  {
+                    kind: "item",
+                    label: "Make this a board",
+                    icon: <BoardIcon16 />,
+                    onSelect: () => {
+                      makeBoard(noteId)
+                      options.openBoard?.()
+                    },
+                  },
+                  ...(options.openTracker
+                    ? [
+                        {
+                          kind: "item" as const,
+                          label: "Make this a tracker",
+                          icon: <TrackerIcon16 />,
+                          onSelect: () => {
+                            makeTracker(noteId)
+                            options.openTracker?.()
+                          },
+                        },
+                      ]
+                    : []),
+                ]
+              : []
 
       // The note's place in the list: its own row's `pinned`.
       const listed = viewByRoot.get(noteId)?.pinned === true
@@ -334,6 +391,7 @@ export function useNoteMenuEntries() {
       requestDelete,
       openShare,
       makeBoard,
+      makeTracker,
       makeNote,
       writeView,
       viewByRoot,
@@ -355,6 +413,7 @@ export function NoteActionsMenu({
   reorder,
   surface = "outline",
   onFeatures,
+  onSeries,
 }: {
   noteId: string
   className?: string
@@ -363,9 +422,11 @@ export function NoteActionsMenu({
   reorder?: ReorderActions
   /** Where the menu is drawn: the board page says so, and gets the way to
    * the outline where every other surface gets the way to the board. */
-  surface?: "outline" | "board"
+  surface?: "outline" | "board" | "tracker"
   /** Opens the board's Features editor: the board page passes it. */
   onFeatures?: () => void
+  /** Opens the tracker's Series editor: the tracker page passes it. */
+  onSeries?: () => void
 }) {
   const entriesFor = useNoteMenuEntries()
   const navigate = useNavigate()
@@ -375,8 +436,8 @@ export function NoteActionsMenu({
   // viewing from the list also takes you home. Compare the decoded path
   // segment, not the raw pathname: a note id with a space or other special
   // character is percent-encoded in the URL, so a raw `=== /views/${noteId}`
-  // check would miss it and skip the redirect. A board's page counts too.
-  const openMatch = location.pathname.match(/^\/(?:views|boards)\/(.+)$/)
+  // check would miss it and skip the redirect. A board's or a tracker's page counts too.
+  const openMatch = location.pathname.match(/^\/(?:views|boards|trackers)\/(.+)$/)
   const openNoteId = openMatch ? decodeURIComponent(openMatch[1]) : ""
   const onDeleted =
     editor?.onDeleted ??
@@ -475,9 +536,22 @@ export function NoteActionsMenu({
                           }),
                         openFeatures: onFeatures,
                       }
-                    : {
-                        openBoard: () => navigate({ to: "/boards/$", params: { _splat: noteId } }),
-                      }),
+                    : surface === "tracker"
+                      ? {
+                          openOutline: () =>
+                            navigate({
+                              to: "/views/$",
+                              params: { _splat: noteId },
+                              search: { query: undefined },
+                            }),
+                          openSeries: onSeries,
+                        }
+                      : {
+                          openBoard: () =>
+                            navigate({ to: "/boards/$", params: { _splat: noteId } }),
+                          openTracker: () =>
+                            navigate({ to: "/trackers/$", params: { _splat: noteId } }),
+                        }),
                 })),
           ]}
         />

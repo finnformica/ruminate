@@ -6,6 +6,7 @@ import type { BlockDoc } from "../blocks/types"
 import { sampleGraph } from "./sample-graph"
 import {
   BOARD_TYPE,
+  TRACKER_TYPE,
   CORPUS_ROOT_ID,
   NOTE_TYPE,
   NOTE_TYPES,
@@ -724,10 +725,11 @@ describe("docFromGraph (the walk, N roots)", () => {
 })
 
 describe("the note types", () => {
-  it("isNoteType: a note or a board, and nothing else", () => {
-    expect(NOTE_TYPES).toEqual([NOTE_TYPE, BOARD_TYPE])
+  it("isNoteType: a note, a board or a tracker, and nothing else", () => {
+    expect(NOTE_TYPES).toEqual([NOTE_TYPE, BOARD_TYPE, TRACKER_TYPE])
     expect(isNoteType("note")).toBe(true)
     expect(isNoteType("board")).toBe(true)
+    expect(isNoteType("tracker")).toBe(true)
     for (const type of ["text", "ul", "corpus_root", "page", "", "Note"]) {
       expect(isNoteType(type)).toBe(false)
     }

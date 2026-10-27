@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 import { figureAlignOf, type FigureAlign } from "../../blocks/figure"
 import { BLOCK_TYPE_DEFS } from "../../blocks/registry"
 import type { Block, BlockType } from "../../blocks/types"
-import { BOARD_TYPE, LEGACY_BOARD_PROP } from "../../data/graph"
+import { BOARD_TYPE, LEGACY_BOARD_PROP, TRACKER_TYPE } from "../../data/graph"
 import type { NoteType } from "../../schema"
 import type { Occurrence } from "../../blocks/view"
 import { cx } from "../../utils/cx"
@@ -208,6 +208,7 @@ const note: BlockKind = {
  * carrying the board property, read until migration 0020 has run everywhere
  * (`isLegacyBoard`, src/data/graph.ts). */
 function noteKindOf(block: Block): NoteType {
+  if (block.type === TRACKER_TYPE) return "tracker"
   return block.type === BOARD_TYPE || block.props?.[LEGACY_BOARD_PROP] === true ? "board" : "note"
 }
 
@@ -220,11 +221,15 @@ function noteKindOf(block: Block): NoteType {
  * the one thing that says what kind of node it is.
  */
 const board: BlockKind = note
+/** A tracker row (docs/trackers.md) draws as a board's does: a note row
+ * with the tracker's icon in its key slot. */
+const tracker: BlockKind = note
 
 export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
   text,
   note,
   board,
+  tracker,
   ul: { slot: "dot", typography: () => BODY },
   ol: { slot: "number", typography: () => BODY },
   todo,

@@ -4,6 +4,8 @@ import { cx } from "../utils/cx"
 import {
   BoardFillIcon16,
   BoardIcon16,
+  TrackerFillIcon16,
+  TrackerIcon16,
   GridFillIcon16,
   GridIcon16,
   NoteFillIcon16,
@@ -28,6 +30,7 @@ const _defaultFilledFavicon = (
 )
 
 /** The icon of a node that is a page: a board for a board (docs/boards.md),
+ * the grid of cells for a tracker (docs/trackers.md),
  * the grid for the Root frame's corpus root, the note icon otherwise. The
  * one icon component for all three, in a row's key slot, the sidebar and a
  * page's header. */
@@ -44,6 +47,9 @@ export const NoteFavicon = React.memo(
     if (note.type === "board") {
       const Icon = filled ? BoardFillIcon16 : BoardIcon16
       icon = <Icon data-testid="favicon-board" />
+    } else if (note.type === "tracker") {
+      const Icon = filled ? TrackerFillIcon16 : TrackerIcon16
+      icon = <Icon data-testid="favicon-tracker" />
     } else if (note.type === "root") {
       const Icon = filled ? GridFillIcon16 : GridIcon16
       icon = <Icon data-testid="favicon-root" />

@@ -14,8 +14,9 @@ and the ⋯ menu, where **Open note** opens the note beneath it.
 
 A board is a note whose root node is of type `board` rather than `note`
 (`BOARD_TYPE`, beside `NOTE_TYPE` in `src/data/graph.ts`;
-docs/graph-schema-v2.md). The two are the note types — `NOTE_TYPES`, and
-`isNoteType` is the question — so everywhere a note is listed, counted,
+docs/graph-schema-v2.md). With the tracker's (docs/trackers.md) these are
+the note types — `NOTE_TYPES`, and `isNoteType` is the question — so
+everywhere a note is listed, counted,
 ordered, deleted, shared or walked, a board is one; the registry knows the
 type (`src/blocks/registry.ts`, the `note` family), so a board linked under
 a block walks as a `board` row, drawn as a note row is with the board's own

@@ -196,6 +196,7 @@ describe("the qualifier popover", () => {
       text: "¶",
       note: null,
       board: null,
+      tracker: null,
       template: null,
     })
     // Capitalised, beside the glyph; the heading levels and the list group

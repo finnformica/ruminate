@@ -676,6 +676,25 @@ export function BoardIcon16(props: IconProps) {
   )
 }
 
+/** A tracker (docs/trackers.md): a month grid of cells, some of them
+ * filled. */
+export function TrackerIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M1 2.5A1.5 1.5 0 0 1 2.5 1h2A1.5 1.5 0 0 1 6 2.5v2A1.5 1.5 0 0 1 4.5 6h-2A1.5 1.5 0 0 1 1 4.5v-2Zm1.5 0v2h2v-2h-2ZM10 2.5A1.5 1.5 0 0 1 11.5 1h2A1.5 1.5 0 0 1 15 2.5v2A1.5 1.5 0 0 1 13.5 6h-2A1.5 1.5 0 0 1 10 4.5v-2Zm1.5 0v2h2v-2h-2ZM1 11.5A1.5 1.5 0 0 1 2.5 10h2A1.5 1.5 0 0 1 6 11.5v2A1.5 1.5 0 0 1 4.5 15h-2A1.5 1.5 0 0 1 1 13.5v-2Zm1.5 0v2h2v-2h-2Z" />
+      <path d="M8 1a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1 1 1 0 0 0 1-1V2a1 1 0 0 0-1-1ZM1 8a1 1 0 0 1 1-1h3a1 1 0 0 1 0 2H2a1 1 0 0 1-1-1Zm6 0a1 1 0 0 1 1-1 1 1 0 0 1 1 1 1 1 0 0 1-1 1 1 1 0 0 1-1-1Zm3.5-1a1 1 0 0 0 0 2h3a1 1 0 1 0 0-2h-3ZM7 11a1 1 0 0 1 1-1 1 1 0 0 1 1 1v3a1 1 0 0 1-1 1 1 1 0 0 1-1-1v-3Zm4.5-1a1.5 1.5 0 0 0-1.5 1.5v2a1.5 1.5 0 0 0 1.5 1.5h2a1.5 1.5 0 0 0 1.5-1.5v-2a1.5 1.5 0 0 0-1.5-1.5h-2Z" />
+    </Icon>
+  )
+}
+
+export function TrackerFillIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M2.5 1A1.5 1.5 0 0 0 1 2.5v2A1.5 1.5 0 0 0 2.5 6h2A1.5 1.5 0 0 0 6 4.5v-2A1.5 1.5 0 0 0 4.5 1h-2ZM8 1a1 1 0 0 0-1 1v3a1 1 0 0 0 2 0V2a1 1 0 0 0-1-1Zm3.5 0A1.5 1.5 0 0 0 10 2.5v2A1.5 1.5 0 0 0 11.5 6h2A1.5 1.5 0 0 0 15 4.5v-2A1.5 1.5 0 0 0 13.5 1h-2ZM2 7a1 1 0 0 0 0 2h3a1 1 0 0 0 0-2H2Zm6 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm3.5 0a1 1 0 1 0 0 2h3a1 1 0 1 0 0-2h-3ZM2.5 10A1.5 1.5 0 0 0 1 11.5v2A1.5 1.5 0 0 0 2.5 15h2A1.5 1.5 0 0 0 6 13.5v-2A1.5 1.5 0 0 0 4.5 10h-2ZM8 10a1 1 0 0 0-1 1v3a1 1 0 1 0 2 0v-3a1 1 0 0 0-1-1Zm3.5 0a1.5 1.5 0 0 0-1.5 1.5v2a1.5 1.5 0 0 0 1.5 1.5h2a1.5 1.5 0 0 0 1.5-1.5v-2a1.5 1.5 0 0 0-1.5-1.5h-2Z" />
+    </Icon>
+  )
+}
+
 export function BoardFillIcon16(props: IconProps) {
   return (
     <Icon size={16} {...props}>

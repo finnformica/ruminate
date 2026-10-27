@@ -494,6 +494,17 @@ describe("validation", () => {
     expect(validateProps("image", { align: "left", size: 50, custom: [1] })).toEqual({ ok: true })
     expect(validateProps("image", { align: "middle" })).toMatchObject({ ok: false })
     expect(validateProps("note", { "bad key": 1 })).toMatchObject({ ok: false })
+    // A tracker's series and entries (docs/trackers.md): text blocks held
+    // to their keys.
+    expect(
+      validateProps("text", { kind: "number", colour: "blue", unit: "km", target: 5, step: 0.5 }),
+    ).toEqual({ ok: true })
+    expect(validateProps("text", { date: "2026-10-27", value: true })).toEqual({ ok: true })
+    expect(validateProps("text", { kind: "habit" })).toMatchObject({ ok: false })
+    expect(validateProps("text", { colour: "mauve" })).toMatchObject({ ok: false })
+    expect(validateProps("text", { date: "27/10/2026", value: 1 })).toMatchObject({ ok: false })
+    expect(validateProps("text", { value: "yes" })).toMatchObject({ ok: false })
+    expect(validateProps("text", { period: "year" })).toMatchObject({ ok: false })
     expect(validateProps("unknown_type", { anything: 1 })).toEqual({ ok: true })
   })
 })

@@ -2,9 +2,9 @@ import { z } from "zod"
 
 export type NoteId = string
 
-/** What kind of note: a board by its root's type (docs/boards.md), a plain
- * note otherwise. */
-export type NoteType = "note" | "board"
+/** What kind of note: a board by its root's type (docs/boards.md), a
+ * tracker by its (docs/trackers.md), a plain note otherwise. */
+export type NoteType = "note" | "board" | "tracker"
 
 /** A heading block: its level (its outline depth, from 1) and text. */
 export type Heading = { level: number; text: string }

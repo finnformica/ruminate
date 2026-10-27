@@ -50,13 +50,17 @@ export const NOTE_TYPE = "note"
 /** A board's root node (docs/boards.md): a note of the other kind, opened as
  * a wall of its pictures. The same row as a note's in every other way. */
 export const BOARD_TYPE = "board"
-/** The two stored types a note's root node can have. The one list: nothing
- * else spells the pair. */
-export const NOTE_TYPES = [NOTE_TYPE, BOARD_TYPE] as const
-/** Is this a note root's type — a note or a board? The one predicate every
- * pass that lists, counts, orders or stops at a note asks. */
+/** A tracker's root node (docs/trackers.md): a note of the third kind,
+ * opened as a month grid of its series. The same row as a note's in every
+ * other way. */
+export const TRACKER_TYPE = "tracker"
+/** The stored types a note's root node can have. The one list: nothing
+ * else spells the set. */
+export const NOTE_TYPES = [NOTE_TYPE, BOARD_TYPE, TRACKER_TYPE] as const
+/** Is this a note root's type — a note, a board or a tracker? The one
+ * predicate every pass that lists, counts, orders or stops at a note asks. */
 export function isNoteType(type: string): boolean {
-  return type === NOTE_TYPE || type === BOARD_TYPE
+  return type === NOTE_TYPE || type === BOARD_TYPE || type === TRACKER_TYPE
 }
 
 /**

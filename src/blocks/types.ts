@@ -36,6 +36,7 @@ export type BlockType =
   | "link"
   | "note"
   | "board"
+  | "tracker"
 
 export const BLOCK_TYPES: readonly BlockType[] = [
   "text",
@@ -52,6 +53,7 @@ export const BLOCK_TYPES: readonly BlockType[] = [
   "link",
   "note",
   "board",
+  "tracker",
 ]
 
 const BLOCK_TYPE_SET: ReadonlySet<string> = new Set(BLOCK_TYPES)

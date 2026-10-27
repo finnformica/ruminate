@@ -39,7 +39,7 @@ export function DeleteNoteDialog() {
   const note = request === null ? undefined : notes.get(request.noteId)
   // The dialog names what it asks about: a board's row in a note is deleted
   // from here too (docs/boards.md, "A board in a note").
-  const noun = note?.type === "board" ? "board" : "note"
+  const noun = note?.type === "board" ? "board" : note?.type === "tracker" ? "tracker" : "note"
   const text = note?.displayName ?? ""
   const label = text.length > LABEL_LENGTH ? `${text.slice(0, LABEL_LENGTH - 1)}…` : text
 
