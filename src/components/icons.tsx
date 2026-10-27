@@ -676,6 +676,15 @@ export function BoardIcon16(props: IconProps) {
   )
 }
 
+/** A minus: the step-down beside a number (docs/trackers.md). */
+export function MinusIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M2.75 7.25a.75.75 0 0 0 0 1.5h10.5a.75.75 0 0 0 0-1.5H2.75Z" />
+    </Icon>
+  )
+}
+
 /** A tracker (docs/trackers.md): a month grid of cells, some of them
  * filled. */
 export function TrackerIcon16(props: IconProps) {

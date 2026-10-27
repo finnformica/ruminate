@@ -173,7 +173,7 @@ describe("TodayStrip", () => {
     expect(onSetEntry).toHaveBeenLastCalledWith("s2", TODAY, 4.5)
     fireEvent.click(screen.getByRole("button", { name: "Less Run" }))
     expect(onSetEntry).toHaveBeenLastCalledWith("s2", TODAY, 3.5)
-    const field = screen.getByRole("textbox", { name: "Run on Tue 27 Oct" }) as HTMLInputElement
+    const field = screen.getByRole("spinbutton", { name: "Run" }) as HTMLInputElement
     expect(field.value).toBe("4")
     fireEvent.change(field, { target: { value: "7.5" } })
     fireEvent.keyDown(field, { key: "Enter" })

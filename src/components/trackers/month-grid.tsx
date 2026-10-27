@@ -23,7 +23,19 @@ import { Surface } from "../ui/surface"
 const LEVEL_STEPS = [0, 5, 7, 8, 9] as const
 
 /** A series's colour at a theme step, as CSS. */
-export const colourVar = (colour: TrackerColour, step: number) => `var(--${colour}-${step})`
+const colourVar = (colour: TrackerColour, step: number) => `var(--${colour}-${step})`
+
+/** The one place a series's colour shows outside its cells: a small dot
+ * beside its name, in the strip, the cards and the Series editor. */
+export function ColourDot({ colour }: { colour: TrackerColour }) {
+  return (
+    <span
+      aria-hidden
+      className="size-2.5 shrink-0 rounded-full"
+      style={{ backgroundColor: colourVar(colour, 9) }}
+    />
+  )
+}
 
 /**
  * The month grid (docs/trackers.md): one card per series, each a GitHub-style
@@ -105,18 +117,14 @@ function SeriesCard({
       tier="card"
       motion={false}
       data-testid="series-card"
-      className="flex flex-col gap-3 p-3"
+      className="flex flex-col gap-4 p-4"
     >
-      <div className="flex min-w-0 items-start justify-between gap-2">
-        <h2 className="flex min-w-0 items-center gap-2 font-bold">
-          <span
-            aria-hidden
-            className="size-2.5 shrink-0 rounded-full"
-            style={{ backgroundColor: colourVar(series.colour, 9) }}
-          />
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <h2 className="flex min-w-0 items-center gap-2 font-bold leading-4">
+          <ColourDot colour={series.colour} />
           <span className="truncate">{name}</span>
         </h2>
-        <dl className="flex shrink-0 gap-3 text-sm text-text-secondary [font-variant-numeric:tabular-nums]">
+        <dl className="flex shrink-0 gap-3 text-sm text-text-secondary tabular-nums">
           <div className="flex gap-1" title="Days in a row">
             <dt className="sr-only">Streak</dt>
             <dd>{run}d</dd>
@@ -138,7 +146,7 @@ function SeriesCard({
       </div>
       {progress ? (
         <div
-          className="flex items-center gap-2 text-sm text-text-secondary [font-variant-numeric:tabular-nums]"
+          className="flex items-center gap-2 text-sm text-text-secondary tabular-nums"
           data-testid="target-progress"
         >
           <div
@@ -165,11 +173,7 @@ function SeriesCard({
           </span>
         </div>
       ) : null}
-      <div
-        role="grid"
-        aria-label={`${name}, by day`}
-        className="mx-auto grid w-full max-w-[17rem] grid-cols-7 gap-1"
-      >
+      <div role="grid" aria-label={`${name}, by day`} className="grid grid-cols-7 gap-1">
         <div role="row" className="contents">
           {WEEKDAY_LABELS.map((label, i) => (
             <div
@@ -178,7 +182,7 @@ function SeriesCard({
               aria-label={
                 ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][i]
               }
-              className="text-center text-xs text-text-tertiary"
+              className="text-center text-sm text-text-secondary"
             >
               {label}
             </div>
@@ -250,20 +254,19 @@ function DayCell({
         data-level={level}
         disabled={future}
         onClick={() => (check ? onToggle(series.id, day, !done) : onPickDay(day))}
+        // The wall's tile, at a day's size: the one focus ring, the control
+        // radius, the hover tint on an empty day, the selected ring, and the
+        // disabled fade on a day that has not come.
         className={cx(
-          "focus-ring block size-full rounded-[3px] text-[0.625rem] leading-none text-transparent",
-          level === 0 && "bg-bg-secondary",
-          !future && "cursor-pointer hover:ring-2 hover:ring-inset hover:ring-[var(--neutral-a6)]",
-          future && "cursor-default opacity-40",
-          day === today && "ring-2 ring-inset ring-text",
-          selected && "ring-2 ring-inset ring-border-focus",
+          "focus-ring block size-full cursor-pointer rounded bg-bg-secondary disabled:cursor-default disabled:opacity-50",
+          level === 0 && "enabled:hover:bg-bg-hover",
+          day === today && "ring-2 ring-border",
+          selected && "ring-2 ring-border-selected",
         )}
         style={
           level > 0 ? { backgroundColor: colourVar(series.colour, LEVEL_STEPS[level]) } : undefined
         }
-      >
-        {Number(day.slice(8))}
-      </button>
+      />
     </div>
   )
 }
