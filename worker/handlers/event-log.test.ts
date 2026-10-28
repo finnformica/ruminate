@@ -1101,8 +1101,21 @@ describe("the per-key log", () => {
         "WHERE user_id = 111 ORDER BY seq",
     )
 
+  it("every statement of the backfill and the fill fits D1's compound SELECT limit", () => {
+    // workerd caps a compound SELECT at five terms (SQLITE_LIMIT_COMPOUND_SELECT);
+    // node:sqlite does not, so only this count stands between the suite and a
+    // migration D1 refuses with "too many terms in compound SELECT".
+    const terms = (sql: string) => sql.split(/\bUNION\b/i).length
+    for (const statement of planLogFill({ now: 1, appendId: "x" })) {
+      expect(terms(statement.sql)).toBeLessThanOrEqual(5)
+    }
+    for (const statement of migration0028.split(";"))
+      expect(terms(statement)).toBeLessThanOrEqual(5)
+  })
+
   it("the migration's backfill, the Worker's fill and expandLog read an old log alike", async () => {
     const w = writer()
+    const unicode = 'héllo — 日本語 🎉 "quoted" back\\slash'
     const old = [
       w.block("note", "note", "N", null),
       w.block("a", "image", "A"),
@@ -1111,6 +1124,27 @@ describe("the per-key log", () => {
       w.view("v1", "note", true),
       w.edit("a", { text: "A!", props: '{"align":"left","size":50,"nested":{"x":1},"bad key":1}' }),
       w.editView("v1", { pinned: false, stack: "[]" }),
+      // The shapes a real log holds: a props patch that is an array, not an
+      // object; odd keys; nulls; unicode; a very long value; keys reordered.
+      w.edit("a", { props: '["not","an","object"]' }),
+      w.edit("a", {
+        props: JSON.stringify({
+          "émoji🎉": 1,
+          "": 2,
+          "9starts": 3,
+          "dotted.key": unicode,
+          "d:2026-10-27": 4,
+          gone: null,
+          long: "x".repeat(20_000),
+        }),
+      }),
+      w.edit("a", {
+        props: JSON.stringify({
+          long: "x".repeat(20_000),
+          "d:2026-10-27": 4,
+          "dotted.key": unicode,
+        }),
+      }),
       w.edit("a", { props: null }),
       w.remove("a"),
     ]
@@ -1144,8 +1178,17 @@ describe("the per-key log", () => {
     expect(byMigration).toEqual(inTs)
     expect(await read("fill")).toEqual(inTs)
     expect(inTs).toContain('evt_tab-1_6#1 set props.nested {"x":1} 6')
+    // An array is no object: every key is gone.
     expect(inTs).toContain("evt_tab-1_8#2 unset props.size null 8")
-    expect(inTs.some((line) => line.includes("bad key"))).toBe(false)
+    expect(inTs).toContain(`evt_tab-1_9#1 set props.dotted.key ${JSON.stringify(unicode)} 9`)
+    // The same keys in another order read as no change at all.
+    expect(inTs.some((line) => line.startsWith("evt_tab-1_10#"))).toBe(false)
+    expect(inTs).toContain("evt_tab-1_11#0 unset props.d:2026-10-27 null 11")
+    expect(
+      inTs.some(
+        (line) => line.includes("bad key") || line.includes("émoji") || line.includes("9starts"),
+      ),
+    ).toBe(false)
   })
 
   it("lands a client's key events in both logs, projects per key, and verify passes", async () => {

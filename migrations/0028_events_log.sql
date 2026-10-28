@@ -126,30 +126,28 @@ WITH pending AS (
       THEN json_extract(e.patch, '$.props') END AS props_new,
     CASE WHEN e.entity = 'block' AND json_type(e.patch, '$.props') IS NOT NULL
       THEN 1 ELSE 0 END AS names_props,
-    (SELECT CASE WHEN json_type(p.patch, '$.props') = 'text'
-        AND json_valid(json_extract(p.patch, '$.props'))
-        THEN json_extract(p.patch, '$.props') END
-      FROM events p
-      WHERE p.user_id = e.user_id AND p.entity = 'block' AND p.entity_id = e.entity_id
-        AND p.seq < e.seq AND json_type(p.patch, '$.props') IS NOT NULL
-      ORDER BY p.seq DESC LIMIT 1) AS props_prior
+    CASE WHEN e.entity = 'block' AND json_type(e.patch, '$.props') IS NOT NULL THEN
+      (SELECT CASE WHEN json_type(p.patch, '$.props') = 'text'
+          AND json_valid(json_extract(p.patch, '$.props'))
+          THEN json_extract(p.patch, '$.props') END
+        FROM events p
+        WHERE p.user_id = e.user_id AND p.entity = 'block' AND p.entity_id = e.entity_id
+          AND p.seq < e.seq AND json_type(p.patch, '$.props') IS NOT NULL
+        ORDER BY p.seq DESC LIMIT 1)
+    END AS props_prior
   FROM events e
   WHERE NOT EXISTS (SELECT 1 FROM events_log l WHERE l.user_id = e.user_id AND l.event_id = e.id)
 ),
+-- The columns each entity has, as one JSON literal: D1 allows at most five
+-- terms in a compound SELECT, so a UNION ALL per column is not an option.
 columns AS (
-  SELECT 'block' AS entity, 'type' AS name, 1 AS ordinal
-  UNION ALL SELECT 'block', 'text', 2
-  UNION ALL SELECT 'block', 'notes_id', 3
-  UNION ALL SELECT 'link', 'source_id', 1
-  UNION ALL SELECT 'link', 'destination_id', 2
-  UNION ALL SELECT 'link', 'kind', 3
-  UNION ALL SELECT 'link', 'sort_key', 4
-  UNION ALL SELECT 'view', 'root_id', 1
-  UNION ALL SELECT 'view', 'filter', 2
-  UNION ALL SELECT 'view', 'sort', 3
-  UNION ALL SELECT 'view', 'pinned', 4
-  UNION ALL SELECT 'view', 'sort_key', 5
-  UNION ALL SELECT 'view', 'stack', 6
+  SELECT json_extract(c.value, '$.entity') AS entity, json_extract(c.value, '$.name') AS name,
+    json_extract(c.value, '$.ordinal') AS ordinal
+  FROM json_each('[{"entity":"block","name":"type","ordinal":1},{"entity":"block","name":"text","ordinal":2},{"entity":"block","name":"notes_id","ordinal":3},
+    {"entity":"link","name":"source_id","ordinal":1},{"entity":"link","name":"destination_id","ordinal":2},{"entity":"link","name":"kind","ordinal":3},
+    {"entity":"link","name":"sort_key","ordinal":4},{"entity":"view","name":"root_id","ordinal":1},{"entity":"view","name":"filter","ordinal":2},
+    {"entity":"view","name":"sort","ordinal":3},{"entity":"view","name":"pinned","ordinal":4},{"entity":"view","name":"sort_key","ordinal":5},
+    {"entity":"view","name":"stack","ordinal":6}]') AS c
 ),
 expanded AS (
   SELECT p.*, 0 AS ordinal, p.action AS k_action, '' AS k,

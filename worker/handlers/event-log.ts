@@ -1432,6 +1432,15 @@ export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
 // The per-key log (docs/event-sourcing.md, "Per-key events"; migrations/0028)
 // -----------------------------------------------------------------------------
 
+/**
+ * The columns each entity has, and the order their rows take, as one JSON
+ * literal for `json_each`. D1 allows at most five terms in a compound
+ * SELECT (`SQLITE_LIMIT_COMPOUND_SELECT`), so a UNION ALL per column is not
+ * an option; the migration's backfill spells the same list.
+ */
+const COLUMN_ORDINALS =
+  '[{"entity":"block","name":"type","ordinal":1},{"entity":"block","name":"text","ordinal":2},{"entity":"block","name":"notes_id","ordinal":3},{"entity":"link","name":"source_id","ordinal":1},{"entity":"link","name":"destination_id","ordinal":2},{"entity":"link","name":"kind","ordinal":3},{"entity":"link","name":"sort_key","ordinal":4},{"entity":"view","name":"root_id","ordinal":1},{"entity":"view","name":"filter","ordinal":2},{"entity":"view","name":"sort","ordinal":3},{"entity":"view","name":"pinned","ordinal":4},{"entity":"view","name":"sort_key","ordinal":5},{"entity":"view","name":"stack","ordinal":6}]'
+
 /** The GLOB pair that is `KEY_PATTERN` (src/data/key-events.ts) in SQL. */
 const KEY_GLOB = "GLOB '[A-Za-z_]*' AND {k} NOT GLOB '*[^A-Za-z0-9_.:-]*' AND length({k}) <= 128"
 const keyGlob = (k: string) => `${k} ${KEY_GLOB.replaceAll("{k}", k)}`
@@ -1459,21 +1468,18 @@ export function planLogFill(ctx: { now: number; appendId: string }): SqlStatemen
         "THEN json_extract(e.patch, '$.props') END AS props_new, " +
         "CASE WHEN e.entity = 'block' AND json_type(e.patch, '$.props') IS NOT NULL " +
         "THEN 1 ELSE 0 END AS names_props, " +
+        "CASE WHEN e.entity = 'block' AND json_type(e.patch, '$.props') IS NOT NULL THEN " +
         "(SELECT CASE WHEN json_type(p.patch, '$.props') = 'text' " +
         "AND json_valid(json_extract(p.patch, '$.props')) " +
         "THEN json_extract(p.patch, '$.props') END FROM events p " +
         "WHERE p.user_id = :tenant AND p.entity = 'block' AND p.entity_id = e.entity_id " +
         "AND p.seq < e.seq AND json_type(p.patch, '$.props') IS NOT NULL " +
-        "ORDER BY p.seq DESC LIMIT 1) AS props_prior " +
+        "ORDER BY p.seq DESC LIMIT 1) END AS props_prior " +
         "FROM events e WHERE e.user_id = :tenant AND NOT EXISTS " +
         "(SELECT 1 FROM events_log l WHERE l.user_id = :tenant AND l.event_id = e.id)), " +
-        "columns AS (SELECT 'block' AS entity, 'type' AS name, 1 AS ordinal " +
-        "UNION ALL SELECT 'block', 'text', 2 UNION ALL SELECT 'block', 'notes_id', 3 " +
-        "UNION ALL SELECT 'link', 'source_id', 1 UNION ALL SELECT 'link', 'destination_id', 2 " +
-        "UNION ALL SELECT 'link', 'kind', 3 UNION ALL SELECT 'link', 'sort_key', 4 " +
-        "UNION ALL SELECT 'view', 'root_id', 1 UNION ALL SELECT 'view', 'filter', 2 " +
-        "UNION ALL SELECT 'view', 'sort', 3 UNION ALL SELECT 'view', 'pinned', 4 " +
-        "UNION ALL SELECT 'view', 'sort_key', 5 UNION ALL SELECT 'view', 'stack', 6), " +
+        "columns AS (SELECT json_extract(c.value, '$.entity') AS entity, " +
+        "json_extract(c.value, '$.name') AS name, json_extract(c.value, '$.ordinal') AS ordinal " +
+        `FROM json_each('${COLUMN_ORDINALS}') AS c), ` +
         "expanded AS (" +
         "SELECT p.*, 0 AS ordinal, p.action AS k_action, '' AS k, " +
         "CASE WHEN json_type(p.patch, '$.deleted_at') = 'integer' " +
