@@ -21,8 +21,8 @@ const node = (driver: Driver, user: number, id: string, type: string, deletedAt:
   // tenant-exempt: the fixture holds TWO tenants on purpose, so it writes
   // the id rather than binding one.
   driver.exec(
-    "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at, seq) " +
-      "VALUES (?, ?, ?, ?, NULL, 100, ?, ?)",
+    "INSERT INTO nodes (user_id, id, type, text, updated_at, deleted_at, seq) " +
+      "VALUES (?, ?, ?, ?, 100, ?, ?)",
     [user, id, type, id, deletedAt, seqOf(id)],
   )
 

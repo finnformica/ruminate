@@ -727,24 +727,24 @@ describe("the device's log", () => {
     expect(queued.map((event) => event.id)).toEqual(made.map((event) => event.id))
     expect(queued[0]).toMatchObject({ device: "test.tab", tz: 0, base_seq: null })
 
-    // Each key row placed in the per-key log, and the old log's seq of the
-    // event it mirrors — one per entity here — on the row it changed.
-    await store.markEventsPushed(
-      queued.map(
-        (event, i) =>
-          [event.id, 100 + i, 10 + ["blk_aaaaaaaaaa", "a"].indexOf(event.entity_id)] as const,
-      ),
-    )
+    // Each key row placed in the log, and the row it changed stamped with
+    // the seq of its last row.
+    await store.markEventsPushed(queued.map((event, i) => [event.id, 100 + i] as const))
     expect(await store.unpushedEvents()).toEqual([])
     expect(await driver.exec("SELECT id, seq FROM events_log ORDER BY position")).toEqual(
       queued.map((event, i) => ({ id: event.id, seq: 100 + i })),
     )
-    // A row's seq is its last event's in the old log.
+    const lastOf = (entity: string, id: string) =>
+      100 + queued.findLastIndex((event) => event.entity === entity && event.entity_id === id)
     expect(await driver.exec("SELECT seq FROM nodes WHERE id = 'blk_aaaaaaaaaa'")).toEqual([
-      { seq: 10 },
+      { seq: lastOf("block", "blk_aaaaaaaaaa") },
     ])
-    expect(await driver.exec("SELECT seq FROM nodes WHERE id = 'a'")).toEqual([{ seq: 11 }])
-    expect(await driver.exec("SELECT seq FROM link")).toEqual([{ seq: 9 }])
+    expect(await driver.exec("SELECT seq FROM nodes WHERE id = 'a'")).toEqual([
+      { seq: lastOf("block", "a") },
+    ])
+    expect(await driver.exec("SELECT seq FROM link")).toEqual([
+      { seq: lastOf("link", "a|blk_aaaaaaaaaa|child") },
+    ])
   })
 
   it("keeps each event's stamp, its own and the ones it pulls, and none where none was sent", async () => {
@@ -789,7 +789,7 @@ describe("the device's log", () => {
   it("coalesces a typing run across writes into one unpushed event, carrying the run's first base", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "a", "- x\n  id:: blk_aaaaaaaaaa\n")
-    await store.markEventsPushed((await store.unpushedEvents()).map((e, i) => [e.id, i + 1, 1]))
+    await store.markEventsPushed((await store.unpushedEvents()).map((e, i) => [e.id, i + 1]))
     const first = await applyOpsToStore(
       store,
       [{ op: "setText", id: "blk_aaaaaaaaaa", text: "xy" }],

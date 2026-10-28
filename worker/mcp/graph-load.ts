@@ -37,6 +37,7 @@
 
 import { NOTE_TYPES } from "../../src/data/graph"
 import type { SqlValue } from "../../src/data/sql-driver"
+import { NODE_PROPS } from "../handlers/event-log"
 import { toLinkRow, toNodeRow, type LinkRow, type NodeRow } from "../handlers/replica-payload"
 import type { TenantDb } from "../tenancy-db"
 
@@ -48,7 +49,8 @@ import type { TenantDb } from "../tenancy-db"
  */
 const CHUNK = 80
 
-const NODE_COLUMNS = "id, type, text, props, updated_at, notes_id"
+/** A node's columns, its props read from its key rows (`NODE_PROPS`). */
+const NODE_COLUMNS = `id, type, text, ${NODE_PROPS("nodes.id")} AS props, updated_at, notes_id`
 
 /**
  * A link, and the node at its FAR end.
@@ -62,7 +64,7 @@ const NODE_COLUMNS = "id, type, text, props, updated_at, notes_id"
 const linkAndNode = (far: string) =>
   `l.source_id, l.destination_id, l.kind, l.sort_key, l.updated_at, ` +
   `${far}.id AS far_id, ${far}.type AS far_type, ${far}.text AS far_text, ` +
-  `${far}.props AS far_props, ${far}.updated_at AS far_updated_at, ` +
+  `${NODE_PROPS(`${far}.id`)} AS far_props, ${far}.updated_at AS far_updated_at, ` +
   `${far}.notes_id AS far_notes_id`
 
 /** `?1, ?2, …` for `count` parameters. */

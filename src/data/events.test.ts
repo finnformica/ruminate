@@ -152,13 +152,16 @@ describe("the fold", () => {
       edit("", 20),
       { ...edit("", 30), id: "del", action: "delete", patch: {} } as RuminateEvent,
     ])
-    const restore = planRestore(log, "block", "x", 3, context("tab", 40)) as RuminateEvent[]
+    const states = (events: RuminateEvent[]) => ({ then: stateAt(events, 3), now: fold(events) })
+    const restore = planRestore(states(log), "block", "x", 3, context("tab", 40)) as RuminateEvent[]
     expect(restore).toHaveLength(1)
     expect(restore[0]).toMatchObject({ action: "restore", ref_seq: 3, patch: { text: "kept" } })
     const after = fold([...log, ...sequenced(restore, 6)])
     expect(after.blocks.get("x")).toMatchObject({ deleted: false, fields: { text: "kept" } })
-    expect(planRestore([...log, ...sequenced(restore, 6)], "block", "x", 3, context())).toEqual([])
-    expect(planRestore(log, "block", "never", 3, context())).toBeNull()
+    expect(
+      planRestore(states([...log, ...sequenced(restore, 6)]), "block", "x", 3, context()),
+    ).toEqual([])
+    expect(planRestore(states(log), "block", "never", 3, context())).toBeNull()
   })
 })
 

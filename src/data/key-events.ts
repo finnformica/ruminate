@@ -33,11 +33,11 @@
 // Every old event has a per-key reading (`expandEvent`): its liveness row,
 // one `set` per field it names, and — for a whole-`props` patch — one `set`
 // per key whose value differs from the props before it, plus one `unset` per
-// key that disappeared. The migration's backfill and the Worker's fill spell
-// the same reading in SQL (`migrations/0028_events_log.sql`,
-// `planLogFill`); a test pins the three together. The other way,
-// `collapseKeyEvents` folds a batch of key events back into the old shape,
-// so both logs are written on every push until the old one is retired.
+// key that disappeared. The migration's backfill spelled the same reading in
+// SQL (`migrations/0028_events_log.sql`); a test pins the two together. The
+// old shape is still read at two doors — a build from before key events, and
+// the rows door, whose events are derived old-shaped (`rowsToEvents`) — and
+// never written: since the cut-over (0029) the per-key log is the one log.
 //
 // ## Validation
 //
@@ -51,7 +51,6 @@
 import { z } from "zod"
 import type { ViewRow } from "../../worker/handlers/replica-payload"
 import {
-  EVENT_VERSION,
   eventStamp,
   linkEntityId,
   viewChangeToEvent,
@@ -120,9 +119,12 @@ export interface KeyEvent {
   tz?: number | null
   hlc?: string
   v: number
-  /** The `events` row this mirrors (`events.id`), and its `seq` there — the
-   * old log's order, which the row cursors still count in. */
+  /** The edit this row is one key of (`editsOf`): the old-shaped event it was
+   * read out of, or the first row of its run. */
   event?: string
+  /** On a row mirrored from the old log before the cut-over (0028), that
+   * event's `seq` there; absent since. A row from before stamps derives its
+   * stamp from it (`keyEventStamp`), so it resolves as the event did. */
   event_seq?: number
 }
 
@@ -300,161 +302,34 @@ export function expandLog(events: readonly RuminateEvent[]): KeyEvent[] {
   return out
 }
 
-/** The old-shaped event of each group of a collapse (`collapseKeyEvents`). */
-export interface Collapsed {
-  events: RuminateEvent[]
-  /** Each key event's id → the id of the old event it was folded into. */
-  eventOf: Map<string, string>
-}
-
-const COLUMN_DEFAULTS: Record<Entity, Record<string, unknown>> = {
-  block: { type: "text", text: "", notes_id: null },
-  link: { source_id: "", destination_id: "", kind: CHILD_KIND, sort_key: "" },
-  view: { root_id: "", filter: null, sort: null, pinned: false, sort_key: null },
-}
-
 /**
- * Fold a run of key events back into the old shape, one old event per
- * (batch, entity, action group): a `create` and the sets after it in the
- * same batch become one `create` with every field; sets and unsets with no
- * create become one `update`; a `delete` is a `delete`; a `restore` and its
- * sets a `restore`. A block's `props` is the props it held (`heldProps`: the
- * replica's row, or the fold's) with the group's sets and unsets applied,
- * so the old log reads exactly what the per-key log says. The old event
- * takes the id its rows name (`event`, when they were read out of one) or
- * the group's first id, so a re-sent push folds to the same ids.
+ * The edit each key event belongs to — what the calendar counts as one
+ * (`editOf`, day-changes.ts) and what an append keeps in one run
+ * (`chunksByGroup`, worker/handlers/event-log.ts): one id per run of rows
+ * of one (batch, entity, entity id). A `create` or a `restore` opens a run
+ * that the sets and unsets after it in the batch join; sets and unsets with
+ * none open form a run of their own; a `delete` is a run by itself and
+ * closes the entity's, so a set after it in the same batch is an edit under
+ * the tombstone. The id is the one the rows name (`event`, read out of an
+ * old-shaped event) or the run's first id, so a re-sent push names the
+ * same edits.
  */
-export function collapseKeyEvents(
-  events: readonly KeyEvent[],
-  heldProps: (entityId: string) => PropsMap | null,
-): Collapsed {
-  interface Group {
-    first: KeyEvent
-    kind: "create" | "update" | "delete" | "restore"
-    columns: Record<string, unknown>
-    sets: PropsMap
-    unsets: Set<string>
-    deleted_at: number | null
-    /** The group's highest stamp; "" while no row of it carries one. */
-    stamp: string
-    ids: string[]
-  }
-  const groups: Group[] = []
-  const open = new Map<string, Group>()
-  const propsNow = new Map<string, PropsMap>()
-  const eventOf = new Map<string, string>()
-
-  const propsOf = (id: string) => {
-    let props = propsNow.get(id)
-    if (!props) {
-      props = liveEntries(heldProps(id))
-      propsNow.set(id, props)
-    }
-    return props
-  }
-  const groupKey = (event: KeyEvent) =>
-    `${event.batch}\x1f${event.entity}\x1f${event.entity_id}\x1f${event.event ?? ""}`
-  const start = (event: KeyEvent, kind: Group["kind"]): Group => {
-    const group: Group = {
-      first: event,
-      kind,
-      columns: {},
-      sets: {},
-      unsets: new Set(),
-      deleted_at: typeof event.value === "number" ? event.value : null,
-      stamp: "",
-      ids: [],
-    }
-    groups.push(group)
-    return group
-  }
+export function editsOf(events: readonly KeyEvent[]): Map<string, string> {
+  const out = new Map<string, string>()
+  const open = new Map<string, string>()
   for (const event of events) {
-    const key = groupKey(event)
-    let group: Group | undefined
-    if (event.action === "create" || event.action === "restore" || event.action === "delete") {
-      group = start(event, event.action)
-      // A delete closes the entity's groups: a set after it in the same
-      // batch is an edit under the tombstone, its own update.
-      if (event.action === "delete") open.delete(key)
-      else open.set(key, group)
-    } else {
-      group = open.get(key)
-      if (!group) {
-        group = start(event, "update")
-        open.set(key, group)
-      }
-      if (isPropsRegister(event.key)) {
-        const name = propNameOf(event.key)
-        if (event.action === "set") {
-          group.sets[name] = event.value
-          group.unsets.delete(name)
-        } else {
-          group.unsets.add(name)
-          delete group.sets[name]
-        }
-      } else {
-        group.columns[event.key] = event.value
-      }
-    }
-    group.ids.push(event.id)
-    if (event.hlc !== undefined && event.hlc > group.stamp) group.stamp = event.hlc
-  }
-
-  const out: RuminateEvent[] = []
-  for (const group of groups) {
-    const { first } = group
-    const oldId = first.event ?? first.id
-    for (const id of group.ids) eventOf.set(id, oldId)
-    const envelope = {
-      id: oldId,
-      batch: first.batch,
-      device: first.device,
-      ...(first.cause !== undefined ? { cause: first.cause } : {}),
-      base_seq: first.base_seq ?? null,
-      ...(group.kind === "restore" ? { ref_seq: first.ref_seq ?? null } : {}),
-      at: first.at,
-      ...(first.tz !== undefined ? { tz: first.tz } : {}),
-      ...(group.stamp !== "" ? { hlc: group.stamp } : {}),
-      v: EVENT_VERSION,
-      entity: first.entity,
-      entity_id: first.entity_id,
-    }
-    const touchesProps = Object.keys(group.sets).length > 0 || group.unsets.size > 0
-    const nextProps = () => {
-      const props = { ...propsOf(first.entity_id), ...group.sets }
-      for (const name of group.unsets) delete props[name]
-      propsNow.set(first.entity_id, props)
-      const keys = Object.keys(props).sort()
-      if (keys.length === 0) return null
-      const sorted: PropsMap = {}
-      for (const key of keys) sorted[key] = props[key]
-      return JSON.stringify(sorted)
-    }
-    if (group.kind === "delete") {
-      out.push({
-        ...envelope,
-        action: "delete",
-        patch: group.deleted_at === null ? {} : { deleted_at: group.deleted_at },
-      } as RuminateEvent)
+    const key = `${event.batch}\x1f${event.entity}\x1f${event.entity_id}\x1f${event.event ?? ""}`
+    const own = event.event ?? event.id
+    if (event.action === "delete") {
+      open.delete(key)
+      out.set(event.id, own)
       continue
     }
-    const patch: Record<string, unknown> = {}
-    if (group.kind === "create") {
-      for (const name of COLUMN_REGISTERS[first.entity]) {
-        if (name in group.columns) patch[name] = group.columns[name]
-        else if (name in COLUMN_DEFAULTS[first.entity])
-          patch[name] = COLUMN_DEFAULTS[first.entity][name]
-      }
-      if (first.entity === "block") patch.props = nextProps()
-      if (group.deleted_at !== null) patch.deleted_at = group.deleted_at
-    } else {
-      Object.assign(patch, group.columns)
-      if (touchesProps) patch.props = nextProps()
-    }
-    if (group.kind === "update" && Object.keys(patch).length === 0) continue
-    out.push({ ...envelope, action: group.kind, patch } as RuminateEvent)
+    if (event.action === "create" || event.action === "restore") open.set(key, own)
+    else if (!open.has(key)) open.set(key, own)
+    out.set(event.id, open.get(key) as string)
   }
-  return { events: out, eventOf }
+  return out
 }
 
 // -----------------------------------------------------------------------------
@@ -572,10 +447,10 @@ export function assembleLogState(state: KeyLogState): LogState {
   return out
 }
 
-/** `stateAt` for key events: the fold of a prefix, by the OLD log's seq when
- * the events carry one (`event_seq`), else their own. */
+/** `stateAt` for key events: the fold of a prefix of the log, by its own
+ * seq — the one order there is since the cut-over (migrations/0029). */
 export function keyStateAt(events: readonly KeyEvent[], seq: number): KeyLogState {
-  return foldKeys(events.filter((event) => (event.event_seq ?? event.seq ?? 0) <= seq))
+  return foldKeys(events.filter((event) => (event.seq ?? 0) <= seq))
 }
 
 type AnyStamped = StampedEntity<Record<string, unknown>>
@@ -1138,7 +1013,7 @@ export interface KeyEventsPutResult {
   ok: true
   appended: number
   stale: number
-  seqs: [id: string, seq: number, eventSeq: number | null][]
+  seqs: [id: string, seq: number][]
   cursor: string | null
 }
 

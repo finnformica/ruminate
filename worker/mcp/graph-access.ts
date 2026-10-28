@@ -86,7 +86,7 @@ import { opsToRows } from "../../src/data/ops-rows"
 import { noteIds, parentsIndex, reachableFrom, type Op } from "../../src/data/ops"
 import type { Note } from "../../src/schema"
 import { toLinkRow, toNodeRow, type LinkRow, type NodeRow } from "../handlers/replica-payload"
-import { writeRows } from "../handlers/event-log"
+import { NODE_PROPS, writeRows } from "../handlers/event-log"
 import type { TenantDb } from "../tenancy-db"
 import {
   linksAbove,
@@ -108,8 +108,8 @@ import type { Grant } from "./grant"
 export async function loadSnapshot(tenant: TenantDb): Promise<GraphSnapshot> {
   const [nodeRows, linkRows] = await Promise.all([
     tenant.exec(
-      "SELECT id, type, text, props, updated_at, notes_id FROM nodes " +
-        "WHERE user_id = :tenant AND deleted_at IS NULL",
+      `SELECT id, type, text, ${NODE_PROPS("nodes.id")} AS props, updated_at, notes_id ` +
+        "FROM nodes WHERE user_id = :tenant AND deleted_at IS NULL",
     ),
     tenant.exec(
       "SELECT source_id, destination_id, kind, sort_key, updated_at FROM link " +

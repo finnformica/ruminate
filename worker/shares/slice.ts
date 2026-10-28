@@ -34,7 +34,7 @@ import {
   type NodeRow,
   type ReplicaPutPayload,
 } from "../handlers/replica-payload"
-import { writeRows } from "../handlers/event-log"
+import { NODE_PROPS, writeRows } from "../handlers/event-log"
 import type { TenantDb } from "../tenancy-db"
 import { shareAllows, type Permission, type ShareGrant } from "./grant"
 import type { ShareView } from "./wire"
@@ -130,7 +130,8 @@ export async function closureIds(
   if (view === null) return { nodes: new Map(), roots: new Set() }
   const rows = await owner.exec(
     closureCte +
-      `SELECT v.id AS id, n.notes_id, n.props, (g.id IS NOT NULL) AS is_root ` +
+      `SELECT v.id AS id, n.notes_id, ${NODE_PROPS("n.id")} AS props, ` +
+      `(g.id IS NOT NULL) AS is_root ` +
       `FROM visible v ` +
       `JOIN nodes n ON n.user_id = :tenant AND n.id = v.id AND n.deleted_at IS NULL ` +
       `LEFT JOIN granted g ON g.id = v.id`,
@@ -165,7 +166,7 @@ export async function sliceRows(
         // `notes_id` names where a block was born, which can be a note outside
         // the share (a block the owner mirrored in from elsewhere). An id
         // outside the closure is never serialized, so it is blanked here.
-        `SELECT n.id, n.type, n.text, n.props, n.updated_at, ` +
+        `SELECT n.id, n.type, n.text, ${NODE_PROPS("n.id")} AS props, n.updated_at, ` +
         `CASE WHEN n.notes_id IN (SELECT id FROM visible) THEN n.notes_id END AS notes_id ` +
         `FROM visible v CROSS JOIN nodes n ON n.id = v.id ` +
         `WHERE n.user_id = :tenant AND n.deleted_at IS NULL`,

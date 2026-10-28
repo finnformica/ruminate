@@ -72,6 +72,9 @@ export interface CorpusMigrations {
   /** migrations/0024: the stamp column on the event log — required in
    * `"columns"` mode. The local store adds the same column (`LOCAL_V11_SQL`). */
   eventHlc?: string
+  /** migrations/0025: the stamps of the projections — required in `"columns"`
+   * mode. The local store's cache rows take the same column (`LOCAL_V13_SQL`). */
+  projectionStamps?: string
   /** migrations/0027: a View's saved stack — required in `"columns"` mode. The
    * local store adds the same column (`LOCAL_V14_SQL`). */
   viewStack?: string
@@ -509,8 +512,21 @@ async function applyV12(driver: SqlDriver, tenancy: CorpusTenancy): Promise<void
   if (tenancy === "single") await driver.execScript(LOCAL_V12_SQL)
 }
 
-async function applyV13(driver: SqlDriver, tenancy: CorpusTenancy): Promise<void> {
-  if (tenancy === "single") await driver.execScript(LOCAL_V13_SQL)
+async function applyV13(
+  driver: SqlDriver,
+  migrations: CorpusMigrations,
+  tenancy: CorpusTenancy,
+): Promise<void> {
+  if (tenancy === "single") {
+    await driver.execScript(LOCAL_V13_SQL)
+    return
+  }
+  if (!migrations.projectionStamps) {
+    throw new Error(
+      'ensureCorpusSchema: "columns" tenancy needs migrations.projectionStamps (0025)',
+    )
+  }
+  await driver.execScript(migrations.projectionStamps)
 }
 
 async function applyV14(
@@ -596,7 +612,7 @@ const STEPS: readonly [number, Step][] = [
   [10, (driver, _migrations, tenancy) => applyV10(driver, tenancy)],
   [11, applyV11],
   [12, (driver, _migrations, tenancy) => applyV12(driver, tenancy)],
-  [13, (driver, _migrations, tenancy) => applyV13(driver, tenancy)],
+  [13, applyV13],
   [14, applyV14],
   [15, applyV15],
   [16, (driver, _migrations, tenancy) => applyV16(driver, tenancy)],

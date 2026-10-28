@@ -33,14 +33,6 @@ export interface Env {
   /** Overrides the code default in replica.ts — raise to shut out old clients. */
   MIN_REPLICA_PROTOCOL?: string
   /**
-   * Which event log the rollup reads (worker/handlers/event-log.ts,
-   * docs/event-sourcing.md, "Per-key events"): `new`, the per-key
-   * `events_log` (the default), or `old`, the `events` table as before. Both
-   * logs are written either way; flipping this in the dashboard is the
-   * revert, no deploy needed.
-   */
-  EVENT_LOG_ROLLUP?: string
-  /**
    * Which database this Worker's replica answers from — absent in production,
    * the preview clone's D1 id on a preview version (scripts/preview-deploy.mjs,
    * docs/preview-databases.md). Echoed on every pull and status response so a

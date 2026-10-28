@@ -96,6 +96,7 @@ describe("the migrations that have shipped", () => {
       "0025_projection_stamps.sql": "bfcd10e563ac2297",
       "0027_view_stack.sql": "a1ff2261695d72e0",
       "0028_events_log.sql": "bbd7c8a9240ae38c",
+      "0029_backfill_delta_mat_values.sql": "78c2478f5346977d",
     }
     const files = Object.fromEntries(
       Object.entries(MIGRATION_FILES).map(([path, sql]) => [path.split("/").pop()!, sql]),

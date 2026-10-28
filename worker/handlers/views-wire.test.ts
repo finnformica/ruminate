@@ -80,8 +80,10 @@ describe("a pushed view, through the log", () => {
       links: [],
       views: [view({ filter: "type:stale", updated_at: 100 })],
     })
+    // A view's create is six rows of the log (its liveness and five columns):
+    // the row takes the seq of the last.
     expect(await stored()).toEqual([
-      { id: "view_1", filter: "type:todo", pinned: 1, updated_at: 200, seq: 1 },
+      { id: "view_1", filter: "type:todo", pinned: 1, updated_at: 200, seq: 6 },
     ])
   })
 
@@ -105,9 +107,10 @@ describe("a pushed view, through the log", () => {
     await corpusPut(tenant, { nodes: [node], links: [] })
     await corpusPut(tenant, { nodes: [], links: [], views: [view()] })
     await corpusPut(tenant, { nodes: [{ ...node, text: "A2", updated_at: 2 }], links: [] })
-    expect((await stored())[0].seq).toBe(2)
+    // The block's create is four rows, the view's six, the edit one.
+    expect((await stored())[0].seq).toBe(10)
     const [row] = await driver.exec("SELECT seq FROM nodes WHERE user_id = 111 AND id = 'blk_a'")
-    expect(row.seq).toBe(3)
+    expect(row.seq).toBe(11)
   })
 })
 

@@ -45,13 +45,10 @@ export interface NoteStore {
   /** The events not yet acknowledged by the replica, oldest first — the push
    * queue, durable across reloads. */
   unpushedEvents(): Promise<KeyEvent[]>
-  /** Stamp events with the `seq` the replica gave them in the per-key log,
-   * and the rows they changed with the seq of the old-shaped event each
-   * mirrors (`eventSeq`: the cursors' order; a row's `seq` is its last
+  /** Stamp events with the `seq` the replica gave them, and the rows they
+   * changed with it (the cursors' order; a row's `seq` is its last
    * event's). */
-  markEventsPushed(
-    seqs: readonly (readonly [id: string, seq: number, eventSeq?: number | null])[],
-  ): Promise<void>
+  markEventsPushed(seqs: readonly (readonly [id: string, seq: number])[]): Promise<void>
   /**
    * Take in events pulled from the replica — everything the tenant's log
    * holds past the device's events cursor, this device's own among them, now

@@ -29,8 +29,11 @@ import type { SqlStatement, SqlValue } from "./sql-driver"
  *   the live keys derive to (`derivedProps`, keys sorted), and its `props`
  *   stamp the highest of theirs. A row written with one `props` stamp and
  *   no keys (a repair, the stamp fill) reads every entry of its props at
- *   that stamp. Each key is also a row of `delta_mat_values`, the mirror of the
- *   replica's read model, written beside the block's row.
+ *   that stamp. Each key is a row of `delta_mat_values`, the mirror of the
+ *   replica's read model, written beside the block's row, and the place a
+ *   read takes the value from: a cache row is read with its `props` derived
+ *   from its keys (`NODE_PROPS`, sql-note-store.ts), and the column itself
+ *   is written as a mirror of them, as the replica writes its own.
  * - **Created** means `stamps.alive` is there: a create (or the stamp fill)
  *   set it. An entity an update reached before its create is held with no
  *   `alive` stamp, and as a tombstone, so no read of live rows sees it, and
@@ -180,6 +183,7 @@ export function cacheRowStatements(
     const values = columns.map((column) => {
       const at = (key as readonly string[]).indexOf(column)
       if (at >= 0) return keyOf[at]
+      // The mirror column: what the keys derive to, beside the key rows.
       if (column === "props") return derivedProps(value.fields)
       return column in value.fields ? toSql(value.fields[column]) : (FILLER[column] ?? null)
     })

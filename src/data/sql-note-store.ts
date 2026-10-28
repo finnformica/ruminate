@@ -9,7 +9,13 @@ import {
   type ViewRow,
 } from "../../worker/handlers/replica-payload"
 import { ensureCorpusSchema } from "./corpus-schema"
-import type { Entity, EntityKeys, StampedState } from "./events"
+import {
+  eventStamp,
+  type Entity,
+  type EntityKeys,
+  type RuminateEvent,
+  type StampedState,
+} from "./events"
 import {
   CACHE_TABLES,
   cacheRowStatements,
@@ -28,7 +34,8 @@ import {
   type KeyEvent,
   type LoggedKeyEvent,
 } from "./key-events"
-import { CHILD_KIND, buildGraphSnapshot } from "./graph"
+import { CHILD_KIND, buildGraphSnapshot, parseProps } from "./graph"
+import { nodePropsSql } from "./node-props-sql"
 import type { NoteStore } from "./note-store"
 import type { SqlDriver, SqlStatement, SqlValue } from "./sql-driver"
 
@@ -56,7 +63,10 @@ export const CACHE_STAMPS_KEY = "cache_stamps"
  * row keeps the stamp of each register (`stamps`), so it is the fold of its
  * entity's events, in any order, and an event applied twice changes
  * nothing. No other row is read, and nothing is folded again: a read is an
- * index lookup. The old `events` table stays, unread (schema v15).
+ * index lookup. The old `events` table stays, unread (schema v15). A block's
+ * props are its `delta_mat_values` rows: every read of a block derives the
+ * column from them (`NODE_PROPS`), as the replica does, and the `props`
+ * column is written beside them as a mirror.
  *
  * **Soft deletes.** Nothing here hard-deletes a corpus row. A delete stamps
  * `deleted_at` (and bumps `updated_at`, so the tombstone replicates like any
@@ -131,18 +141,16 @@ export async function openSqlNoteStore(
       if (seqs.length === 0) return
       const statements: SqlStatement[] = []
       // A placed event moves to the end of the log's append order.
-      for (const [id, seq, eventSeq] of seqs) {
+      for (const [id, seq] of seqs) {
         statements.push({
-          sql:
-            "UPDATE events_log SET seq = ?, event_seq = COALESCE(?, event_seq), " +
-            `position = ${NEXT_POSITION} WHERE id = ?`,
-          params: [seq, eventSeq ?? null, id],
+          sql: `UPDATE events_log SET seq = ?, position = ${NEXT_POSITION} WHERE id = ?`,
+          params: [seq, id],
         })
       }
-      // A row's `seq` is its last event's in the OLD log — the cursors' order:
-      // stamp the rows these events changed, never backwards.
-      for (const [id, , eventSeq] of seqs) {
-        if (eventSeq === null || eventSeq === undefined) continue
+      // A row's `seq` is its last event's — the cursors' order: stamp the
+      // rows these events changed, and the keys of the blocks, never
+      // backwards.
+      for (const [id, seq] of seqs) {
         for (const table of ["nodes", "link", "views"] as const) {
           statements.push({
             sql:
@@ -151,14 +159,14 @@ export async function openSqlNoteStore(
                 ? "source_id || '|' || destination_id || '|' || kind = "
                 : "id = ") +
               `(SELECT entity_id FROM events_log WHERE id = ?2 AND entity = '${ENTITY_OF[table]}')`,
-            params: [eventSeq, id],
+            params: [seq, id],
           })
         }
         statements.push({
           sql:
             "UPDATE delta_mat_values SET seq = ?1 WHERE (seq IS NULL OR seq < ?1) AND block_id = " +
             "(SELECT entity_id FROM events_log WHERE id = ?2 AND entity = 'block')",
-          params: [eventSeq, id],
+          params: [seq, id],
         })
       }
       await driver.batch(statements)
@@ -212,7 +220,7 @@ export async function openSqlNoteStore(
       }
       // Rows from outside the log (a repair from the screen) take the stamps
       // their last event derives, as the stamp fill gives them.
-      for (const node of plan.nodes) statements.push(upsertNodeStatement(node))
+      for (const node of plan.nodes) statements.push(...upsertNodeStatements(node))
       for (const link of plan.links) statements.push(upsertLinkStatement(link))
       for (const view of plan.views) statements.push(upsertViewStatement(view))
       if (statements.length > 0) await driver.batch(statements)
@@ -273,8 +281,13 @@ async function loadMemGraph(driver: SqlDriver): Promise<{ nodes: NodeRow[]; link
   return { nodes: nodeRows.map(toNodeRow), links: linkRows.map(toLinkRow) }
 }
 
+/** A block's `props` as its `delta_mat_values` rows say (`nodePropsSql`):
+ * the one spelling every read of a block here uses. */
+const NODE_PROPS = nodePropsSql("nodes.id", "single")
+
 const LIVE_NODES =
-  "SELECT id, type, text, props, updated_at, notes_id, seq FROM nodes WHERE deleted_at IS NULL"
+  `SELECT id, type, text, ${NODE_PROPS} AS props, updated_at, notes_id, seq FROM nodes ` +
+  "WHERE deleted_at IS NULL"
 // A live link with a tombstoned end is not read: `buildGraphSnapshot` drops
 // it when it sees the tombstone, and only the live nodes are read here. The
 // fold reads out the same graph (`toGraphSnapshot`, `readOutEntities`).
@@ -333,7 +346,8 @@ async function loadAllRows(
 ): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }> {
   const [nodeRows, linkRows, viewRows] = await Promise.all([
     driver.exec(
-      `SELECT id, type, text, props, updated_at, deleted_at, notes_id, seq FROM nodes WHERE ${CREATED} ` +
+      `SELECT id, type, text, ${NODE_PROPS} AS props, updated_at, deleted_at, notes_id, seq ` +
+        `FROM nodes WHERE ${CREATED} ` +
         "/* includes-deleted: the full-push source; a delete only reaches other " +
         "devices if its tombstone travels */",
     ),
@@ -428,6 +442,13 @@ function keysOfEvents(events: readonly KeyEvent[]) {
 }
 
 /** `(k1 = ? AND k2 = ?) OR …` for a chunk of entity ids, with its params. */
+/** Every column of an entity's cache row, a block's `props` derived from
+ * its keys (`NODE_PROPS`) rather than read from the mirror column. */
+const columnsOf = (entity: Entity) =>
+  entity === "block"
+    ? `id, type, text, ${NODE_PROPS} AS props, updated_at, deleted_at, notes_id, seq, stamps`
+    : "*"
+
 function whereKeys(entity: Entity, ids: readonly string[]): { sql: string; params: string[] } {
   const { key } = CACHE_TABLES[entity]
   if (key.length === 1) {
@@ -453,7 +474,7 @@ async function loadCacheState(
     for (const ids of inChunks([...keys[entity]])) {
       const where = whereKeys(entity, ids)
       const rows = await driver.exec(
-        `SELECT * FROM ${CACHE_TABLES[entity].table} WHERE ${where.sql} ` +
+        `SELECT ${columnsOf(entity)} FROM ${CACHE_TABLES[entity].table} WHERE ${where.sql} ` +
           "/* includes-deleted: the fold holds tombstones */",
         where.params,
       )
@@ -566,7 +587,8 @@ async function loadRowsOf(
     for (const chunk of inChunks([...ids])) {
       const where = whereKeys(entity, chunk)
       const rows = await driver.exec(
-        `SELECT * FROM ${CACHE_TABLES[entity].table} WHERE ${CREATED} AND (${where.sql}) ` +
+        `SELECT ${columnsOf(entity)} FROM ${CACHE_TABLES[entity].table} ` +
+          `WHERE ${CREATED} AND (${where.sql}) ` +
           "/* includes-deleted: compared with the replica's rows, tombstones too */",
         where.params,
       )
@@ -710,27 +732,47 @@ function upsertViewStatement(view: ViewRow): SqlStatement {
   }
 }
 
-const upsertNodeStatement = (node: NodeRow): SqlStatement => ({
-  sql:
-    "INSERT INTO nodes (id, type, text, props, updated_at, deleted_at, notes_id, seq, stamps) " +
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
-    "ON CONFLICT (id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
-    "props = excluded.props, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, " +
-    // A note id is set once and never cleared by a row that carries none.
-    "notes_id = COALESCE(excluded.notes_id, nodes.notes_id), seq = excluded.seq, " +
-    "stamps = excluded.stamps",
-  params: [
-    node.id,
-    node.type,
-    node.text,
-    node.props,
-    node.updated_at,
-    node.deleted_at ?? null,
-    node.notes_id ?? null,
-    node.seq ?? null,
-    derivedStamps("block", node),
-  ],
-})
+/** A node row as the replica's rows look, verbatim — its props in the
+ * mirror column and as one key row each, at the stamp the row derives
+ * (`derivedStamps`). */
+const upsertNodeStatements = (node: NodeRow): SqlStatement[] => {
+  const stamp = eventStamp({ at: node.updated_at, seq: node.seq ?? 0 } as RuminateEvent)
+  const keys = Object.entries(parseProps(node.props) ?? {}).filter(
+    ([, value]) => value !== null && value !== undefined,
+  )
+  return [
+    {
+      sql:
+        "INSERT INTO nodes (id, type, text, props, updated_at, deleted_at, notes_id, seq, stamps) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+        "ON CONFLICT (id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
+        "props = excluded.props, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, " +
+        // A note id is set once and never cleared by a row that carries none.
+        "notes_id = COALESCE(excluded.notes_id, nodes.notes_id), seq = excluded.seq, " +
+        "stamps = excluded.stamps",
+      params: [
+        node.id,
+        node.type,
+        node.text,
+        node.props,
+        node.updated_at,
+        node.deleted_at ?? null,
+        node.notes_id ?? null,
+        node.seq ?? null,
+        derivedStamps("block", node),
+      ],
+    },
+    // The row's keys replace the block's: a key the row no longer names
+    // is gone from it.
+    { sql: "DELETE FROM delta_mat_values WHERE block_id = ?", params: [node.id] },
+    ...keys.map(([key, value]): SqlStatement => ({
+      sql:
+        "INSERT INTO delta_mat_values (block_id, key, value, hlc, seq, updated_at) " +
+        "VALUES (?, ?, ?, ?, ?, ?)",
+      params: [node.id, key, JSON.stringify(value), stamp, node.seq ?? null, node.updated_at],
+    })),
+  ]
+}
 
 const upsertLinkStatement = (link: LinkRow): SqlStatement => ({
   sql:

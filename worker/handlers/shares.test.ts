@@ -140,7 +140,10 @@ const sliceIds = (body: SliceBody) => body.nodes.map((row) => row.id).sort()
 
 async function ownerNode(id: string): Promise<Record<string, unknown> | undefined> {
   const rows = await harness.control.exec(
-    "SELECT id, type, text, props, notes_id, updated_at, deleted_at FROM nodes WHERE user_id = ?1 AND id = ?2",
+    "SELECT id, type, text, (SELECT NULLIF(json_group_object(b.key, json(b.value)), '{}') " +
+      "FROM delta_mat_values b WHERE b.user_id = ?1 AND b.block_id = nodes.id " +
+      "AND b.value IS NOT NULL) AS props, notes_id, updated_at, deleted_at FROM nodes " +
+      "WHERE user_id = ?1 AND id = ?2",
     [OWNER, id],
   )
   return rows[0]

@@ -106,11 +106,8 @@ export interface ReplicaSyncOptions {
   getAllRows: () => Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }>
   /** The store's unpushed events, oldest first — the queue. */
   getUnpushedEvents: () => Promise<KeyEvent[]>
-  /** Stamp pushed events with the `seq` the replica gave each, and the old
-   * log's seq of the event each mirrors. */
-  markEventsPushed: (
-    seqs: readonly (readonly [id: string, seq: number, eventSeq?: number | null])[],
-  ) => Promise<void>
+  /** Stamp pushed events with the `seq` the replica gave each. */
+  markEventsPushed: (seqs: readonly (readonly [id: string, seq: number])[]) => Promise<void>
   /** Injectable for tests; default global fetch (same-origin URLs). */
   fetchImpl?: typeof fetch
   /** Injectable for tests; default the real github-session helpers. */
@@ -409,7 +406,7 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   ): Promise<{ cursor: string; committed: boolean } | null> {
     if (events.length === 0) return null
     const cursor = nextCursor()
-    const seqs: [string, number, number | null][] = []
+    const seqs: [string, number][] = []
     let committed: string | null = null
     for (let index = 0; index < events.length; index += chunkEvents) {
       const run = events.slice(index, index + chunkEvents)
