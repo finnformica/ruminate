@@ -312,7 +312,14 @@ fold by stamp (`foldByStamp`): each row is the fold of one entity's events
   (`nodesOf`). The app does not use them yet: its graph atom still reads all
   live rows at boot (`getGraph`), with nothing to fold.
 - **The row pull** still runs (ES-9 waits), but its rows no longer write the
-  cache. The fold check compares them with it.
+  cache. The fold check compares them with it. The one exception is the
+  **first screen of a device whose log has not begun** (a fresh profile, a
+  wiped cache): its full pull seeds the cache with the rows as they are, each
+  with the stamps its last event derives (as the stamp fill gives a row), and
+  the screen draws from them at once. The log then catches up in pages behind
+  the screen: an event a row already holds changes nothing, a later one lands
+  as on any cache row. Before this (2026-10-28) a fresh device drew nothing
+  until the whole log had folded — 27 pages for a corpus of 50,000 rows.
 - **The two read-outs agree** (the two ES-4 differences): a row never placed
   has no `seq` in the cache, in `getGraph` and in `toGraphSnapshot`; and a
   live link with a tombstoned end is in no read (`getGraph` and the lazy
@@ -397,7 +404,11 @@ row as a snapshot `create` under the `seq` it already holds (no cursor moves).
 - **Genesis is just the first reconcile.** There is no backfill migration,
   because `npm run deploy` applies migrations _before_ uploading the Worker:
   rows the old Worker wrote in between would be missing from a log seeded by
-  SQL. A tenant's first write — or first read of its log — seeds it instead.
+  SQL. A tenant's first write — or first pull of its rows — seeds it instead.
+  A pull reconciles once, on the rows (`replicaPull`); the pages of the log
+  that follow (`replicaKeyEvents`) read without one. Each page used to
+  reconcile, and the scan of `events` it took cost a fresh device's pages
+  more than the read did.
 - **A write around the log is repaired by the next write**, not left to
   drift: the old Worker during a rollout, a statement run in the console.
   The rows it snapshots also lose their `stamps`, which named values the row

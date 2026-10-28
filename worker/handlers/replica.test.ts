@@ -967,6 +967,33 @@ describe("tenant scoping — the adversarial suite", () => {
       expect(log.events).toEqual([])
     })
 
+    it("the pull of rows reconciles the log once; a page of the log does not", async () => {
+      // A row written around the log (an old Worker, the console) holds a
+      // seq the log has no event at. Each page of the log used to reconcile,
+      // which cost a fresh device's 27 pages a scan of `events` each; now
+      // the pull of rows that precedes them does, once.
+      const { env, driver } = await seededEnv()
+      await driver.exec(
+        "INSERT INTO nodes (user_id, id, type, text, props, updated_at, seq) " +
+          "VALUES (111, 'blk_aroundlog1', 'note', 'around the log', NULL, 100, 900)",
+      )
+      const page = async () =>
+        (await (await get(env, "alice-token", "/api/replica/events-log")).json()) as {
+          events: { entity_id: string; action: string }[]
+        }
+      const before = await page()
+      expect(before.events.some((event) => event.entity_id === "blk_aroundlog1")).toBe(false)
+      const pulled = (await (await get(env, "alice-token", "/api/replica/notes")).json()) as {
+        nodes: { id: string }[]
+      }
+      expect(pulled.nodes.some((node) => node.id === "blk_aroundlog1")).toBe(true)
+      const after = await page()
+      // The snapshot's create, read per key: the create row and its fields.
+      expect(
+        after.events.filter((event) => event.entity_id === "blk_aroundlog1").map((e) => e.action),
+      ).toEqual(["create", "set", "set", "set"])
+    })
+
     it("one tenant's log and past are not another's to read", async () => {
       const { env } = await seededEnv()
       const log = (await (await get(env, "bob-token", "/api/replica/events")).json()) as {

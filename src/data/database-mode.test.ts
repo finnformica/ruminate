@@ -784,6 +784,47 @@ describe("database mode reads the fold", () => {
     expect(graph().nodes.size).toBe(2_001)
   }, 60_000)
 
+  it("a fresh device draws the pulled rows at once, before any page of the log", async () => {
+    // Finn's report of 2026-10-28: a fresh profile pulled 27 pages of the log
+    // and showed nothing until the last had folded, though the first request
+    // had brought every row. Here the log never answers until released: the
+    // notes are on screen from the rows alone, and the fold check, once the
+    // log has caught up, finds the cache and the log agree.
+    const { source, calls } = stubSource({
+      full: remoteCorpus({ "note-a": NOTE_A, "note-b": NOTE_B }, 1, "100"),
+    })
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const pullEvents = source.pullEvents
+    source.pullEvents = async (since, limit) => {
+      await gate
+      return pullEvents(since, limit)
+    }
+    const store = await openSqlNoteStore(createNodeSqlDriver())
+    startDatabaseMode({
+      openStore: async () => ({ store, persistence: "memory" }),
+      openReplicaSync: async () => null,
+      source,
+      foldCheckMs: 0,
+      pullRetryMs: 10 * 60_000,
+    })
+    try {
+      await vi.waitFor(() => expect(graph().nodes.get("blk_a000000000")?.text).toBe("A"))
+      expect(graph().nodes.get("blk_b000000000")?.text).toBe("B")
+      expect(calls.full).toBe(1)
+      // Nothing of the log has landed: the rows alone drew the screen.
+      expect(await store.eventLog()).toEqual([])
+      expect((await store.getMeta("events_pull_cursor")) ?? "").toBe("")
+    } finally {
+      release()
+    }
+    await flushDatabaseMode()
+    expect((await store.eventLog()).length).toBeGreaterThan(0)
+    expect(graph().nodes.get("blk_a000000000")?.text).toBe("A")
+    await checked()
+    expect(reported()).toEqual([])
+  })
+
   it("pulls a long log to its end before the check, and shows all of it", async () => {
     // Four rows per create: just past ten pages of 2,000 rows.
     const events = Array.from({ length: 5_001 }, (_, i) => placed(i + 1, `note-${i}`, `N${i}`))
@@ -850,6 +891,21 @@ describe("database mode event log", () => {
     expect(log[0]).toMatchObject({ seq: 100, event: "evt_remote_1" })
     expect(log.slice(4).map((event) => event.pending)).toEqual(own.map(() => true))
     expect(log.slice(4).map((event) => event.seq)).toEqual(own.map((_, i) => 104 + i))
+  })
+
+  it("a device whose log has begun does not seed its cache from a full pull", async () => {
+    // A pre-0005 cursor degrades to a full pull on a device that has its
+    // log: the rows are held for the fold check, and the log alone writes.
+    const { source, calls } = stubSource({
+      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
+      events: [placed(1, "note-a", "A")],
+    })
+    const store = await seededStore({}, "1788891492616", CACHE_GENERATION)
+    await store.setMeta("events_pull_cursor", "999")
+    await boot({ store, source, replica: stubReplica().handle })
+    expect(calls.full).toBe(1)
+    expect(calls.events).toEqual([[999, 2_000]])
+    expect(await noteOf(store, "note-a")).toBeNull()
   })
 
   it("a wiped cache pulls the log again from the start", async () => {

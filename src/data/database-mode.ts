@@ -1091,6 +1091,7 @@ function runPull(activation: DatabaseModeRuntime) {
       // in the same shape; a full pull is simply "everything changed".
       const useSince =
         cursor !== null && /^\d+$/.test(cursor) && Number(cursor) < LEGACY_TIMESTAMP_CURSOR_FLOOR
+      let full = !useSince
       let body: ReplicaChangesBody = useSince
         ? await activation.source.pullSince(cursor)
         : await activation.source.pullFull()
@@ -1102,7 +1103,10 @@ function runPull(activation: DatabaseModeRuntime) {
       if (replicaIdentityChanged(await store.getMeta(REPLICA_ID_KEY), body.replica_id)) {
         await store.clear()
         await resetCursors(store)
-        if (useSince) body = await activation.source.pullFull()
+        if (useSince) {
+          body = await activation.source.pullFull()
+          full = true
+        }
         if (runtime !== activation) return
       }
       if (typeof body.replica_id === "string" && body.replica_id.length > 0) {
@@ -1110,9 +1114,16 @@ function runPull(activation: DatabaseModeRuntime) {
       }
 
       // The rows no longer write the cache: the events pull below brings the
-      // same changes, and the fold check compares the two.
+      // same changes, and the fold check compares the two. The one exception
+      // is the first screen of a device whose log has not begun (a fresh
+      // profile, a wiped cache): its full pull seeds the cache, so every note
+      // shows now, and the log catches up behind it (`seedCache`).
       holdReplicaRows(activation, body)
       if (body.cursor !== null) await store.setMeta(PULL_CURSOR_KEY, body.cursor)
+      if (full && (await logNotBegun(store))) {
+        await seedCache(activation, store, body)
+        if (runtime !== activation) return
+      }
       await pullEventLog(activation, store)
 
       patchStatus({
@@ -1146,6 +1157,40 @@ function runPull(activation: DatabaseModeRuntime) {
       }, retryMs)
     }
   })
+}
+
+/** Has this device pulled no page of the log yet? True on a fresh profile
+ * and after a wipe (`resetCursors`), never once a page has landed. */
+async function logNotBegun(store: NoteStore): Promise<boolean> {
+  const held = await store.getMeta(EVENTS_CURSOR_KEY)
+  return held === null || held === ""
+}
+
+/**
+ * The first screen of a device whose log has not begun: the rows a full pull
+ * brought, written to the cache as they are — each with the stamps its last
+ * event derives, as the stamp fill gives a row — and drawn at once. The log
+ * then catches up in pages behind the screen (`pullEventLog`): an event the
+ * row already holds changes nothing (its stamp does not beat the row's), a
+ * later one lands as it would on any cache row.
+ *
+ * Without this a fresh device drew nothing until the whole log had folded
+ * (27 pages of 2,000 rows for a corpus of 50,000, Finn's report of
+ * 2026-10-28), though the rows it needed had come with the first request.
+ */
+async function seedCache(
+  activation: DatabaseModeRuntime,
+  store: NoteStore,
+  body: ReplicaChangesBody,
+) {
+  await store.applyPull({
+    nodes: body.nodes,
+    links: body.links,
+    views: body.views,
+    deleteNodes: [],
+    deleteLinks: [],
+  })
+  await refreshGraph(activation)
 }
 
 /**
