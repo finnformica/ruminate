@@ -183,12 +183,6 @@ const OWNER_KEY = "store_owner"
  * its props. A cache from before holds one `props` stamp per row and the old
  * log; one re-pull brings the per-key log down and folds the rows from it.
  *
- * Generation `11` is the cut-over (`LOCAL_V16_SQL`, migrations/0029,
- * docs/event-sourcing.md, "The cut-over"): `nodes` loses its `props`
- * column, a block's props are its `delta_mat_values` rows alone, and the
- * replica's `seq` is the per-key log's own, which the rows and the cursors
- * now count in. One re-pull brings every row and key down in that order.
- *
  * This is why the constant is bumped rather than merely re-documented: every
  * device that already booted on generation `2` has `"2"` stamped in its meta,
  * so folding a new change into the old number is a wipe that never fires.
@@ -199,7 +193,7 @@ const OWNER_KEY = "store_owner"
  * when the tab hides, so the window is small — but it is real, and it is why
  * this is bumped deliberately rather than routinely.
  */
-export const CACHE_GENERATION = "11"
+export const CACHE_GENERATION = "10"
 /**
  * The database the local copy was last pulled from — `"production"`, or a
  * preview clone's id — as the replica reports it (`replica_id` on every pull,

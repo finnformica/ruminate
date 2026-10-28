@@ -22,7 +22,7 @@ import migration0024 from "../../migrations/0024_event_hlc.sql?raw"
 import migration0025 from "../../migrations/0025_projection_stamps.sql?raw"
 import migration0027 from "../../migrations/0027_view_stack.sql?raw"
 import migration0028 from "../../migrations/0028_events_log.sql?raw"
-import migration0029 from "../../migrations/0029_drop_node_props.sql?raw"
+import migration0029 from "../../migrations/0029_backfill_delta_mat_values.sql?raw"
 import migration0003 from "../../migrations/0003_control_plane.sql?raw"
 import migration0010 from "../../migrations/0010_user_email.sql?raw"
 import migration0011 from "../../migrations/0011_user_email_required.sql?raw"
@@ -112,19 +112,12 @@ export async function createTenantTestDriver(): Promise<SqlDriver> {
       projectionStamps: migration0025,
       viewStack: migration0027,
       eventsLog: migration0028,
-      dropNodeProps: migration0029,
     },
     "columns",
   )
-  return driver
-}
-
-/**
- * The corpus as the data migrations before 0029 met it: `nodes.props` put
- * back, empty. For the suites that run 0015 or 0020 against rows with props.
- */
-export async function withNodeProps(driver: SqlDriver): Promise<SqlDriver> {
-  await driver.execScript("ALTER TABLE nodes ADD COLUMN props TEXT")
+  // D1 only: a data migration (the backfill of `delta_mat_values` from the
+  // props column), with no local step to pair with.
+  await driver.execScript(migration0029)
   return driver
 }
 

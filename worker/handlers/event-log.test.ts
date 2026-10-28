@@ -14,7 +14,7 @@ import { encodeHlc } from "../../src/data/hlc"
 import type { SqlDriver } from "../../src/data/sql-driver"
 import { ensureTenantMeta, forTenant, type TenantDb } from "../tenancy-db"
 import migration0028 from "../../migrations/0028_events_log.sql?raw"
-import migration0029 from "../../migrations/0029_drop_node_props.sql?raw"
+import migration0029 from "../../migrations/0029_backfill_delta_mat_values.sql?raw"
 import {
   assembleLogState,
   assembleStamped,
@@ -221,10 +221,8 @@ describe("appending events", () => {
     )
     expect(a).toMatchObject({ text: "Heading, edited", type: "text", props: null, seq: 28 })
     expect(a.deleted_at).not.toBeNull()
-    // The column itself is gone: a block's props are its key rows.
-    expect((await driver.exec("PRAGMA table_info(nodes)")).map((c) => c.name)).not.toContain(
-      "props",
-    )
+    // The column stays as a mirror of the keys, written beside every change.
+    expect(await verifyLog(alice)).toMatchObject({ mirror: [] })
   })
 
   it("plans the same eight statements for one event or three hundred", () => {
@@ -499,6 +497,10 @@ describe("every writer's rows become events", () => {
       2_000,
     )
     expect(await propsOf(driver, "a")).toEqual({ nested: { x: [1] }, size: 50 })
+    // The mirror column says the same, for a build that reads it.
+    expect(await driver.exec("SELECT props FROM nodes WHERE user_id = 111 AND id = 'a'")).toEqual([
+      { props: '{"nested":{"x":[1]},"size":50}' },
+    ])
     const since = await corpusPullSince(alice, Number(pulled.cursor))
     expect(since.nodes.map((row) => [row.id, row.props])).toEqual([
       ["a", '{"nested":{"x":[1]},"size":50}'],
@@ -524,6 +526,7 @@ describe("every writer's rows become events", () => {
     expect(await verifyLog(alice)).toMatchObject({
       ok: true,
       deltaMatValues: [],
+      mirror: [],
       drift: { nodes: [] },
     })
   })
@@ -831,6 +834,8 @@ describe("reconcile", () => {
     expect(verdict.ok).toBe(false)
     expect(verdict.deltaMatValues).toEqual(["a size"])
     expect(verdict.drift.nodes).toEqual(["a"])
+    // …and the mirror column no longer says what the keys say.
+    expect(verdict.mirror).toEqual(["a"])
   })
 })
 
@@ -1694,7 +1699,7 @@ describe("the per-key log", () => {
 // -----------------------------------------------------------------------------
 
 describe("the cut-over", () => {
-  it("no statement in the Worker or the browser store names a props column of nodes", () => {
+  it("no statement in the Worker or the browser store reads the props column of nodes", () => {
     const proc = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } })
       .process
     const { readdirSync, readFileSync } = proc?.getBuiltinModule?.("node:fs") as {
@@ -1725,10 +1730,13 @@ describe("the cut-over", () => {
         .replace(/\/\*[\s\S]*?\*\//g, "")
         .replace(/^\s*\/\/.*$/gm, "")
       // Every string literal: a column named as `<alias>.props`, or `props`
-      // bare in a column list, is a read or a write of the column that is
-      // gone. `AS props` (the derived column), `'props'` (a stamps key) and
-      // `props.` (a key register) are not.
+      // bare in a column list, is a read of the column — unless it is the
+      // mirror's write (an insert or update of `nodes`). `AS props` (the
+      // derived column), `'props'` (a stamps key) and `props.` (a key
+      // register) are not.
       for (const literal of text.match(/`(?:[^`\\]|\\.)*`|"(?:[^"\\]|\\.)*"/g) ?? []) {
+        if (/INSERT INTO nodes \(|UPDATE nodes SET|props = CASE WHEN|excluded\.props/.test(literal))
+          continue
         if (/\b[a-z_]+\.props\b/.test(literal) || /[(,]\s*props\s*[,)]/.test(literal)) {
           offenders.push(`${path}: ${literal.slice(0, 80)}`)
         }

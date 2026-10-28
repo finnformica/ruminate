@@ -17,9 +17,7 @@ import type { ViewRow } from "./views"
 
 /** Undo the v13 step on a current store, to build an older one by hand. */
 /** What step v15 adds, taken away: a store as it was at v14. */
-/** What step v16 takes away, put back: a store as it was at v15. */
-const UNDO_V16 = "ALTER TABLE nodes ADD COLUMN props TEXT;"
-const UNDO_V15 = UNDO_V16 + "DROP TABLE events_log; DROP TABLE delta_mat_values;"
+const UNDO_V15 = "DROP TABLE events_log; DROP TABLE delta_mat_values;"
 /** What step v14 adds, taken away: a store as it was at v13. */
 const UNDO_V14 = UNDO_V15 + "ALTER TABLE views DROP COLUMN stack;"
 const UNDO_V13 =
@@ -217,7 +215,7 @@ describe("openSqlNoteStore", () => {
     const store = await openSqlNoteStore(driver)
     expect((await store.getGraph()).nodes.size).toBe(0)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "15" },
     ])
     expect(
       await driver.exec("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"),
@@ -250,7 +248,7 @@ describe("openSqlNoteStore", () => {
     // columns, it never rewrites rows.
     expect(await noteOf(store, "a")).toBe("\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "15" },
     ])
     // The row is live: a nullable column means NULL = never deleted.
     expect(await driver.exec("SELECT deleted_at FROM nodes WHERE id = ?", ["a"])).toEqual([
@@ -276,7 +274,7 @@ describe("openSqlNoteStore", () => {
     const store = await openSqlNoteStore(driver)
     expect(await noteOf(store, "a")).toBe("\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "15" },
     ])
     // No note id until a pull brings the replica's backfill down.
     expect(await driver.exec("SELECT notes_id FROM nodes WHERE id = ?", ["a"])).toEqual([
@@ -335,7 +333,7 @@ describe("openSqlNoteStore", () => {
 
     const store = await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "15" },
     ])
     // The old queue is kept as it was (the old log is not read any more), and
     // a pulled event is placed in the per-key log.
@@ -382,7 +380,7 @@ describe("openSqlNoteStore", () => {
     )
     const store = await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "15" },
     ])
     // An event made before stamps is never given one in place. The old queue
     // is kept as it was, and not read: the per-key log is the queue now.
@@ -405,7 +403,7 @@ describe("openSqlNoteStore", () => {
     )
     await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "15" },
     ])
     expect((await driver.exec("SELECT id FROM events")).map((row) => row.id)).toEqual(["evt_1"])
     // v12 made snapshots and v13 took them away: the cache replaces them.
@@ -455,7 +453,7 @@ describe("openSqlNoteStore", () => {
     )
     const reopened = await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "15" },
     ])
     // A row from before the column is a one-frame View: it holds no stack.
     expect(await reopened.getViews()).toEqual([view])
@@ -470,7 +468,7 @@ describe("openSqlNoteStore", () => {
     const reopened = await openSqlNoteStore(driver)
     expect((await reopened.getGraph()).nodes.size).toBe(0)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "15" },
     ])
   })
 
@@ -525,7 +523,7 @@ describe("openSqlNoteStore", () => {
     const reopened = await openSqlNoteStore(driver)
     expect(await noteOf(reopened, "a")).toBe("- kept\n  id:: blk_aaaaaaaaaa\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "15" },
     ])
     expect(await driver.exec("SELECT seq FROM nodes WHERE id = 'a'")).toEqual([{ seq: null }])
     expect(await reopened.unpushedEvents()).toEqual([])

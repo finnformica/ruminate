@@ -1,6 +1,6 @@
 import { expect, test } from "vitest"
 import migration0020 from "../../migrations/0020_board_type.sql?raw"
-import { createTenantTestDriver, withNodeProps } from "./sqlite-test-driver"
+import { createTenantTestDriver } from "./sqlite-test-driver"
 
 /**
  * 0020 against the **exact shape production D1 is in** (the real ladder, as
@@ -31,7 +31,7 @@ const node = (
   )
 
 test("0020 retypes a legacy board, strips the prop and bumps updated_at; everything else is untouched", async () => {
-  const driver = await withNodeProps(await createTenantTestDriver())
+  const driver = await createTenantTestDriver()
   await node(driver, 1, "n1", "note", '{"board":true,"width":"full"}')
   await node(driver, 1, "n2", "note", '{"board":true}')
   await node(driver, 1, "n3", "note", '{"title":"Plain"}')
@@ -62,7 +62,7 @@ test("0020 retypes a legacy board, strips the prop and bumps updated_at; everyth
 })
 
 test("0020 is re-runnable: a second pass matches no row", async () => {
-  const driver = await withNodeProps(await createTenantTestDriver())
+  const driver = await createTenantTestDriver()
   await node(driver, 1, "n1", "note", '{"board":true,"title":"Wall"}')
   await node(driver, 1, "n2", "note", '{"title":"Plain"}')
   await driver.execScript(migration0020)

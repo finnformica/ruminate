@@ -506,9 +506,9 @@ and the page says so (`earliest`).
 **Decided 2026-10-27, requested by Finn.** The log is per key: `events_log`
 (migrations/0028) holds every change as one row per KEY of one entity, and
 the tables are projected from it. **Cut over 2026-10-27** (migrations/0029,
-"The cut-over" below): the old `events` table is read-only history,
-`nodes.props` is gone, and a block's props are its rows of
-`delta_mat_values`. Code: `src/data/key-events.ts` (the vocabulary, the
+"The cut-over" below): the old `events` table is read-only history, and a
+block's props are read from its rows of `delta_mat_values`, with
+`nodes.props` kept as a mirror until a later PR drops it. Code: `src/data/key-events.ts` (the vocabulary, the
 validation, the folds, ops → key events, the expansion of an old event),
 `worker/handlers/event-log.ts` (the append, the reconcile, `delta_mat_values`,
 verify), `src/data/node-props-sql.ts` (a block's props in SQL),
@@ -567,14 +567,16 @@ primary key `(user_id, block_id, key)`: one row per key of a block's props
 with its current value as JSON, or NULL for a key that was unset — the
 tombstone keeps the key's stamp, so an older set that arrives later loses
 to it. `hlc` is the stamp of the row that set it, `seq` that row's place in
-the log, `updated_at` the writer's clock. It is the only place a block's
-props live: `nodes` has no `props` column (0029). Every reader derives the
-column from the keys, in SQL — the live keys in sorted order as one JSON
-object, or NULL for none (`nodePropsSql`, `NODE_PROPS`), which is
-`derivedProps` spelled in SQL — so the ~37 readers of a row's `props`
-(the pulls, the MCP loaders, a share's slice, the browser's cache reads)
-read what they always did. Comparing props is by value, never by string
-(`propsEqual`).
+the log, `updated_at` the writer's clock. It is where a block's props are
+read from (0029): every reader derives the column from the keys, in SQL —
+the live keys in sorted order as one JSON object, or NULL for none
+(`nodePropsSql`, `NODE_PROPS`), which is `derivedProps` spelled in SQL — so
+the ~37 readers of a row's `props` (the pulls, the MCP loaders, a share's
+slice, the browser's cache reads) read what they always did. `nodes.props`
+stays as a MIRROR: the projection writes it from the keys beside every
+change, nothing in this build reads it, and `verify` reports a block whose
+mirror and keys disagree (`mirror`). Comparing props is by value, never by
+string (`propsEqual`).
 
 ### The rollup, per key
 
@@ -658,13 +660,14 @@ of a key it never held live is let be.
 The device's log is `events_log` (schema v15, `LOCAL_V15_SQL`), one row per
 key, the push queue as before (`seq` NULL until placed). Each cache row
 holds a stamp per register in `stamps`, a block's props keys among them,
-and `delta_mat_values` holds each key beside it — and since schema v16
-(`LOCAL_V16_SQL`) that is where a block's props live: `nodes` has no
-`props` column, and every read of a cache row derives it from the keys. A
-push is answered with each row's `seq`, which the rows it changed take. The
-pull reads the per-key log (`GET /api/replica/events-log`), and the row
-pull carries `delta_mat_values` for the fold check to compare. The old
-`events` table stays, unread. The cache re-pulled once at v15 (generation 10) and once more at v16 (generation 11). The calendar folds the per-key
+and `delta_mat_values` holds each key beside it — and that is where a read
+of a cache row takes a block's props from (`NODE_PROPS`); the `props`
+column is written beside them as a mirror. A push is answered with each
+row's `seq`, which the rows it changed take. The pull reads the per-key log
+(`GET /api/replica/events-log`), and the row pull carries
+`delta_mat_values` for the fold check to compare. The old `events` table
+stays, unread. The cache re-pulled once at v15 (generation 10); the
+cut-over asks nothing more of it. The calendar folds the per-key
 log, counts the rows of one edit as one, and marks a row whose props keys
 changed with the keys that did.
 
@@ -676,53 +679,51 @@ as before), so an agent changes one key without touching the others.
 
 ### The cut-over
 
-**2026-10-27, requested by Finn** (migrations/0029). The trial of the per-key
-log ran with both logs written and a dashboard flag, `EVENT_LOG_ROLLUP`,
-to pick which one the rollup read. The flag and the old-rule code paths are
-gone; nothing writes `events` any more; `nodes.props` is dropped, after
-every live key of every block's `props` that `delta_mat_values` did not hold
-is written there at the row's props stamp (or the stamp its `updated_at`
-and `seq` derive, on a row from before stamps). A tenant the Worker had
-seeded (`delta_mat_values_seeded` in `meta`) gains nothing from that; one it
-had not gets its props as its rows said, one stamp per block, and the
-Worker seeds its per-key stamps from the fold on its first write or verify
-(`seedDeltaMatValues`).
+**2026-10-27, requested by Finn; scoped 2026-10-28 to keep the column**
+(migrations/0029). The trial of the per-key log ran with both logs written
+and a dashboard flag, `EVENT_LOG_ROLLUP`, to pick which one the rollup
+read. The flag and the old-rule code paths are gone; nothing writes `events`
+any more; every reader of a block's props reads its keys. `nodes.props`
+stays, as a mirror the projection writes beside every change, so a build
+from before the cut-over reads it as it always did. The migration only
+backfills: every live key of every block's `props` that `delta_mat_values`
+did not hold is written there at the row's props stamp (or the stamp its
+`updated_at` and `seq` derive, on a row from before stamps). A tenant the
+Worker had seeded (`delta_mat_values_seeded` in `meta`) gains nothing from
+that; one it had not gets its props as its rows said, one stamp per block,
+and the Worker seeds its per-key stamps from the fold on its first write
+or verify (`seedDeltaMatValues`). The browser's schema and cache generation
+do not change: its `delta_mat_values` rows are complete since v15, and it
+mirrors the column on write as the replica does.
 
-**What is irreversible.** The column. After 0029 a Worker from before it
-fails on every read and write of `nodes` (`no such column: props`), so the
-deploy is the migration then the upload, as `npm run deploy` and the
-preview script order them; the seconds between are failed requests, which
-the client retries. The rows' `seq` and the pull cursors count in
+**What changes for good.** The rows' `seq` and the pull cursors count in
 `events_log.seq` from here on; a row from before holds the old log's `seq`,
 which never reaches past a new one (every old event is mirrored above it).
+Rows written since carry `event_seq` NULL and an `event_id` that names an
+edit, not a row of `events`.
 
-**To roll back.** Revert the build and the schema together: the Worker
-before 0029 with a column it reads. Re-add the column and fill it from the
-keys, as the readers derive it:
+**To roll back.** Redeploy the build before this one (#299's). No schema
+change is needed: it reads `nodes.props`, which the mirror kept current,
+and it writes `events` and `events_log` both. Its first write for a tenant
+finds every row this build touched above the old log's end and records
+each as a snapshot in `events` at the row's own `seq` (`planReconcile`
+there), so the old log's `seq` moves past the new one and every device's
+cursor stays valid. The keys of those rows then take one stamp per block
+(that build's fill reads a snapshot whole). `/at` by seq on that build
+reads the rows this build wrote as before any moment (`event_seq` NULL),
+until they are snapshotted. Devices need nothing: the local schema is the
+same (v15), and so is the cache generation (10).
 
-```sql
-ALTER TABLE nodes ADD COLUMN props TEXT;
-UPDATE nodes SET props = (SELECT NULLIF(json_group_object(b.key, json(b.value)), '{}')
-  FROM (SELECT key, value FROM delta_mat_values WHERE user_id = nodes.user_id
-    AND block_id = nodes.id AND value IS NOT NULL ORDER BY key) AS b);
-```
-
-The per-key rows and the log stay as they are. The old `events` table has
-nothing written since the cut-over, so a Worker that projects from it
-would start behind: the one to go back to is PR 1's build, whose rollup
-reads `events_log` and writes both logs, under `EVENT_LOG_ROLLUP` unset. A
-device on this build has a schema the older build does not know (v16) and
-resets its local store on open, then re-pulls.
-
-**The old `events` table.** It is history, read-only: `GET
-/api/replica/events` still serves it as it stood at the cut-over, for a
-build from before key events, and nothing else reads it. It can be dropped
-once no such build is in the wild — the service worker refreshes a cached
-bundle on the next load, so a week after the deploy is enough — by a
-migration that drops the table and its triggers, with `readEvents` and
-that route removed in the same change, and `event_purges` kept (the
-per-key log's delete trigger reads it). Nothing in the per-key log depends
-on it: `event_seq` is a number, not a reference.
+**The follow-up.** A later PR drops `nodes.props` on both shapes, once the
+cut-over has run for a while: a migration with `ALTER TABLE nodes DROP
+COLUMN props`, the mirror write removed from `planKeyChunk` and
+`cacheRowStatements`, the local ladder's next step, one cache re-pull, and
+`verify` without `mirror`. The old `events` table goes later still, once no
+build from before key events is in the wild: a migration that drops the
+table and its triggers, with `readEvents` and `GET /api/replica/events`
+removed in the same change, and `event_purges` kept (the per-key log's
+delete trigger reads it). Nothing in the per-key log depends on it:
+`event_seq` is a number, not a reference.
 
 ## Append-only, structurally
 

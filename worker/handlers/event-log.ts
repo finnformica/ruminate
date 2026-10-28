@@ -10,10 +10,12 @@
 // are never ahead of the log nor behind it, and everything that reads the
 // corpus (pulls, MCP, shares, search, the D1 console) goes on reading the
 // tables it always has. A block's props are its rows of `delta_mat_values`,
-// one per key; `nodes` holds no `props` column (0029), and every reader
-// derives it from the keys (`nodePropsSql`). The old `events` table stays
-// as it was at the cut-over, read-only: `readEvents` still serves it as
-// history, and nothing writes it.
+// one per key, and every reader derives the column from the keys
+// (`nodePropsSql`); `nodes.props` stays as a MIRROR of them (0029), written
+// beside every change and read by nothing here, so a build from before the
+// cut-over reads it as it always did. The old `events` table stays as it
+// was at the cut-over, read-only: `readEvents` still serves it as history,
+// and nothing writes it.
 //
 // ## Two doors
 //
@@ -102,6 +104,7 @@ import {
   keyStateAt,
   parseStoredKeyEvent,
   propNameOf,
+  propsEqual,
   propsRegister,
   type KeyEvent,
   type LoggedKeyEvent,
@@ -1000,6 +1003,10 @@ export interface LogVerdict {
   /** `delta_mat_values` against the per-key fold: the (block, key) pairs that
    * differ, as `<block id> <key>`. */
   deltaMatValues: string[]
+  /** The mirror column against the keys: the blocks whose `nodes.props`
+   * does not say what their `delta_mat_values` rows say. Reported only: no
+   * reader of this build reads the column (0029). */
+  mirror: string[]
   rejected: number
 }
 
@@ -1035,7 +1042,8 @@ const canonStamps = (stamps: Record<string, string> | null) =>
  * Two checks, both in `ok`: the tables against the fold (`drift`), a
  * block's props read from its key rows and compared as a value; and
  * `delta_mat_values` against the per-key fold (`deltaMatValues`), each key's
- * value and stamp. A block no event has touched since stamps (0025) holds
+ * value and stamp. A third, reported only: the mirror column against the
+ * keys (`mirror`). A block no event has touched since stamps (0025) holds
  * its keys at stamps derived one way or another — the backfill's, a
  * snapshot's — so for it the values are compared and the stamps are not,
  * and a tombstone of a key it never held live is let be.
@@ -1064,6 +1072,10 @@ export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
     ...row,
     props: derivedProps(live.get(row.id) ?? {}),
   }))
+  // The mirror column against the keys, by value.
+  const mirror = nodes
+    .filter((row) => !propsEqual(legacy.mirror.get(row.id), row.props))
+    .map((row) => row.id)
 
   const byKeys = projectKeyLog(keyLog, legacy.of)
   const active = assembleProjection(byKeys.tables)
@@ -1158,6 +1170,7 @@ export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
     },
     drift,
     deltaMatValues,
+    mirror,
     rejected: byKeys.rejected,
   }
 }
@@ -1292,6 +1305,9 @@ const createdKeyStamps = (entity: Entity) =>
     .join(", ") +
   `, 'alive', ${winnerStamp("j.value", "$.created.alive")})`
 
+/** A block's `props` as its key rows say — the mirror column takes it
+ * beside every change (`NODE_PROPS`). */
+const propsFromKeys = (blockId: string) => NODE_PROPS(blockId)
 /** The stamp of a block's props register: the highest of its keys'. */
 const propsStampFromKeys = (blockId: string) =>
   `(SELECT MAX(hlc) FROM delta_mat_values WHERE user_id = :tenant AND block_id = ${blockId})`
@@ -1316,7 +1332,8 @@ const BLOCK_COLUMNS = ["type", "text", "notes_id"] as const
 /**
  * The projection of one run of key events: the log appended,
  * `delta_mat_values` upserted key by key by stamp, then the rows — a block's
- * other registers by stamp, its `props` stamp the highest of its keys'.
+ * other registers by stamp, its `props` stamp the highest of its keys', and
+ * its `props` column the mirror of the keys as they stand after the upsert.
  */
 function planKeyChunk(events: readonly KeyEvent[], ctx: AppendContext): SqlStatement[] {
   const changes = stampedKeyChanges(events)
@@ -1372,9 +1389,10 @@ function planKeyChunk(events: readonly KeyEvent[], ctx: AppendContext): SqlState
     // Blocks → nodes
     {
       sql:
-        "INSERT INTO nodes (user_id, id, type, text, updated_at, deleted_at, notes_id, " +
+        "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at, notes_id, " +
         "seq, stamps) SELECT :tenant, json_extract(j.value, '$.entity_id'), " +
         `${createdField("type")}, ${createdField("text")}, ` +
+        `${propsFromKeys("json_extract(j.value, '$.entity_id')")}, ` +
         "json_extract(j.value, '$.created.top.at'), " +
         "json_extract(j.value, '$.created.alive.deleted_at'), " +
         `${createdField("notes_id")}, ${SEQ_OF_LAST_EVENT}, ` +
@@ -1392,6 +1410,8 @@ function planKeyChunk(events: readonly KeyEvent[], ctx: AppendContext): SqlState
       sql:
         keyChangesAs("block", "entity_id") +
         `UPDATE nodes SET ${blockFields}, ` +
+        // The mirror: the column follows the keys, and is read by nothing here.
+        `props = CASE WHEN j.touches_keys THEN ${propsFromKeys("nodes.id")} ELSE nodes.props END, ` +
         `${tombstone("nodes")}, ${blockStampsAfter}, ${blockUpdatedAt}, ` +
         `seq = ${SEQ_OF_LAST_EVENT} ` +
         "FROM j WHERE nodes.user_id = :tenant AND nodes.id = j.entity_id " +
@@ -1899,10 +1919,13 @@ async function legacyReader(tenant: TenantDb): Promise<{
   of: (entity: Entity, id: string) => number
   stamps: Map<string, Record<string, string> | null>
   rows: { nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }
+  /** Each block's `props` column, the mirror, by id. */
+  mirror: Map<string, string | null>
 }> {
   const all = tenant.includingDeleted()
   const nodeRows = await all.exec(
-    "SELECT id, type, text, updated_at, deleted_at, notes_id, seq, stamps FROM nodes " +
+    "SELECT id, type, text, updated_at, deleted_at, notes_id, seq, stamps, " +
+      "props AS mirror FROM nodes " +
       "WHERE user_id = :tenant /* includes-deleted: the fold holds tombstones too */",
   )
   const linkRows = await all.exec(
@@ -1916,6 +1939,9 @@ async function legacyReader(tenant: TenantDb): Promise<{
   const nodes = nodeRows.map(toNodeRow)
   const links = linkRows.map(toLinkRow)
   const views = viewRows.map(toViewRow)
+  const mirror = new Map(
+    nodeRows.map((raw) => [String(raw.id), raw.mirror === null ? null : String(raw.mirror)]),
+  )
   const linkKey = (row: LinkRow) => linkEntityId(row.source_id, row.destination_id, row.kind)
   const stamps = new Map<string, Record<string, string> | null>()
   const rowSeq = new Map<string, number | undefined>()
@@ -1935,7 +1961,7 @@ async function legacyReader(tenant: TenantDb): Promise<{
     if (held === null || held === undefined) return Number(rowSeq.get(key) ?? 0)
     return Number(held.legacy ?? 0)
   }
-  return { of, stamps, rows: { nodes, links, views } }
+  return { of, stamps, rows: { nodes, links, views }, mirror }
 }
 
 /** `nodePropsSql` for the Worker's shape — the one spelling every reader of

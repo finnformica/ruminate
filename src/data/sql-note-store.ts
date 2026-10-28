@@ -63,10 +63,10 @@ export const CACHE_STAMPS_KEY = "cache_stamps"
  * row keeps the stamp of each register (`stamps`), so it is the fold of its
  * entity's events, in any order, and an event applied twice changes
  * nothing. No other row is read, and nothing is folded again: a read is an
- * index lookup. The old `events` table stays, unread (schema v15), and
- * `nodes` holds no `props` column (schema v16): a block's props are its
- * `delta_mat_values` rows, and every read of a block derives the column from
- * them (`NODE_PROPS`), as the replica does.
+ * index lookup. The old `events` table stays, unread (schema v15). A block's
+ * props are its `delta_mat_values` rows: every read of a block derives the
+ * column from them (`NODE_PROPS`), as the replica does, and the `props`
+ * column is written beside them as a mirror.
  *
  * **Soft deletes.** Nothing here hard-deletes a corpus row. A delete stamps
  * `deleted_at` (and bumps `updated_at`, so the tombstone replicates like any
@@ -443,8 +443,11 @@ function keysOfEvents(events: readonly KeyEvent[]) {
 
 /** `(k1 = ? AND k2 = ?) OR …` for a chunk of entity ids, with its params. */
 /** Every column of an entity's cache row, a block's `props` derived from
- * its keys (`NODE_PROPS`), as `*` read it when the column was there. */
-const columnsOf = (entity: Entity) => (entity === "block" ? `nodes.*, ${NODE_PROPS} AS props` : "*")
+ * its keys (`NODE_PROPS`) rather than read from the mirror column. */
+const columnsOf = (entity: Entity) =>
+  entity === "block"
+    ? `id, type, text, ${NODE_PROPS} AS props, updated_at, deleted_at, notes_id, seq, stamps`
+    : "*"
 
 function whereKeys(entity: Entity, ids: readonly string[]): { sql: string; params: string[] } {
   const { key } = CACHE_TABLES[entity]
@@ -729,8 +732,9 @@ function upsertViewStatement(view: ViewRow): SqlStatement {
   }
 }
 
-/** A node row as the replica's rows look, verbatim, and its props as one
- * key row each, at the stamp the row derives (`derivedStamps`). */
+/** A node row as the replica's rows look, verbatim — its props in the
+ * mirror column and as one key row each, at the stamp the row derives
+ * (`derivedStamps`). */
 const upsertNodeStatements = (node: NodeRow): SqlStatement[] => {
   const stamp = eventStamp({ at: node.updated_at, seq: node.seq ?? 0 } as RuminateEvent)
   const keys = Object.entries(parseProps(node.props) ?? {}).filter(
@@ -739,10 +743,10 @@ const upsertNodeStatements = (node: NodeRow): SqlStatement[] => {
   return [
     {
       sql:
-        "INSERT INTO nodes (id, type, text, updated_at, deleted_at, notes_id, seq, stamps) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
+        "INSERT INTO nodes (id, type, text, props, updated_at, deleted_at, notes_id, seq, stamps) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
-        "updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, " +
+        "props = excluded.props, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, " +
         // A note id is set once and never cleared by a row that carries none.
         "notes_id = COALESCE(excluded.notes_id, nodes.notes_id), seq = excluded.seq, " +
         "stamps = excluded.stamps",
@@ -750,6 +754,7 @@ const upsertNodeStatements = (node: NodeRow): SqlStatement[] => {
         node.id,
         node.type,
         node.text,
+        node.props,
         node.updated_at,
         node.deleted_at ?? null,
         node.notes_id ?? null,

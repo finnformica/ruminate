@@ -1,7 +1,7 @@
 import { expect, test } from "vitest"
 import migration0015 from "../../migrations/0015_views.sql?raw"
 import migration0016 from "../../migrations/0016_retire_view_props.sql?raw"
-import { createTenantTestDriver, withNodeProps } from "./sqlite-test-driver"
+import { createTenantTestDriver } from "./sqlite-test-driver"
 
 /**
  * 0015 and 0016 against the **exact shape production D1 is in** (the real
@@ -20,7 +20,7 @@ import { createTenantTestDriver, withNodeProps } from "./sqlite-test-driver"
  * 0015 made puts us at v4 with rows, which is the state production was in.
  */
 async function v4Driver() {
-  const driver = await withNodeProps(await createTenantTestDriver())
+  const driver = await createTenantTestDriver()
   await driver.exec("DROP TABLE views")
   return driver
 }
