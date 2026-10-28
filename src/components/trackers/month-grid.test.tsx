@@ -108,6 +108,9 @@ describe("MonthGrid", () => {
     expect(within(read).getByText("2d")).toBeTruthy()
     expect(within(read).getByText("2×")).toBeTruthy()
     expect(within(read).queryByTestId("target-progress")).toBeNull()
+    // The row is still there, empty, so the cards line up.
+    expect(within(read).getByTestId("target-slot")).toBeTruthy()
+    expect(within(run).queryByTestId("target-slot")).toBeNull()
     expect(within(run).getByText("4 km")).toBeTruthy()
     const bar = within(run).getByRole("progressbar", { name: "Target this week" })
     expect(bar.getAttribute("aria-valuenow")).toBe("4")

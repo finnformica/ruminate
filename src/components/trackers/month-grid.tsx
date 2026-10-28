@@ -144,6 +144,9 @@ function SeriesCard({
           </div>
         </dl>
       </div>
+      {/* The target row is on every card, so names, bars and grids sit on
+          the same lines across the cards (Finn, 2026-10-28). A series with
+          no target keeps the row's height and shows nothing in it. */}
       {progress ? (
         <div
           className="flex items-center gap-2 text-sm text-text-secondary tabular-nums"
@@ -172,7 +175,16 @@ function SeriesCard({
             {progress.period === "day" ? "" : ` this ${progress.period}`}
           </span>
         </div>
-      ) : null}
+      ) : (
+        <div
+          aria-hidden
+          className="invisible flex items-center gap-2 text-sm tabular-nums"
+          data-testid="target-slot"
+        >
+          <div className="h-1.5 min-w-0 flex-1" />
+          <span className="shrink-0">0/0</span>
+        </div>
+      )}
       <div role="grid" aria-label={`${name}, by day`} className="grid grid-cols-7 gap-1">
         <div role="row" className="contents">
           {WEEKDAY_LABELS.map((label, i) => (
