@@ -1406,11 +1406,11 @@ function planKeyChunk(events: readonly KeyEvent[], ctx: AppendContext): SqlState
         "ON CONFLICT (user_id, id) DO NOTHING",
       params: params(changesFor(changes, "block")),
     },
+    // …and the mirror column with them: it follows the keys, read by nothing here.
     {
       sql:
         keyChangesAs("block", "entity_id") +
         `UPDATE nodes SET ${blockFields}, ` +
-        // The mirror: the column follows the keys, and is read by nothing here.
         `props = CASE WHEN j.touches_keys THEN ${propsFromKeys("nodes.id")} ELSE nodes.props END, ` +
         `${tombstone("nodes")}, ${blockStampsAfter}, ${blockUpdatedAt}, ` +
         `seq = ${SEQ_OF_LAST_EVENT} ` +
