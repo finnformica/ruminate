@@ -539,7 +539,7 @@ function daysInMonth(month: MonthString): number {
 }
 
 /** Every day of the month, in order. */
-export function monthDays(month: MonthString): DayString[] {
+function monthDays(month: MonthString): DayString[] {
   const count = daysInMonth(month)
   const days: DayString[] = []
   for (let d = 1; d <= count; d += 1) days.push(`${month}-${pad2(d)}`)

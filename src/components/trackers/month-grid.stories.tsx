@@ -1,5 +1,6 @@
 import React from "react"
-import type { Series, SeriesState } from "../../data/tracker"
+import { rangeLabel, type Series, type SeriesState, type TrackerRange } from "../../data/tracker"
+import { JournalGrid } from "./journal-grid"
 import { MonthGrid } from "./month-grid"
 import { TodayStrip } from "./today-strip"
 
@@ -76,7 +77,17 @@ const SERIES: SeriesState[] = [
 
 /** The tracker page's body as the route composes it: the Today strip over
  * the month grid, on live state so the story can be logged into. */
-function Tracker({ series: initial, width }: { series: SeriesState[]; width: number }) {
+function Tracker({
+  series: initial,
+  width,
+  range = "month",
+  layout = "cards",
+}: {
+  series: SeriesState[]
+  width: number
+  range?: TrackerRange
+  layout?: "cards" | "grid"
+}) {
   const [series, setSeries] = React.useState(initial)
   const [day, setDay] = React.useState(TODAY)
   const setEntry = (seriesId: string, date: string, value: boolean | number | null) =>
@@ -98,15 +109,28 @@ function Tracker({ series: initial, width }: { series: SeriesState[]; width: num
         onSetEntry={setEntry}
         onBackToToday={() => setDay(TODAY)}
       />
-      <h2 className="font-bold">October 2026</h2>
-      <MonthGrid
-        series={series}
-        month="2026-10"
-        today={TODAY}
-        selectedDay={day}
-        onToggle={(seriesId, cellDay, done) => setEntry(seriesId, cellDay, done ? true : null)}
-        onPickDay={(cellDay) => setDay(cellDay)}
-      />
+      <h2 className="font-bold">{rangeLabel(range, TODAY)}</h2>
+      {layout === "grid" ? (
+        <JournalGrid
+          series={series}
+          range={range}
+          start={TODAY}
+          today={TODAY}
+          selectedDay={day}
+          onToggle={(seriesId, cellDay, done) => setEntry(seriesId, cellDay, done ? true : null)}
+          onPickDay={(cellDay) => setDay(cellDay)}
+        />
+      ) : (
+        <MonthGrid
+          series={series}
+          range={range}
+          start={TODAY}
+          today={TODAY}
+          selectedDay={day}
+          onToggle={(seriesId, cellDay, done) => setEntry(seriesId, cellDay, done ? true : null)}
+          onPickDay={(cellDay) => setDay(cellDay)}
+        />
+      )}
     </div>
   )
 }
@@ -123,6 +147,34 @@ export const Desktop = {
 
 export const Phone = {
   render: () => <Tracker series={SERIES} width={375} />,
+}
+
+export const WeekCards = {
+  render: () => <Tracker series={SERIES} width={1024} range="week" />,
+}
+
+export const YearCards = {
+  render: () => <Tracker series={SERIES} width={1024} range="year" />,
+}
+
+export const YearCardsPhone = {
+  render: () => <Tracker series={SERIES} width={390} range="year" />,
+}
+
+export const WeekGrid = {
+  render: () => <Tracker series={SERIES} width={1024} range="week" layout="grid" />,
+}
+
+export const MonthGridLayout = {
+  render: () => <Tracker series={SERIES} width={1024} layout="grid" />,
+}
+
+export const MonthGridPhone = {
+  render: () => <Tracker series={SERIES} width={390} layout="grid" />,
+}
+
+export const YearGrid = {
+  render: () => <Tracker series={SERIES} width={1024} range="year" layout="grid" />,
 }
 
 export const Empty = {

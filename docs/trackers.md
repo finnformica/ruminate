@@ -8,7 +8,8 @@ above it to log the day in a tap. **New tracker**, under the header's
 the note's own ⋯ menu, which adds **Series** (the editor) and **Open note**
 (the outline beneath).
 
-Requested by Finn, 2026-10-27. The defaults are his: a month view only, a
+Requested by Finn, 2026-10-27. The defaults are his: a month view (a week
+and a year, and the journal grid, were added 2026-10-28), a
 streak is days in a row, the week starts on Monday, an entry carries no
 note, nothing is imported from a journal, and a day is the viewer's local
 date. The grid fits a phone (375 px) with no sideways scroll. The design is
@@ -130,8 +131,23 @@ has no keys to validate.
   **Add series** writes a check series named "New series" with its name
   selected. Remove asks first (`ConfirmDialog`, danger): the entries go
   with it. On a phone the list is a sheet.
-- The month shown moves with the arrows beside its name; **This month**
-  comes back. The page refreshes its idea of today every minute, so a tab
+- **The range and the layout** (Finn, 2026-10-28, a first cut to judge
+  from screenshots): a switch shows a **Week** (seven days from Monday), a
+  **Month** or a **Year** (`TRACKER_RANGES`, `rangeDays`, `rangeStart`,
+  `shiftRange` in `src/data/tracker.ts`); the cell is one day in each. A
+  second switch draws the range as **Cards**, one per series as above (a
+  week as one row of seven, a year as a heatmap of its weeks, `yearWeeks`,
+  sized to the card so a phone does not scroll sideways), or as the
+  **Grid** (`journal-grid.tsx`): one table, a row per series with its
+  colour, name and rollup at the left, a column per day with its weekday
+  and number on top, as a bullet journal's habit page is drawn. A tap on a
+  grid cell logs as a tap on a card's cell does. On a narrow screen the
+  days scroll sideways under a series column that stays put, and the grid
+  opens scrolled to today. The switches are page state: a reload shows
+  this month as cards.
+- The range shown moves with the arrows beside its name, by a week, a
+  month or a year; **This week**, **This month** or **This year** comes
+  back. The page refreshes its idea of today every minute, so a tab
   left open over midnight moves on.
 
 ### Colour
