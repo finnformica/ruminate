@@ -335,23 +335,15 @@ does not wait for the whole graph (`src/data/first-screen.ts`).
    closed, and each note gets only its first child (`firstChildLinksOf`,
    one index seek per note), which draws the chevron. A note's top-level
    blocks can be most of the corpus.
-2. **A limit in display order.** Each frame reads at most 300 rows
-   (`FIRST_SCREEN_ROWS`), the first in display order, so the top of the
-   page is whole and a long note costs no more than a short one. Each
-   round reads, in one batch, the lists of all the first rows not read
-   yet; a round adds rows only deeper down, so a frame takes at most
-   depth + 1 rounds. In the Root frame, the first 300 notes get their
-   first child. The rows past the limit are not drawn until the whole
-   graph lands.
-3. **The whole graph.** After the browser paints (`nextPaint`), the
+2. **The whole graph.** After the browser paints (`nextPaint`), the
    runtime reads the whole live graph (`getGraph`), as before, and it
    replaces the first screen. A repair, and a pull after the cache was
    cleared, read the whole graph again.
-4. **No writes in between.** Until the whole graph is read
+3. **No writes in between.** Until the whole graph is read
    (`databaseGraphWholeAtom`), the editor is read-only and the runtime
    refuses ops. A delete counts a block's places and reaches across notes
    (`deleteBlockOps`, `deleteSubtreeOps`), so it must see the whole graph.
-5. **A pulled page reads what it names.** After each page of the events
+4. **A pulled page reads what it names.** After each page of the events
    pull, the runtime reads only the rows the page's events name, and the
    links at each named node (`patchGraph`, `src/data/graph-patch.ts`). It
    sorts again only the lists those links are in. Every other row keeps
@@ -383,20 +375,67 @@ six reloads. The browser's OPFS store is slower, and the console line above
 gives its times. "30 times m93" is 750 notes of 44 blocks and one long note
 of 3,000 rows.
 
-| corpus                         | before: first screen | Root    | a note | long note | whole graph | pulled page (before) | pulled page |
-| ------------------------------ | -------------------- | ------- | ------ | --------- | ----------- | -------------------- | ----------- |
-| m93: 1,125 nodes, 17,000 edits | 18.8 ms              | 1.8 ms  | 2.1 ms | none      | 21 ms       | 17 ms                | 1.9 ms      |
-| 30 times m93: 36,750 blocks    | 866 ms               | 20.5 ms | 9.7 ms | 37.9 ms   | 802 ms      | 869 ms               | 69 ms       |
+| corpus                         | before: first screen | Root    | a note  | long note | whole graph | pulled page (before) | pulled page |
+| ------------------------------ | -------------------- | ------- | ------- | --------- | ----------- | -------------------- | ----------- |
+| m93: 1,125 nodes, 17,000 edits | 18.8 ms              | 1.7 ms  | 2.0 ms  | none      | 20 ms       | 17 ms                | 1.9 ms      |
+| 30 times m93: 36,750 blocks    | 866 ms               | 40.7 ms | 12.2 ms | 64.5 ms   | 903 ms      | 869 ms               | 69 ms       |
 
 - **Before:** the open, the whole graph, the notes and the block index.
 - **Root, a note, long note:** the first screen of the Root frame
-  (depth 1), or of a note (depth 2), and the notes built from it. Without
-  the limit the long note took 64.5 ms, and Root 40.7 ms.
+  (depth 1), or of a note (depth 2), and the notes built from it. The
+  first screen has no limit: the long note reads all its 3,000 rows.
 - **Whole graph:** the read after the first screen, with the notes and the
   block index.
 - **Pulled page:** a page with one text edit, then the notes and the block
   index: the whole graph read again (before), or `patchGraph` (33 ms of
   the 69 at the larger size; the rest is the notes builder).
+
+### A future scale step: a paged boot
+
+Not built. Finn, 2026-10-28: "I don't think we need to do the pagination
+part just yet, but store in docs for future in case we get to that scale."
+This is how branch-demo (Flow) loads its item tree lazily, read from its
+code on 2026-10-28, kept here for that day.
+
+What branch-demo does:
+
+- **One shared budget, in display order.** The first load reads 300
+  entities in the order the rows show, not one row at a time and not only
+  the root's children. Rows open to depth 2. A scroll adds pages of 50, up
+  to 5,000 for each step. The first rows show at 100, 200, then 300.
+- **Bodies in batches.** It fetches entity bodies 100 at a time, and one
+  coalescer joins the requests already in flight.
+- **Search, parent paths and counts on the server.** Search and filters run
+  on indexed rows on the server; parent paths come from one request. A
+  closed row's count is the length of its parent's link list.
+- **Only loaded rows are kept current.** A push event patches the cached
+  rows or marks them stale. A row not loaded has no cache entry, so it
+  needs no update.
+- **Measured** (a table view, a folder of 458 children, over the network):
+  open the folder about 290 ms, expand one row (50 more rows) about
+  240 ms, show more 10 to 16 ms.
+
+What ruminate has of it already: the first screen reads only the open
+frames, and a pulled page reads only the rows it names (`patchGraph`).
+What it does not have: a budget, pages on scroll, and indexes for search,
+parent paths and counts. Its block editor is not virtualised, so pages on
+scroll also need a virtual list.
+
+When ruminate needs it. In the cost table, the whole graph costs about
+24 microseconds per node with `node:sqlite` (20 ms at 1,125 nodes, 903 ms
+at 36,750), and OPFS is slower. Production held 3,711 rows. Take the step
+when one of these is true:
+
+- The boot's console line shows a whole graph read of more than 1 second
+  on a real device. With `node:sqlite` that is about 40,000 nodes; on OPFS
+  expect it at fewer.
+- A first screen passes 200 ms. A note of 3,000 rows takes 64.5 ms, so
+  this is a note, or a Root frame, of about 10,000 rows.
+
+Then the budget goes first (it bounds the first screen), and the indexes
+next (they let search, parent paths and counts go without the whole graph,
+so the whole read can stop). The 300 / depth 2 / 50 numbers are a start;
+measure them on ruminate's own rows.
 
 ### The fold check
 

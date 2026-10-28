@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { parse } from "../blocks/parse"
 import { expandedByDepth } from "../blocks/default-collapsed"
-import { FIRST_SCREEN_ROWS, framesOnScreen, loadFirstScreen } from "./first-screen"
+import { framesOnScreen, loadFirstScreen } from "./first-screen"
 import { CORPUS_ROOT_ID, noteView, rootView } from "./graph"
 import { docToOps } from "./ops"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
@@ -109,24 +109,6 @@ describe("loadFirstScreen", () => {
       "blk_a000000000",
       "blk_b000000000",
     ])
-  })
-
-  it("reads a long note's first rows in display order, and no more", async () => {
-    const store = await openSqlNoteStore(createNodeSqlDriver())
-    let markdown = "- R1\n  id:: blk_r000000001\n  - R1 child\n    id:: blk_k000000001\n"
-    for (let i = 2; i <= 400; i += 1) {
-      markdown += `- R${i}\n  id:: blk_r${String(i).padStart(9, "0")}\n`
-    }
-    await applyOpsToStore(store, docToOps("note-long", parse(markdown), await store.getGraph()))
-
-    const graph = await loadFirstScreen(store, [{ id: "note-long", depth: 2 }], [])
-
-    expect(graph.nodes.has("blk_r000000001")).toBe(true)
-    expect(graph.nodes.has("blk_k000000001")).toBe(true)
-    // The note, R1, R1's child, then R2 on: the limit falls at R298.
-    expect(graph.nodes.has(`blk_r${String(FIRST_SCREEN_ROWS - 2).padStart(9, "0")}`)).toBe(true)
-    expect(graph.nodes.has(`blk_r${String(FIRST_SCREEN_ROWS - 1).padStart(9, "0")}`)).toBe(false)
-    expect(graph.nodes.has("blk_r000000400")).toBe(false)
   })
 
   it("reads the roots of the views", async () => {
