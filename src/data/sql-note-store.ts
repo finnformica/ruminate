@@ -188,6 +188,21 @@ export async function openSqlNoteStore(
 
     nodesOf: (ids) => readChunked(driver, ids, LIVE_NODES, "id", toNodeRow),
 
+    nodesOfType: (types) => readChunked(driver, types, LIVE_NODES, "type", toNodeRow),
+
+    firstChildLinksOf: async (ids) => {
+      if (ids.length === 0) return []
+      // One seek per node down `link_source`, in sort-key order, to its
+      // first live link: a node's list is never read whole.
+      const rows = await driver.exec(
+        `${LIVE_LINKS} AND rowid IN (SELECT (SELECT link.rowid FROM link WHERE ` +
+          `link.source_id = ids.value AND link.kind = '${CHILD_KIND}' AND ${LIVE_LINK} ` +
+          "ORDER BY link.sort_key LIMIT 1) FROM json_each(?) AS ids)",
+        [JSON.stringify([...new Set(ids)])],
+      )
+      return rows.map(toLinkRow)
+    },
+
     getAllRows: () => loadAllRows(driver),
 
     applyPull: async (plan) => {
@@ -281,6 +296,11 @@ const LIVE_NODES =
 const LIVE_LINKS =
   "SELECT source_id, destination_id, kind, sort_key, updated_at, seq FROM link " +
   "WHERE deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM nodes " +
+  "WHERE nodes.id IN (link.source_id, link.destination_id) " +
+  "AND nodes.deleted_at IS NOT NULL)"
+/** `LIVE_LINKS`'s condition, for a subquery over `link`. */
+const LIVE_LINK =
+  "link.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM nodes " +
   "WHERE nodes.id IN (link.source_id, link.destination_id) " +
   "AND nodes.deleted_at IS NOT NULL)"
 const LIVE_VIEWS =

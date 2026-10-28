@@ -83,6 +83,14 @@ export interface NoteStore {
   childLinksOf(sourceIds: readonly string[]): Promise<LinkRow[]>
   parentLinksOf(destinationIds: readonly string[]): Promise<LinkRow[]>
   nodesOf(ids: readonly string[]): Promise<NodeRow[]>
+  /** The first live child link of each named node by sort key (on a tie,
+   * either): what draws a closed row's chevron without its whole list (the
+   * Root frame's note rows, `src/data/first-screen.ts`). */
+  firstChildLinksOf(sourceIds: readonly string[]): Promise<LinkRow[]>
+  /** The live nodes of the named types — the notes and boards, for the
+   * first screen (`src/data/first-screen.ts`). A scan of `nodes`, as no index
+   * holds the type, but it builds only the rows it returns. */
+  nodesOfType(types: readonly string[]): Promise<NodeRow[]>
   /** Every row of every corpus table, **tombstones included** — the replica
    * full-push source, and a delete only reaches other devices if it travels. */
   getAllRows(): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }>

@@ -270,6 +270,7 @@ describe("the read-outs agree (the two ES-4 differences)", () => {
     expect(graph.childLinks.get("a")?.map((link) => link.destination_id)).toEqual(["e"])
     expect(graph.nodes.get("e")).not.toHaveProperty("seq")
     expect((await store.childLinksOf(["a"])).map((link) => link.destination_id)).toEqual(["e"])
+    expect((await store.firstChildLinksOf(["a"])).map((link) => link.destination_id)).toEqual(["e"])
     expect((await store.parentLinksOf(["c"])).length).toBe(0)
 
     const keys = {
@@ -311,6 +312,17 @@ describe("lazy reads", () => {
     expect(reads[1].params).toEqual(["blk_aaaaaaaaaa", "blk_bbbbbbbbbb"])
     expect(await plan(inner, reads[0])).toMatch(/USING (COVERING )?INDEX link_source/)
     expect(await plan(inner, reads[1])).toMatch(/USING INDEX sqlite_autoindex_nodes_1|PRIMARY KEY/)
+  })
+
+  it("reads the first child of each note, by source", async () => {
+    const { store, reads, inner } = await outline()
+    const firsts = await store.firstChildLinksOf(["note-a", "note-b"])
+    expect(firsts.map((link) => link.destination_id).sort()).toEqual([
+      "blk_aaaaaaaaaa",
+      "blk_cccccccccc",
+    ])
+    expect(reads).toHaveLength(1)
+    expect(await plan(inner, reads[0])).toMatch(/USING (COVERING )?INDEX link_source/)
   })
 
   it("reads an up pivot by destination", async () => {

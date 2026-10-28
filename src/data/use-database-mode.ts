@@ -1,9 +1,10 @@
-import { useAtomValue, useSetAtom } from "jotai"
+import { useAtomValue, useSetAtom, useStore } from "jotai"
 import React from "react"
 import { useEvent, useNetworkState } from "react-use"
-import { githubUserAtom, signOutAtom } from "../global-state"
+import { expandedLevelsAtom, githubUserAtom, signOutAtom } from "../global-state"
 import { sessionStatusAtom } from "../utils/github-session"
 import { requestAmbientDatabasePull, startDatabaseMode, stopDatabaseMode } from "./database-mode"
+import { framesOnScreen } from "./first-screen"
 import { refreshFeatures, resetFeatures, seedFeatures } from "./features"
 import { startImageCache, stopImageCache } from "./image-cache"
 import { startUploadQueue, stopUploadQueue } from "./image-queue"
@@ -36,6 +37,7 @@ export function useDatabaseMode() {
   const { online } = useNetworkState()
   const session = useAtomValue(sessionStatusAtom)
   const signOut = useSetAtom(signOutAtom)
+  const jotaiStore = useStore()
 
   // The store is bound to the signed-in identity (stable GitHub id when the
   // session carries one; login otherwise) so a different account signing in
@@ -49,7 +51,12 @@ export function useDatabaseMode() {
 
   React.useEffect(() => {
     if (!active || owner === null) return
-    startDatabaseMode({ owner })
+    // The boot draws the frames the address names before it reads the whole
+    // graph (src/data/first-screen.ts).
+    startDatabaseMode({
+      owner,
+      firstScreen: framesOnScreen(window.location, jotaiStore.get(expandedLevelsAtom)),
+    })
     // The notes others shared with this identity ride alongside the user's
     // own corpus (src/data/shared-mode.ts) and stop with it.
     startSharedMode()
@@ -82,7 +89,7 @@ export function useDatabaseMode() {
       stopSharedMode()
       stopDatabaseMode()
     }
-  }, [active, owner])
+  }, [active, owner, jotaiStore])
 
   React.useEffect(() => {
     if (session === "expired" && active) signOut()

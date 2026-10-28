@@ -15,6 +15,7 @@ import {
   CACHE_GENERATION,
   EMPTY_GRAPH,
   databaseGraphAtom,
+  databaseGraphWholeAtom,
   databaseModeStatusAtom,
   databaseApplyOps,
   databaseApplyViews,
@@ -317,6 +318,51 @@ describe("database mode boot", () => {
       "note-b": NOTE_B,
     })
     expect(await store.getMeta("d1_pull_cursor")).toBe("600")
+  })
+
+  it("a boot that names its first screen draws it, then reads the whole graph", async () => {
+    const deep = "- A\n  id:: blk_a000000000\n  - A1\n    id:: blk_a100000000\n"
+    const seeded = await seededStore({ "note-a": deep, "note-b": NOTE_B }, "500")
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    // The whole graph waits, so the test sees the first screen alone.
+    const store: NoteStore = {
+      ...seeded,
+      getGraph: async () => {
+        await held
+        return seeded.getGraph()
+      },
+    }
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    vi.spyOn(console, "info").mockImplementation(() => {})
+    const { source } = stubSource({ since: () => remoteChanges({}, 600, "600") })
+    startDatabaseMode({
+      openStore: async () => ({ store, persistence: "memory" }),
+      openReplicaSync: async () => null,
+      source,
+      pullRetryMs: 10 * 60_000,
+      firstScreen: [{ id: "note-a", depth: 0 }],
+    })
+
+    await vi.waitFor(() => expect(status().status).toBe("ready"))
+    expect(jotai.get(databaseGraphWholeAtom)).toBe(false)
+    expect(graph().nodes.has("blk_a000000000")).toBe(true)
+    expect(graph().nodes.has("blk_a100000000")).toBe(false)
+    expect(graph().nodes.has("note-b")).toBe(true)
+    expect(graph().nodes.has("blk_b000000000")).toBe(false)
+    // No op lands on part of the graph.
+    const before = graph()
+    databaseApplyOps(deleteBlockOps("blk_a000000000", before))
+    expect(graph()).toBe(before)
+    expect(warn).toHaveBeenCalled()
+
+    release()
+    await flushDatabaseMode()
+    expect(jotai.get(databaseGraphWholeAtom)).toBe(true)
+    expect(graph().nodes.has("blk_a100000000")).toBe(true)
+    expect(graph().nodes.has("blk_b000000000")).toBe(true)
+    // The refused delete never reached the store.
+    expect(await store.nodesOf(["blk_a000000000"])).toHaveLength(1)
   })
 
   it("while the browser says offline, no pull is attempted — it waits for the network", async () => {

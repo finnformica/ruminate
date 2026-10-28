@@ -11,6 +11,7 @@ import { CORPUS_ROOT_ID, childIdsOf, isNoteType } from "../../data/graph"
 import { deleteBlockOps, deleteSubtreeOps, linkBlockOps, parentCount } from "../../data/ops"
 import { sharedOriginAtom } from "../../data/shared-mode"
 import { useApplyOps } from "../../data/store"
+import { databaseGraphWholeAtom } from "../../data/database-mode"
 import { useFoldRule } from "../../data/view-state"
 import { collapsedKeysOf } from "../../blocks/default-collapsed"
 import { titlesFocus } from "../../blocks/markers"
@@ -94,7 +95,7 @@ export function BlockNoteEditor({
   newRootSignal,
   appendRootSignal,
   refocusSignal,
-  readOnly = false,
+  readOnly: readOnlyProp = false,
   browse = false,
   focusBlockId = null,
   onFocusNavigate,
@@ -196,6 +197,10 @@ export function BlockNoteEditor({
   fixedRoots?: boolean
   movableRoots?: boolean
 }) {
+  // Read-only, too, while the boot has read only the first screen: an edit
+  // waits for the whole graph (`databaseGraphWholeAtom`).
+  const graphWhole = useAtomValue(databaseGraphWholeAtom)
+  const readOnly = readOnlyProp || !graphWhole
   // A view that may legitimately hold nothing gets no starter: a filter that
   // matched nothing, and the basket, would otherwise show one empty row that
   // reads as "this note is empty" when it is not, and that the filter would

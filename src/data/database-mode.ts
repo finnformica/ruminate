@@ -34,6 +34,7 @@ import { resetReplicaAccess } from "./replica-access"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import type { CorpusRows } from "./deleted-notes"
 import type { NoteStore } from "./note-store"
+import { loadFirstScreen, type FirstScreenFrame } from "./first-screen"
 import { isBrowserOffline } from "../utils/network"
 import { sampleViews } from "./sample-graph"
 import {
@@ -243,6 +244,15 @@ export const EMPTY_GRAPH: GraphSnapshot = buildGraphSnapshot([], [])
 export const databaseGraphAtom = atom<GraphSnapshot>(EMPTY_GRAPH)
 
 /**
+ * Does `databaseGraphAtom` hold the whole graph? False from a boot that
+ * reads the first screen (`DatabaseModeOptions.firstScreen`) until the whole
+ * graph replaces it. Until then the editor is read-only and the runtime
+ * takes no ops: a delete counts a block's places and reaches across notes
+ * (`deleteBlockOps`, `deleteSubtreeOps`), so it must see the whole graph.
+ */
+export const databaseGraphWholeAtom = atom(true)
+
+/**
  * Bumped whenever the device's log changed — a flush of its own events, a
  * pull of everyone's — so a reader of `databaseEventLog` (the calendar's day
  * view) knows to read again. The log itself is not held in an atom: it is
@@ -293,6 +303,10 @@ export interface DatabaseModeOptions {
   pullRetryMs?: number
   /** Injectable for tests: the gap between fold checks (`FOLD_CHECK_MS`). */
   foldCheckMs?: number
+  /** The frames on screen at boot (`framesOnScreen`). Given, the boot draws
+   * them from a read of the first screen (`loadFirstScreen`), then reads the
+   * whole graph. Omitted, it reads the whole graph at once. */
+  firstScreen?: readonly FirstScreenFrame[]
 }
 
 /** What the push loop reads and writes of the store: the queue of unpushed
@@ -449,6 +463,7 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     document.addEventListener("visibilitychange", onPageHidden)
   }
   jotai().set(databaseModeStatusAtom, { ...OFF_STATUS, status: "opening" })
+  jotai().set(databaseGraphWholeAtom, options.firstScreen === undefined)
 
   enqueue(async () => {
     try {
@@ -498,9 +513,37 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
       const saved = decodeHlc((await opened.store.getMeta(HLC_KEY)) ?? "")
       if (saved !== null) activation.lastStamp = receiveHlc(activation.lastStamp, saved)
 
-      // The cache is the state: boot reads it, with nothing to fold.
-      await refreshGraph(activation)
-      if (runtime !== activation) return
+      // The cache is the state: boot reads it, with nothing to fold. The
+      // first screen first, when the page named it, so the page draws before
+      // the whole graph is read; then the whole graph, before the pull.
+      if (options.firstScreen) {
+        const started = performance.now()
+        const views = await opened.store.getViews()
+        const graph = await loadFirstScreen(
+          opened.store,
+          options.firstScreen,
+          views.map((view) => view.root_id),
+        )
+        if (runtime !== activation) return
+        jotai().set(databaseGraphAtom, graph)
+        jotai().set(viewsAtom, viewMapOf(views))
+        patchStatus({ status: "ready" })
+        const firstScreen = performance.now() - started
+        await nextPaint()
+        if (runtime !== activation) return
+        const read = performance.now()
+        await refreshGraph(activation)
+        if (runtime !== activation) return
+        jotai().set(databaseGraphWholeAtom, true)
+        // One line per boot: the reload's cost on this device.
+        console.info(
+          `[ruminate] boot: first screen ${Math.round(firstScreen)} ms, ` +
+            `whole graph ${Math.round(performance.now() - read)} ms`,
+        )
+      } else {
+        await refreshGraph(activation)
+        if (runtime !== activation) return
+      }
       patchStatus({ status: "ready" })
 
       // Start the push loop before the first pull, so the pull can consult
@@ -535,6 +578,22 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
 
   // The initial pull (full on first boot, since-cursor after).
   runPull(activation)
+}
+
+/** Resolve once the browser has drawn what the atoms hold now, so the first
+ * screen paints before the whole graph is read. A hidden tab draws no frames:
+ * the timer lets the boot go on there. */
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, 100)
+    if (typeof requestAnimationFrame !== "function") return
+    requestAnimationFrame(() =>
+      setTimeout(() => {
+        clearTimeout(timer)
+        resolve()
+      }, 0),
+    )
+  })
 }
 
 /** Stop the runtime and close the database (OPFS contents stay in place). */
@@ -573,6 +632,7 @@ export function stopDatabaseMode() {
   const store = jotai()
   store.set(databaseModeStatusAtom, OFF_STATUS)
   store.set(databaseGraphAtom, EMPTY_GRAPH)
+  store.set(databaseGraphWholeAtom, true)
   store.set(viewsAtom, viewMapOf(sampleViews()))
   store.set(storageDiagnosticsAtom, OFF_STORAGE_DIAGNOSTICS)
   // A denial belongs to the account that was refused; the signed-out screen
@@ -641,6 +701,13 @@ export function databaseApplyOps(
 ) {
   const activation = runtime
   if (!activation) return
+  if (ops.length > 0 && !jotai().get(databaseGraphWholeAtom)) {
+    // The editor is read-only until the whole graph is read; nothing else
+    // should write in that moment, and ops made against part of the graph
+    // can delete what another note still holds.
+    console.warn("[ruminate] ops before the whole graph was read; not applied")
+    return
+  }
   const now = Date.now()
   const ctx = eventContext(activation, now, cause)
   if (ops.length === 0) {

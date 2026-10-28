@@ -307,8 +307,9 @@ fold by stamp (`foldByStamp`): each row is the fold of one entity's events
 - **Lazy reads.** A read is an index lookup: the live child links of a node
   by `link_source` (`childLinksOf`), the links into a node by
   `link_destination` (`parentLinksOf`, an up pivot), and nodes by id
-  (`nodesOf`). The app does not use them yet: its graph atom still reads all
-  live rows at boot (`getGraph`), with nothing to fold.
+  (`nodesOf`), and nodes by type (`nodesOfType`, a scan). The boot reads
+  the first screen with them, then the whole live graph (`getGraph`):
+  "The boot read", below.
 - **The row pull** still runs (ES-9 waits), but its rows no longer write the
   cache. The fold check compares them with it.
 - **The two read-outs agree** (the two ES-4 differences): a row never placed
@@ -316,6 +317,66 @@ fold by stamp (`foldByStamp`): each row is the fold of one entity's events
   live link with a tombstoned end is in no read (`getGraph` and the lazy
   reads leave it out in SQL, `buildGraphSnapshot` and `readOutEntities` when
   they see the tombstone).
+
+### The boot read
+
+Asked for by Finn, 2026-10-28: a reload draws what is on screen first, and
+does not wait for the whole graph (`src/data/first-screen.ts`).
+
+1. **The first screen.** The hook that starts the runtime reads the frames
+   the address names (`framesOnScreen`: the frame on top of each pane, with
+   its depth). The runtime reads every note and board (`nodesOfType`), the
+   corpus root and its order, the roots of the views, and each frame's rows
+   to one level past its depth (`loadFirstScreen`). The walk lists a child
+   only when its node is in the graph, and a closed row needs its children
+   for its chevron: hence the one more level. Each child list it reads is
+   the source's complete list, so a frame draws as the whole graph draws
+   it. The Root frame at its own depth is the exception: its note rows are
+   closed, and each note gets only its first child (`firstChildLinksOf`,
+   one index seek per note), which draws the chevron. A note's top-level
+   blocks can be most of the corpus.
+2. **The whole graph.** After the browser paints (`nextPaint`), the
+   runtime reads the whole live graph (`getGraph`), as before, and it
+   replaces the first screen. Every later read (a pull, a repair) is the
+   whole graph.
+3. **No writes in between.** Until the whole graph is read
+   (`databaseGraphWholeAtom`), the editor is read-only and the runtime
+   refuses ops. A delete counts a block's places and reaches across notes
+   (`deleteBlockOps`, `deleteSubtreeOps`), so it must see the whole graph.
+
+What still reads the whole graph, and why: everything that derives from
+`graphSnapshotAtom` reads all of it — the notes (`notesAtom`: each note's
+text, for search, and its dates, for the calendar), the block index (search,
+`type:` queries, the sidebar's block views), backlinks and up pivots
+(`parentLinks`), the boards, the delete rules, and the writes. With the
+first screen they read part of the graph for the moment before the whole
+graph lands. To make them lazy is a separate change: each needs an index
+of its own in the store.
+
+An expand reads nothing. A row the first screen draws closed has its
+children in memory, and after the whole graph lands every row has. A lazy
+read beside the whole read gains nothing in the browser: one SQL worker
+answers in order, so it waits behind the whole read.
+
+The boot writes one line to the console with its two times:
+`[ruminate] boot: first screen N ms, whole graph M ms`.
+
+Cost, measured 2026-10-28 with `node:sqlite` on a store file, the median of
+six reloads. The browser's OPFS store is slower, and the console line above
+gives its times.
+
+| corpus                         | before: first screen | Root  | a note | whole graph | expand |
+| ------------------------------ | -------------------- | ----- | ------ | ----------- | ------ |
+| m93: 1,125 nodes, 17,000 edits | 23.5 ms              | 2 ms  | 2.1 ms | 20 ms       | 0.3 ms |
+| 30 times m93: 33,750 blocks    | 987 ms               | 40 ms | 15 ms  | 913 ms      | 0.3 ms |
+
+- **Before:** the open, the whole graph, the notes and the block index.
+- **Root, a note:** the first screen of the Root frame (depth 1), or of a
+  note (depth 2), and the notes built from it.
+- **Whole graph:** the read after the first screen, with the notes and the
+  block index.
+- **Expand:** the lazy read of one block's children. In the app an expand
+  reads nothing (above).
 
 ### The fold check
 

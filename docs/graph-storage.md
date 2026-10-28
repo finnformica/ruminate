@@ -101,7 +101,9 @@ row pull, row push or full push (revised 2026-10-21)
 until then.
 
 - **Boot:** open the SQL store (OPFS; per-tab fallback to memory) → serve
-  the cache's live rows into the atoms immediately, with nothing to fold →
+  the first screen into the atoms (the notes, and the frames the address
+  names: docs/event-sourcing.md, "The boot read") → the whole live graph
+  after it, with nothing to fold →
   pull rows from D1 (full corpus on first boot; `?since=<cursor>` after), kept
   only for the fold check → pull the events past the events cursor into the
   log and the cache, in one transaction per page, and from it into the
