@@ -316,7 +316,8 @@ fold by stamp (`foldByStamp`): each row is the fold of one entity's events
   **first screen of a device whose log has not begun** (a fresh profile, a
   wiped cache): its full pull seeds the cache with the rows as they are, each
   with the stamps its last event derives (as the stamp fill gives a row), and
-  the screen draws from them at once. The log then catches up in pages behind
+  with the replica's key rows (`delta_mat_values`, 0029) at the stamps the
+  replica holds for them; the screen draws from them at once. The log then catches up in pages behind
   the screen: an event a row already holds changes nothing, a later one lands
   as on any cache row. Before this (2026-10-28) a fresh device drew nothing
   until the whole log had folded — 27 pages for a corpus of 50,000 rows.

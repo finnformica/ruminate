@@ -790,9 +790,20 @@ describe("database mode reads the fold", () => {
     // had brought every row. Here the log never answers until released: the
     // notes are on screen from the rows alone, and the fold check, once the
     // log has caught up, finds the cache and the log agree.
-    const { source, calls } = stubSource({
-      full: remoteCorpus({ "note-a": NOTE_A, "note-b": NOTE_B }, 1, "100"),
-    })
+    const full = remoteCorpus({ "note-a": NOTE_A, "note-b": NOTE_B }, 1, "100")
+    // A key of block A, as the replica's own key row (migrations/0029) and
+    // in the row's mirror: the first screen holds the replica's stamp for it.
+    const blockA = full.nodes.find((node) => node.id === "blk_a000000000") as NodeRow
+    blockA.props = '{"colour":"red"}'
+    const colour = {
+      block_id: "blk_a000000000",
+      key: "colour",
+      value: '"red"',
+      hlc: "000000000009000-0000-other.tab",
+      seq: 1,
+      updated_at: 9_000,
+    }
+    const { source, calls } = stubSource({ full: { ...full, delta_mat_values: [colour] } })
     let release = () => {}
     const gate = new Promise<void>((resolve) => (release = resolve))
     const pullEvents = source.pullEvents
@@ -812,6 +823,12 @@ describe("database mode reads the fold", () => {
       await vi.waitFor(() => expect(graph().nodes.get("blk_a000000000")?.text).toBe("A"))
       expect(graph().nodes.get("blk_b000000000")?.text).toBe("B")
       expect(calls.full).toBe(1)
+      expect(JSON.parse(graph().nodes.get("blk_a000000000")?.props ?? "null")).toEqual({
+        colour: "red",
+      })
+      expect(await store.getDeltaMatValuesOf(["blk_a000000000"])).toEqual([
+        expect.objectContaining({ key: "colour", hlc: colour.hlc }),
+      ])
       // Nothing of the log has landed: the rows alone drew the screen.
       expect(await store.eventLog()).toEqual([])
       expect((await store.getMeta("events_pull_cursor")) ?? "").toBe("")

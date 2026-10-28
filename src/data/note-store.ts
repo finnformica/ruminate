@@ -97,8 +97,11 @@ export interface NoteStore {
   /** Apply a planned pull (row upserts + deletes) in one transaction. Rows
    * land verbatim — remote `updated_at` and `deleted_at` are preserved — and
    * take the stamps their last event derives (`derivedStamps`). The pull of
-   * rows no longer writes the cache; a repair from the screen does. */
-  applyPull(plan: GraphDiff): Promise<void>
+   * rows no longer writes the cache; a repair from the screen does, and so
+   * does the first screen of a device whose log has not begun, with the
+   * replica's key rows (`values`, its `delta_mat_values`) written after the
+   * rows' own, each at the stamp the replica holds for it. */
+  applyPull(plan: GraphDiff, values?: readonly DeltaMatValueRow[]): Promise<void>
   /** Wipe every corpus row — nodes, links, views and the device's log (meta
    * is kept). A cache reset, not a delete: nothing is tombstoned, so nothing
    * replicates — and an event not yet pushed goes with it, as an unpushed

@@ -1183,13 +1183,19 @@ async function seedCache(
   store: NoteStore,
   body: ReplicaChangesBody,
 ) {
-  await store.applyPull({
-    nodes: body.nodes,
-    links: body.links,
-    views: body.views,
-    deleteNodes: [],
-    deleteLinks: [],
-  })
+  await store.applyPull(
+    {
+      nodes: body.nodes,
+      links: body.links,
+      views: body.views,
+      deleteNodes: [],
+      deleteLinks: [],
+    },
+    // The replica's key rows (`delta_mat_values`, migrations/0029), each
+    // with the stamp the replica holds for it: the fold check compares
+    // these stamps, and the log's replay beats only what they do not hold.
+    body.delta_mat_values ?? [],
+  )
   await refreshGraph(activation)
 }
 
