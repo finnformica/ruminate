@@ -61,6 +61,7 @@ describe("the migrations that have shipped", () => {
       13: "2bed56f75635ceed",
       14: "134c78d5eee39fd1",
       15: "d69c8d3a054e43c4",
+      16: "53866f4d4b3aed53",
     }
     expect(await hashes(SHIPPED_LOCAL_STEPS), RULE).toEqual(pinned)
   })
