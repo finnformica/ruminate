@@ -26,9 +26,13 @@ import { deleteBlockOps, type Op } from "./ops"
  *   `max`, `step`, `target`, `period` (what the target is for: a day, a
  *   week or the month) and `rollup` (how a number series adds up: `sum` or
  *   `avg`).
- * - An **entry** is a child of a series, one per day, whose props carry
- *   `date` (`YYYY-MM-DD`, the viewer's local day) and `value` (`true` for a
- *   check, a number for a number series). Clearing a day deletes the entry.
+ * - An **entry** is a child of a series, one per day, and its TEXT is the
+ *   truth (Finn, 2026-10-28): under a check series a to-do block whose text
+ *   is the day (`YYYY-MM-DD`, the viewer's local day), ticked when done;
+ *   under a number series a plain block reading `YYYY-MM-DD · 5 km`, the
+ *   first number after the day its value. The outline shows the log as it
+ *   is. A row the parser cannot read is an ordinary row, which the grid
+ *   leaves out. Entries sit under their series in date order.
  *
  * This module is the one place that reads and writes that shape, and every
  * calculation the page draws — the grid, a streak, a rollup, a target's
@@ -83,12 +87,6 @@ export const trackerSeriesKeys = z.object({
   rollup: z.enum(SERIES_ROLLUPS).optional(),
 })
 
-/** The keys of an entry block: the day, and what was logged on it. */
-export const trackerEntryKeys = z.object({
-  date: z.string().regex(DAY_RE, "a date is YYYY-MM-DD").optional(),
-  value: z.union([z.boolean(), z.number()]).optional(),
-})
-
 export interface Series {
   /** The series block: its identity. */
   id: string
@@ -110,8 +108,17 @@ export interface Entry {
   /** The entry block. */
   id: string
   date: DayString
+  /** Done or not for a check series; the logged number for a number series. */
   value: boolean | number
 }
+
+/** The block types a check series's entries are: an open and a ticked
+ * to-do (`src/blocks/registry.ts`, the `todo` family). */
+const TODO_TYPE = "todo"
+const DONE_TYPE = "done"
+
+/** What separates the day from the value in a number entry's text. */
+const ENTRY_SEPARATOR = " · "
 
 /** A series with its entries, one per day (`entries`), as the page reads it. */
 export interface SeriesState {
@@ -167,27 +174,73 @@ export function seriesOf(block: { id: string; text: string; props: string | null
   }
 }
 
-/** The entry a block's props declare, or null: a day, and a boolean or a
- * finite number. */
-export function entryOf(block: { id: string; props: string | null }): Entry | null {
+/** A block an entry is read from: its type, its text and, for a block
+ * written before the text shape, its props. */
+export interface EntryBlock {
+  id: string
+  type: string
+  text: string
+  props: string | null
+}
+
+const ENTRY_TEXT_RE = /^(\d{4}-\d{2}-\d{2})(?:\b(.*))?$/s
+const FIRST_NUMBER_RE = /-?\d+(?:[.,]\d+)?/
+
+/**
+ * The entry a block's text declares under a series of `kind`, or null when
+ * it declares none. A check entry is a to-do block whose text is a day:
+ * ticked (`done`) is done, open (`todo`) is not. A number entry is any block
+ * whose text begins with a day and carries a number after it (`2026-10-28 ·
+ * 5 km`); a comma decimal reads as a point. A block written before the
+ * text shape, with `date` and `value` in its props and no readable text, is
+ * read from those and left as it is. Anything else is an ordinary row.
+ */
+export function entryOf(block: EntryBlock, kind: SeriesKind): Entry | null {
+  const match = ENTRY_TEXT_RE.exec(block.text.trim())
+  if (match) {
+    const [, date, rest = ""] = match
+    if (kind === "check") {
+      if (block.type === DONE_TYPE) return { id: block.id, date, value: true }
+      if (block.type === TODO_TYPE) return { id: block.id, date, value: false }
+    } else {
+      const number = FIRST_NUMBER_RE.exec(rest)
+      if (number) {
+        const value = Number(number[0].replace(",", "."))
+        if (Number.isFinite(value)) return { id: block.id, date, value }
+      }
+    }
+  }
+  // TRANSITION: the shape before 2026-10-28, read once and left alone.
   const props = parseProps(block.props)
   const date = props?.date
   const value = props?.value
   if (typeof date !== "string" || !DAY_RE.test(date)) return null
-  if (typeof value !== "boolean" && !(typeof value === "number" && Number.isFinite(value)))
-    return null
-  return { id: block.id, date, value }
+  if (kind === "check") return typeof value === "boolean" ? { id: block.id, date, value } : null
+  return typeof value === "number" && Number.isFinite(value) ? { id: block.id, date, value } : null
+}
+
+/** A number entry's text: the day, the separator, the value with its unit. */
+export function entryText(series: Pick<Series, "unit">, date: DayString, value: number): string {
+  return `${date}${ENTRY_SEPARATOR}${formatAmount(series, value)}`
+}
+
+/** The entry a child of a series reads as, or null. */
+function entryAt(snapshot: GraphSnapshot, id: string, kind: SeriesKind): Entry | null {
+  const node = snapshot.nodes.get(id)
+  return node ? entryOf({ id, type: node.type, text: node.text, props: node.props }, kind) : null
 }
 
 /** The entries of a series, by day. Two entries on one day — two devices
  * logging the same day offline — read as the later child, so the grid shows
- * one of them rather than neither; a clear deletes both (`setEntryOps`). */
-function seriesEntries(snapshot: GraphSnapshot, seriesId: string): Map<DayString, Entry> {
+ * one of them rather than neither. */
+function seriesEntries(
+  snapshot: GraphSnapshot,
+  seriesId: string,
+  kind: SeriesKind,
+): Map<DayString, Entry> {
   const entries = new Map<DayString, Entry>()
   for (const id of childIdsOf(snapshot, seriesId)) {
-    const node = snapshot.nodes.get(id)
-    if (!node) continue
-    const entry = entryOf({ id, props: node.props })
+    const entry = entryAt(snapshot, id, kind)
     if (entry) entries.set(entry.date, entry)
   }
   return entries
@@ -202,7 +255,7 @@ export function trackerSeries(snapshot: GraphSnapshot, trackerId: NoteId): Serie
     const node = snapshot.nodes.get(id)
     if (!node) continue
     const series = seriesOf({ id, text: node.text, props: node.props })
-    if (series) out.push({ series, entries: seriesEntries(snapshot, id) })
+    if (series) out.push({ series, entries: seriesEntries(snapshot, id, series.kind) })
   }
   return out
 }
@@ -211,8 +264,8 @@ export function trackerSeries(snapshot: GraphSnapshot, trackerId: NoteId): Serie
 // Writing the graph
 // -----------------------------------------------------------------------------
 
-/** The block type a series or an entry is stored as: a plain row, so the
- * outline draws it as one. */
+/** The block type a series, or a number entry, is stored as: a plain row,
+ * so the outline draws it as one. */
 const ROW_TYPE = "text"
 
 /** What **Add series** writes before it is configured. */
@@ -222,6 +275,24 @@ const NEW_SERIES_NAME = "New series"
 function lastKey(snapshot: GraphSnapshot, parentId: string): string {
   const links = snapshot.childLinks.get(parentId) ?? []
   return sortKeyBetween(links.length > 0 ? links[links.length - 1].sort_key : null, null)
+}
+
+/** The sort key that puts a new entry for `date` among its series's entries
+ * in date order: before the first entry of a later day, else last. */
+function entryKey(
+  snapshot: GraphSnapshot,
+  seriesId: string,
+  kind: SeriesKind,
+  date: DayString,
+): string {
+  const links = snapshot.childLinks.get(seriesId) ?? []
+  for (let i = 0; i < links.length; i += 1) {
+    const entry = entryAt(snapshot, links[i].destination_id, kind)
+    if (entry && entry.date > date) {
+      return sortKeyBetween(i > 0 ? links[i - 1].sort_key : null, links[i].sort_key)
+    }
+  }
+  return lastKey(snapshot, seriesId)
 }
 
 /**
@@ -343,10 +414,13 @@ export function removeSeriesOps(snapshot: GraphSnapshot, seriesId: string): Op[]
 
 /**
  * A day logged — the Today strip, or a tap on a cell: one entry per series
- * per day. A value writes the day's entry, creating it under the series when
- * the day has none and setting `value` when it has; `null` clears the day,
- * deleting its entry (and any duplicate of it). A check series takes `true`
- * only — `false` is a clear. Nothing when the block is not a series.
+ * per day, written as text (above). On a check series a value ticks the
+ * day's to-do, creating it (`done`, its text the day) when the day has none;
+ * `null` or `false` opens it again (`todo`), so the row stays in the log.
+ * On a number series a value writes the day's row (`2026-10-28 · 5 km`),
+ * creating it when the day has none; `null` deletes the row (and any
+ * duplicate of it). A new row goes in among the entries in date order.
+ * Nothing when the block is not a series.
  */
 export function setEntryOps(
   snapshot: GraphSnapshot,
@@ -358,36 +432,40 @@ export function setEntryOps(
   if (!node || !DAY_RE.test(date)) return []
   const series = seriesOf({ id: seriesId, text: node.text, props: node.props })
   if (!series) return []
-  const onDay = childIdsOf(snapshot, seriesId).filter((id) => {
-    const child = snapshot.nodes.get(id)
-    return child ? entryOf({ id, props: child.props })?.date === date : false
-  })
+  const onDay = childIdsOf(snapshot, seriesId).filter(
+    (id) => entryAt(snapshot, id, series.kind)?.date === date,
+  )
   const clears = value === null || value === false
-  if (clears) return onDay.length === 0 ? [] : deleteBlockOps(onDay, snapshot)
-  const stored = series.kind === "check" ? true : value
-  if (typeof stored !== "boolean" && !Number.isFinite(stored)) return []
-  if (onDay.length > 0) {
-    const [keep, ...extra] = onDay
-    const props = parseProps(snapshot.nodes.get(keep)?.props ?? null) ?? {}
-    return [
-      { op: "setProps", id: keep, props: propsJson({ ...props, date, value: stored }) },
-      ...(extra.length > 0 ? deleteBlockOps(extra, snapshot) : []),
-    ]
-  }
   const trackerId = (snapshot.parentLinks.get(seriesId) ?? []).find((link) =>
     isTracker(snapshot, link.source_id),
   )?.source_id
-  const id = blockId()
+  const create = (type: string, text: string): Op[] => {
+    const id = blockId()
+    return [
+      { op: "create", id, type, text, props: null, ...(trackerId ? { notesId: trackerId } : {}) },
+      {
+        op: "link",
+        source: seriesId,
+        destination: id,
+        sortKey: entryKey(snapshot, seriesId, series.kind, date),
+      },
+    ]
+  }
+  if (series.kind === "check") {
+    const type = clears ? TODO_TYPE : DONE_TYPE
+    if (onDay.length === 0) return clears ? [] : create(DONE_TYPE, date)
+    return onDay.flatMap((id) =>
+      snapshot.nodes.get(id)?.type === type ? [] : [{ op: "setType", id, type } as Op],
+    )
+  }
+  if (clears) return onDay.length === 0 ? [] : deleteBlockOps(onDay, snapshot)
+  if (typeof value !== "number" || !Number.isFinite(value)) return []
+  const text = entryText(series, date, value)
+  if (onDay.length === 0) return create(ROW_TYPE, text)
+  const [keep, ...extra] = onDay
   return [
-    {
-      op: "create",
-      id,
-      type: ROW_TYPE,
-      text: "",
-      props: propsJson({ date, value: stored }),
-      ...(trackerId ? { notesId: trackerId } : {}),
-    },
-    { op: "link", source: seriesId, destination: id, sortKey: lastKey(snapshot, seriesId) },
+    ...(snapshot.nodes.get(keep)?.text === text ? [] : [{ op: "setText", id: keep, text } as Op]),
+    ...(extra.length > 0 ? deleteBlockOps(extra, snapshot) : []),
   ]
 }
 

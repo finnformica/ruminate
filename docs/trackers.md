@@ -37,46 +37,56 @@ note** on a tracker sets it back (`useMakeNote`). Nothing else about the
 note changes either way.
 
 Beneath that type, every piece of a tracker is a block the outline already
-understands, and every value is a **props key** of one of those blocks —
+understands, and the log reads as text in the outline (Finn, 2026-10-28:
+"codified as text"). A series's settings are **props keys** of its block —
 held per key in the event log (docs/event-sourcing.md, "Per-key events"),
-so two devices that log two different days offline both keep their change.
-No table is added.
+so two devices that change two settings offline both keep their change. An
+entry carries no keys at all: its text is the truth. No table is added.
 
 | on the page | in the graph                                                                                                                                                                                                                                                                                                                                                                               |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | the tracker | a note whose root node is of type `tracker`                                                                                                                                                                                                                                                                                                                                                |
 | a series    | a direct child of the page whose props carry `kind`: `check` or `number`. Its text is its name; the block is its identity. Its settings are its other keys: `colour` (a palette name, below), `unit`, `min`, `max`, `step`, `target`, `period` (`day`, `week` or `month`: what the target is for) and `rollup` (`sum` or `avg`: how a number series adds up). A key not set is the default |
-| an entry    | a child of a series, one per day, whose props carry `date` (`YYYY-MM-DD`, the viewer's local day) and `value`: `true` for a check, a number for a number series. Its text is empty                                                                                                                                                                                                         |
+| an entry    | a child of a series, one per day, in date order. Under a check series a to-do block whose text is the day (`YYYY-MM-DD`, the viewer's local day): ticked (`done`) is done, open (`todo`) is not, missing is not. Under a number series a plain block whose text is the day, a separator and the value with its unit (`2026-10-28 · 5 km`); the first number after the day is the value     |
 
-So a tracker's outline reads, with the keys shown as the outline's props:
+So a tracker's outline reads, with the series's keys shown as the
+outline's props:
 
 ```
 Habits
   Read                      kind: check · colour: green · target: 20 · period: month
-    (entry)                 date: 2026-10-26 · value: true
-    (entry)                 date: 2026-10-27 · value: true
+    [x] 2026-10-26
+    [x] 2026-10-27
+    [ ] 2026-10-28
   Run                       kind: number · colour: blue · unit: km · step: 0.5 · target: 15 · period: week
-    (entry)                 date: 2026-10-27 · value: 3
+    2026-10-27 · 3 km
+    2026-10-28 · 5 km
 ```
 
 `src/data/tracker.ts` is the one place that reads and writes that shape:
 `trackerSeries` reads the series with their entries, leniently (a `kind`
 that is not one of the two is not a series; a malformed key falls back to
-its default); `newTrackerOps`, `addSeriesOps`, `updateSeriesOps`,
-`removeSeriesOps` and `setEntryOps` write it. Logging a day writes one
-entry per series per day: a value creates the entry or sets its `value`;
-clearing deletes it (and any duplicate of it — two devices that logged the
-same day offline). A check series stores `true` only; `false` is a clear.
-`removeSeriesOps` deletes the series with every entry under it.
+its default; `entryOf` reads an entry from a block's type and text, a comma
+decimal as a point, and a row it cannot read — `Knee felt fine` under Run —
+is an ordinary row the grid leaves out). `newTrackerOps`, `addSeriesOps`,
+`updateSeriesOps`, `removeSeriesOps` and `setEntryOps` write it. Logging a
+day writes one entry per series per day. On a check series a value ticks
+the day's to-do, creating it as `done` when the day has none; a clear opens
+it again (`todo`), so the row stays in the log. On a number series a value
+writes the day's row (`entryText`), creating it when the day has none; a
+clear deletes the row (and any duplicate of it — two devices that logged
+the same day offline). A new row goes in among the entries in date order
+(`entryKey`). `removeSeriesOps` deletes the series with every entry under
+it. A row written before 2026-10-28, with `date` and `value` in its props
+and no readable text, is still read from those and left as it is; there
+are no production trackers, so there is no migration.
 
-The keys have a zod schema in the per-block-type validation
-(`validateProps`, `src/data/key-events.ts`): a series and an entry are text
-blocks, so a `text` block's `kind`, `colour`, `period`, `rollup`, `step`,
-`date` and `value` are held to their shapes, and the per-key `set` events
-are held to the same (`KNOWN_PROP_VALUES`). The replica refuses a push
-that breaks them, as PR 1 does for every known key. The trade-off, as
-there: a `text` block's `date` or `value` key written by hand to another
-shape is refused too.
+The series's keys have a zod schema in the per-block-type validation
+(`validateProps`, `src/data/key-events.ts`): a series is a text block, so a
+`text` block's `kind`, `colour`, `period`, `rollup` and `step` are held to
+their shapes, and the per-key `set` events are held to the same
+(`KNOWN_PROP_VALUES`). The replica refuses a push that breaks them, as PR 1
+does for every known key. An entry has no keys to validate.
 
 ## The page
 
@@ -126,7 +136,7 @@ no scale for reads as the default, green.
 `src/data/tracker.test.ts` covers the days (local day, Monday start, month
 steps), the grid (October 2026, a month that begins on Sunday, a four-row
 February), the streak, the rollups, the target's three periods, the cell
-levels and the ops; `src/components/trackers/month-grid.test.tsx` renders
+levels, the entry text in both shapes and the ops; `src/components/trackers/month-grid.test.tsx` renders
 the grid and the strip; `src/data/key-events.test.ts` pins the key
 validation. `month-grid.stories.tsx` shows the page at desktop and phone
 widths.

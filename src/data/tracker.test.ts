@@ -14,6 +14,7 @@ import {
   cellLevel,
   daysBetween,
   entryOf,
+  entryText,
   formatAmount,
   isDone,
   isTracker,
@@ -30,7 +31,6 @@ import {
   streak,
   targetProgress,
   trackerSeries,
-  trackerEntryKeys,
   trackerSeriesKeys,
   updateSeriesOps,
   weekStart,
@@ -318,20 +318,54 @@ describe("reading blocks", () => {
     expect(seriesOf({ id: "b", text: "x", props: JSON.stringify({ kind: "other" }) })).toBeNull()
   })
 
-  it("reads an entry only with a day and a boolean or a finite number", () => {
-    expect(
-      entryOf({ id: "e", props: JSON.stringify({ date: "2026-10-27", value: true }) }),
-    ).toEqual({ id: "e", date: "2026-10-27", value: true })
-    expect(entryOf({ id: "e", props: JSON.stringify({ date: "2026-10-27", value: 2 }) })).toEqual({
+  it("reads a check entry from a to-do whose text is the day", () => {
+    expect(entryOf({ id: "e", type: "done", text: "2026-10-27", props: null }, "check")).toEqual({
       id: "e",
       date: "2026-10-27",
-      value: 2,
+      value: true,
     })
-    expect(entryOf({ id: "e", props: JSON.stringify({ date: "27/10/2026", value: 2 }) })).toBeNull()
+    expect(entryOf({ id: "e", type: "todo", text: " 2026-10-27 ", props: null }, "check")).toEqual({
+      id: "e",
+      date: "2026-10-27",
+      value: false,
+    })
+    // A plain row with a day, a to-do with other text, or a bad day: not an
+    // entry.
+    expect(entryOf({ id: "e", type: "text", text: "2026-10-27", props: null }, "check")).toBeNull()
+    expect(entryOf({ id: "e", type: "done", text: "Read a book", props: null }, "check")).toBeNull()
+    expect(entryOf({ id: "e", type: "done", text: "27/10/2026", props: null }, "check")).toBeNull()
+    expect(entryOf({ id: "e", type: "done", text: "2026-10-27x", props: null }, "check")).toBeNull()
+  })
+
+  it("reads a number entry from a row that begins with the day and carries a number", () => {
+    const read = (text: string, type = "text") =>
+      entryOf({ id: "e", type, text, props: null }, "number")
+    expect(read("2026-10-27 · 5 km")).toEqual({ id: "e", date: "2026-10-27", value: 5 })
+    expect(read("2026-10-27 · 2.5 km")).toEqual({ id: "e", date: "2026-10-27", value: 2.5 })
+    expect(read("2026-10-27: 3,5")).toEqual({ id: "e", date: "2026-10-27", value: 3.5 })
+    expect(read("2026-10-27 ran 8km", "ul")).toEqual({ id: "e", date: "2026-10-27", value: 8 })
+    expect(read("2026-10-27")).toBeNull()
+    expect(read("2026-10-27 · km")).toBeNull()
+    expect(read("ran 5 km on 2026-10-27")).toBeNull()
+    expect(entryText({ unit: "km" }, "2026-10-27", 5)).toBe("2026-10-27 · 5 km")
+    expect(entryText({ unit: "" }, "2026-10-27", 2.25)).toBe("2026-10-27 · 2.3")
+  })
+
+  it("still reads an entry written before the text shape from its props", () => {
+    const props = (date: string, value: unknown) => JSON.stringify({ date, value })
     expect(
-      entryOf({ id: "e", props: JSON.stringify({ date: "2026-10-27", value: "2" }) }),
+      entryOf({ id: "e", type: "text", text: "", props: props("2026-10-27", true) }, "check"),
+    ).toEqual({ id: "e", date: "2026-10-27", value: true })
+    expect(
+      entryOf({ id: "e", type: "text", text: "", props: props("2026-10-27", 2) }, "number"),
+    ).toEqual({ id: "e", date: "2026-10-27", value: 2 })
+    expect(
+      entryOf({ id: "e", type: "text", text: "", props: props("2026-10-27", 2) }, "check"),
     ).toBeNull()
-    expect(entryOf({ id: "e", props: null })).toBeNull()
+    expect(
+      entryOf({ id: "e", type: "text", text: "", props: props("27/10/2026", 2) }, "number"),
+    ).toBeNull()
+    expect(entryOf({ id: "e", type: "text", text: "", props: null }, "number")).toBeNull()
   })
 })
 
@@ -402,39 +436,83 @@ describe("writing the graph", () => {
     expect(updateSeriesOps(snapshot, "t1", { name: "x" })).toEqual([])
   })
 
-  it("logs a day as one entry per series, updates it in place, and clears it", () => {
+  it("logs a check as a ticked to-do whose text is the day, and opens it to clear", () => {
     let snapshot = tracker()
     snapshot = apply(snapshot, addSeriesOps(snapshot, "t1", "s1"))
-    snapshot = apply(snapshot, addSeriesOps(snapshot, "t1", "s2", { kind: "number" }))
     snapshot = apply(snapshot, setEntryOps(snapshot, "s1", "2026-10-27", true))
-    snapshot = apply(snapshot, setEntryOps(snapshot, "s2", "2026-10-27", 4))
-    let [check, number] = trackerSeries(snapshot, "t1")
-    expect(check.entries.get("2026-10-27")?.value).toBe(true)
-    expect(number.entries.get("2026-10-27")?.value).toBe(4)
-    const entryId = check.entries.get("2026-10-27")!.id
-    expect(snapshot.nodes.get(entryId)).toMatchObject({ type: "text", text: "", notes_id: "t1" })
-
-    // A second value on the same day changes the entry, it does not add one.
-    snapshot = apply(snapshot, setEntryOps(snapshot, "s2", "2026-10-27", 6))
-    expect(childIdsOf(snapshot, "s2")).toHaveLength(1)
-    // A check takes true only: a number on it is stored as a tick.
+    const [entryId] = childIdsOf(snapshot, "s1")
+    expect(snapshot.nodes.get(entryId)).toMatchObject({
+      type: "done",
+      text: "2026-10-27",
+      props: null,
+      notes_id: "t1",
+    })
+    expect(trackerSeries(snapshot, "t1")[0].entries.get("2026-10-27")?.value).toBe(true)
+    // Ticking again writes nothing; clearing opens the to-do and keeps the row.
+    expect(setEntryOps(snapshot, "s1", "2026-10-27", true)).toEqual([])
+    const clear = setEntryOps(snapshot, "s1", "2026-10-27", null)
+    expect(clear).toEqual([{ op: "setType", id: entryId, type: "todo" }])
+    snapshot = apply(snapshot, clear)
+    expect(trackerSeries(snapshot, "t1")[0].entries.get("2026-10-27")?.value).toBe(false)
+    expect(isDone(trackerSeries(snapshot, "t1")[0], "2026-10-27")).toBe(false)
+    // A number on a check is a tick; clearing a day with no row writes nothing.
     snapshot = apply(snapshot, setEntryOps(snapshot, "s1", "2026-10-28", 7))
-    ;[check, number] = trackerSeries(snapshot, "t1")
-    expect(number.entries.get("2026-10-27")?.value).toBe(6)
-    expect(check.entries.get("2026-10-28")?.value).toBe(true)
+    expect(snapshot.nodes.get(childIdsOf(snapshot, "s1")[1])).toMatchObject({ type: "done" })
+    expect(setEntryOps(snapshot, "s1", "2026-10-29", false)).toEqual([])
+  })
 
-    // Clearing deletes the day's entry; false clears a check too.
+  it("logs a number as a row of the day and the value, rewrites it, and deletes it to clear", () => {
+    let snapshot = tracker()
+    snapshot = apply(snapshot, addSeriesOps(snapshot, "t1", "s2", { kind: "number", unit: "km" }))
+    snapshot = apply(snapshot, setEntryOps(snapshot, "s2", "2026-10-27", 4))
+    const [entryId] = childIdsOf(snapshot, "s2")
+    expect(snapshot.nodes.get(entryId)).toMatchObject({
+      type: "text",
+      text: "2026-10-27 · 4 km",
+      props: null,
+    })
+    // A second value on the same day rewrites the row, it does not add one.
+    snapshot = apply(snapshot, setEntryOps(snapshot, "s2", "2026-10-27", 6.5))
+    expect(childIdsOf(snapshot, "s2")).toEqual([entryId])
+    expect(snapshot.nodes.get(entryId)?.text).toBe("2026-10-27 · 6.5 km")
+    expect(trackerSeries(snapshot, "t1")[0].entries.get("2026-10-27")?.value).toBe(6.5)
+    expect(setEntryOps(snapshot, "s2", "2026-10-27", 6.5)).toEqual([])
+    // Clearing deletes the row.
     snapshot = apply(snapshot, setEntryOps(snapshot, "s2", "2026-10-27", null))
-    snapshot = apply(snapshot, setEntryOps(snapshot, "s1", "2026-10-28", false))
-    ;[check, number] = trackerSeries(snapshot, "t1")
-    expect(number.entries.size).toBe(0)
-    expect(check.entries.size).toBe(1)
-    expect(snapshot.nodes.has(entryId)).toBe(true)
-    // Clearing a day with nothing on it, a bad day, or a block that is not a
-    // series: nothing.
+    expect(childIdsOf(snapshot, "s2")).toEqual([])
     expect(setEntryOps(snapshot, "s2", "2026-10-27", null)).toEqual([])
     expect(setEntryOps(snapshot, "s2", "27 Oct", 1)).toEqual([])
     expect(setEntryOps(snapshot, "t1", "2026-10-27", 1)).toEqual([])
+  })
+
+  it("keeps the entries under a series in date order", () => {
+    let snapshot = tracker()
+    snapshot = apply(snapshot, addSeriesOps(snapshot, "t1", "s1"))
+    for (const day of ["2026-10-27", "2026-10-20", "2026-10-25", "2026-10-28", "2026-10-01"]) {
+      snapshot = apply(snapshot, setEntryOps(snapshot, "s1", day, true))
+    }
+    const texts = childIdsOf(snapshot, "s1").map((id) => snapshot.nodes.get(id)?.text)
+    expect(texts).toEqual(["2026-10-01", "2026-10-20", "2026-10-25", "2026-10-27", "2026-10-28"])
+  })
+
+  it("leaves a row it cannot read out of the grid, as an ordinary row", () => {
+    let snapshot = tracker()
+    snapshot = apply(snapshot, addSeriesOps(snapshot, "t1", "s2", { kind: "number" }))
+    snapshot = apply(snapshot, [
+      {
+        op: "create",
+        id: "note1",
+        type: "text",
+        text: "Knee felt fine",
+        props: null,
+        notesId: "t1",
+      },
+      { op: "link", source: "s2", destination: "note1", sortKey: "a0" },
+    ])
+    snapshot = apply(snapshot, setEntryOps(snapshot, "s2", "2026-10-27", 3))
+    const [state] = trackerSeries(snapshot, "t1")
+    expect(state.entries.size).toBe(1)
+    expect(childIdsOf(snapshot, "s2")).toHaveLength(2)
   })
 
   it("removes a series with every entry under it", () => {
@@ -465,18 +543,14 @@ describe("the key schemas", () => {
         rollup: "avg",
       }).success,
     ).toBe(true)
-    expect(trackerEntryKeys.safeParse({ date: "2026-10-27", value: true }).success).toBe(true)
-    expect(trackerEntryKeys.safeParse({ date: "2026-10-27", value: 2.5 }).success).toBe(true)
   })
 
-  it("reject a bad kind, colour, period, rollup, step, date or value", () => {
+  it("reject a bad kind, colour, period, rollup or step", () => {
     expect(trackerSeriesKeys.safeParse({ kind: "habit" }).success).toBe(false)
     expect(trackerSeriesKeys.safeParse({ colour: "mauve" }).success).toBe(false)
     expect(trackerSeriesKeys.safeParse({ period: "year" }).success).toBe(false)
     expect(trackerSeriesKeys.safeParse({ rollup: "max" }).success).toBe(false)
     expect(trackerSeriesKeys.safeParse({ step: 0 }).success).toBe(false)
     expect(trackerSeriesKeys.safeParse({ target: "5" }).success).toBe(false)
-    expect(trackerEntryKeys.safeParse({ date: "27/10/2026" }).success).toBe(false)
-    expect(trackerEntryKeys.safeParse({ value: "yes" }).success).toBe(false)
   })
 })
