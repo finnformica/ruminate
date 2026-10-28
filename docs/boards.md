@@ -45,7 +45,8 @@ A board is never a **focused frame**. Focusing a board row — F or ⌘. on
 it, the block menu, the phone's edit bar, a crumb on the path down to a
 block inside it, a palette result, a Root row — opens its board page, as
 a new history entry, so Back returns to the view as it was
-(`useBoardFocus`, `src/hooks/open-note.ts`). A link to a board block
+(`useFocusBlock`, `src/hooks/open-note.ts`: the one focus, which a
+tracker row takes too, docs/trackers.md). A link to a board block
 (`/views/<note>?block=<board>`, as **Copy link** writes it) opens the
 board in the link's place. In a split the pane keeps such a link as a
 focus: the board page has no panes. The board's own outline

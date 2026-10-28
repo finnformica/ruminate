@@ -2,18 +2,19 @@ import { useNavigate, useRouter } from "@tanstack/react-router"
 import { atom, useAtomValue, useStore } from "jotai"
 import React from "react"
 import { isBoard } from "../data/boards"
+import type { GraphSnapshot } from "../data/graph"
 import { layoutFromSearch, layoutToSearch, withPane, type FocusFrame } from "../data/panes"
 import { rootFrame } from "../data/root-frame"
+import { isTracker } from "../data/tracker"
 import { restoreViewFrames } from "../data/view-stack"
 import { viewByRootAtom } from "../data/views"
-import { graphSnapshotAtom, notesAtom } from "../global-state"
+import { graphSnapshotAtom } from "../global-state"
 import type { NoteId } from "../schema"
 
 /**
- * Where the palette opens a note: a board (docs/boards.md) on its board
- * page, a tracker (docs/trackers.md) on its tracker page, every other note
- * on its outline — focused on a block when one is
- * given, unless that block is a board, which opens on its own board page.
+ * Where the palette opens a note or a block (`useFocusBlock`): a board or a
+ * tracker on its own page, every other note on its outline — focused on a
+ * block when one is given.
  * A pick restarts the stack (docs/graph-walk.md, section 1): the pane shows
  * Root › the note or block, not the old frames with it pushed on top. While
  * the page is split, that is the stack of the pane with the keyboard
@@ -22,35 +23,28 @@ import type { NoteId } from "../schema"
 export function useOpenNote() {
   const navigate = useNavigate()
   const openFramesInPane = useOpenFramesInPane()
-  const store = useStore()
+  const focusBlock = useFocusBlock()
   return React.useCallback(
     (noteId: NoteId, block?: string) => {
-      if (block && isBoard(store.get(graphSnapshotAtom), block)) {
-        return navigate({ to: "/boards/$", params: { _splat: block } })
-      }
-      const kind = store.get(notesAtom).get(noteId)?.type
-      if (kind === "board") {
-        return navigate({ to: "/boards/$", params: { _splat: noteId } })
-      }
-      if (kind === "tracker") {
-        return navigate({ to: "/trackers/$", params: { _splat: noteId } })
-      }
-      if (openFramesInPane([rootFrame(), { noteId, root: block ?? null, selected: null }])) return
-      return navigate({
-        to: "/views/$",
-        params: { _splat: noteId },
-        search: { query: undefined, block },
+      focusBlock(block ?? noteId, () => {
+        if (openFramesInPane([rootFrame(), { noteId, root: block ?? null, selected: null }])) return
+        void navigate({
+          to: "/views/$",
+          params: { _splat: noteId },
+          search: { query: undefined, block },
+        })
       })
     },
-    [navigate, openFramesInPane, store],
+    [navigate, openFramesInPane, focusBlock],
   )
 }
 
 /**
  * Where the palette opens a View row: its saved stack (`restoreViewFrames`,
  * docs/graph-walk.md section 7), as the sidebar's row does, in place of the
- * pane's stack. A View with no saved stack, a board, or a row that is not a
- * View (a block revealed under a View's row) opens as `useOpenNote` does.
+ * pane's stack. A View with no saved stack, a board or a tracker, or a row
+ * that is not a View (a block revealed under a View's row) opens as
+ * `useOpenNote` does.
  */
 export function useOpenView() {
   const navigate = useNavigate()
@@ -63,7 +57,7 @@ export function useOpenView() {
       const graph = store.get(graphSnapshotAtom)
       const stack = store.get(viewByRootAtom).get(rootId)?.stack
       const frames =
-        stack && !isBoard(graph, rootId)
+        stack && kindPageOf(graph, rootId) === null
           ? restoreViewFrames({ rootId, noteId, stack }, graph)
           : null
       if (!frames) return openNote(noteId, block)
@@ -107,34 +101,58 @@ export function useOpenFramesInPane() {
   )
 }
 
+/** The page of its own that a block's kind opens on (block-kinds.tsx:
+ * note, board, tracker): a board's (docs/boards.md) or a tracker's
+ * (docs/trackers.md). Null for every other block, which focuses in the
+ * outline. */
+function kindPageOf(graph: GraphSnapshot, id: string): "/boards/$" | "/trackers/$" | null {
+  if (isTracker(graph, id)) return "/trackers/$"
+  if (isBoard(graph, id)) return "/boards/$"
+  return null
+}
+
 /**
- * A board is never a focused frame (docs/boards.md): a focus on one opens
- * its board page instead, as a new history entry, so Back returns to the
- * view the reader left. The returned `opensBoard(id)` does that and says
- * whether it did, for the note page's focus moves (a key, the block menu,
- * a crumb) to try first. A link to a board block (Copy link, an old URL)
- * opens the board in the link's place; in a split the pane keeps it, as the
- * board page has no panes.
+ * The one focus: every way to focus on a block calls it (F and ⌘., the
+ * block menu, the phone edit bar, a crumb, the palette, a link). A board or
+ * a tracker is never a focused frame: a focus on one opens its own page
+ * (`kindPageOf`), as a new history entry, so Back returns to the view the
+ * reader left. Any other block (or none) goes to `outline`, the caller's
+ * own focus in the outline. `replace` puts the page in the place of the
+ * history entry, for a link.
  */
-export function useBoardFocus(focusBlockId: string | null, split: boolean) {
+export function useFocusBlock() {
   const navigate = useNavigate()
   const store = useStore()
-  const focusesBoard = useAtomValue(
+  return React.useCallback(
+    (id: string | null, outline: () => void, options: { replace?: boolean } = {}) => {
+      const to = id === null ? null : kindPageOf(store.get(graphSnapshotAtom), id)
+      if (to === null || id === null) return outline()
+      void navigate({ to, params: { _splat: id }, ...(options.replace ? { replace: true } : {}) })
+    },
+    [navigate, store],
+  )
+}
+
+/**
+ * The note page's focus (`useFocusBlock`), and its link: a link to a board
+ * or a tracker block (Copy link, an old URL) opens that page in the link's
+ * place. In a split the pane keeps it, as those pages have no panes.
+ */
+export function useNotePageFocus(focusBlockId: string | null, split: boolean) {
+  const focusBlock = useFocusBlock()
+  const opensPage = useAtomValue(
     React.useMemo(
-      () => atom((get) => focusBlockId !== null && isBoard(get(graphSnapshotAtom), focusBlockId)),
+      () =>
+        atom(
+          (get) =>
+            focusBlockId !== null && kindPageOf(get(graphSnapshotAtom), focusBlockId) !== null,
+        ),
       [focusBlockId],
     ),
   )
   React.useEffect(() => {
-    if (!focusesBoard || focusBlockId === null || split) return
-    void navigate({ to: "/boards/$", params: { _splat: focusBlockId }, replace: true })
-  }, [focusesBoard, focusBlockId, split, navigate])
-  return React.useCallback(
-    (id: string | null): boolean => {
-      if (id === null || !isBoard(store.get(graphSnapshotAtom), id)) return false
-      void navigate({ to: "/boards/$", params: { _splat: id } })
-      return true
-    },
-    [navigate, store],
-  )
+    if (!opensPage || split) return
+    focusBlock(focusBlockId, () => {}, { replace: true })
+  }, [opensPage, focusBlockId, split, focusBlock])
+  return focusBlock
 }

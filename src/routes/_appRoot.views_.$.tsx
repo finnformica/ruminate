@@ -40,7 +40,7 @@ import { useCreateNote, useNoteById, useRenameNote } from "../hooks/note"
 import { useSavedView, useWriteView } from "../hooks/views"
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
-import { useBoardFocus } from "../hooks/open-note"
+import { useNotePageFocus } from "../hooks/open-note"
 import { pathToBlock } from "../data/graph"
 import { ROOT_DEPTH, ROOT_FAVICON, ROOT_LABEL, isRootFrame, rootHomeOf } from "../data/root-frame"
 import { stackToSave } from "../data/view-stack"
@@ -591,9 +591,9 @@ function NotePage({
     const keys = chain.slice(0, -1).map((id) => (key = keyOf(key, id)))
     return { ...move, pane: withCurrent(move.pane, { folds: { open: keys, closed: [] } }) }
   }
-  // A board is never a focused frame: a focus, a crumb or a link that
-  // lands on one opens its board page (`useBoardFocus`).
-  const opensBoard = useBoardFocus(focusBlockId ?? null, split)
+  // A board or a tracker is never a focused frame: a focus, a crumb or a
+  // link that lands on one opens its own page (`useFocusBlock`).
+  const focusBlock = useNotePageFocus(focusBlockId ?? null, split)
   // A brand-new note opens ready to be written: the title editing when there
   // is one (naming it is the first thing to do, and naming it creates it —
   // `renameTo`), else the first block. Never while the notes are still
@@ -810,17 +810,18 @@ function NotePage({
   }
   const focusTo = (id: string | null, selected: string | null) => {
     if (!noteId) return
-    if (opensBoard(id)) return
-    const at = selected ? pathOfKey(selected) : null
-    if (isRoot) {
-      // Root has no focus view of its own: focusing a row there opens its
-      // note, or its note focused on the block (the note is the root row its key starts from), and Back comes down to Root on that row.
-      const home = id === null ? null : rootHomeOf(editorDoc, id)
-      if (id === null || home === null) return
-      applyMove(goTo(pane, { noteId: home, root: id === home ? null : id }, at))
-      return
-    }
-    applyMove(goTo(pane, { noteId, root: id }, at))
+    focusBlock(id, () => {
+      const at = selected ? pathOfKey(selected) : null
+      if (isRoot) {
+        // Root has no focus view of its own: focusing a row there opens its
+        // note, or its note focused on the block (the note is the root row its key starts from), and Back comes down to Root on that row.
+        const home = id === null ? null : rootHomeOf(editorDoc, id)
+        if (id === null || home === null) return
+        applyMove(goTo(pane, { noteId: home, root: id === home ? null : id }, at))
+        return
+      }
+      applyMove(goTo(pane, { noteId, root: id }, at))
+    })
   }
   // A pivot set from a row (`p`, the block menu) is frame state: it
   // replaces the URL entry, and opens the row so the depth rule cannot hide
@@ -857,12 +858,8 @@ function NotePage({
       <FocusTrail
         frames={pane.frames}
         onPopTo={(at) => applyMove(popTo(pane, at))}
-        onGoVia={(at, target) => {
-          if (!opensBoard(target.root)) applyMove(goVia(pane, at, target))
-        }}
-        onGoAbove={(target) => {
-          if (!opensBoard(target.root)) applyMove(goAbove(pane, target))
-        }}
+        onGoVia={(at, target) => focusBlock(target.root, () => applyMove(goVia(pane, at, target)))}
+        onGoAbove={(target) => focusBlock(target.root, () => applyMove(goAbove(pane, target)))}
       />
     ) : null
 
