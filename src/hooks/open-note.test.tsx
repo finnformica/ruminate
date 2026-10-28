@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, renderHook } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react"
 import { Provider, createStore } from "jotai"
 import React, { useState } from "react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
 import { BlockEditor } from "../components/block-editor/block-editor"
 import { FocusTrail } from "../components/focus-trail"
-import { BOARD_TYPE, buildGraphSnapshot, docToGraph } from "../data/graph"
+import { BOARD_TYPE, TRACKER_TYPE, buildGraphSnapshot, docToGraph } from "../data/graph"
 import {
   currentFrame,
   goAbove,
@@ -27,12 +27,13 @@ import {
 import { isRootFrame, rootFrame } from "../data/root-frame"
 import { viewMapOf, viewsAtom, type ViewRow } from "../data/views"
 import { sampleGraphAtom } from "../global-state"
-import { useBoardFocus, useOpenNote, useOpenView } from "./open-note"
+import { useFocusBlock, useNotePageFocus, useOpenNote, useOpenView } from "./open-note"
 
 /**
- * A focus on a board block opens the board (docs/boards.md), at every way
- * in: the editor's keys, the trail's crumbs, the palette and a link. Any
- * other block is focused as before.
+ * A focus on a board or a tracker block opens its own page (docs/boards.md,
+ * docs/trackers.md), at every way in: the editor's keys, the phone's edit
+ * bar, the trail's crumbs, the palette and a link. Every one calls the one
+ * focus (`useFocusBlock`). Any other block is focused as before.
  */
 
 const mocks = vi.hoisted(() => ({ navigate: vi.fn(), matches: [] as unknown[] }))
@@ -50,16 +51,36 @@ globalThis.ResizeObserver = class {
   disconnect() {}
 }
 
+/** The pointer: fine (a mouse) unless a test makes it coarse (a phone). */
+let coarse = false
+beforeEach(() => {
+  coarse = false
+  window.matchMedia = ((query: string) =>
+    ({
+      matches: query === "(pointer: coarse)" && coarse,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }) as MediaQueryList) as typeof window.matchMedia
+})
+
 afterEach(() => {
   cleanup()
   mocks.navigate.mockReset()
   mocks.matches = []
+  delete (window as { matchMedia?: unknown }).matchMedia
 })
 
 const PLAIN = "blk_plain00000"
 const BOARD = "blk_board00000"
+const TRACKER = "blk_track00000"
 const UNDER = "blk_under00000"
 const VALUE = "blk_value00000"
+const SERIES = "blk_serie00000"
 const OUTLINE = [
   "- Plain",
   `  id:: ${PLAIN}`,
@@ -69,15 +90,25 @@ const OUTLINE = [
   `  id:: ${BOARD}`,
   "  - Colour",
   `    id:: ${VALUE}`,
+  "- Runs",
+  `  id:: ${TRACKER}`,
+  "  - Distance",
+  `    id:: ${SERIES}`,
 ].join("\n")
 
-/** Note `n` with a plain block and a board block (Hall, its own `board`
- * node, with a block under it). The editor's doc and the graph agree. */
+const KINDS: Record<string, typeof BOARD_TYPE | typeof TRACKER_TYPE> = {
+  [BOARD]: BOARD_TYPE,
+  [TRACKER]: TRACKER_TYPE,
+}
+
+/** Note `n` with a plain block, a board block (Hall, its own `board` node)
+ * and a tracker block (Runs, its own `tracker` node), each with a block
+ * under it. The editor's doc and the graph agree. */
 function setup(views: ViewRow[] = []) {
   const doc: BlockDoc = parse(OUTLINE)
-  doc.blocks[BOARD] = { ...doc.blocks[BOARD], type: BOARD_TYPE }
+  for (const [id, type] of Object.entries(KINDS)) doc.blocks[id] = { ...doc.blocks[id], type }
   const g = docToGraph("n", serialize(parse(OUTLINE)), 1)
-  const nodes = g.nodes.map((node) => (node.id === BOARD ? { ...node, type: BOARD_TYPE } : node))
+  const nodes = g.nodes.map((node) => (KINDS[node.id] ? { ...node, type: KINDS[node.id] } : node))
   const store = createStore()
   store.set(sampleGraphAtom, buildGraphSnapshot(nodes, g.links))
   store.set(viewsAtom, viewMapOf(views))
@@ -87,14 +118,22 @@ function setup(views: ViewRow[] = []) {
   return { doc, wrapper }
 }
 
-const toBoard = (id: string, replace?: boolean) => ({
-  to: "/boards/$",
+/** The two kinds with a page of their own: the block, its row's text, the
+ * block under it, and the page. */
+const KIND_PAGES = [
+  { kind: "board", id: BOARD, text: "Hall", under: VALUE, to: "/boards/$" },
+  { kind: "tracker", id: TRACKER, text: "Runs", under: SERIES, to: "/trackers/$" },
+] as const
+
+const toPage = (to: string, id: string, replace?: boolean) => ({
+  to,
   params: { _splat: id },
   ...(replace ? { replace } : {}),
 })
 
-/** One pane, wired as the note page wires its editor and its trail: a
- * board first (`useBoardFocus`), else the pane's own move. */
+/** One pane, wired as the note page wires its editor and its trail: every
+ * focus through the one focus (`useNotePageFocus`), the pane's own move
+ * its outline step. */
 function PaneHost({
   doc,
   start,
@@ -106,7 +145,7 @@ function PaneHost({
 }) {
   const [pane, setPane] = useState(start)
   const root = currentFrame(pane).root
-  const opensBoard = useBoardFocus(root, false)
+  const focusBlock = useNotePageFocus(root, false)
   const apply = (move: FocusMove | null) => {
     if (!move) return
     setPane(move.pane)
@@ -118,20 +157,17 @@ function PaneHost({
       onChange={() => {}}
       noteId="n"
       focusRootId={root}
-      onFocusNavigate={(id, selected) => {
-        if (opensBoard(id)) return
-        apply(goTo(pane, { noteId: "n", root: id }, selected ? pathOfKey(selected) : null))
-      }}
+      onFocusNavigate={(id, selected) =>
+        focusBlock(id, () =>
+          apply(goTo(pane, { noteId: "n", root: id }, selected ? pathOfKey(selected) : null)),
+        )
+      }
       focusTrail={
         <FocusTrail
           frames={pane.frames}
           onPopTo={(at) => apply(popTo(pane, at))}
-          onGoVia={(at, target) => {
-            if (!opensBoard(target.root)) apply(goVia(pane, at, target))
-          }}
-          onGoAbove={(target) => {
-            if (!opensBoard(target.root)) apply(goAbove(pane, target))
-          }}
+          onGoVia={(at, target) => focusBlock(target.root, () => apply(goVia(pane, at, target)))}
+          onGoAbove={(target) => focusBlock(target.root, () => apply(goAbove(pane, target)))}
         />
       }
     />
@@ -151,55 +187,65 @@ function renderPane(start: Pane = paneOf("n")) {
   return { ...view, stacks, select, press }
 }
 
-describe("useBoardFocus", () => {
-  it("opens a board block on its board page, as a new history entry", () => {
-    const { wrapper } = setup()
-    const { result } = renderHook(() => useBoardFocus(null, false), { wrapper })
-    expect(result.current(BOARD)).toBe(true)
-    expect(mocks.navigate).toHaveBeenCalledWith(toBoard(BOARD))
-  })
+describe("useFocusBlock", () => {
+  for (const { kind, id, to } of KIND_PAGES) {
+    it(`opens a ${kind} block on its own page, as a new history entry`, () => {
+      const { wrapper } = setup()
+      const outline = vi.fn()
+      const { result } = renderHook(() => useFocusBlock(), { wrapper })
+      result.current(id, outline)
+      expect(mocks.navigate).toHaveBeenCalledWith(toPage(to, id))
+      expect(outline).not.toHaveBeenCalled()
+    })
+  }
 
-  it("leaves a plain block, and no block, to the pane", () => {
+  it("leaves a plain block, and no block, to the outline", () => {
     const { wrapper } = setup()
-    const { result } = renderHook(() => useBoardFocus(null, false), { wrapper })
-    expect(result.current(PLAIN)).toBe(false)
-    expect(result.current(null)).toBe(false)
+    const outline = vi.fn()
+    const { result } = renderHook(() => useFocusBlock(), { wrapper })
+    result.current(PLAIN, outline)
+    result.current(null, outline)
+    expect(outline).toHaveBeenCalledTimes(2)
     expect(mocks.navigate).not.toHaveBeenCalled()
   })
 })
 
 describe("a link to a block (Copy link, ?block=)", () => {
-  it("to a board block opens the board in the link's place", () => {
-    const { wrapper } = setup()
-    renderHook(() => useBoardFocus(BOARD, false), { wrapper })
-    expect(mocks.navigate).toHaveBeenCalledWith(toBoard(BOARD, true))
-  })
+  for (const { kind, id, to } of KIND_PAGES) {
+    it(`to a ${kind} block opens its page in the link's place`, () => {
+      const { wrapper } = setup()
+      renderHook(() => useNotePageFocus(id, false), { wrapper })
+      expect(mocks.navigate).toHaveBeenCalledWith(toPage(to, id, true))
+    })
+
+    it(`to a ${kind} block in a split pane stays in the pane: its page has no panes`, () => {
+      const { wrapper } = setup()
+      renderHook(() => useNotePageFocus(id, true), { wrapper })
+      expect(mocks.navigate).not.toHaveBeenCalled()
+    })
+  }
 
   it("to a plain block stays on the focused block", () => {
     const { wrapper } = setup()
-    renderHook(() => useBoardFocus(PLAIN, false), { wrapper })
-    expect(mocks.navigate).not.toHaveBeenCalled()
-  })
-
-  it("in a split pane stays in the pane: the board page has no panes", () => {
-    const { wrapper } = setup()
-    renderHook(() => useBoardFocus(BOARD, true), { wrapper })
+    renderHook(() => useNotePageFocus(PLAIN, false), { wrapper })
     expect(mocks.navigate).not.toHaveBeenCalled()
   })
 })
 
-describe("a focus from the editor's keys", () => {
+describe("a focus from the editor's keys (desktop)", () => {
   for (const [name, key, mods] of [
     ["f", "f", {}],
     ["⌘.", ".", { metaKey: true }],
   ] as const) {
-    it(`${name} on a board block opens the board, and pushes no frame`, () => {
-      const { select, press, stacks } = renderPane()
-      select("Hall")
-      press(key, mods)
-      expect(mocks.navigate).toHaveBeenCalledWith(toBoard(BOARD))
-      expect(stacks).toEqual([])
-    })
+    for (const { kind, id, text, to } of KIND_PAGES) {
+      it(`${name} on a ${kind} block opens its page, and pushes no frame`, () => {
+        const { select, press, stacks } = renderPane()
+        select(text)
+        press(key, mods)
+        expect(mocks.navigate).toHaveBeenCalledWith(toPage(to, id))
+        expect(stacks).toEqual([])
+      })
+    }
 
     it(`${name} on a plain block pushes a frame, as before`, () => {
       const { select, press, stacks } = renderPane()
@@ -211,6 +257,31 @@ describe("a focus from the editor's keys", () => {
   }
 })
 
+describe("a focus from the phone's edit bar", () => {
+  /** Edit the row `text` on a touch screen, then tap Focus on block. */
+  const focusFromBar = (text: string) => {
+    coarse = true
+    const pane = renderPane()
+    fireEvent.click(pane.getByText(text))
+    fireEvent.click(screen.getByLabelText("Focus on block"))
+    return pane
+  }
+
+  for (const { kind, id, text, to } of KIND_PAGES) {
+    it(`Focus on block on a ${kind} block opens its page, and pushes no frame`, () => {
+      const { stacks } = focusFromBar(text)
+      expect(mocks.navigate).toHaveBeenCalledWith(toPage(to, id))
+      expect(stacks).toEqual([])
+    })
+  }
+
+  it("Focus on block on a plain block pushes a frame, as before", () => {
+    const { stacks } = focusFromBar("Plain")
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    expect(stacks.at(-1)!.frames.map((frame) => frame.root)).toEqual([null, PLAIN])
+  })
+})
+
 describe("a crumb on the trail", () => {
   /** The trail's crumb named `label`. */
   const crumb = (container: HTMLElement, label: string) =>
@@ -218,13 +289,15 @@ describe("a crumb on the trail", () => {
       (button) => button.textContent === label,
     )!
 
-  it("to a board block on the path opens the board", () => {
-    // In on the board's own block: the trail reads Note › Hall › Colour.
-    const { container, stacks } = renderPane(paneOf("n", VALUE))
-    fireEvent.click(crumb(container, "Hall"))
-    expect(mocks.navigate).toHaveBeenCalledWith(toBoard(BOARD))
-    expect(stacks).toEqual([])
-  })
+  for (const { kind, id, text, under, to } of KIND_PAGES) {
+    it(`to a ${kind} block on the path opens its page`, () => {
+      // In on the block under it: the trail reads Note › Hall › Colour.
+      const { container, stacks } = renderPane(paneOf("n", under))
+      fireEvent.click(crumb(container, text))
+      expect(mocks.navigate).toHaveBeenCalledWith(toPage(to, id))
+      expect(stacks).toEqual([])
+    })
+  }
 
   it("to a plain block on the path goes to it, as before", () => {
     // In on the plain block's own block: Note › Plain › Under plain.
@@ -235,23 +308,92 @@ describe("a crumb on the trail", () => {
   })
 })
 
-describe("the palette (useOpenNote)", () => {
-  it("opens a board block on its board page", () => {
-    const { wrapper } = setup()
-    const { result } = renderHook(() => useOpenNote(), { wrapper })
-    void result.current("n", BOARD)
-    expect(mocks.navigate).toHaveBeenCalledWith({ to: "/boards/$", params: { _splat: BOARD } })
-  })
+describe("the palette (useOpenNote: ↵, and f on a result)", () => {
+  for (const { kind, id, to } of KIND_PAGES) {
+    it(`opens a ${kind} block on its own page`, () => {
+      const { wrapper } = setup()
+      const { result } = renderHook(() => useOpenNote(), { wrapper })
+      act(() => result.current("n", id))
+      expect(mocks.navigate).toHaveBeenCalledWith(toPage(to, id))
+    })
+
+    it(`opens a ${kind} note on its own page`, () => {
+      const { wrapper } = setup()
+      const { result } = renderHook(() => useOpenNote(), { wrapper })
+      act(() => result.current(id))
+      expect(mocks.navigate).toHaveBeenCalledWith(toPage(to, id))
+    })
+
+    it(`opens a ${kind} View row on its own page, not its saved stack`, () => {
+      const { wrapper } = setup([viewRow(id, "n")])
+      const { result } = renderHook(() => useOpenView(), { wrapper })
+      act(() => result.current("n", id))
+      expect(mocks.navigate).toHaveBeenCalledWith(toPage(to, id))
+    })
+  }
 
   it("opens a plain block focused in its note, as before", () => {
     const { wrapper } = setup()
     const { result } = renderHook(() => useOpenNote(), { wrapper })
-    void result.current("n", PLAIN)
+    act(() => result.current("n", PLAIN))
     expect(mocks.navigate).toHaveBeenCalledWith({
       to: "/views/$",
       params: { _splat: "n" },
       search: { query: undefined, block: PLAIN },
     })
+  })
+})
+
+/** Every non-test source file under src/, by its path from src/, with its
+ * text. */
+const SOURCES = import.meta.glob(["/src/**/*.{ts,tsx}", "!/src/**/*.{test,stories}.{ts,tsx}"], {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>
+const files = Object.entries(SOURCES).map(([path, text]) => ({
+  path: path.slice("/src/".length),
+  text,
+}))
+
+describe("every focus entry point calls the one focus", () => {
+  const file = (path: string) => files.find((f) => f.path === path)!.text
+  const page = file("routes/_appRoot.views_.$.tsx")
+
+  it("a kind is read in one place: kindPageOf", () => {
+    const hook = file("hooks/open-note.ts")
+    expect(hook.match(/isBoard\(/g)).toHaveLength(1)
+    expect(hook.match(/isTracker\(/g)).toHaveLength(1)
+    expect(hook.match(/kindPageOf\(/g)!.length).toBeGreaterThan(1)
+    // The palette's ways in (↵, f on a result, a View row) open through it.
+    expect(hook).toMatch(/export function useOpenNote[\s\S]*?focusBlock\(block \?\? noteId/)
+    expect(hook).toMatch(/export function useOpenView[\s\S]*?kindPageOf\(graph, rootId\)/)
+  })
+
+  it("the note page's focus, crumbs and link go through it", () => {
+    expect(page).toContain("useNotePageFocus(")
+    expect(page).toMatch(/const focusTo = [^\n]*\n[^\n]*\n\s*focusBlock\(id, /)
+    expect(page).toMatch(/onGoVia=\{\(at, target\) => focusBlock\(target\.root, /)
+    expect(page).toMatch(/onGoAbove=\{\(target\) => focusBlock\(target\.root, /)
+    expect(page).not.toMatch(/isBoard\(|isTracker\(/)
+  })
+
+  it("no other file hosts a focus: each host is one of the known ways in", () => {
+    // A focus reaches a host through the editor's `onFocusNavigate` (F, ⌘.,
+    // the block menu, the phone's edit bar) or the trail's crumbs. A new
+    // host must call the one focus, then join this list.
+    const hosts = files
+      .filter((f) => /onFocusNavigate=\{|<FocusTrail\b/.test(f.text))
+      .map((f) => f.path)
+      .sort()
+    expect(hosts).toEqual([
+      // Passes the note page's `onFocusNavigate` through to the editor.
+      "components/block-editor/block-note-editor.tsx",
+      // A palette result: a focus is an open, through `useOpenNote`.
+      "components/results-editor.tsx",
+      "routes/_appRoot.views_.$.tsx",
+    ])
+    expect(file("components/command-menu.tsx")).toMatch(/useOpenNote\(\)/)
   })
 })
 

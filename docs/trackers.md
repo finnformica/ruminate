@@ -30,6 +30,14 @@ under `type:tracker` in a search, and is what the page checks before it
 draws anything (`isTracker`). A note of any other type is refused and
 opened as a note.
 
+A tracker is never a **focused frame**, as a board is not (docs/boards.md).
+Every way to focus a tracker row (F or ⌘., the block menu, the phone's edit
+bar, a crumb, a palette result, a Root row, a link) calls one function,
+`useFocusBlock` in `src/hooks/open-note.ts`. It reads the row's kind and
+opens the tracker page as a new history entry, so Back returns. A link
+opens it in the link's place; in a split the pane keeps the link as a
+focus.
+
 The type is a note's **default surface**, nothing more: **Make this a
 tracker** on a plain note sets the root's type (`useMakeTracker`,
 `src/hooks/tracker.ts`, one `setType`) and opens the tracker; **Make this a
