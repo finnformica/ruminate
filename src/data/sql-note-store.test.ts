@@ -585,6 +585,58 @@ describe("openSqlNoteStore", () => {
     expect(await noteOf(store, "a")).toBeNull()
   })
 
+  it("applyPull writes the replica's key rows over the ones a row's mirror derives", async () => {
+    const { store, driver } = await makeStoreWithDriver()
+    await store.applyPull(
+      {
+        nodes: [
+          {
+            id: "blk_k",
+            type: "paragraph",
+            text: "k",
+            props: '{"colour":"red","size":"big"}',
+            updated_at: 42,
+            seq: 7,
+          },
+        ],
+        links: [],
+        views: [],
+        deleteNodes: [],
+        deleteLinks: [],
+      },
+      [
+        {
+          block_id: "blk_k",
+          key: "colour",
+          value: '"red"',
+          hlc: "000000000000099-0002-other.tab",
+          seq: 9,
+          updated_at: 99,
+        },
+      ],
+    )
+    // The replica's row for `colour` with its own stamp; `size` as the
+    // mirror derives it.
+    expect(
+      await driver.exec(
+        "SELECT key, value, hlc, seq FROM delta_mat_values WHERE block_id = 'blk_k' ORDER BY key",
+      ),
+    ).toEqual([
+      { key: "colour", value: '"red"', hlc: "000000000000099-0002-other.tab", seq: 9 },
+      { key: "size", value: '"big"', hlc: "000000000000042-0000-seq:000000000000007", seq: 7 },
+    ])
+    const node = (await store.getGraph()).nodes.get("blk_k")
+    expect(JSON.parse(node?.props ?? "null")).toEqual({ colour: "red", size: "big" })
+    // Each key a register of its own in `stamps`, so the fold of the log
+    // reads the replica's stamp for `colour` and beats only what beats it.
+    const [row] = await driver.exec("SELECT stamps FROM nodes WHERE id = 'blk_k'")
+    expect(JSON.parse(String(row.stamps))).toMatchObject({
+      "props.colour": "000000000000099-0002-other.tab",
+      "props.size": "000000000000042-0000-seq:000000000000007",
+      props: "000000000000099-0002-other.tab",
+    })
+  })
+
   it("getAllRows returns every row of both tables", async () => {
     const { store } = await makeStoreWithDriver()
     await seed(store, "a", "- x\n  id:: blk_aaaaaaaaaa\n")

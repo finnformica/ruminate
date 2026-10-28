@@ -30,6 +30,7 @@ import {
   coalesceTypingKeys,
   foldKeysByStamp,
   parseStoredKeyEvent,
+  propsRegister,
   type DeltaMatValueRow,
   type KeyEvent,
   type LoggedKeyEvent,
@@ -198,7 +199,7 @@ export async function openSqlNoteStore(
 
     getAllRows: () => loadAllRows(driver),
 
-    applyPull: async (plan) => {
+    applyPull: async (plan, values = []) => {
       const statements: SqlStatement[] = []
       for (const [source, destination, kind] of plan.deleteLinks) {
         // tenant-exempt: a row absent from the replica's key lists no longer
@@ -219,10 +220,24 @@ export async function openSqlNoteStore(
         statements.push({ sql: "DELETE FROM nodes WHERE id = ?", params: [id] })
       }
       // Rows from outside the log (a repair from the screen) take the stamps
-      // their last event derives, as the stamp fill gives them.
-      for (const node of plan.nodes) statements.push(...upsertNodeStatements(node))
+      // their last event derives, as the stamp fill gives them — except a
+      // key the replica's own key rows name, which takes the replica's.
+      const valuesOf = new Map<string, DeltaMatValueRow[]>()
+      for (const row of values) {
+        const held = valuesOf.get(row.block_id)
+        if (held) held.push(row)
+        else valuesOf.set(row.block_id, [row])
+      }
+      for (const node of plan.nodes) {
+        statements.push(...upsertNodeStatements(node, valuesOf.get(node.id) ?? []))
+        valuesOf.delete(node.id)
+      }
       for (const link of plan.links) statements.push(upsertLinkStatement(link))
       for (const view of plan.views) statements.push(upsertViewStatement(view))
+      // A key row of a block the plan does not carry: the row alone.
+      for (const rows of valuesOf.values()) {
+        for (const row of rows) statements.push(upsertDeltaMatValueStatement(row))
+      }
       if (statements.length > 0) await driver.batch(statements)
     },
 
@@ -734,12 +749,37 @@ function upsertViewStatement(view: ViewRow): SqlStatement {
 
 /** A node row as the replica's rows look, verbatim — its props in the
  * mirror column and as one key row each, at the stamp the row derives
- * (`derivedStamps`). */
-const upsertNodeStatements = (node: NodeRow): SqlStatement[] => {
+ * (`derivedStamps`). With the replica's own key rows of the block
+ * (`pulled`, its `delta_mat_values`), each key is a register of its own in
+ * `stamps`: a pulled key at the replica's stamp, any other at the row's. The
+ * fold reads a key's stamp from there (`entityOfRow`), so the log's replay
+ * beats a pulled key only as it beats it on the replica. */
+const upsertNodeStatements = (node: NodeRow, pulled: DeltaMatValueRow[] = []): SqlStatement[] => {
   const stamp = eventStamp({ at: node.updated_at, seq: node.seq ?? 0 } as RuminateEvent)
-  const keys = Object.entries(parseProps(node.props) ?? {}).filter(
-    ([, value]) => value !== null && value !== undefined,
-  )
+  const keys = new Map<string, DeltaMatValueRow>()
+  for (const [key, value] of Object.entries(parseProps(node.props) ?? {})) {
+    if (value === null || value === undefined) continue
+    keys.set(key, {
+      block_id: node.id,
+      key,
+      value: JSON.stringify(value),
+      hlc: stamp,
+      ...(node.seq !== undefined && node.seq !== null ? { seq: node.seq } : {}),
+      updated_at: node.updated_at,
+    })
+  }
+  for (const row of pulled) keys.set(row.key, row)
+  let stamps = derivedStamps("block", node)
+  if (pulled.length > 0) {
+    const keyed = JSON.parse(stamps) as Record<string, string>
+    let top = ""
+    for (const row of keys.values()) {
+      keyed[propsRegister(row.key)] = row.hlc
+      if (row.hlc > top) top = row.hlc
+    }
+    keyed.props = top
+    stamps = JSON.stringify(keyed)
+  }
   return [
     {
       sql:
@@ -759,20 +799,31 @@ const upsertNodeStatements = (node: NodeRow): SqlStatement[] => {
         node.deleted_at ?? null,
         node.notes_id ?? null,
         node.seq ?? null,
-        derivedStamps("block", node),
+        stamps,
       ],
     },
     // The row's keys replace the block's: a key the row no longer names
     // is gone from it.
     { sql: "DELETE FROM delta_mat_values WHERE block_id = ?", params: [node.id] },
-    ...keys.map(([key, value]): SqlStatement => ({
+    ...[...keys.values()].map((row): SqlStatement => ({
       sql:
         "INSERT INTO delta_mat_values (block_id, key, value, hlc, seq, updated_at) " +
         "VALUES (?, ?, ?, ?, ?, ?)",
-      params: [node.id, key, JSON.stringify(value), stamp, node.seq ?? null, node.updated_at],
+      params: [node.id, row.key, row.value, row.hlc, row.seq ?? null, row.updated_at],
     })),
   ]
 }
+
+/** One of the replica's `delta_mat_values` rows, as the pull carries it:
+ * the key's value and the stamp the replica resolved it by. */
+const upsertDeltaMatValueStatement = (row: DeltaMatValueRow): SqlStatement => ({
+  sql:
+    "INSERT INTO delta_mat_values (block_id, key, value, hlc, seq, updated_at) " +
+    "VALUES (?, ?, ?, ?, ?, ?) " +
+    "ON CONFLICT (block_id, key) DO UPDATE SET value = excluded.value, hlc = excluded.hlc, " +
+    "seq = excluded.seq, updated_at = excluded.updated_at",
+  params: [row.block_id, row.key, row.value, row.hlc, row.seq ?? null, row.updated_at],
+})
 
 const upsertLinkStatement = (link: LinkRow): SqlStatement => ({
   sql:

@@ -280,6 +280,11 @@ async function replicaEvents(request: Request, tenant: TenantDb): Promise<Respon
  * oldest first, by its own seq (docs/event-sourcing.md, "Per-key events").
  * With `entity` + `entity_id`, one entity's rows. What a device of this
  * build pulls and folds.
+ *
+ * No reconcile here: a device reads a long log in pages (27 of them for a
+ * corpus of 50,000 rows), and the reconcile — a scan of the whole `events`
+ * table — cost each page more than the read did. The pull of rows that
+ * precedes the pages reconciles once (`replicaPull`), and every write does.
  */
 async function replicaKeyEvents(request: Request, tenant: TenantDb): Promise<Response> {
   const query = new URL(request.url).searchParams
@@ -288,7 +293,6 @@ async function replicaKeyEvents(request: Request, tenant: TenantDb): Promise<Res
   if ((entity === null) !== (entityId === null) || (entity !== null && !ENTITIES.has(entity))) {
     return jsonResponse({ error: "invalid_entity" }, 400)
   }
-  await reconcileLog(tenant)
   const events = await readKeyEvents(tenant, {
     since: count(query.get("since")) ?? 0,
     limit: Math.min(count(query.get("limit")) ?? 1000, MAX_EVENTS),
@@ -371,6 +375,11 @@ async function replicaPull(request: Request, tenant: TenantDb, env: Env): Promis
   // corpus, and it leaves with a sequence cursor.
   const since = parsed !== null && parsed >= LEGACY_TIMESTAMP_CURSOR_FLOOR ? null : parsed
 
+  // The one reconcile of a pull: the rows served here are all in the log the
+  // same pull reads next (`replicaKeyEvents`, page by page, without one). A
+  // tenant who has not written since the log began has an empty one until
+  // something reconciles it; a reader should never be the one to find that.
+  await reconcileLog(tenant)
   const body = since === null ? await corpusPullFull(tenant) : await corpusPullSince(tenant, since)
   return jsonResponse({ ...body, replica_id: replicaId(env) })
 }
