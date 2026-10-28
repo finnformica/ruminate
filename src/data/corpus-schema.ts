@@ -84,7 +84,7 @@ export interface CorpusMigrations {
 /** Which v3 shape the ladder should produce (see the module header). */
 export type CorpusTenancy = "single" | "columns"
 
-const CORPUS_SCHEMA_VERSION = 15
+const CORPUS_SCHEMA_VERSION = 16
 
 /**
  * The single-tenant v5 step: the `views` table (migrations/0015) — the
@@ -325,6 +325,20 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '15');
 `
 
 /**
+ * The single-tenant v16 step: the index v15 left off `events_log.position`.
+ * Every pulled row is placed with `NEXT_POSITION` — `(SELECT MAX(position) +
+ * 1 FROM events_log)` (`sql-note-store.ts`) — which without an index scans
+ * the whole log per insert: O(n^2) over a pull. The old `events` table has
+ * had this index since v12 (`events_position`); `events_log` never did. DDL
+ * only, so no cache generation bump: the rows the index covers are already
+ * correct.
+ */
+const LOCAL_V16_SQL = `
+CREATE INDEX IF NOT EXISTS events_log_position ON events_log (position);
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '16');
+`
+
+/**
  * The single-tenant v4 step: `notes_id` on nodes (migrations/0006) and nothing
  * else — no backfill, because the local store is a cache and re-pulls the
  * note ids the replica computed (`CACHE_GENERATION`, database-mode.ts).
@@ -530,6 +544,16 @@ async function applyV15(
 }
 
 /**
+ * The single-tenant v16 step is DDL only on both shapes: the D1 `events_log`
+ * (migrations/0028) keys on `(user_id, seq)`, and that primary key already
+ * covers the scan this index fixes locally, so "columns" tenancy has
+ * nothing to add.
+ */
+async function applyV16(driver: SqlDriver, tenancy: CorpusTenancy): Promise<void> {
+  if (tenancy === "single") await driver.execScript(LOCAL_V16_SQL)
+}
+
+/**
  * Every local step that has shipped, by the version it leaves behind — for
  * `corpus-schema.test.ts`, which pins a hash of each. A step that has reached
  * a device cannot be edited without that test failing; the next change to
@@ -549,6 +573,7 @@ export const SHIPPED_LOCAL_STEPS: Readonly<Record<number, string>> = {
   13: LOCAL_V13_SQL,
   14: LOCAL_V14_SQL,
   15: LOCAL_V15_SQL,
+  16: LOCAL_V16_SQL,
 }
 
 type Step = (
@@ -574,6 +599,7 @@ const STEPS: readonly [number, Step][] = [
   [13, (driver, _migrations, tenancy) => applyV13(driver, tenancy)],
   [14, applyV14],
   [15, applyV15],
+  [16, (driver, _migrations, tenancy) => applyV16(driver, tenancy)],
 ]
 
 /**
