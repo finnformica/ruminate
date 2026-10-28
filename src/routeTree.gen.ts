@@ -22,6 +22,7 @@ import { Route as AppRootNotesIndexRouteImport } from './routes/_appRoot.notes.i
 import { Route as AppRootNotesSplatRouteImport } from './routes/_appRoot.notes_.$'
 import { Route as AppRootSettingsIndexRouteImport } from './routes/_appRoot.settings.index'
 import { Route as AppRootSettingsPageRouteImport } from './routes/_appRoot.settings.$page'
+import { Route as AppRootTrackersSplatRouteImport } from './routes/_appRoot.trackers.$'
 import { Route as AppRootViewsIndexRouteImport } from './routes/_appRoot.views.index'
 import { Route as AppRootViewsSplatRouteImport } from './routes/_appRoot.views_.$'
 
@@ -89,6 +90,11 @@ const AppRootSettingsPageRoute = AppRootSettingsPageRouteImport.update({
   path: '/$page',
   getParentRoute: () => AppRootSettingsRoute,
 } as any)
+const AppRootTrackersSplatRoute = AppRootTrackersSplatRouteImport.update({
+  id: '/trackers/$',
+  path: '/trackers/$',
+  getParentRoute: () => AppRootRoute,
+} as any)
 const AppRootViewsIndexRoute = AppRootViewsIndexRouteImport.update({
   id: '/views/',
   path: '/views/',
@@ -110,6 +116,7 @@ export interface FileRoutesByFullPath {
   '/invite/$token': typeof AppRootInviteTokenRoute
   '/notes/$': typeof AppRootNotesSplatRoute
   '/settings/$page': typeof AppRootSettingsPageRoute
+  '/trackers/$': typeof AppRootTrackersSplatRoute
   '/views/$': typeof AppRootViewsSplatRoute
   '/calendar/': typeof AppRootCalendarIndexRoute
   '/notes/': typeof AppRootNotesIndexRoute
@@ -125,6 +132,7 @@ export interface FileRoutesByTo {
   '/invite/$token': typeof AppRootInviteTokenRoute
   '/notes/$': typeof AppRootNotesSplatRoute
   '/settings/$page': typeof AppRootSettingsPageRoute
+  '/trackers/$': typeof AppRootTrackersSplatRoute
   '/views/$': typeof AppRootViewsSplatRoute
   '/calendar': typeof AppRootCalendarIndexRoute
   '/notes': typeof AppRootNotesIndexRoute
@@ -143,6 +151,7 @@ export interface FileRoutesById {
   '/_appRoot/invite/$token': typeof AppRootInviteTokenRoute
   '/_appRoot/notes_/$': typeof AppRootNotesSplatRoute
   '/_appRoot/settings/$page': typeof AppRootSettingsPageRoute
+  '/_appRoot/trackers/$': typeof AppRootTrackersSplatRoute
   '/_appRoot/views_/$': typeof AppRootViewsSplatRoute
   '/_appRoot/calendar/': typeof AppRootCalendarIndexRoute
   '/_appRoot/notes/': typeof AppRootNotesIndexRoute
@@ -161,6 +170,7 @@ export interface FileRouteTypes {
     | '/invite/$token'
     | '/notes/$'
     | '/settings/$page'
+    | '/trackers/$'
     | '/views/$'
     | '/calendar/'
     | '/notes/'
@@ -176,6 +186,7 @@ export interface FileRouteTypes {
     | '/invite/$token'
     | '/notes/$'
     | '/settings/$page'
+    | '/trackers/$'
     | '/views/$'
     | '/calendar'
     | '/notes'
@@ -193,6 +204,7 @@ export interface FileRouteTypes {
     | '/_appRoot/invite/$token'
     | '/_appRoot/notes_/$'
     | '/_appRoot/settings/$page'
+    | '/_appRoot/trackers/$'
     | '/_appRoot/views_/$'
     | '/_appRoot/calendar/'
     | '/_appRoot/notes/'
@@ -297,6 +309,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRootSettingsPageRouteImport
       parentRoute: typeof AppRootSettingsRoute
     }
+    '/_appRoot/trackers/$': {
+      id: '/_appRoot/trackers/$'
+      path: '/trackers/$'
+      fullPath: '/trackers/$'
+      preLoaderRoute: typeof AppRootTrackersSplatRouteImport
+      parentRoute: typeof AppRootRoute
+    }
     '/_appRoot/views/': {
       id: '/_appRoot/views/'
       path: '/views'
@@ -337,6 +356,7 @@ interface AppRootRouteChildren {
   AppRootCalendarSplatRoute: typeof AppRootCalendarSplatRoute
   AppRootInviteTokenRoute: typeof AppRootInviteTokenRoute
   AppRootNotesSplatRoute: typeof AppRootNotesSplatRoute
+  AppRootTrackersSplatRoute: typeof AppRootTrackersSplatRoute
   AppRootViewsSplatRoute: typeof AppRootViewsSplatRoute
   AppRootCalendarIndexRoute: typeof AppRootCalendarIndexRoute
   AppRootNotesIndexRoute: typeof AppRootNotesIndexRoute
@@ -352,6 +372,7 @@ const AppRootRouteChildren: AppRootRouteChildren = {
   AppRootCalendarSplatRoute: AppRootCalendarSplatRoute,
   AppRootInviteTokenRoute: AppRootInviteTokenRoute,
   AppRootNotesSplatRoute: AppRootNotesSplatRoute,
+  AppRootTrackersSplatRoute: AppRootTrackersSplatRoute,
   AppRootViewsSplatRoute: AppRootViewsSplatRoute,
   AppRootCalendarIndexRoute: AppRootCalendarIndexRoute,
   AppRootNotesIndexRoute: AppRootNotesIndexRoute,

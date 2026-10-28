@@ -14,7 +14,7 @@ import type { Block, BlockProps, BlockType } from "./types"
  * `src/components/block-editor/block-kinds.tsx`).
  *
  * Entries are ordered as the slash menu and "Turn into" offer them; siblings
- * that are never offered (`done`, `h2`, `h3`, `note`, `board`) follow their family.
+ * that are never offered (`done`, `h2`, `h3`, `note`, `board`, `tracker`) follow their family.
  */
 
 /** A family groups types that toggle into each other and continue alike:
@@ -350,6 +350,20 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     turnInto: false,
     search: null,
   },
+  // A tracker is a note root of the third kind (docs/trackers.md), in the
+  // same family for the same reasons.
+  {
+    id: "tracker",
+    family: "note",
+    label: "Tracker",
+    keywords: [],
+    marker: "",
+    listItem: false,
+    marked: false,
+    splitsAs: "text",
+    turnInto: false,
+    search: null,
+  },
 ]
 
 const DEFS_BY_ID = new Map(BLOCK_TYPE_DEFS.map((def) => [def.id, def]))
@@ -359,7 +373,8 @@ export function defOf(type: BlockType): BlockTypeDef {
   return DEFS_BY_ID.get(type) ?? DEFS_BY_ID.get("text")!
 }
 
-/** Is this a note root's type (the `note` family: a note or a board)? The
+/** Is this a note root's type (the `note` family: a note, a board or a
+ * tracker)? The
  * registry's own answer, for the block modules; the graph's is `isNoteType`
  * (`src/data/graph.ts`), over the stored string. */
 export function isNoteFamily(type: BlockType): boolean {

@@ -589,7 +589,7 @@ function ViewRowBody({
   const navigate = useNavigate()
   const { pathname } = useLocation()
   // Deleting the note on screen leads to Root, as the ⋯ menu does.
-  const open = pathname.match(/^\/(?:views|boards)\/(.+)$/)
+  const open = pathname.match(/^\/(?:views|boards|trackers)\/(.+)$/)
   const onDeleted =
     open && decodeURIComponent(open[1]) === entry.noteId
       ? () =>
@@ -862,12 +862,13 @@ function NoteNavItem({
   className?: string
 }) {
   const openFramesInPane = useOpenFramesInPane()
-  // A board's row opens its board page (docs/boards.md), with nothing to
-  // say about focus; every other note's its outline.
-  if (note.type === "board") {
+  // A board's row opens its board page (docs/boards.md) and a tracker's its
+  // tracker page (docs/trackers.md), with nothing to say about focus; every
+  // other note's its outline.
+  if (note.type === "board" || note.type === "tracker") {
     return (
       <Link
-        to="/boards/$"
+        to={note.type === "board" ? "/boards/$" : "/trackers/$"}
         params={{ _splat: note.id }}
         activeOptions={{ exact: true }}
         data-size={size}

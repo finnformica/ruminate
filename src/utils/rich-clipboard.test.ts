@@ -145,6 +145,7 @@ describe("every block type's html survives a foreign app", () => {
     h3: "as h2",
     note: "a page's title, never a copied block",
     board: "as note: a board's title",
+    tracker: "as note: a tracker's title",
     link: "its html is the link in a paragraph, which reads back as the inline link — title and address kept; the hover card makes a block of it again",
   }
   const text = "some **bold** text"

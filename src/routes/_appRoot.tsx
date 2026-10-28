@@ -6,6 +6,7 @@ import { DeleteNoteDialog } from "../components/delete-note-dialog"
 import { DevBar } from "../components/dev-bar"
 import { BoardPicker } from "../components/board-picker"
 import { NewBoardDialog } from "../components/new-board-dialog"
+import { NewTrackerDialog } from "../components/new-tracker-dialog"
 import { ShareDialog } from "../components/share-note-dialog"
 import { Toaster } from "../components/ui/toaster"
 import { useDatabaseMode } from "../data/use-database-mode"
@@ -71,6 +72,7 @@ function RouteComponent() {
       <CommandMenu />
       <ShareDialog />
       <NewBoardDialog />
+      <NewTrackerDialog />
       <BoardPicker />
       <DeleteNoteDialog />
       <GlobalShortcuts />

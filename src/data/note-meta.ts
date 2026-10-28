@@ -4,6 +4,7 @@ import type { Block, BlockDoc } from "../blocks/types"
 import { toDateStringUtc } from "../utils/date"
 import {
   BOARD_TYPE,
+  TRACKER_TYPE,
   isLegacyBoard,
   isNoteType,
   noteDoc,
@@ -131,13 +132,19 @@ export function noteFromNode(id: NoteId, snapshot: GraphSnapshot): Note | null {
   // A board is a note root of its own type (docs/boards.md) — or, until
   // migrations/0020 has run, a note whose page still carries the old
   // property.
-  const type: NoteType = note.type === BOARD_TYPE || isLegacyBoard(note) ? "board" : "note"
+  const type: NoteType =
+    note.type === TRACKER_TYPE
+      ? "tracker"
+      : note.type === BOARD_TYPE || isLegacyBoard(note)
+        ? "board"
+        : "note"
 
   const text = texts.join("\n")
   let displayName = ""
   switch (type) {
     case "note":
     case "board":
+    case "tracker":
       if (title) displayName = title
       // An id a human wrote is a name; a minted one is opaque and never is.
       else if (id && !/^\d+$/.test(id) && !isMintedNoteId(id)) displayName = id
@@ -148,7 +155,9 @@ export function noteFromNode(id: NoteId, snapshot: GraphSnapshot): Note | null {
             ? words.slice(0, PREVIEW_WORDS).join(" ")
             : type === "board"
               ? "Empty board"
-              : "Empty note"
+              : type === "tracker"
+                ? "Empty tracker"
+                : "Empty note"
         if (words.length > PREVIEW_WORDS) displayName += "…"
       }
       break

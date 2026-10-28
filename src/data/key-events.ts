@@ -65,6 +65,7 @@ import {
 import { CHILD_KIND, parseProps, type GraphSnapshot } from "./graph"
 import { decodeHlc } from "./hlc"
 import type { Op } from "./ops"
+import { trackerSeriesKeys } from "./tracker"
 
 /** The shape per-key events are written in; the old log writes `1`. */
 export const KEY_EVENT_VERSION = 2
@@ -887,9 +888,13 @@ const nullableInteger = z.int().nullable()
 
 /** The known props keys of each block type, each with the shape the app
  * writes it in (`src/blocks/figure.ts`, `image.ts`, `link.ts`, the note's
- * metadata in docs/metadata.md). Other keys are allowed with any JSON
- * value, held to `KEY_PATTERN`. */
+ * metadata in docs/metadata.md, a tracker's series in
+ * `src/data/tracker.ts`). Other keys are allowed with any JSON value, held
+ * to `KEY_PATTERN`. */
 const BLOCK_PROP_SCHEMAS = {
+  // A tracker's series is a text block (docs/trackers.md); its entries are
+  // text, with no keys of their own.
+  text: trackerSeriesKeys,
   note: z.object({
     title: z.string().optional(),
     font: z.string().optional(),

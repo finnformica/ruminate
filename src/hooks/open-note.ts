@@ -11,7 +11,8 @@ import type { NoteId } from "../schema"
 
 /**
  * Where the palette opens a note: a board (docs/boards.md) on its board
- * page, every other note on its outline — focused on a block when one is
+ * page, a tracker (docs/trackers.md) on its tracker page, every other note
+ * on its outline — focused on a block when one is
  * given, unless that block is a board, which opens on its own board page.
  * A pick restarts the stack (docs/graph-walk.md, section 1): the pane shows
  * Root › the note or block, not the old frames with it pushed on top. While
@@ -27,8 +28,12 @@ export function useOpenNote() {
       if (block && isBoard(store.get(graphSnapshotAtom), block)) {
         return navigate({ to: "/boards/$", params: { _splat: block } })
       }
-      if (store.get(notesAtom).get(noteId)?.type === "board") {
+      const kind = store.get(notesAtom).get(noteId)?.type
+      if (kind === "board") {
         return navigate({ to: "/boards/$", params: { _splat: noteId } })
+      }
+      if (kind === "tracker") {
+        return navigate({ to: "/trackers/$", params: { _splat: noteId } })
       }
       if (openFramesInPane([rootFrame(), { noteId, root: block ?? null, selected: null }])) return
       return navigate({
