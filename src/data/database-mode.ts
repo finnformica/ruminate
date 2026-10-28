@@ -10,19 +10,22 @@ import type { NoteId } from "../schema"
 import { SessionExpiredError } from "../utils/github-token"
 import { createD1NoteSource, type D1NoteSource } from "./d1-note-source"
 import {
-  coalesceTyping,
-  eventStamp,
   linkEntityId,
-  opsToEvents,
   readOutEntities,
-  viewChangeToEvent,
   type Entity,
   type EntityKeys,
   type EventContext,
-  type LoggedEvent,
-  type RuminateEvent,
 } from "./events"
-import { foldCheckKey, foldDifferences } from "./fold-check"
+import { deltaMatValueDifferences, foldCheckKey, foldDifferences } from "./fold-check"
+import {
+  coalesceTypingKeys,
+  keyEventStamp,
+  opsToKeyEvents,
+  viewChangeToKeyEvents,
+  type DeltaMatValueRow,
+  type KeyEvent,
+  type LoggedKeyEvent,
+} from "./key-events"
 import { buildGraphSnapshot, isNoteType, type GraphSnapshot } from "./graph"
 import { decodeHlc, encodeHlc, receiveHlc, tickHlc, type Hlc } from "./hlc"
 import { applyOps, notesTouchedBy, type Op } from "./ops"
@@ -174,6 +177,12 @@ const OWNER_KEY = "store_owner"
  * `base_seq` is "the writer did not say" — but a cache whose every row says
  * that is a history that cannot tell an offline week's edit from a fresh one.
  *
+ * Generation `10` is the per-key log (`LOCAL_V15_SQL`, migrations/0028,
+ * docs/event-sourcing.md, "Per-key events"): the device's log is
+ * `events_log`, one row per key, and each cache row holds a stamp per key of
+ * its props. A cache from before holds one `props` stamp per row and the old
+ * log; one re-pull brings the per-key log down and folds the rows from it.
+ *
  * This is why the constant is bumped rather than merely re-documented: every
  * device that already booted on generation `2` has `"2"` stamped in its meta,
  * so folding a new change into the old number is a wipe that never fires.
@@ -184,7 +193,7 @@ const OWNER_KEY = "store_owner"
  * when the tab hides, so the window is small — but it is real, and it is why
  * this is bumped deliberately rather than routinely.
  */
-export const CACHE_GENERATION = "9"
+export const CACHE_GENERATION = "10"
 /**
  * The database the local copy was last pulled from — `"production"`, or a
  * preview clone's id — as the replica reports it (`replica_id` on every pull,
@@ -304,9 +313,9 @@ interface DatabaseModeRuntime {
   generation: number
   /** Ops applied to the graph atom and not yet written to the store. */
   pendingOps: Op[]
-  /** The same ops (and view writes) as the events they amount to — what the
-   * flush writes. A typing run coalesces to one event before it lands. */
-  pendingEvents: RuminateEvent[]
+  /** The same ops (and view writes) as the per-key events they amount to —
+   * what the flush writes. A typing run coalesces to one event before it lands. */
+  pendingEvents: KeyEvent[]
   /** Notes those ops touched — whose rollups the flush refreshes. */
   pendingNoteIds: Set<NoteId>
   opsFlushTimer: ReturnType<typeof setTimeout> | null
@@ -325,6 +334,9 @@ interface DatabaseModeRuntime {
   /** The replica's rows the pulls brought since the last fold check, by key
    * (`foldCheckKey`): the check compares each with its cache row. */
   replicaRows: { nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }
+  /** The replica's `delta_mat_values` rows the pulls brought since the last
+   * fold check: compared with the cache's. */
+  replicaValues: DeltaMatValueRow[]
 }
 
 let runtime: DatabaseModeRuntime | null = null
@@ -424,6 +436,7 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     logBehind: false,
     foldCheckTimer: null,
     foldCheckKeys: noKeys(),
+    replicaValues: [],
     replicaRows: noRows(),
   }
   runtime = activation
@@ -544,7 +557,7 @@ export function stopDatabaseMode() {
     // Events still coalescing are written before the store closes (no
     // replica to notify any more — they wait in the log, and the next boot's
     // push loop finds them unpushed).
-    const events = coalesceTyping(stopped.pendingEvents)
+    const events = coalesceTypingKeys(stopped.pendingEvents)
     stopped.pendingOps = []
     stopped.pendingEvents = []
     stopped.pendingViews = []
@@ -643,7 +656,7 @@ export function databaseApplyOps(
   for (const note of notesTouchedBy(before, ops)) activation.pendingNoteIds.add(note)
   for (const note of notesTouchedBy(after, ops)) activation.pendingNoteIds.add(note)
   activation.pendingOps.push(...ops)
-  activation.pendingEvents.push(...opsToEvents(before, ops, ctx))
+  activation.pendingEvents.push(...opsToKeyEvents(before, ops, ctx))
   patchStatus({ emptyOffline: false })
   // A deleted node takes its view with it: the one place the graph reaches
   // into the views table (`src/data/views.ts`). Then the batch's own rows.
@@ -687,8 +700,7 @@ function queueViewRows(
   const store = jotai()
   const held = store.get(viewsAtom)
   for (const row of views) {
-    const event = viewChangeToEvent(held.get(row.id), row, ctx)
-    if (event !== null) activation.pendingEvents.push(event)
+    activation.pendingEvents.push(...viewChangeToKeyEvents(held.get(row.id), row, ctx))
   }
   store.set(viewsAtom, applyViewRows(held, views))
   activation.pendingViews.push(...views)
@@ -718,10 +730,10 @@ const bumpEventLog = () => jotai().set(eventLogVersionAtom, (n) => n + 1)
  * (`src/data/day-changes.ts`). Null while the runtime is down or still
  * opening its store.
  */
-export async function databaseEventLog(): Promise<LoggedEvent[] | null> {
+export async function databaseEventLog(): Promise<LoggedKeyEvent[] | null> {
   const activation = runtime
   if (!activation) return null
-  let log: LoggedEvent[] | null = null
+  let log: LoggedKeyEvent[] | null = null
   await enqueue(async () => {
     if (runtime !== activation || !activation.store) return
     await flushOps(activation)
@@ -763,7 +775,7 @@ async function flushOps(activation: DatabaseModeRuntime) {
   // A typing run is one event, not one per keystroke — coalesced here, where
   // the whole run is in hand, and again in the store against the unpushed
   // tail of the log (`NoteStore.applyEvents`).
-  const events = coalesceTyping(activation.pendingEvents)
+  const events = coalesceTypingKeys(activation.pendingEvents)
   const views = activation.pendingViews
   const notes = [...activation.pendingNoteIds]
   if (events.length === 0 && views.length === 0) return
@@ -814,7 +826,7 @@ const noKeys = () => ({
 })
 
 /** Note the entities a batch of events names, for the next fold check. */
-function touchEvents(activation: DatabaseModeRuntime, events: readonly RuminateEvent[]) {
+function touchEvents(activation: DatabaseModeRuntime, events: readonly KeyEvent[]) {
   const keys = activation.foldCheckKeys
   for (const event of events) {
     const table =
@@ -829,6 +841,7 @@ function holdReplicaRows(activation: DatabaseModeRuntime, body: ReplicaChangesBo
   held.nodes.push(...body.nodes)
   held.links.push(...body.links)
   held.views.push(...body.views)
+  activation.replicaValues.push(...(body.delta_mat_values ?? []))
 }
 
 /** Queue a fold check of what batches touched, at most one per
@@ -865,10 +878,13 @@ async function checkFold(activation: DatabaseModeRuntime) {
   const store = activation.store
   const keys: EntityKeys = activation.foldCheckKeys
   const pulled = activation.replicaRows
+  const pulledValues = activation.replicaValues
   activation.foldCheckKeys = noKeys()
   activation.replicaRows = noRows()
+  activation.replicaValues = []
   const touched = keys.blocks.size + keys.links.size + keys.views.size
-  const brought = pulled.nodes.length + pulled.links.length + pulled.views.length
+  const brought =
+    pulled.nodes.length + pulled.links.length + pulled.views.length + pulledValues.length
   if (touched + brought === 0) return
   try {
     const found: string[] = []
@@ -887,14 +903,18 @@ async function checkFold(activation: DatabaseModeRuntime) {
     // The replica's rows against the cache.
     if (brought > 0) {
       const replicaKeys: EntityKeys = {
-        blocks: new Set(pulled.nodes.map((row) => row.id)),
+        blocks: new Set([
+          ...pulled.nodes.map((row) => row.id),
+          ...pulledValues.map((row) => row.block_id),
+        ]),
         links: new Set(
           pulled.links.map((row) => linkEntityId(row.source_id, row.destination_id, row.kind)),
         ),
         views: new Set(pulled.views.map((row) => row.id)),
       }
-      const [cached, unpushed, cursor] = await Promise.all([
+      const [cached, cachedValues, unpushed, cursor] = await Promise.all([
         store.getRowsOf(replicaKeys),
+        store.getDeltaMatValuesOf([...new Set(pulledValues.map((row) => row.block_id))]),
         store.unpushedEvents(),
         store.getMeta(PULL_CURSOR_KEY),
       ])
@@ -913,6 +933,15 @@ async function checkFold(activation: DatabaseModeRuntime) {
       }
       const differences = foldDifferences(cached, pulled, REPLICA_SIDES, skip)
       found.push(...[...differences.values()].map((line) => `replica ${line}`))
+      // The replica's key rows against the cache's, for the blocks it brought.
+      const broughtBlocks = new Set(pulledValues.map((row) => row.block_id))
+      const valueDifferences = deltaMatValueDifferences(
+        cachedValues.filter((row) => broughtBlocks.has(row.block_id)),
+        pulledValues,
+        REPLICA_SIDES,
+        skip,
+      )
+      found.push(...[...valueDifferences.values()].map((line) => `replica ${line}`))
     }
     if (runtime !== activation) return
 
@@ -1147,7 +1176,7 @@ async function pullEventLog(activation: DatabaseModeRuntime, store: NoteStore) {
       // A device that has seen an edit stamps after it, whatever its clock
       // says. An event from before stamps moves it by the stamp it derives.
       for (const event of events) {
-        const stamp = decodeHlc(eventStamp(event))
+        const stamp = decodeHlc(keyEventStamp(event))
         if (stamp !== null) activation.lastStamp = receiveHlc(activation.lastStamp, stamp)
       }
       await saveStamp(activation, store)

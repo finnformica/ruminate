@@ -192,6 +192,7 @@ describe("corpus operations over the real D1 schema", () => {
       nodes: [withSeq(nodes[0], 1), withSeq(nodes[1], 2)],
       links: [withSeq(links[0], 3)],
       views: [],
+      delta_mat_values: [],
       cursor: "3",
     })
   })
@@ -214,6 +215,7 @@ describe("corpus operations over the real D1 schema", () => {
       nodes: [withSeq({ ...nodes[1], text: "A2", updated_at: 301 }, 4)],
       links: [],
       views: [],
+      delta_mat_values: [],
       cursor: "4",
     })
   })
@@ -243,6 +245,7 @@ describe("corpus operations over the real D1 schema", () => {
       nodes: [],
       links: [],
       views: [],
+      delta_mat_values: [],
       cursor: null,
     })
   })
@@ -267,6 +270,7 @@ describe("corpus operations over the real D1 schema", () => {
       nodes: [],
       links: [],
       views: [],
+      delta_mat_values: [],
       cursor: null,
     })
   })
@@ -675,6 +679,7 @@ describe("tenant scoping — the adversarial suite", () => {
       nodes: [],
       links: [],
       views: [],
+      delta_mat_values: [],
       cursor: null,
       replica_id: "production",
     })
@@ -692,6 +697,7 @@ describe("tenant scoping — the adversarial suite", () => {
       nodes: [],
       links: [],
       views: [],
+      delta_mat_values: [],
       cursor: null,
       replica_id: "production",
     })
@@ -851,6 +857,113 @@ describe("tenant scoping — the adversarial suite", () => {
         events: { device: string }[]
       }
       expect(events[0].device).toBe("unknown")
+    })
+
+    it("a push of key events lands, answers each row's place in both logs, and is served back per key", async () => {
+      const { env } = await testEnv()
+      const row = (n: number, action: string, key: string, value: unknown) => ({
+        id: `key_${n}`,
+        entity: "block",
+        entity_id: "blk_a",
+        action,
+        key,
+        value,
+        batch: "b1",
+        device: "dev12345.tab001",
+        at: 1_000 + n,
+        hlc: `${String(1_000 + n).padStart(15, "0")}-0000-dev12345.tab001`,
+        v: 2,
+      })
+      const events = [
+        row(1, "create", "", null),
+        row(2, "set", "type", "image"),
+        row(3, "set", "text", "A"),
+        row(4, "set", "notes_id", null),
+        row(5, "set", "props.align", "left"),
+      ]
+      const response = await replica(
+        new Request("https://example.com/api/replica/events", {
+          method: "PUT",
+          headers: clientHeaders("alice-token"),
+          body: JSON.stringify({ events, cursor: "c9" }),
+        }),
+        env,
+        github,
+      )
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({
+        ok: true,
+        appended: 5,
+        stale: 0,
+        seqs: [1, 2, 3, 4, 5].map((seq) => [`key_${seq}`, seq, 1]),
+        cursor: "c9",
+      })
+      const served = (await (await get(env, "alice-token", "/api/replica/events-log")).json()) as {
+        events: Record<string, unknown>[]
+        cursor: number
+      }
+      expect(served.cursor).toBe(5)
+      expect(served.events.map((event) => `${event.action} ${event.key}`)).toEqual([
+        "create ",
+        "set type",
+        "set text",
+        "set notes_id",
+        "set props.align",
+      ])
+      expect(served.events[4]).toMatchObject({
+        value: "left",
+        event: "key_1",
+        event_seq: 1,
+        actor: 111,
+      })
+      // The pull carries the block's keys.
+      const pulled = (await (await get(env, "alice-token", "/api/replica/notes")).json()) as {
+        delta_mat_values: Record<string, unknown>[]
+      }
+      expect(pulled.delta_mat_values).toEqual([
+        expect.objectContaining({ block_id: "blk_a", key: "align", value: '"left"', seq: 1 }),
+      ])
+      // The verify reads all three.
+      expect(await (await get(env, "alice-token", "/api/replica/verify")).json()).toMatchObject({
+        ok: true,
+        rollup: "new",
+        logs: [],
+        deltaMatValues: [],
+      })
+    })
+
+    it("refuses a push of key events that is not what this build sends, whole", async () => {
+      const { env } = await testEnv()
+      const bad = await replica(
+        new Request("https://example.com/api/replica/events", {
+          method: "PUT",
+          headers: clientHeaders("alice-token"),
+          body: JSON.stringify({
+            events: [
+              {
+                id: "key_1",
+                entity: "block",
+                entity_id: "blk_a",
+                action: "set",
+                key: "props.bad key",
+                value: 1,
+                batch: "b1",
+                device: "d",
+                at: 1,
+                v: 2,
+              },
+            ],
+          }),
+        }),
+        env,
+        github,
+      )
+      expect(bad.status).toBe(400)
+      expect(await bad.json()).toEqual({ error: "invalid_payload" })
+      const log = (await (await get(env, "alice-token", "/api/replica/events-log")).json()) as {
+        events: unknown[]
+      }
+      expect(log.events).toEqual([])
     })
 
     it("one tenant's log and past are not another's to read", async () => {

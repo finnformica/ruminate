@@ -19,6 +19,7 @@
 //   GET /api/replica/notes  — row pull (full, or ?since=<cursor> incremental)
 //   GET /api/replica/status — row counts + schema_version + replica_cursor
 //   GET /api/replica/events — the event log, or one entity's history
+//   GET /api/replica/events-log — the per-key log (docs/event-sourcing.md)
 //   GET /api/replica/at     — the corpus as it stood at a seq or a time
 //   GET /api/replica/verify — does folding the log still yield the tables?
 //   POST /api/replica/restore — put a block back the way it was, by appending
@@ -63,6 +64,7 @@ import type { Env } from "../types"
 import {
   corpusAt,
   readEvents,
+  readKeyEvents,
   reconcileLog,
   restoreSubtree,
   sayable,
@@ -70,11 +72,13 @@ import {
   writerOf,
 } from "./event-log"
 import { parseEventsPayload } from "../../src/data/events"
+import { isKeyEventsBody, parseKeyEventsPayload } from "../../src/data/key-events"
 import {
   corpusPullFull,
   corpusPullSince,
   corpusPut,
   corpusPutEvents,
+  corpusPutKeyEvents,
   corpusStatus,
 } from "./replica-corpus"
 import {
@@ -213,6 +217,7 @@ export async function replica(
     (pathname === "/api/replica/notes" && (method === "PUT" || method === "GET")) ||
     (pathname === "/api/replica/status" && method === "GET") ||
     (pathname === "/api/replica/events" && (method === "GET" || method === "PUT")) ||
+    (pathname === "/api/replica/events-log" && method === "GET") ||
     (pathname === "/api/replica/at" && method === "GET") ||
     (pathname === "/api/replica/verify" && method === "GET") ||
     (pathname === "/api/replica/restore" && method === "POST")
@@ -229,6 +234,7 @@ export async function replica(
     return replicaPutEvents(request, tenant)
   }
   if (pathname === "/api/replica/events") return replicaEvents(request, tenant)
+  if (pathname === "/api/replica/events-log") return replicaKeyEvents(request, tenant)
   if (pathname === "/api/replica/at") return replicaAt(request, tenant)
   if (pathname === "/api/replica/verify") return jsonResponse(await verifyLog(tenant))
   if (pathname === "/api/replica/restore") return replicaRestore(request, tenant)
@@ -262,6 +268,28 @@ async function replicaEvents(request: Request, tenant: TenantDb): Promise<Respon
   // something reconciles it; a reader should never be the one to find that.
   await reconcileLog(tenant)
   const events = await readEvents(tenant, {
+    since: count(query.get("since")) ?? 0,
+    limit: Math.min(count(query.get("limit")) ?? 1000, MAX_EVENTS),
+    ...(entity !== null && entityId !== null ? { entity, entityId } : {}),
+  })
+  return jsonResponse({ events, cursor: events.at(-1)?.seq ?? null })
+}
+
+/**
+ * `GET /api/replica/events-log?since=<seq>&limit=<n>` — the per-key log,
+ * oldest first, by its own seq (docs/event-sourcing.md, "Per-key events").
+ * With `entity` + `entity_id`, one entity's rows. What a device of this
+ * build pulls and folds.
+ */
+async function replicaKeyEvents(request: Request, tenant: TenantDb): Promise<Response> {
+  const query = new URL(request.url).searchParams
+  const entity = query.get("entity")
+  const entityId = query.get("entity_id")
+  if ((entity === null) !== (entityId === null) || (entity !== null && !ENTITIES.has(entity))) {
+    return jsonResponse({ error: "invalid_entity" }, 400)
+  }
+  await reconcileLog(tenant)
+  const events = await readKeyEvents(tenant, {
     since: count(query.get("since")) ?? 0,
     limit: Math.min(count(query.get("limit")) ?? 1000, MAX_EVENTS),
     ...(entity !== null && entityId !== null ? { entity, entityId } : {}),
@@ -405,10 +433,22 @@ async function replicaPutEvents(request: Request, tenant: TenantDb): Promise<Res
   } catch {
     return jsonResponse({ error: "invalid_json" }, 400)
   }
-  const payload = parseEventsPayload(body)
-  if (!payload) return jsonResponse({ error: "invalid_payload" }, 400)
   const writer = writerOf(request)
   const fallback = writer.device ?? "unknown"
+  // A push is one shape or the other: per-key events (`v: 2`, this build),
+  // or old-shaped ones from a build before them. Each is validated whole.
+  if (isKeyEventsBody(body)) {
+    const payload = parseKeyEventsPayload(body)
+    if (!payload) return jsonResponse({ error: "invalid_payload" }, 400)
+    const events = payload.events.map((event) =>
+      sayable(event.device) ? event : { ...event, device: fallback },
+    )
+    return jsonResponse(
+      await corpusPutKeyEvents(tenant, { ...payload, events }, Date.now(), writer),
+    )
+  }
+  const payload = parseEventsPayload(body)
+  if (!payload) return jsonResponse({ error: "invalid_payload" }, 400)
   const events = payload.events.map((event) =>
     sayable(event.device) ? event : { ...event, device: fallback },
   )

@@ -51,7 +51,8 @@ import { BLOCK_TYPES } from "../../src/blocks/types"
 import { generateNKeysBetween } from "fractional-indexing"
 import { blockId } from "../../src/blocks/id"
 import { imagePropsOf } from "../../src/blocks/image"
-import { isNoteType, propsJson, sortKeyBetween } from "../../src/data/graph"
+import { isNoteType, parseProps, propsJson, sortKeyBetween } from "../../src/data/graph"
+import { propsEqual, validateProps } from "../../src/data/key-events"
 import { IMAGE_LINK_TTL_SECONDS, signImageLink } from "../handlers/image-links"
 import { imageUrlOf } from "../handlers/image-policy"
 import { deleteBlockOps, deleteNoteOps, deleteSubtreeOps, type Op } from "../../src/data/ops"
@@ -1428,11 +1429,19 @@ export const TOOLS: ToolDef[] = [
       text: textArg("The block's new text, without any markdown marker."),
       type: blockTypeArg("Tick a to-do by setting `done`; untick it with `todo`."),
       props: propsArg("Replaces the block's metadata object outright. Omit to leave it alone."),
+      set_props: propsArg(
+        "Metadata keys to set, merged into what the block holds; other keys stay. " +
+          "The cheap way to change one key.",
+      ),
+      unset_props: z.optional(
+        z.array(z.string()).register(z.globalRegistry, { description: "Metadata keys to remove." }),
+      ),
     }),
     async run(args, context) {
       const { graph } = context
       const id = args.block_id
-      const { text, type, props } = args
+      const { text, type, set_props: setProps, unset_props: unsetProps } = args
+      let { props } = args
 
       const row = nodeOf(graph, id)
       if (!row) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
@@ -1446,18 +1455,41 @@ export const TOOLS: ToolDef[] = [
       // schema — but it is kept here so that a call naming a block this token
       // cannot reach is refused for THAT reason first, rather than being told
       // about its empty field list.
-      if (text === undefined && type === undefined && props === undefined) {
-        return { ok: false, message: "Give at least one of `text`, `type` or `props` to change." }
+      if (
+        text === undefined &&
+        type === undefined &&
+        props === undefined &&
+        setProps === undefined &&
+        unsetProps === undefined
+      ) {
+        return {
+          ok: false,
+          message:
+            "Give at least one of `text`, `type`, `props`, `set_props` or `unset_props` to change.",
+        }
       }
       const refusal = sharedOutsideScope(context, id)
       if (refusal) return refusal
+
+      // Per-key changes (docs/event-sourcing.md, "Per-key events"): the keys
+      // named are set or removed on what the block holds, and only those
+      // keys become events, so an edit to another key elsewhere survives.
+      if (setProps !== undefined || unsetProps !== undefined) {
+        const merged = { ...(parseProps(row.props) ?? {}), ...(setProps ?? {}) }
+        for (const key of unsetProps ?? []) delete merged[key]
+        props = merged
+      }
+      if (props !== undefined) {
+        const valid = validateProps(type ?? row.type, props)
+        if (!valid.ok) return { ok: false, message: `Metadata refused: ${valid.message}.` }
+      }
 
       const ops: Op[] = []
       if (text !== undefined && text !== row.text) ops.push({ op: "setText", id, text })
       if (type !== undefined && type !== row.type) ops.push({ op: "setType", id, type })
       if (props !== undefined) {
         const next = propsJson(props)
-        if (next !== row.props) ops.push({ op: "setProps", id, props: next })
+        if (!propsEqual(next, row.props)) ops.push({ op: "setProps", id, props: next })
       }
       const written = await applyOpsToReplica(context.tenant, graph.snapshot, ops, context.now)
       return {

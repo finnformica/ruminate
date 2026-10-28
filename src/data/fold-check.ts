@@ -1,5 +1,6 @@
 import type { LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
 import { linkEntityId, type Entity } from "./events"
+import { canonicalJson, propsEqual, type DeltaMatValueRow } from "./key-events"
 
 /**
  * The fold check (docs/event-only-sync.md, "The cache"): the client's tables
@@ -32,8 +33,51 @@ function differingFields(fold: object, tables: object): string[] {
   const out: string[] = []
   for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
     if (IGNORED.has(key)) continue
+    // A block's props are compared as a value: the two sides may spell the
+    // same keys in different orders (docs/event-sourcing.md, "Per-key events").
+    if (key === "props") {
+      if (!propsEqual(a.props as string | null, b.props as string | null)) out.push(key)
+      continue
+    }
     // A field a row leaves out reads as null (`notes_id`, `props`).
     if ((a[key] ?? null) !== (b[key] ?? null)) out.push(key)
+  }
+  return out
+}
+
+/**
+ * Where two sets of `delta_mat_values` rows differ, one line per (block, key):
+ * `block blk_1 align: value`. A row's value is compared as JSON, its stamp
+ * as is; `seq` and `updated_at` are not compared (`IGNORED`, and the
+ * writer's clock). `skip` leaves out a block the check cannot judge yet.
+ */
+export function deltaMatValueDifferences(
+  first: readonly DeltaMatValueRow[],
+  second: readonly DeltaMatValueRow[],
+  sides: FoldCheckSides,
+  skip: (entity: Entity, id: string) => boolean = () => false,
+): Map<string, string> {
+  const out = new Map<string, string>()
+  const keyOf = (row: DeltaMatValueRow) => `${row.block_id} ${row.key}`
+  const byKey = (rows: readonly DeltaMatValueRow[]) => new Map(rows.map((row) => [keyOf(row), row]))
+  const a = byKey(first)
+  const b = byKey(second)
+  const valueOf = (row: DeltaMatValueRow) =>
+    row.value === null ? "" : canonicalJson(JSON.parse(row.value) as unknown)
+  for (const key of new Set([...a.keys(), ...b.keys()])) {
+    const row = a.get(key) ?? (b.get(key) as DeltaMatValueRow)
+    if (skip("block", row.block_id)) continue
+    const label = `block ${key}`
+    const x = a.get(key)
+    const y = b.get(key)
+    if (!y) out.set(label, `${label}: only in ${sides[0]}`)
+    else if (!x) out.set(label, `${label}: only in ${sides[1]}`)
+    else {
+      const fields: string[] = []
+      if (valueOf(x) !== valueOf(y)) fields.push("value")
+      if (x.hlc !== y.hlc) fields.push("hlc")
+      if (fields.length > 0) out.set(label, `${label}: ${fields.join(", ")}`)
+    }
   }
   return out
 }

@@ -11,7 +11,9 @@ from there — and the replica takes them in as made. Code: `src/data/events.ts`
 `src/data/sql-note-store.ts` (the device's log and its projection),
 `src/data/replica-sync.ts` (the push), `src/data/hlc.ts` (the stamp),
 `src/data/fold-cache.ts` (the client's tables as a cache of the fold),
-`migrations/0023_events.sql`, `migrations/0024_event_hlc.sql`.
+`migrations/0023_events.sql`, `migrations/0024_event_hlc.sql`. Since
+2026-10-27 the log is per key ("Per-key events", below; `src/data/key-events.ts`,
+`migrations/0028_events_log.sql`).
 
 **Decided 2026-10-20: event-only sync** ([event-only-sync.md](./event-only-sync.md)).
 The log is the truth; the browser keeps `nodes`, `link` and `views` as an
@@ -496,6 +498,181 @@ is drawn in the viewer's zone: today is today where the reader is.
 
 A day before the log began is not an empty day but one history cannot answer,
 and the page says so (`earliest`).
+
+## Per-key events
+
+**Decided 2026-10-27, requested by Finn.** A second log, `events_log`
+(migrations/0028), holds every change as one row per KEY of one entity, and
+the tables are projected from it. The old `events` table stays and is still
+written beside it on every push; `EVENT_LOG_ROLLUP` picks which log the
+rollup reads (`new`, the default, or `old`), so the revert is a flip of the
+variable in the dashboard, with no deploy and nothing lost. Code:
+`src/data/key-events.ts` (the vocabulary, the validation, the folds,
+ops → key events, the expansion of an old event and the collapse back),
+`worker/handlers/event-log.ts` (the fill, the per-key stale check and
+projection, `delta_mat_values`, verify), `src/data/fold-cache.ts` and
+`src/data/sql-note-store.ts` (the device's per-key log and cache),
+`migrations/0028_events_log.sql`.
+
+### Why
+
+A block's `props` was one register: a whole-`props` patch, last writer wins.
+Two devices offline that changed two different keys of one block — a
+picture resized on the phone, its alignment changed on the laptop — kept one
+change and lost the other, by stamp. branch-demo's model (one `Value` diff
+per key, merged key by key) keeps both, and a history can say which key
+changed. The model here is that one: option A of the three considered, one
+step further, with each key its own row.
+
+### The shape
+
+One row of `events_log` is one change to one register of one entity. The
+registers are a block's `type`, `text`, `notes_id` and one `props.<name>`
+per entry of its props; a link's `source_id`, `destination_id`, `kind`,
+`sort_key`; a view's `root_id`, `filter`, `sort`, `pinned`, `sort_key`,
+`stack`. Five actions:
+
+| action    | key              | value                                        |
+| --------- | ---------------- | -------------------------------------------- |
+| `create`  | `""`             | `deleted_at` when it arrives dead, else null |
+| `set`     | a register       | the value, as JSON                           |
+| `unset`   | a `props.<name>` | null — the key is gone                       |
+| `delete`  | `""`             | `deleted_at` when it is not the row's `at`   |
+| `restore` | `""`             | null; `ref_seq` names the moment             |
+
+A null value is no value: the app writes a null to remove a key
+(`notePropsOps`), and a key event reads it as an `unset`. Everything the old
+table stores beside a change (`seq`, `at`, `tz`, `actor`, `origin`,
+`device`, `client`, `batch`, `cause`, `base_seq`, `ref_seq`, `hlc`,
+`received_at`, `append`) is stored beside a key row too, with two more:
+`event_id` and `event_seq`, the old-shaped event the row mirrors and its
+`seq` there. `events_log.seq` is the per-key log's own total order; the row
+cursors still count in `event_seq`, the old log's.
+
+The CHECKs hold every row to that: `json_valid(value)`, `action` one of the
+five, `entity` one of the three, and a key that matches `KEY_PATTERN` —
+letters, digits, `_`, `.`, `:` and `-`, starting with a letter or `_`, at
+most 128 long (`props.` and 128 for a props register) — or `""` on a
+liveness row. The same pattern is a CHECK on `delta_mat_values.key`.
+
+### The read model
+
+`delta_mat_values (user_id, block_id, key, value, hlc, seq, updated_at)`,
+primary key `(user_id, block_id, key)`: one row per key of a block's props
+with its current value as JSON, or NULL for a key that was unset — the
+tombstone keeps the key's stamp, so an older set that arrives later loses
+to it. `nodes.props` is derived from it under the new rollup: the live keys
+in sorted order as one JSON object, or NULL for none (`derivedProps`), so
+the ~37 readers of `props` read what they always did; comparing props is by
+value, never by string, because the two logs spell the same keys in
+different orders (`propsEqual`). The Worker seeds a tenant's rows once, from
+the per-key fold with the legacy rule (`seedDeltaMatValues`, under the
+`delta_mat_values_seeded` meta key), on the tenant's first write or verify
+after the deploy, so the rows are exactly the fold's.
+
+### The rollup, per key
+
+- **Fold.** `foldKeys` is the left fold by seq, `foldKeysByStamp` the fold
+  by stamp: each register is a last-writer-wins register on the stamp of
+  the event that set it, a block's props key by key. `assembleLogState` and
+  `assembleStamped` give the state in the old shape, props assembled, so
+  every reader of a `LogState` or a `StampedState` reads it.
+- **Projection** (`planKeyChunk`). Both logs appended, then the keys a run
+  sets upserted into `delta_mat_values` by stamp, then the rows: a block's
+  `props` derived from its key rows, its `props` stamp the highest of their
+  stamps, its other registers by stamp as before. An entity's row takes the
+  seq of the last old-shaped event that touched it. A row's `updated_at`
+  moves when the run's top stamp beats every register the row holds, keys
+  as they stand after the upsert.
+- **Stale** (`staleKeyEvents`). A `set` or `unset` is dropped when the key
+  it names already holds a stamp at least as high — a column's in the row's
+  `stamps`, a props key's in `delta_mat_values` — and a liveness row when
+  `alive` does. A key no row has set has no stamp, so any set of it lands.
+  So the laptop's older alignment lands beside the phone's newer size.
+- **Under the old rollup** the old-shaped events project as they always
+  have, and the stale check is the old one, per field of the event each
+  group of key rows folds to. `delta_mat_values` still takes the keys by stamp,
+  so a later flip finds it current.
+
+### Two shapes, both written
+
+A current browser pushes **key events** (`opsToKeyEvents`, `v: 2`) to
+`PUT /api/replica/events`; the replica folds each push back into the old
+shape against the rows it holds (`collapseKeyEvents`: a create and the sets
+after it in one batch are one `create` with every field; sets and unsets are
+one `update` whose `props` is the held props with those keys changed), and
+appends both. Every other writer — the row door (`rowsToEvents`), a build
+before key events, a restore — hands over old-shaped events, which the
+replica reads per key against the rows it holds (`expandEvent`): the
+liveness row, a `set` per field named, and for a whole-`props` patch a `set`
+per key whose value differs and an `unset` per key gone. An old event that
+reads as no change per key (a reorder of keys) is still recorded in the old
+log, so its push is answered.
+
+The migration backfills `events_log` from `events` with the same reading in
+SQL, each event read against the props the block's previous event that
+named props left; the Worker runs the same statement, scoped to one tenant,
+in every write's batch after the reconcile (`planLogFill`), so a snapshot
+and a straggler the old Worker appended during the rollout are read per key
+before anything projects. A props key that does not match the pattern is
+left out of the backfill rather than fail the migration. A test pins the
+migration's statement, the fill and `expandLog` together.
+
+### Validation
+
+One zod schema per action, one per entity's registers, and one per block
+type's known props keys (`BLOCK_PROP_SCHEMAS`: the figure's `align` and
+`size`, the image's `image`, `src`, `width`, `height`, `thumbhash`, the
+link's `url` and preview keys, the code block's `language`, the note's
+`title`, `font`, `width`, `updated_at`), with every props key held to
+`KEY_PATTERN` and other keys allowed with any JSON value. An invalid event
+is refused at write: the browser makes none, the replica answers a push
+that holds one with 400, whole, and the MCP `update_block` refuses metadata
+that would make one. On read a row that does not parse is logged and
+skipped (`parseStoredKeyEvent`), never thrown over.
+
+### Verify
+
+`GET /api/replica/verify` reads both logs and the whole corpus and reports
+three things: `drift`, the tables against the fold of the log the rollup
+reads (which decides `ok`); `deltaMatValues`, the key rows against the per-key
+fold, value and stamp (also in `ok`); and `logs`, the two logs against each
+other by seq, reported only — by design the per-key log can keep a key the
+old log's whole-props patch would have lost, and such an entity is listed
+there. Under the new rollup a block's `props` stamp is not compared: a row
+from the old rollup holds the stamp of its last whole-props event, where the
+key rows hold their own.
+
+### The browser
+
+The device's log is `events_log` (schema v15, `LOCAL_V15_SQL`), one row per
+key, the push queue as before (`seq` NULL until placed, `event_seq` the old
+log's seq of the event a placed row mirrors, which the rows' `seq` takes).
+Each cache row holds a stamp per register in `stamps`, a block's props keys
+among them, and `delta_mat_values` mirrors the replica's read model beside it.
+The pull reads the per-key log (`GET /api/replica/events-log`), and the row
+pull carries `delta_mat_values` for the fold check to compare. The old `events`
+table stays, unread. The cache re-pulls once (generation 10). The calendar
+folds the per-key log, counts the rows of one old-shaped event as one edit,
+and marks a row whose props keys changed with the keys that did.
+
+### MCP
+
+`update_block` takes `set_props` (keys to set, merged into what the block
+holds) and `unset_props` (keys to remove) beside `props` (the whole object,
+as before), so an agent changes one key without touching the others.
+
+### The trial, and the revert
+
+Watch `GET /api/replica/verify`: `ok` should stay true; `logs` lists the
+entities where the two logs disagree, which should be only blocks two
+devices changed on different keys at once (the per-key log kept both). To
+revert, set `EVENT_LOG_ROLLUP=old` in the dashboard: the tables project
+from `events` again from the next write on. Rows the new rollup merged per
+key keep what they hold until rewritten, and verify under the old rule may
+list them as drift until then. The browser is unchanged by the flip; a
+revert of the build itself resets a device's local store (an unknown
+schema version) and it re-pulls.
 
 ## Append-only, structurally
 

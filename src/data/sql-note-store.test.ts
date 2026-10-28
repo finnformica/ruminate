@@ -5,18 +5,21 @@ import migration0001 from "../../migrations/0001_init.sql?raw"
 import migration0002 from "../../migrations/0002_nodes.sql?raw"
 import { parse } from "../blocks/parse"
 import type { BlockProps } from "../blocks/types"
-import { linkEntityId, opsToEvents, viewChangeToEvent, type RuminateEvent } from "./events"
+import { linkEntityId } from "./events"
 import { rollup } from "./graph"
+import { opsToKeyEvents, viewChangeToKeyEvents, type KeyEvent } from "./key-events"
 import type { NoteStore } from "./note-store"
 import { deleteBlockOps, deleteNoteOps, docToOps, type Op } from "./ops"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import { CACHE_STAMPS_KEY, openSqlNoteStore } from "./sql-note-store"
-import { applyOpsToStore, testEventContext } from "./store-test-support"
+import { applyOpsToStore, keyed, testEventContext } from "./store-test-support"
 import type { ViewRow } from "./views"
 
 /** Undo the v13 step on a current store, to build an older one by hand. */
+/** What step v15 adds, taken away: a store as it was at v14. */
+const UNDO_V15 = "DROP TABLE events_log; DROP TABLE delta_mat_values;"
 /** What step v14 adds, taken away: a store as it was at v13. */
-const UNDO_V14 = "ALTER TABLE views DROP COLUMN stack;"
+const UNDO_V14 = UNDO_V15 + "ALTER TABLE views DROP COLUMN stack;"
 const UNDO_V13 =
   "DROP INDEX events_entity; ALTER TABLE nodes DROP COLUMN stamps; " +
   "ALTER TABLE link DROP COLUMN stamps; ALTER TABLE views DROP COLUMN stamps; " +
@@ -44,7 +47,7 @@ async function seed(
 const applyOps = (store: NoteStore, ops: readonly Op[]) => applyOpsToStore(store, ops)
 
 /** Events as `entity.action entity_id`, in order. */
-const named = (events: readonly RuminateEvent[]) =>
+const named = (events: readonly KeyEvent[]) =>
   events.map((event) => `${event.entity}.${event.action} ${event.entity_id}`)
 
 /** A note's markdown projection off the live graph, or null when absent. */
@@ -88,8 +91,8 @@ describe("openSqlNoteStore", () => {
       "a",
       "- one\n  id:: blk_aaaaaaaaaa\n- two edited\n  id:: blk_bbbbbbbbbb\n",
     )
-    expect(named(events)).toEqual(["block.update blk_bbbbbbbbbb"])
-    expect(events[0].patch).toEqual({ text: "two edited" })
+    expect(named(events)).toEqual(["block.set blk_bbbbbbbbbb"])
+    expect(events[0]).toMatchObject({ key: "text", value: "two edited" })
 
     // Link rows and the untouched node are byte-identical, updated_at included.
     expect(
@@ -186,8 +189,8 @@ describe("openSqlNoteStore", () => {
     // ONE event, the note's: a rename can no longer bump `updated_at` on
     // blocks the user never touched, so it cannot clobber a concurrent edit
     // to one of them under per-row LWW.
-    expect(named(events)).toEqual([`block.update ${id}`])
-    expect(events[0].patch).toEqual({ text: "New Name" })
+    expect(named(events)).toEqual([`block.set ${id}`])
+    expect(events[0]).toMatchObject({ key: "text", value: "New Name" })
 
     // The id is untouched, so every deep link and block row still resolves.
     const after = await driver.exec("SELECT id, text, updated_at FROM nodes ORDER BY id")
@@ -212,14 +215,16 @@ describe("openSqlNoteStore", () => {
     const store = await openSqlNoteStore(driver)
     expect((await store.getGraph()).nodes.size).toBe(0)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "14" },
+      { value: "15" },
     ])
     expect(
       await driver.exec("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"),
       // The v1 tables are gone and v5's `views` and v9's `events` are there —
       // the ladder ran to the top, not just to 0002.
     ).toEqual([
+      { name: "delta_mat_values" },
       { name: "events" },
+      { name: "events_log" },
       { name: "link" },
       { name: "meta" },
       { name: "nodes" },
@@ -243,7 +248,7 @@ describe("openSqlNoteStore", () => {
     // columns, it never rewrites rows.
     expect(await noteOf(store, "a")).toBe("\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "14" },
+      { value: "15" },
     ])
     // The row is live: a nullable column means NULL = never deleted.
     expect(await driver.exec("SELECT deleted_at FROM nodes WHERE id = ?", ["a"])).toEqual([
@@ -269,7 +274,7 @@ describe("openSqlNoteStore", () => {
     const store = await openSqlNoteStore(driver)
     expect(await noteOf(store, "a")).toBe("\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "14" },
+      { value: "15" },
     ])
     // No note id until a pull brings the replica's backfill down.
     expect(await driver.exec("SELECT notes_id FROM nodes WHERE id = ?", ["a"])).toEqual([
@@ -328,34 +333,37 @@ describe("openSqlNoteStore", () => {
 
     const store = await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "14" },
+      { value: "15" },
     ])
-    // The unpushed event is still queued, and a pulled event can now be placed.
+    // The old queue is kept as it was (the old log is not read any more), and
+    // a pulled event is placed in the per-key log.
     expect(await driver.exec("SELECT id, seq, origin FROM events")).toEqual([
       { id: "evt_1", seq: null, origin: null },
     ])
-    await store.applyPulledEvents([
-      {
-        id: "evt_2",
-        seq: 7,
-        entity: "block",
-        entity_id: "blk_bbbbbbbbbb",
-        action: "create",
-        patch: { type: "paragraph", text: "pulled", props: null, notes_id: "a" },
-        v: 1,
-        batch: "b2",
-        device: "d2",
-        base_seq: null,
-        at: 200,
-        tz: null,
-        origin: "replica",
-        actor: 1,
-        received_at: 201,
-      },
-    ])
-    expect(await driver.exec("SELECT id, origin FROM events WHERE seq = 7")).toEqual([
-      { id: "evt_2", origin: "replica" },
-    ])
+    await store.applyPulledEvents(
+      keyed([
+        {
+          id: "evt_2",
+          seq: 7,
+          entity: "block",
+          entity_id: "blk_bbbbbbbbbb",
+          action: "create",
+          patch: { type: "paragraph", text: "pulled", props: null, notes_id: "a" },
+          v: 1,
+          batch: "b2",
+          device: "d2",
+          base_seq: null,
+          at: 200,
+          tz: null,
+          origin: "replica",
+          actor: 1,
+          received_at: 201,
+        },
+      ]),
+    )
+    expect(
+      await driver.exec("SELECT event_id, origin FROM events_log WHERE event_seq = 7 LIMIT 1"),
+    ).toEqual([{ event_id: "evt_2", origin: "replica" }])
   })
 
   it("adds the stamp column to a v10 events table, keeping its queue unstamped", async () => {
@@ -372,13 +380,12 @@ describe("openSqlNoteStore", () => {
     )
     const store = await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "14" },
+      { value: "15" },
     ])
-    // An event made before stamps is never given one in place.
+    // An event made before stamps is never given one in place. The old queue
+    // is kept as it was, and not read: the per-key log is the queue now.
     expect(await driver.exec("SELECT id, hlc FROM events")).toEqual([{ id: "evt_1", hlc: null }])
-    const [queued] = await store.unpushedEvents()
-    expect(queued.id).toBe("evt_1")
-    expect("hlc" in queued).toBe(false)
+    expect(await store.unpushedEvents()).toEqual([])
   })
 
   it("climbs a v11 store to the cache, keeping its log", async () => {
@@ -394,11 +401,11 @@ describe("openSqlNoteStore", () => {
         '\'{"type":"paragraph","text":"queued","props":null,"notes_id":null}\', ' +
         "1, 'b1', 'd1', 100, 1);",
     )
-    const store = await openSqlNoteStore(driver)
+    await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "14" },
+      { value: "15" },
     ])
-    expect((await store.unpushedEvents()).map((event) => event.id)).toEqual(["evt_1"])
+    expect((await driver.exec("SELECT id FROM events")).map((row) => row.id)).toEqual(["evt_1"])
     // v12 made snapshots and v13 took them away: the cache replaces them.
     expect(
       await driver.exec(
@@ -439,14 +446,14 @@ describe("openSqlNoteStore", () => {
       sort_key: null,
       updated_at: 10,
     }
-    const event = viewChangeToEvent(undefined, view, testEventContext({ at: 10, device: "d" }))
-    await store.applyEvents([event!])
+    const events = viewChangeToKeyEvents(undefined, view, testEventContext({ at: 10, device: "d" }))
+    await store.applyEvents(events)
     await driver.execScript(
       UNDO_V14 + "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '13');",
     )
     const reopened = await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "14" },
+      { value: "15" },
     ])
     // A row from before the column is a one-frame View: it holds no stack.
     expect(await reopened.getViews()).toEqual([view])
@@ -461,7 +468,7 @@ describe("openSqlNoteStore", () => {
     const reopened = await openSqlNoteStore(driver)
     expect((await reopened.getGraph()).nodes.size).toBe(0)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "14" },
+      { value: "15" },
     ])
   })
 
@@ -516,7 +523,7 @@ describe("openSqlNoteStore", () => {
     const reopened = await openSqlNoteStore(driver)
     expect(await noteOf(reopened, "a")).toBe("- kept\n  id:: blk_aaaaaaaaaa\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "14" },
+      { value: "15" },
     ])
     expect(await driver.exec("SELECT seq FROM nodes WHERE id = 'a'")).toEqual([{ seq: null }])
     expect(await reopened.unpushedEvents()).toEqual([])
@@ -698,19 +705,24 @@ describe("the device's log", () => {
     expect(queued.map((event) => event.id)).toEqual(made.map((event) => event.id))
     expect(queued[0]).toMatchObject({ device: "test.tab", tz: 0, base_seq: null })
 
-    await store.markEventsPushed(queued.map((event, i) => [event.id, 100 + i] as const))
+    // Each key row placed in the per-key log, and the old log's seq of the
+    // event it mirrors — one per entity here — on the row it changed.
+    await store.markEventsPushed(
+      queued.map(
+        (event, i) =>
+          [event.id, 100 + i, 10 + ["blk_aaaaaaaaaa", "a"].indexOf(event.entity_id)] as const,
+      ),
+    )
     expect(await store.unpushedEvents()).toEqual([])
-    expect(await driver.exec("SELECT id, seq FROM events ORDER BY position")).toEqual(
+    expect(await driver.exec("SELECT id, seq FROM events_log ORDER BY position")).toEqual(
       queued.map((event, i) => ({ id: event.id, seq: 100 + i })),
     )
-    // A row's seq is its last event's — the note's is its create, the
-    // block's its create, the link's its own.
-    const block = queued.findIndex((e) => e.entity === "block" && e.entity_id === "blk_aaaaaaaaaa")
+    // A row's seq is its last event's in the old log.
     expect(await driver.exec("SELECT seq FROM nodes WHERE id = 'blk_aaaaaaaaaa'")).toEqual([
-      { seq: 100 + block },
+      { seq: 10 },
     ])
-    const link = queued.findIndex((e) => e.entity === "link")
-    expect(await driver.exec("SELECT seq FROM link")).toEqual([{ seq: 100 + link }])
+    expect(await driver.exec("SELECT seq FROM nodes WHERE id = 'a'")).toEqual([{ seq: 11 }])
+    expect(await driver.exec("SELECT seq FROM link")).toEqual([{ seq: 9 }])
   })
 
   it("keeps each event's stamp, its own and the ones it pulls, and none where none was sent", async () => {
@@ -738,22 +750,24 @@ describe("the device's log", () => {
       at: 200,
       ...(hlc ? { hlc } : {}),
     })
-    await store.applyPulledEvents([pulled(1, "000000000000200-0000-other.tab"), pulled(2)])
+    await store.applyPulledEvents(keyed([pulled(1, "000000000000200-0000-other.tab"), pulled(2)]))
     expect(
-      await driver.exec("SELECT id, hlc FROM events WHERE seq IS NOT NULL ORDER BY seq"),
+      await driver.exec(
+        "SELECT event_id, hlc FROM events_log WHERE seq IS NOT NULL AND key = '' ORDER BY seq",
+      ),
     ).toEqual([
-      { id: "evt_remote_1", hlc: "000000000000200-0000-other.tab" },
-      { id: "evt_remote_2", hlc: null },
+      { event_id: "evt_remote_1", hlc: "000000000000200-0000-other.tab" },
+      { event_id: "evt_remote_2", hlc: null },
     ])
     const log = await store.eventLog()
     expect(log[0].hlc).toBe("000000000000200-0000-other.tab")
-    expect("hlc" in log[1]).toBe(false)
+    expect("hlc" in log.find((event) => event.event === "evt_remote_2")!).toBe(false)
   })
 
   it("coalesces a typing run across writes into one unpushed event, carrying the run's first base", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "a", "- x\n  id:: blk_aaaaaaaaaa\n")
-    await store.markEventsPushed((await store.unpushedEvents()).map((e, i) => [e.id, i + 1]))
+    await store.markEventsPushed((await store.unpushedEvents()).map((e, i) => [e.id, i + 1, 1]))
     const first = await applyOpsToStore(
       store,
       [{ op: "setText", id: "blk_aaaaaaaaaa", text: "xy" }],
@@ -774,15 +788,19 @@ describe("the device's log", () => {
     expect(queued).toHaveLength(1)
     expect(queued[0]).toMatchObject({
       id: last[0].id,
-      action: "update",
-      patch: { text: "xyzw" },
+      action: "set",
+      key: "text",
+      value: "xyzw",
       base_seq: first[0].base_seq,
     })
     expect(await driver.exec("SELECT text FROM nodes WHERE id = 'blk_aaaaaaaaaa'")).toEqual([
       { text: "xyzw" },
     ])
     // The log holds exactly the pushed events plus the one survivor.
-    expect(await driver.exec("SELECT COUNT(*) AS n FROM events")).toEqual([{ n: 3 + 1 }])
+    const pushed = await driver.exec("SELECT COUNT(*) AS n FROM events_log WHERE seq IS NOT NULL")
+    expect(await driver.exec("SELECT COUNT(*) AS n FROM events_log")).toEqual([
+      { n: Number(pushed[0].n) + 1 },
+    ])
   })
 
   it("never coalesces into an event a push has in flight", async () => {
@@ -794,7 +812,7 @@ describe("the device's log", () => {
       ctx(10_000),
     )
     const graph = await store.getGraph()
-    const next = opsToEvents(
+    const next = opsToKeyEvents(
       graph,
       [{ op: "setText", id: "blk_aaaaaaaaaa", text: "xyz" }],
       ctx(11_000),
@@ -807,7 +825,9 @@ describe("the device's log", () => {
 
   it("a run ends at a structural change, so a history never loses a step", async () => {
     const { store } = await makeStoreWithDriver()
-    await seed(store, "a", "- x\n  id:: blk_aaaaaaaaaa\n")
+    const seeded = new Set(
+      (await seed(store, "a", "- x\n  id:: blk_aaaaaaaaaa\n")).map((e) => e.id),
+    )
     await applyOpsToStore(store, [{ op: "setText", id: "blk_aaaaaaaaaa", text: "xy" }], ctx(10_000))
     await applyOpsToStore(store, [{ op: "setType", id: "blk_aaaaaaaaaa", type: "h1" }], ctx(10_100))
     await applyOpsToStore(
@@ -815,13 +835,11 @@ describe("the device's log", () => {
       [{ op: "setText", id: "blk_aaaaaaaaaa", text: "xyz" }],
       ctx(10_200),
     )
-    const typed = (await store.unpushedEvents()).filter(
-      (event) => event.entity === "block" && event.action === "update",
-    )
-    expect(typed.map((event) => event.patch)).toEqual([
-      { text: "xy" },
-      { type: "h1" },
-      { text: "xyz" },
+    const typed = (await store.unpushedEvents()).filter((event) => !seeded.has(event.id))
+    expect(typed.map((event) => [event.key, event.value])).toEqual([
+      ["text", "xy"],
+      ["type", "h1"],
+      ["text", "xyz"],
     ])
   })
 
@@ -830,7 +848,7 @@ describe("the device's log", () => {
     const own = await seed(store, "a", "- one\n  id:: blk_aaaaaaaaaa\n")
     // The replica took the push but the answer was lost: the pull brings
     // this device's own events back, placed, among another device's.
-    const pulled = [
+    const other = keyed([
       {
         id: "evt_other_1",
         seq: 1,
@@ -847,7 +865,16 @@ describe("the device's log", () => {
         actor: 222,
         received_at: 600,
       },
-      ...own.map((event, i) => ({ ...event, seq: 2 + i, origin: "replica", actor: 111 })),
+    ])
+    const pulled = [
+      ...other,
+      ...own.map((event, i) => ({
+        ...event,
+        seq: 200 + i,
+        event_seq: 2,
+        origin: "replica",
+        actor: 111,
+      })),
     ] as Parameters<typeof store.applyPulledEvents>[0]
     await store.applyPulledEvents(pulled)
     // Nothing left to push: the pull placed them.
@@ -863,9 +890,9 @@ describe("the device's log", () => {
     )
     const log = await store.eventLog()
     expect(log.map((event) => [event.id, event.seq, event.pending ?? false])).toEqual([
-      ["evt_other_1", 1, false],
-      ...own.map((event, i) => [event.id, 2 + i, false]),
-      [typed[0].id, 2 + own.length, true],
+      ...other.map((event) => [event.id, event.seq, false]),
+      ...own.map((event, i) => [event.id, 200 + i, false]),
+      [typed[0].id, 200 + own.length, true],
     ])
     expect(log[0]).toMatchObject({ origin: "replica", actor: 222, received_at: 600, tz: -300 })
   })
@@ -882,9 +909,9 @@ describe("the device's log", () => {
       updated_at: 10,
     }
     const apply = async (before: ViewRow | undefined, after: ViewRow | undefined, at: number) => {
-      const event = viewChangeToEvent(before, after, ctx(at))
-      if (event) await store.applyEvents([event])
-      return event
+      const events = viewChangeToKeyEvents(before, after, ctx(at))
+      if (events.length > 0) await store.applyEvents(events)
+      return events
     }
     await apply(undefined, view, 10)
     expect(await store.getViews()).toEqual([{ ...view, updated_at: 10 }])
@@ -897,11 +924,17 @@ describe("the device's log", () => {
     ])
     await apply({ ...view, deleted_at: 30 }, { ...view, updated_at: 40 }, 40)
     expect((await store.getViews())[0]).toMatchObject({ id: "v1", updated_at: 40 })
-    expect((await store.unpushedEvents()).map((e) => e.action)).toEqual([
+    // The liveness rows, in order, with the one key the update set between.
+    const rows = await store.unpushedEvents()
+    expect(rows.filter((e) => e.key === "").map((e) => e.action)).toEqual([
       "create",
-      "update",
       "delete",
       "restore",
+    ])
+    expect(rows.filter((e) => e.key === "filter").map((e) => [e.action, e.value])).toEqual([
+      ["set", null],
+      ["set", "type:todo"],
+      ["set", null],
     ])
   })
 
@@ -917,21 +950,21 @@ describe("the device's log", () => {
       updated_at: 10,
     }
     const stacked = { ...view, stack: "corpus_root:base", updated_at: 20 }
-    await store.applyEvents([viewChangeToEvent(undefined, view, ctx(10))!])
-    await store.applyEvents([viewChangeToEvent(view, stacked, ctx(20))!])
+    await store.applyEvents(viewChangeToKeyEvents(undefined, view, ctx(10)))
+    await store.applyEvents(viewChangeToKeyEvents(view, stacked, ctx(20)))
     expect(await store.getViews()).toEqual([stacked])
     // An older client's update names only the field it changed.
-    const older = viewChangeToEvent(
+    const older = viewChangeToKeyEvents(
       view,
       { ...view, filter: "type:todo", updated_at: 30 },
       ctx(30),
-    )!
-    expect(older.patch).toEqual({ filter: "type:todo" })
-    await store.applyEvents([older])
+    )
+    expect(older.map((e) => [e.action, e.key, e.value])).toEqual([["set", "filter", "type:todo"]])
+    await store.applyEvents(older)
     expect(await store.getViews()).toEqual([{ ...stacked, filter: "type:todo", updated_at: 30 }])
-    const cleared = viewChangeToEvent(stacked, { ...view, updated_at: 40 }, ctx(40))!
-    expect(cleared.patch).toEqual({ stack: null })
-    await store.applyEvents([cleared])
+    const cleared = viewChangeToKeyEvents(stacked, { ...view, updated_at: 40 }, ctx(40))
+    expect(cleared.map((e) => [e.action, e.key, e.value])).toEqual([["set", "stack", null]])
+    await store.applyEvents(cleared)
     expect(await driver.exec("SELECT stack FROM views")).toEqual([{ stack: null }])
     expect((await store.getViews())[0]).not.toHaveProperty("stack")
   })

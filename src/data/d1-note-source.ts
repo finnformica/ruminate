@@ -12,7 +12,7 @@ import {
 } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github-session"
-import type { LoggedEvent } from "./events"
+import type { LoggedKeyEvent } from "./key-events"
 import { CHILD_KIND } from "./graph"
 import { trackReplicaAccess } from "./replica-access"
 
@@ -54,15 +54,16 @@ export interface D1NoteSource {
    */
   pullSince(cursor: string): Promise<ReplicaChangesBody>
   /**
-   * The tenant's event log past `since` (a `seq`), oldest first, at most
-   * `limit` of them (docs/event-sourcing.md): what the device's own log is
-   * brought up to date from, for the history it shows. `cursor` is the last
-   * event's `seq`, or null when nothing was newer.
+   * The tenant's per-key event log past `since` (its own `seq`), oldest
+   * first, at most `limit` of them (docs/event-sourcing.md, "Per-key
+   * events"): what the device's own log is brought up to date from, and
+   * its cache folded from. `cursor` is the last event's `seq`, or null when
+   * nothing was newer.
    */
   pullEvents(
     since: number,
     limit: number,
-  ): Promise<{ events: LoggedEvent[]; cursor: number | null }>
+  ): Promise<{ events: LoggedKeyEvent[]; cursor: number | null }>
 }
 
 export function createD1NoteSource(options: D1NoteSourceOptions = {}): D1NoteSource {
@@ -110,8 +111,8 @@ export function createD1NoteSource(options: D1NoteSourceOptions = {}): D1NoteSou
     },
 
     pullEvents: async (since, limit) => {
-      const response = await authorizedGet(`/api/replica/events?since=${since}&limit=${limit}`)
-      return (await response.json()) as { events: LoggedEvent[]; cursor: number | null }
+      const response = await authorizedGet(`/api/replica/events-log?since=${since}&limit=${limit}`)
+      return (await response.json()) as { events: LoggedKeyEvent[]; cursor: number | null }
     },
   }
 }

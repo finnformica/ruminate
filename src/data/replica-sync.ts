@@ -8,7 +8,7 @@ import {
   type ReplicaStatusBody,
   type ViewRow,
 } from "../../worker/handlers/replica-payload"
-import { MAX_EVENTS_PER_PUT, type EventsPutResult, type RuminateEvent } from "./events"
+import { MAX_KEY_EVENTS_PER_PUT, type KeyEvent, type KeyEventsPutResult } from "./key-events"
 import { writerHeaders } from "./writer-identity"
 import type { NoteId } from "../schema"
 import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github-session"
@@ -105,9 +105,12 @@ export interface ReplicaSyncOptions {
    * tombstone travels, and a full push is how a repaired replica catches up. */
   getAllRows: () => Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }>
   /** The store's unpushed events, oldest first — the queue. */
-  getUnpushedEvents: () => Promise<RuminateEvent[]>
-  /** Stamp pushed events with the `seq` the replica gave each. */
-  markEventsPushed: (seqs: readonly (readonly [id: string, seq: number])[]) => Promise<void>
+  getUnpushedEvents: () => Promise<KeyEvent[]>
+  /** Stamp pushed events with the `seq` the replica gave each, and the old
+   * log's seq of the event each mirrors. */
+  markEventsPushed: (
+    seqs: readonly (readonly [id: string, seq: number, eventSeq?: number | null])[],
+  ) => Promise<void>
   /** Injectable for tests; default global fetch (same-origin URLs). */
   fetchImpl?: typeof fetch
   /** Injectable for tests; default the real github-session helpers. */
@@ -161,7 +164,9 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   const auth: ReplicaAuth = options.auth ?? { ensureFreshToken, getAccessToken, withAuthRetry }
   const debounceMs = options.debounceMs ?? DEBOUNCE_MS
   const chunkRows = options.chunkRows ?? CHUNK_ROWS
-  const chunkEvents = Math.min(chunkRows, MAX_EVENTS_PER_PUT)
+  // A row is a few key events, so a run of `chunkRows` key events is fewer
+  // rows than it was; the replica cuts a run by bytes as well (`planKeyAppend`).
+  const chunkEvents = Math.min(chunkRows, MAX_KEY_EVENTS_PER_PUT)
   const backoffStartMs = options.backoffStartMs ?? BACKOFF_START_MS
   const backoffMaxMs = options.backoffMaxMs ?? BACKOFF_MAX_MS
 
@@ -295,13 +300,13 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
 
   /** Push one run of events; returns what the replica said of them. */
   async function putEvents(
-    events: RuminateEvent[],
+    events: KeyEvent[],
     cursor: string | undefined,
     keepalive: boolean,
-  ): Promise<EventsPutResult> {
+  ): Promise<KeyEventsPutResult> {
     const body = JSON.stringify(cursor === undefined ? { events } : { events, cursor })
     const response = await put("/api/replica/events", body, keepalive)
-    const result = (await response.json().catch(() => null)) as EventsPutResult | null
+    const result = (await response.json().catch(() => null)) as KeyEventsPutResult | null
     if (!result || !Array.isArray(result.seqs)) {
       throw new Error("Replica answered a push of events without saying what it held")
     }
@@ -399,12 +404,12 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   /** The queue, through the events door, in runs of `chunkEvents`. Returns
    * false when there was nothing to push. */
   async function pushEvents(
-    events: RuminateEvent[],
+    events: KeyEvent[],
     keepalive: boolean,
   ): Promise<{ cursor: string; committed: boolean } | null> {
     if (events.length === 0) return null
     const cursor = nextCursor()
-    const seqs: [string, number][] = []
+    const seqs: [string, number, number | null][] = []
     let committed: string | null = null
     for (let index = 0; index < events.length; index += chunkEvents) {
       const run = events.slice(index, index + chunkEvents)

@@ -15,14 +15,21 @@ import {
 import { encodeHlc } from "../../src/data/hlc"
 import type { SqlDriver } from "../../src/data/sql-driver"
 import { ensureTenantMeta, forTenant, type TenantDb } from "../tenancy-db"
+import migration0028 from "../../migrations/0028_events_log.sql?raw"
+import { collapseKeyEvents, expandLog, type KeyEvent } from "../../src/data/key-events"
 import {
   appendClientEvents,
+  appendClientKeyEvents,
   appendEvents,
   corpusAt,
   planEventAppend,
+  planKeyAppend,
+  planLogFill,
   planReconcile,
   readEvents,
+  readKeyEvents,
   restoreSubtree,
+  setEventLogRollup,
   verifyLog,
   writeRows,
 } from "./event-log"
@@ -1031,5 +1038,447 @@ describe("a view's stack (migrations/0027)", () => {
     }
     expect(results[0]).toEqual([{ filter: "type:todo", sort: "text:asc", stack: "by.a" }])
     expect(results[1]).toEqual(results[0])
+  })
+})
+
+// -----------------------------------------------------------------------------
+// The per-key log (docs/event-sourcing.md, "Per-key events"; migrations/0028)
+// -----------------------------------------------------------------------------
+
+describe("the per-key log", () => {
+  /** A client's key events, as `opsToKeyEvents` would make them, stamped. */
+  function keyWriter(device: string) {
+    let n = 0
+    let ms = 1_000
+    const row = (
+      entity: KeyEvent["entity"],
+      entityId: string,
+      action: KeyEvent["action"],
+      key: string,
+      value: unknown,
+      at = ms,
+    ): KeyEvent => ({
+      id: `key_${device}_${(n += 1)}`,
+      entity,
+      entity_id: entityId,
+      action,
+      key,
+      value,
+      batch: `b_${device}`,
+      device,
+      at,
+      hlc: encodeHlc({ ms: (ms += 1), counter: 0, device }),
+      v: 2,
+    })
+    return {
+      row,
+      block: (id: string, props: Record<string, unknown>) => [
+        row("block", id, "create", "", null),
+        row("block", id, "set", "type", "image"),
+        row("block", id, "set", "text", id),
+        row("block", id, "set", "notes_id", "note"),
+        ...Object.entries(props).map(([key, value]) =>
+          row("block", id, "set", `props.${key}`, value),
+        ),
+      ],
+      at: (when: number) => {
+        ms = when
+      },
+    }
+  }
+  const client = (tenant: TenantDb, events: KeyEvent[], now = 5_000) =>
+    appendClientKeyEvents(tenant, events, { actor: tenant.userId, origin: "replica", now })
+  const propsOf = async (driver: SqlDriver, id: string) =>
+    JSON.parse(
+      String(
+        (await driver.exec("SELECT props FROM nodes WHERE user_id = 111 AND id = ?1", [id]))[0]
+          .props,
+      ),
+    )
+  const keyRows = (driver: SqlDriver) =>
+    driver.exec(
+      "SELECT id, entity_id, action, key, value, event_id, event_seq FROM events_log " +
+        "WHERE user_id = 111 ORDER BY seq",
+    )
+
+  it("every statement of the backfill and the fill fits D1's compound SELECT limit", () => {
+    // workerd caps a compound SELECT at five terms (SQLITE_LIMIT_COMPOUND_SELECT);
+    // node:sqlite does not, so only this count stands between the suite and a
+    // migration D1 refuses with "too many terms in compound SELECT".
+    const terms = (sql: string) => sql.split(/\bUNION\b/i).length
+    for (const statement of planLogFill({ now: 1, appendId: "x" })) {
+      expect(terms(statement.sql)).toBeLessThanOrEqual(5)
+    }
+    for (const statement of migration0028.split(";"))
+      expect(terms(statement)).toBeLessThanOrEqual(5)
+  })
+
+  it("the migration's backfill, the Worker's fill and expandLog read an old log alike", async () => {
+    const w = writer()
+    const unicode = 'héllo — 日本語 🎉 "quoted" back\\slash'
+    const old = [
+      w.block("note", "note", "N", null),
+      w.block("a", "image", "A"),
+      w.edit("a", { props: '{"size":40,"align":"left"}' }),
+      w.link("note", "a", "a0"),
+      w.view("v1", "note", true),
+      w.edit("a", { text: "A!", props: '{"align":"left","size":50,"nested":{"x":1},"bad key":1}' }),
+      w.editView("v1", { pinned: false, stack: "[]" }),
+      // The shapes a real log holds: a props patch that is an array, not an
+      // object; odd keys; nulls; unicode; a very long value; keys reordered.
+      w.edit("a", { props: '["not","an","object"]' }),
+      w.edit("a", {
+        props: JSON.stringify({
+          "émoji🎉": 1,
+          "": 2,
+          "9starts": 3,
+          "dotted.key": unicode,
+          "d:2026-10-27": 4,
+          gone: null,
+          long: "x".repeat(20_000),
+        }),
+      }),
+      w.edit("a", {
+        props: JSON.stringify({
+          long: "x".repeat(20_000),
+          "d:2026-10-27": 4,
+          "dotted.key": unicode,
+        }),
+      }),
+      w.edit("a", { props: null }),
+      w.remove("a"),
+    ]
+    const ctx = { appendId: "x", actor: 111, origin: "replica" as const, client: null, now: 1 }
+    // Three tenants with the same old log and no per-key rows: one read by
+    // the migration's statement, one by the Worker's fill, one in TypeScript.
+    const read = async (how: "migration" | "fill") => {
+      const { driver, alice } = await open()
+      await alice.includingDeleted().batch(planEventAppend(old, ctx))
+      await driver.exec("DELETE FROM events_log WHERE user_id = 111")
+      if (how === "migration") {
+        await driver.execScript(
+          migration0028.slice(migration0028.indexOf("INSERT INTO events_log")),
+        )
+      } else {
+        await alice.includingDeleted().batch(planLogFill({ now: 2, appendId: "fill" }))
+      }
+      const rows = await keyRows(driver)
+      return rows.map((row) => `${row.id} ${row.action} ${row.key} ${row.value} ${row.event_seq}`)
+    }
+    const log = await (async () => {
+      const { alice } = await open()
+      await alice.includingDeleted().batch(planEventAppend(old, ctx))
+      return readEvents(alice)
+    })()
+    const inTs = expandLog(log).map(
+      (row) =>
+        `${row.id} ${row.action} ${row.key} ${JSON.stringify(row.value ?? null)} ${row.event_seq}`,
+    )
+    const byMigration = await read("migration")
+    expect(byMigration).toEqual(inTs)
+    expect(await read("fill")).toEqual(inTs)
+    expect(inTs).toContain('evt_tab-1_6#1 set props.nested {"x":1} 6')
+    // An array is no object: every key is gone.
+    expect(inTs).toContain("evt_tab-1_8#2 unset props.size null 8")
+    expect(inTs).toContain(`evt_tab-1_9#1 set props.dotted.key ${JSON.stringify(unicode)} 9`)
+    // The same keys in another order read as no change at all.
+    expect(inTs.some((line) => line.startsWith("evt_tab-1_10#"))).toBe(false)
+    expect(inTs).toContain("evt_tab-1_11#0 unset props.d:2026-10-27 null 11")
+    expect(
+      inTs.some(
+        (line) => line.includes("bad key") || line.includes("émoji") || line.includes("9starts"),
+      ),
+    ).toBe(false)
+  })
+
+  it("lands a client's key events in both logs, projects per key, and verify passes", async () => {
+    const { driver, alice } = await open()
+    const dev = keyWriter("dev.a")
+    const landed = await client(alice, [
+      ...dev.block("note", {}),
+      ...dev.block("a", { align: "left", size: 40 }),
+    ])
+    expect(landed.stale).toBe(0)
+    expect(landed.seqs.map(([, seq, eventSeq]) => [seq, eventSeq])).toEqual([
+      [1, 1],
+      [2, 1],
+      [3, 1],
+      [4, 1],
+      [5, 2],
+      [6, 2],
+      [7, 2],
+      [8, 2],
+      [9, 2],
+      [10, 2],
+    ])
+    // The old log holds one event per gesture, with the props assembled.
+    expect(shape(await readEvents(alice))).toEqual(["1 block.create note", "2 block.create a"])
+    const [, created] = await readEvents(alice)
+    expect(JSON.parse(String((created.patch as { props?: string }).props))).toEqual({
+      align: "left",
+      size: 40,
+    })
+    expect(await propsOf(driver, "a")).toEqual({ align: "left", size: 40 })
+    expect(
+      await driver.exec("SELECT key, value FROM delta_mat_values WHERE user_id = 111 ORDER BY key"),
+    ).toEqual([
+      { key: "align", value: '"left"' },
+      { key: "size", value: "40" },
+    ])
+    expect(await verifyLog(alice)).toMatchObject({
+      ok: true,
+      rollup: "new",
+      events: 2,
+      keyEvents: 10,
+      logs: [],
+    })
+    // A re-sent push appends nothing and answers the same seqs.
+    const again = await client(alice, dev.block("a", { align: "left", size: 40 }).slice(0, 0))
+    expect(again.appended).toBe(0)
+  })
+
+  it("two devices offline on two keys of one block both keep their change — per key, where whole props would lose one", async () => {
+    const { driver, alice } = await open()
+    const dev = keyWriter("dev.a")
+    const phone = keyWriter("phone")
+    await client(alice, [...dev.block("note", {}), ...dev.block("a", { align: "left", size: 40 })])
+    // The phone sets the size at 2000 and pushes first; the laptop set the
+    // alignment at 1500 and pushes after.
+    phone.at(2_000)
+    await client(alice, [phone.row("block", "a", "set", "props.size", 80)])
+    dev.at(1_500)
+    const late = await client(alice, [dev.row("block", "a", "set", "props.align", "right")])
+    expect(late.stale).toBe(0)
+    expect(await propsOf(driver, "a")).toEqual({ align: "right", size: 80 })
+    // The old log, written beside, reads the same: each event's props is
+    // the row's props with that key changed.
+    const old = await readEvents(alice)
+    expect(JSON.parse(String((old.at(-1)!.patch as { props?: string }).props))).toEqual({
+      align: "right",
+      size: 80,
+    })
+    const verdict = await verifyLog(alice)
+    expect(verdict).toMatchObject({ ok: true, logs: [], deltaMatValues: [] })
+    // The same two edits through the old door, as whole-props patches: the
+    // laptop's older patch would set no field and is dropped.
+    const { driver: driver2, alice: bob } = await open()
+    const w = writer("dev.a")
+    await client(bob, [
+      ...keyWriter("dev.a").block("note", {}),
+      ...keyWriter("dev.a").block("b", { align: "left", size: 40 }),
+    ])
+    await appendClientEvents(
+      bob,
+      [
+        stampedAt(
+          { ...w.edit("b", { props: '{"align":"left","size":80}' }), device: "phone" },
+          2_000,
+        ),
+      ],
+      { actor: 111, origin: "replica" },
+    )
+    const dropped = await appendClientEvents(
+      bob,
+      [stampedAt(w.edit("b", { props: '{"align":"right","size":40}' }), 1_500)],
+      { actor: 111, origin: "replica" },
+    )
+    expect(dropped.stale).toBe(1)
+    expect(await propsOf(driver2, "b")).toEqual({ align: "left", size: 80 })
+  })
+
+  it("an unset is a tombstone of the key: an older set that arrives later loses to it", async () => {
+    const { driver, alice } = await open()
+    const dev = keyWriter("dev.a")
+    const phone = keyWriter("phone")
+    await client(alice, [...dev.block("note", {}), ...dev.block("a", { size: 40 })])
+    dev.at(3_000)
+    await client(alice, [dev.row("block", "a", "unset", "props.size", null)])
+    phone.at(2_000)
+    const late = await client(alice, [phone.row("block", "a", "set", "props.size", 50)])
+    expect(late.stale).toBe(1)
+    expect(
+      (await driver.exec("SELECT props FROM nodes WHERE user_id = 111 AND id = 'a'"))[0].props,
+    ).toBeNull()
+    expect(
+      await driver.exec(
+        "SELECT key, value FROM delta_mat_values WHERE user_id = 111 AND block_id = 'a'",
+      ),
+    ).toEqual([{ key: "size", value: null }])
+    expect(await verifyLog(alice)).toMatchObject({ ok: true })
+  })
+
+  it("the row door and the key door write the same two logs, and verify passes with both", async () => {
+    const { driver, alice } = await open()
+    await corpusPut(
+      alice,
+      {
+        nodes: [
+          node("note", "note", "N", 100, { notes_id: undefined }),
+          node("a", "image", "A", 100, { props: '{"size":40,"align":"left"}' }),
+        ],
+        links: [child("note", "a", "a0", 100)],
+      },
+      1_000,
+    )
+    // An MCP-shaped write of the whole props reads as the keys that changed.
+    await corpusPut(
+      alice,
+      { nodes: [node("a", "image", "A", 200, { props: '{"align":"left","size":60}' })], links: [] },
+      2_000,
+    )
+    const rows = await keyRows(driver)
+    expect(
+      rows.filter((row) => row.entity_id === "a").map((row) => `${row.action} ${row.key}`),
+    ).toEqual([
+      "create ",
+      "set type",
+      "set text",
+      "set notes_id",
+      "set props.align",
+      "set props.size",
+      "set props.size",
+    ])
+    // Then a key event on top, from a client.
+    const dev = keyWriter("dev.a")
+    dev.at(9_000)
+    await client(alice, [dev.row("block", "a", "set", "props.align", "right")])
+    expect(await propsOf(driver, "a")).toEqual({ align: "right", size: 60 })
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, logs: [] })
+    // A restore reads per key too.
+    await corpusPut(
+      alice,
+      {
+        nodes: [
+          node("a", "image", "A", 300, { props: '{"align":"right","size":60}', deleted_at: 300 }),
+        ],
+        links: [],
+      },
+      10_000,
+    )
+    await restoreSubtree(alice, "a", 4, { actor: 111, origin: "replica", now: 11_000 })
+    expect(await verifyLog(alice)).toMatchObject({ ok: true })
+  })
+
+  it("seeds delta_mat_values once from the per-key fold, so a tenant from before the log verifies", async () => {
+    const { driver, alice } = await open()
+    const w = writer()
+    const ctx = { appendId: "x", actor: 111, origin: "replica" as const, client: null, now: 1 }
+    // A tenant as the deploy finds it: an old log, projected by the old
+    // rule, and the per-key table empty.
+    await alice
+      .includingDeleted()
+      .batch(
+        planEventAppend(
+          [
+            w.block("note", "note", "N", null),
+            w.block("a", "image", "A"),
+            w.edit("a", { props: '{"size":40}' }),
+            w.edit("a", { props: '{"size":40,"align":"left"}' }),
+          ],
+          ctx,
+        ),
+      )
+    await driver.exec("DELETE FROM events_log WHERE user_id = 111")
+    expect(
+      await driver.exec("SELECT COUNT(*) AS n FROM delta_mat_values WHERE user_id = 111"),
+    ).toEqual([{ n: 0 }])
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, keyEvents: 10 })
+    expect(
+      await driver.exec("SELECT key, value FROM delta_mat_values WHERE user_id = 111 ORDER BY key"),
+    ).toEqual([
+      { key: "align", value: '"left"' },
+      { key: "size", value: "40" },
+    ])
+    expect(
+      await driver.exec(
+        "SELECT value FROM meta WHERE user_id = 111 AND key = 'delta_mat_values_seeded'",
+      ),
+    ).toHaveLength(1)
+    // A later key event projects from the seeded keys.
+    const dev = keyWriter("dev.a")
+    dev.at(9_000)
+    await client(alice, [dev.row("block", "a", "unset", "props.size", null)])
+    expect(await propsOf(driver, "a")).toEqual({ align: "left" })
+    expect(await verifyLog(alice)).toMatchObject({ ok: true })
+  })
+
+  it("under the old rollup the old events project as before, both logs are still written, and verify passes", async () => {
+    setEventLogRollup("old")
+    try {
+      const { driver, alice } = await open()
+      const dev = keyWriter("dev.a")
+      await client(alice, [
+        ...dev.block("note", {}),
+        ...dev.block("a", { align: "left", size: 40 }),
+      ])
+      dev.at(2_000)
+      await client(alice, [dev.row("block", "a", "set", "props.size", 80)])
+      expect(await propsOf(driver, "a")).toEqual({ align: "left", size: 80 })
+      expect((await keyRows(driver)).length).toBe(11)
+      expect(await verifyLog(alice)).toMatchObject({ ok: true, rollup: "old", logs: [] })
+      // A whole-props stale check: an older edit to another key is dropped,
+      // as the old rule has it.
+      const phone = keyWriter("phone")
+      phone.at(1_500)
+      const dropped = await client(alice, [phone.row("block", "a", "set", "props.align", "right")])
+      expect(dropped.stale).toBe(1)
+      expect(await propsOf(driver, "a")).toEqual({ align: "left", size: 80 })
+    } finally {
+      setEventLogRollup("new")
+    }
+  })
+
+  it("cuts an append into runs that fit without parting a create from its keys", async () => {
+    const { driver, alice } = await open()
+    const dev = keyWriter("dev.a")
+    const events = [
+      ...dev.block("note", {}),
+      ...dev.block("a", { size: 40 }),
+      dev.row("link", "note|a|child", "create", "", null),
+      dev.row("link", "note|a|child", "set", "source_id", "note"),
+      dev.row("link", "note|a|child", "set", "destination_id", "a"),
+      dev.row("link", "note|a|child", "set", "kind", "child"),
+      dev.row("link", "note|a|child", "set", "sort_key", "a0"),
+    ]
+    const { events: old, eventOf } = collapseKeyEvents(events, () => null)
+    // Each row names the event it mirrors, as `appendKeyEvents` has it.
+    const mirrored = events.map((event) => ({ ...event, event: eventOf.get(event.id) }))
+    const ctx = { appendId: "x", actor: 111, origin: "replica" as const, client: null, now: 1 }
+    // A limit so small every group is its own run: the hardest case for order.
+    const statements = planKeyAppend(mirrored, old, eventOf, ctx, 1)
+    expect(statements).toHaveLength(9 * 3)
+    await alice.includingDeleted().batch([...planReconcile(ctx), ...statements])
+    expect(await driver.exec("SELECT sort_key FROM link WHERE user_id = 111")).toEqual([
+      { sort_key: "a0" },
+    ])
+    expect((await readKeyEvents(alice)).map((row) => row.seq)).toEqual(events.map((_, i) => i + 1))
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, events: 3, keyEvents: 14 })
+  })
+
+  it("serves the per-key log by its own seq, one entity's too", async () => {
+    const { alice } = await open()
+    const dev = keyWriter("dev.a")
+    await client(alice, [...dev.block("note", {}), ...dev.block("a", { size: 40 })])
+    const all = await readKeyEvents(alice)
+    expect(all.map((row) => row.seq)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+    expect(all[0]).toMatchObject({
+      origin: "replica",
+      actor: 111,
+      event: "key_dev.a_1",
+      event_seq: 1,
+    })
+    const some = await readKeyEvents(alice, { since: 4, entity: "block", entityId: "a" })
+    expect(some.map((row) => `${row.action} ${row.key}`)).toEqual([
+      "create ",
+      "set type",
+      "set text",
+      "set notes_id",
+      "set props.size",
+    ])
+    // The log began with one append: a moment inside it is answered as its end.
+    const past = await corpusAt(alice, { seq: 1 })
+    expect(past.seq).toBe(2)
+    expect(past.nodes.map((row) => row.id).sort()).toEqual(["a", "note"])
+    expect(past.nodes.find((row) => row.id === "a")?.props).toBe('{"size":40}')
   })
 })

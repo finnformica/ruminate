@@ -21,8 +21,13 @@
 // runs is the one a reader sees.
 
 import type { TenantDb } from "../tenancy-db"
-import { appendClientEvents, writeRows } from "./event-log"
+import { appendClientEvents, appendClientKeyEvents, writeRows } from "./event-log"
 import type { EventsPutPayload, EventsPutResult } from "../../src/data/events"
+import type {
+  DeltaMatValueRow,
+  KeyEventsPutPayload,
+  KeyEventsPutResult,
+} from "../../src/data/key-events"
 import {
   toLinkRow,
   toNodeRow,
@@ -81,8 +86,29 @@ export async function corpusPullFull(tenant: TenantDb): Promise<ReplicaCorpusBod
         "WHERE user_id = :tenant /* includes-deleted: replication carries tombstones */",
     )
   ).map(toViewRow)
-  return { nodes, links, views, cursor: cursorOf(nodes, links, views) }
+  const deltaMatValues = (
+    await all.exec(
+      "SELECT block_id, key, value, hlc, seq, updated_at FROM delta_mat_values WHERE user_id = :tenant",
+    )
+  ).map(toDeltaMatValueRow)
+  return {
+    nodes,
+    links,
+    views,
+    delta_mat_values: deltaMatValues,
+    cursor: cursorOf(nodes, links, views),
+  }
 }
+
+/** One `delta_mat_values` row as the wire carries it. */
+const toDeltaMatValueRow = (row: Record<string, unknown>): DeltaMatValueRow => ({
+  block_id: String(row.block_id),
+  key: String(row.key),
+  value: row.value === null ? null : String(row.value),
+  hlc: String(row.hlc),
+  seq: Number(row.seq),
+  updated_at: Number(row.updated_at),
+})
 
 /**
  * Incremental pull: rows with `seq > since` (tombstones included — a delete
@@ -136,7 +162,22 @@ export async function corpusPullSince(
       [since],
     )
   ).map(toViewRow)
-  return { nodes, links, views, cursor: cursorOf(nodes, links, views) }
+  // The key rows of the blocks pulled: a block's `seq` is its last event's,
+  // and so is each of its keys' at most, so the same cursor bounds both.
+  const deltaMatValues = (
+    await all.exec(
+      "SELECT block_id, key, value, hlc, seq, updated_at FROM delta_mat_values " +
+        "WHERE user_id = :tenant AND seq > ?1",
+      [since],
+    )
+  ).map(toDeltaMatValueRow)
+  return {
+    nodes,
+    links,
+    views,
+    delta_mat_values: deltaMatValues,
+    cursor: cursorOf(nodes, links, views),
+  }
 }
 
 /**
@@ -198,6 +239,23 @@ export async function corpusPutEvents(
   writer: { device?: string; client?: string | null } = {},
 ): Promise<EventsPutResult> {
   const landed = await appendClientEvents(
+    tenant,
+    payload.events,
+    { actor: tenant.userId, origin: "replica", now, ...writer },
+    cursorStatements(payload.cursor),
+  )
+  return { ok: true, ...landed, cursor: payload.cursor ?? null }
+}
+
+/** `corpusPutEvents` for a push of KEY EVENTS (`opsToKeyEvents`,
+ * docs/event-sourcing.md, "Per-key events"), through `appendClientKeyEvents`. */
+export async function corpusPutKeyEvents(
+  tenant: TenantDb,
+  payload: KeyEventsPutPayload,
+  now: number = Date.now(),
+  writer: { device?: string; client?: string | null } = {},
+): Promise<KeyEventsPutResult> {
+  const landed = await appendClientKeyEvents(
     tenant,
     payload.events,
     { actor: tenant.userId, origin: "replica", now, ...writer },

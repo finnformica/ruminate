@@ -19,6 +19,7 @@ import { mcp, MCP_PATH } from "./handlers/mcp"
 import { mcpTokens, MCP_TOKENS_PREFIX } from "./handlers/mcp-tokens"
 import { preferences, PREFERENCES_PATH } from "./handlers/preferences"
 import { replica } from "./handlers/replica"
+import { rollupOf, setEventLogRollup } from "./handlers/event-log"
 import { shares, SHARES_PREFIX } from "./handlers/shares"
 import { isSocialPath, withSocialMeta } from "./handlers/social"
 import { unfurl, UNFURL_PATH } from "./handlers/unfurl"
@@ -26,6 +27,8 @@ import { unfurl, UNFURL_PATH } from "./handlers/unfurl"
 export default {
   async fetch(request, env): Promise<Response> {
     const { origin, pathname } = new URL(request.url)
+    // Which event log the rollup reads, from the dashboard (worker/types.ts).
+    setEventLogRollup(rollupOf(env))
 
     if (pathname === "/github-auth") return githubAuth(request, env)
     if (pathname === "/github-refresh") return githubRefresh(request, env)

@@ -1170,7 +1170,10 @@ export function BlockItem({
     >
       <LinkActionsContext.Provider value={linkActions}>
         {mark?.kind === "changed" ? (
-          <WordDiff segments={mark.words} />
+          <>
+            <WordDiff segments={mark.words} />
+            {mark.keys ? <ChangedKeys keys={mark.keys} /> : null}
+          </>
         ) : mark?.kind === "fold" ? (
           <FoldRow
             count={mark.count}
@@ -1506,6 +1509,20 @@ function WordDiff({ segments }: { segments: readonly { kind: string; text: strin
         ),
       )}
     </>
+  )
+}
+
+/** The props keys a period changed on a row (`DiffMark`, `keys`): a row
+ * whose words did not change still says what did — a picture resized, a
+ * note's font — by the key's name, after its words. */
+function ChangedKeys({ keys }: { keys: readonly string[] }) {
+  return (
+    <span
+      data-testid="diff-keys"
+      className="ml-2 select-none whitespace-nowrap font-mono text-xs text-text-changed"
+    >
+      {keys.join(", ")}
+    </span>
   )
 }
 

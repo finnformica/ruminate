@@ -1,14 +1,15 @@
 import type { GraphDiff, LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
-import type { EntityKeys, LoggedEvent, RuminateEvent, StampedState } from "./events"
+import type { EntityKeys, StampedState } from "./events"
 import type { GraphSnapshot } from "./graph"
+import type { DeltaMatValueRow, KeyEvent, LoggedKeyEvent } from "./key-events"
 
 /**
  * The storage contract behind the `src/data` seam: a row store for the
  * schema v2 graph (docs/graph-schema-v2.md) — `nodes` + `link` + `meta`.
  *
  * The app holds the live graph in memory (`databaseGraphAtom`) and edits it
- * with ops (`src/data/ops.ts`); the runtime turns each batch into the EVENTS
- * it amounts to (`opsToEvents`, docs/event-sourcing.md). The store keeps
+ * with ops (`src/data/ops.ts`); the runtime turns each batch into the per-key
+ * EVENTS it amounts to (`opsToKeyEvents`, docs/event-sourcing.md). The store keeps
  * those events and the replica's — the log, the truth — and the rows as a
  * cache of the log's fold (docs/event-only-sync.md, "The cache"), updated in
  * the same transaction as each batch and each pulled page, and read by
@@ -38,15 +39,19 @@ export interface NoteStore {
    * them.
    */
   applyEvents(
-    events: readonly RuminateEvent[],
+    events: readonly KeyEvent[],
     options?: { frozen?: ReadonlySet<string> },
   ): Promise<void>
   /** The events not yet acknowledged by the replica, oldest first — the push
    * queue, durable across reloads. */
-  unpushedEvents(): Promise<RuminateEvent[]>
-  /** Stamp events with the `seq` the replica gave them, and the rows they
-   * changed with the same (a row's `seq` is its last event's). */
-  markEventsPushed(seqs: readonly (readonly [id: string, seq: number])[]): Promise<void>
+  unpushedEvents(): Promise<KeyEvent[]>
+  /** Stamp events with the `seq` the replica gave them in the per-key log,
+   * and the rows they changed with the seq of the old-shaped event each
+   * mirrors (`eventSeq`: the cursors' order; a row's `seq` is its last
+   * event's). */
+  markEventsPushed(
+    seqs: readonly (readonly [id: string, seq: number, eventSeq?: number | null])[],
+  ): Promise<void>
   /**
    * Take in events pulled from the replica — everything the tenant's log
    * holds past the device's events cursor, this device's own among them, now
@@ -54,18 +59,22 @@ export interface NoteStore {
    * An event already held (one of this device's own, pushed but never
    * answered) takes the `seq` it is pulled with, and changes nothing else.
    */
-  applyPulledEvents(events: readonly LoggedEvent[]): Promise<void>
+  applyPulledEvents(events: readonly LoggedKeyEvent[]): Promise<void>
   /** The tenant's log as this device holds it, in order: every placed event,
    * then this device's unpushed ones, provisionally sequenced after them
-   * (`LoggedEvent.pending`). What a day on the calendar is folded from. */
-  eventLog(): Promise<LoggedEvent[]>
-  /** The fold by stamp (`foldByStamp`) of the named entities' events, read by
-   * the `events_entity` index — or of the whole log, with no keys. The fold
-   * check compares it with the cache (`src/data/fold-check.ts`). */
+   * (`LoggedKeyEvent.pending`). What a day on the calendar is folded from. */
+  eventLog(): Promise<LoggedKeyEvent[]>
+  /** The fold by stamp (`foldKeysByStamp`, assembled) of the named entities'
+   * events, read by the `events_log_entity` index — or of the whole log,
+   * with no keys. The fold check compares it with the cache
+   * (`src/data/fold-check.ts`). */
   foldOfLog(keys?: EntityKeys): Promise<StampedState>
   /** The cache rows of the named entities, tombstones too: what the replica's
    * pulled rows are compared with. */
   getRowsOf(keys: EntityKeys): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }>
+  /** The `delta_mat_values` rows of the named blocks: what the replica's pulled
+   * key rows are compared with. */
+  getDeltaMatValuesOf(ids: readonly string[]): Promise<DeltaMatValueRow[]>
   /** The lazy reads of the walk (docs/event-only-sync.md, "Lazy reads"):
    * the live child links of the named nodes, by `link_source`, in sibling
    * order; the live child links into them, by `link_destination` (an up

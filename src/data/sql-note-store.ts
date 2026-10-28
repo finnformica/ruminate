@@ -9,15 +9,7 @@ import {
   type ViewRow,
 } from "../../worker/handlers/replica-payload"
 import { ensureCorpusSchema } from "./corpus-schema"
-import {
-  coalesceTyping,
-  foldByStamp,
-  type Entity,
-  type EntityKeys,
-  type LoggedEvent,
-  type RuminateEvent,
-  type StampedState,
-} from "./events"
+import type { Entity, EntityKeys, StampedState } from "./events"
 import {
   CACHE_TABLES,
   cacheRowStatements,
@@ -27,6 +19,15 @@ import {
   fillStampsStatements,
   keyValues,
 } from "./fold-cache"
+import {
+  assembleStamped,
+  coalesceTypingKeys,
+  foldKeysByStamp,
+  parseStoredKeyEvent,
+  type DeltaMatValueRow,
+  type KeyEvent,
+  type LoggedKeyEvent,
+} from "./key-events"
 import { CHILD_KIND, buildGraphSnapshot } from "./graph"
 import type { NoteStore } from "./note-store"
 import type { SqlDriver, SqlStatement, SqlValue } from "./sql-driver"
@@ -46,14 +47,16 @@ export const CACHE_STAMPS_KEY = "cache_stamps"
  * has.
  *
  * **The log is the truth; the rows are a cache of its fold**
- * (docs/event-only-sync.md, "The cache"). A write arrives as the events the
- * editor's ops amount to (`opsToEvents`), and a pull as the events of the
- * replica's log. Each lands in one transaction: appended to `events`, and
- * applied to the cache rows of the entities it names, field by field by
- * stamp (`foldByStamp`, `fold-cache.ts`). Each row keeps the stamp of each
- * field (`stamps`), so it is the fold of its entity's events, in any order,
- * and an event applied twice changes nothing. No other row is read, and
- * nothing is folded again: a read is an index lookup.
+ * (docs/event-only-sync.md, "The cache"). A write arrives as the per-key
+ * events the editor's ops amount to (`opsToKeyEvents`), and a pull as the
+ * per-key events of the replica's log. Each lands in one transaction:
+ * appended to `events_log`, and applied to the cache rows of the entities
+ * it names, register by register by stamp (`foldKeysByStamp`,
+ * `fold-cache.ts`), a block's keys to `delta_mat_values` beside its row. Each
+ * row keeps the stamp of each register (`stamps`), so it is the fold of its
+ * entity's events, in any order, and an event applied twice changes
+ * nothing. No other row is read, and nothing is folded again: a read is an
+ * index lookup. The old `events` table stays, unread (schema v15).
  *
  * **Soft deletes.** Nothing here hard-deletes a corpus row. A delete stamps
  * `deleted_at` (and bumps `updated_at`, so the tombstone replicates like any
@@ -98,10 +101,10 @@ export async function openSqlNoteStore(
       // in a push that has already picked it up.
       const open = unpushed.filter((event) => !frozen.has(event.id))
       const held = new Set(open.map((event) => event.id))
-      const coalesced = coalesceTyping([...open, ...events])
+      const coalesced = coalesceTypingKeys([...open, ...events])
       const kept = new Set(coalesced.map((event) => event.id))
       const statements: SqlStatement[] = []
-      const appended: RuminateEvent[] = []
+      const appended: KeyEvent[] = []
       for (const event of coalesced) {
         if (held.has(event.id)) continue
         statements.push(insertEventStatement(event))
@@ -113,7 +116,7 @@ export async function openSqlNoteStore(
         // tenant-exempt: the local store is one user per browser profile; and
         // this is the queue coalescing, not a delete of anything that happened.
         if (!kept.has(event.id))
-          statements.push({ sql: "DELETE FROM events WHERE id = ?", params: [event.id] })
+          statements.push({ sql: "DELETE FROM events_log WHERE id = ?", params: [event.id] })
       }
       // The cache takes what is appended. An event a run coalesced away was
       // applied when it was appended, and the one that replaced it has the
@@ -128,15 +131,18 @@ export async function openSqlNoteStore(
       if (seqs.length === 0) return
       const statements: SqlStatement[] = []
       // A placed event moves to the end of the log's append order.
-      for (const [id, seq] of seqs) {
+      for (const [id, seq, eventSeq] of seqs) {
         statements.push({
-          sql: `UPDATE events SET seq = ?, position = ${NEXT_POSITION} WHERE id = ?`,
-          params: [seq, id],
+          sql:
+            "UPDATE events_log SET seq = ?, event_seq = COALESCE(?, event_seq), " +
+            `position = ${NEXT_POSITION} WHERE id = ?`,
+          params: [seq, eventSeq ?? null, id],
         })
       }
-      // A row's `seq` is its last event's: stamp the rows these events changed,
-      // never backwards.
-      for (const [id, seq] of seqs) {
+      // A row's `seq` is its last event's in the OLD log — the cursors' order:
+      // stamp the rows these events changed, never backwards.
+      for (const [id, , eventSeq] of seqs) {
+        if (eventSeq === null || eventSeq === undefined) continue
         for (const table of ["nodes", "link", "views"] as const) {
           statements.push({
             sql:
@@ -144,10 +150,16 @@ export async function openSqlNoteStore(
               (table === "link"
                 ? "source_id || '|' || destination_id || '|' || kind = "
                 : "id = ") +
-              `(SELECT entity_id FROM events WHERE id = ?2 AND entity = '${ENTITY_OF[table]}')`,
-            params: [seq, id],
+              `(SELECT entity_id FROM events_log WHERE id = ?2 AND entity = '${ENTITY_OF[table]}')`,
+            params: [eventSeq, id],
           })
         }
+        statements.push({
+          sql:
+            "UPDATE delta_mat_values SET seq = ?1 WHERE (seq IS NULL OR seq < ?1) AND block_id = " +
+            "(SELECT entity_id FROM events_log WHERE id = ?2 AND entity = 'block')",
+          params: [eventSeq, id],
+        })
       }
       await driver.batch(statements)
     },
@@ -165,6 +177,8 @@ export async function openSqlNoteStore(
     foldOfLog: (keys) => loadFoldOfLog(driver, keys),
 
     getRowsOf: (keys) => loadRowsOf(driver, keys),
+
+    getDeltaMatValuesOf: (ids) => loadDeltaMatValuesOf(driver, ids),
 
     childLinksOf: (ids) =>
       readChunked(driver, ids, LIVE_LINKS, "source_id", toLinkRow, ORDER_LINKS),
@@ -221,6 +235,10 @@ export async function openSqlNoteStore(
         // tenant-exempt: as above — the device's log of a corpus it no longer
         // holds, unpushed events included (see `NoteStore.clear`).
         { sql: "DELETE FROM events" },
+        // tenant-exempt: as above.
+        { sql: "DELETE FROM events_log" },
+        // tenant-exempt: as above.
+        { sql: "DELETE FROM delta_mat_values" },
       ])
     },
 
@@ -350,26 +368,30 @@ async function loadViews(driver: SqlDriver): Promise<ViewRow[]> {
 const ENTITY_OF = { nodes: "block", link: "link", views: "view" } as const
 
 /** The queue: events the replica has not acknowledged, in the order made. */
-async function loadUnpushed(driver: SqlDriver): Promise<RuminateEvent[]> {
+async function loadUnpushed(driver: SqlDriver): Promise<KeyEvent[]> {
   const rows = await driver.exec(
-    "SELECT id, entity, entity_id, action, patch, v, batch, device, cause, base_seq, ref_seq, " +
-      "at, tz, hlc FROM events WHERE seq IS NULL ORDER BY position",
+    `SELECT ${EVENT_COLUMNS} FROM events_log WHERE seq IS NULL ORDER BY position`,
   )
-  return rows.map(toEvent)
+  return rows.flatMap((row) => {
+    const event = toEvent(row)
+    return event === null ? [] : [event]
+  })
 }
 
 /** The whole log, placed events first in `seq` order, then this device's
  * unpushed ones in the order made, each given a provisional `seq` above the
- * last placed one so a fold keeps them last. */
-async function loadLog(driver: SqlDriver): Promise<LoggedEvent[]> {
+ * last placed one so a fold keeps them last. A row that does not read as an
+ * event is reported and skipped (`parseStoredKeyEvent`). */
+async function loadLog(driver: SqlDriver): Promise<LoggedKeyEvent[]> {
   const rows = await driver.exec(
-    "SELECT id, seq, entity, entity_id, action, patch, v, batch, device, cause, base_seq, " +
-      "ref_seq, at, tz, hlc, origin, actor, received_at FROM events " +
+    `SELECT ${EVENT_COLUMNS}, origin, actor, received_at FROM events_log ` +
       "ORDER BY seq IS NULL, seq, position",
   )
   let last = 0
-  return rows.map((row) => {
-    const event = toEvent(row) as LoggedEvent
+  const out: LoggedKeyEvent[] = []
+  for (const row of rows) {
+    const event = toEvent(row)
+    if (event === null) continue
     if (row.seq !== null) {
       event.seq = Number(row.seq)
       last = event.seq
@@ -377,11 +399,9 @@ async function loadLog(driver: SqlDriver): Promise<LoggedEvent[]> {
       event.seq = last += 1
       event.pending = true
     }
-    if (row.origin !== null) event.origin = String(row.origin)
-    if (row.actor !== null) event.actor = Number(row.actor)
-    if (row.received_at !== null) event.received_at = Number(row.received_at)
-    return event
-  })
+    out.push(event)
+  }
+  return out
 }
 
 // -----------------------------------------------------------------------------
@@ -392,16 +412,16 @@ async function loadLog(driver: SqlDriver): Promise<LoggedEvent[]> {
 const CREATED = "(stamps IS NULL OR json_extract(stamps, '$.alive') IS NOT NULL)"
 
 const EVENT_COLUMNS =
-  "id, seq, entity, entity_id, action, patch, v, batch, device, cause, base_seq, ref_seq, at, tz, hlc"
+  "id, seq, entity, entity_id, action, key, value, v, batch, device, cause, base_seq, ref_seq, " +
+  "at, tz, hlc, event_id, event_seq"
 
-const toPlacedEvent = (row: Record<string, SqlValue>): RuminateEvent => {
-  const event = toEvent(row)
-  if (row.seq !== null) event.seq = Number(row.seq)
-  return event
-}
+/** A stored row as a key event, placed when it is; null (reported) for a
+ * row that is not one. */
+const toEvent = (row: Record<string, SqlValue>): LoggedKeyEvent | null =>
+  parseStoredKeyEvent(row as Record<string, unknown>)
 
 /** The entities a batch of events names, by kind. */
-function keysOfEvents(events: readonly RuminateEvent[]) {
+function keysOfEvents(events: readonly KeyEvent[]) {
   const keys = { block: new Set<string>(), link: new Set<string>(), view: new Set<string>() }
   for (const event of events) keys[event.entity].add(event.entity_id)
   return keys
@@ -452,11 +472,11 @@ async function loadCacheState(
  */
 async function cacheStatements(
   driver: SqlDriver,
-  events: readonly RuminateEvent[],
+  events: readonly KeyEvent[],
 ): Promise<SqlStatement[]> {
   if (events.length === 0) return []
   const keys = keysOfEvents(events)
-  const state = foldByStamp(events, await loadCacheState(driver, keys))
+  const state = foldKeysByStamp(events, await loadCacheState(driver, keys))
   const tables = { block: state.blocks, link: state.links, view: state.views }
   const statements: SqlStatement[] = []
   for (const entity of Object.keys(keys) as Entity[]) {
@@ -470,15 +490,22 @@ async function cacheStatements(
   return statements
 }
 
-/** The fold of the log (`foldByStamp`): of the named entities' events, by the
- * `events_entity` index, or of the whole log. What the fold check compares
- * the cache with. */
+/** The fold of the log (`foldKeysByStamp`): of the named entities' events,
+ * by the `events_log_entity` index, or of the whole log, in the old shape
+ * with each block's props assembled (`assembleStamped`). What the fold
+ * check compares the cache with. */
 async function loadFoldOfLog(driver: SqlDriver, keys?: EntityKeys): Promise<StampedState> {
-  if (!keys) {
-    const rows = await driver.exec(`SELECT ${EVENT_COLUMNS} FROM events`)
-    return foldByStamp(rows.map(toPlacedEvent))
+  const events: KeyEvent[] = []
+  const take = (rows: Record<string, SqlValue>[]) => {
+    for (const row of rows) {
+      const event = toEvent(row)
+      if (event !== null) events.push(event)
+    }
   }
-  const events: RuminateEvent[] = []
+  if (!keys) {
+    take(await driver.exec(`SELECT ${EVENT_COLUMNS} FROM events_log`))
+    return assembleStamped(foldKeysByStamp(events))
+  }
   const named: [Entity, ReadonlySet<string>][] = [
     ["block", keys.blocks],
     ["link", keys.links],
@@ -486,15 +513,42 @@ async function loadFoldOfLog(driver: SqlDriver, keys?: EntityKeys): Promise<Stam
   ]
   for (const [entity, ids] of named) {
     for (const chunk of inChunks([...ids])) {
-      const rows = await driver.exec(
-        `SELECT ${EVENT_COLUMNS} FROM events WHERE entity = ? AND entity_id IN ` +
-          `(${chunk.map(() => "?").join(", ")})`,
-        [entity, ...chunk],
+      take(
+        await driver.exec(
+          `SELECT ${EVENT_COLUMNS} FROM events_log WHERE entity = ? AND entity_id IN ` +
+            `(${chunk.map(() => "?").join(", ")})`,
+          [entity, ...chunk],
+        ),
       )
-      events.push(...rows.map(toPlacedEvent))
     }
   }
-  return foldByStamp(events)
+  return assembleStamped(foldKeysByStamp(events))
+}
+
+/** The `delta_mat_values` rows of the named blocks (`NoteStore.getDeltaMatValuesOf`). */
+async function loadDeltaMatValuesOf(
+  driver: SqlDriver,
+  ids: readonly string[],
+): Promise<DeltaMatValueRow[]> {
+  const out: DeltaMatValueRow[] = []
+  for (const chunk of inChunks([...new Set(ids)])) {
+    const rows = await driver.exec(
+      "SELECT block_id, key, value, hlc, seq, updated_at FROM delta_mat_values WHERE block_id IN " +
+        `(${chunk.map(() => "?").join(", ")})`,
+      chunk,
+    )
+    for (const row of rows) {
+      out.push({
+        block_id: String(row.block_id),
+        key: String(row.key),
+        value: row.value === null ? null : String(row.value),
+        hlc: String(row.hlc),
+        ...(row.seq === null ? {} : { seq: Number(row.seq) }),
+        updated_at: Number(row.updated_at),
+      })
+    }
+  }
+  return out
 }
 
 /** Every cache row of the named entities, tombstones too, as the replica's
@@ -568,81 +622,58 @@ async function fillStampsOnce(driver: SqlDriver, now: number): Promise<void> {
  * The position the next event takes, worked out by the statement that writes
  * it: the log's append order, which the push queue and the history keep.
  */
-const NEXT_POSITION = "(SELECT COALESCE(MAX(position), 0) + 1 FROM events)"
+const NEXT_POSITION = "(SELECT COALESCE(MAX(position), 0) + 1 FROM events_log)"
 
-const toEvent = (row: Record<string, SqlValue>): RuminateEvent =>
-  ({
-    id: row.id,
-    entity: row.entity,
-    entity_id: row.entity_id,
-    action: row.action,
-    patch: JSON.parse(String(row.patch)),
-    v: Number(row.v),
-    batch: row.batch,
-    device: row.device,
-    ...(row.cause === null ? {} : { cause: row.cause }),
-    base_seq: row.base_seq === null ? null : Number(row.base_seq),
-    ...(row.ref_seq === null ? {} : { ref_seq: Number(row.ref_seq) }),
-    at: Number(row.at),
-    tz: row.tz === null ? null : Number(row.tz),
-    // Null on an event made before stamps: a reader derives it (`eventStamp`).
-    ...(row.hlc === null ? {} : { hlc: String(row.hlc) }),
-  }) as RuminateEvent
+/** A key event's columns, in the order the inserts name them. */
+const eventParams = (event: KeyEvent): SqlValue[] => [
+  event.id,
+  event.entity,
+  event.entity_id,
+  event.action,
+  event.key,
+  JSON.stringify(event.value ?? null),
+  event.v,
+  event.batch,
+  event.device,
+  event.cause ?? null,
+  event.base_seq ?? null,
+  event.ref_seq ?? null,
+  event.at,
+  event.tz ?? null,
+  event.hlc ?? null,
+  event.event ?? null,
+  event.event_seq ?? null,
+]
 
 /** A pulled event, placed, at the next position. One of this device's own
  * that the replica took but never answered is placed by this, and moves to
  * that position as `markEventsPushed` would move it; one already placed stays. */
-const insertPulledEventStatement = (event: LoggedEvent): SqlStatement => ({
+const insertPulledEventStatement = (event: LoggedKeyEvent): SqlStatement => ({
   sql:
-    "INSERT INTO events (id, seq, entity, entity_id, action, patch, v, batch, device, cause, " +
-    "base_seq, ref_seq, at, tz, hlc, origin, actor, received_at, position) " +
-    `VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${NEXT_POSITION}) ` +
-    "ON CONFLICT (id) DO UPDATE SET seq = excluded.seq, origin = excluded.origin, " +
+    "INSERT INTO events_log (id, entity, entity_id, action, key, value, v, batch, device, " +
+    "cause, base_seq, ref_seq, at, tz, hlc, event_id, event_seq, seq, origin, actor, " +
+    "received_at, position) " +
+    `VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${NEXT_POSITION}) ` +
+    "ON CONFLICT (id) DO UPDATE SET seq = excluded.seq, event_id = excluded.event_id, " +
+    "event_seq = excluded.event_seq, origin = excluded.origin, " +
     "actor = excluded.actor, received_at = excluded.received_at, " +
-    "position = CASE WHEN events.seq IS NULL THEN excluded.position ELSE events.position END",
+    "position = CASE WHEN events_log.seq IS NULL THEN excluded.position " +
+    "ELSE events_log.position END",
   params: [
-    event.id,
+    ...eventParams(event),
     event.seq,
-    event.entity,
-    event.entity_id,
-    event.action,
-    JSON.stringify(event.patch),
-    event.v,
-    event.batch,
-    event.device,
-    event.cause ?? null,
-    event.base_seq ?? null,
-    event.ref_seq ?? null,
-    event.at,
-    event.tz ?? null,
-    event.hlc ?? null,
     event.origin ?? null,
     event.actor ?? null,
     event.received_at ?? null,
   ],
 })
 
-const insertEventStatement = (event: RuminateEvent): SqlStatement => ({
+const insertEventStatement = (event: KeyEvent): SqlStatement => ({
   sql:
-    "INSERT INTO events (id, seq, entity, entity_id, action, patch, v, batch, device, cause, " +
-    "base_seq, ref_seq, at, tz, hlc, position) " +
-    `VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${NEXT_POSITION})`,
-  params: [
-    event.id,
-    event.entity,
-    event.entity_id,
-    event.action,
-    JSON.stringify(event.patch),
-    event.v,
-    event.batch,
-    event.device,
-    event.cause ?? null,
-    event.base_seq ?? null,
-    event.ref_seq ?? null,
-    event.at,
-    event.tz ?? null,
-    event.hlc ?? null,
-  ],
+    "INSERT INTO events_log (id, entity, entity_id, action, key, value, v, batch, device, " +
+    "cause, base_seq, ref_seq, at, tz, hlc, event_id, event_seq, seq, position) " +
+    `VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ${NEXT_POSITION})`,
+  params: eventParams(event),
 })
 
 // -----------------------------------------------------------------------------

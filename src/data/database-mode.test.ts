@@ -35,7 +35,9 @@ import type { NoteStore } from "./note-store"
 import { openSqlNoteStore } from "./sql-note-store"
 import { applyOpsToStore } from "./store-test-support"
 import { viewRootIdsAtom, viewsAtom, type ViewRow } from "./views"
-import { linkEntityId, rowsToEvents, type LoggedEvent, type RuminateEvent } from "./events"
+import { linkEntityId, rowsToEvents, type LoggedEvent } from "./events"
+import type { KeyEvent, LoggedKeyEvent } from "./key-events"
+import { keyed } from "./store-test-support"
 import { decodeHlc } from "./hlc"
 import { writerTimezone } from "./writer-identity"
 
@@ -80,7 +82,11 @@ function stubSource(responses: {
   }
   const logged = <B extends ReplicaChangesBody>(body: B): B => {
     if (responses.events) return body
-    const events = rowsToEvents(held, body, { batch: `bat_rows_${log.length}`, device: "", now: 0 })
+    const events = rowsToEvents(held, body, {
+      batch: `bat_rows_${log.length}`,
+      device: "other.tab",
+      now: 0,
+    })
     for (const event of events) {
       const seq = log.length + 1
       log.push({ ...event, seq, origin: "replica", actor: 111, received_at: event.at })
@@ -108,7 +114,10 @@ function stubSource(responses: {
     pullEvents: async (since, limit) => {
       calls.events.push([since, limit])
       if (responses.fail) throw new Error("offline")
-      const events = log.filter((e) => e.seq > since).slice(0, limit)
+      // Served per key, as the replica's per-key log serves it.
+      const events = keyed(log)
+        .filter((e) => e.seq > since)
+        .slice(0, limit)
       return { events, cursor: events.at(-1)?.seq ?? null }
     },
   }
@@ -230,12 +239,20 @@ async function seedNotes(store: NoteStore, notes: Record<string, string>) {
 }
 
 /** The store's queue as `[entity.action, entity_id]`, in the order made. */
-const queued = async (store: NoteStore) =>
-  (await store.unpushedEvents()).map((event) => [
-    `${event.entity}.${event.action}`,
-    event.entity_id,
-  ])
-const ofEntity = (events: RuminateEvent[], entity: RuminateEvent["entity"]) =>
+const queued = async (store: NoteStore) => {
+  const out: [string, string][] = []
+  for (const row of await store.unpushedEvents()) {
+    const last = out.at(-1)
+    // A set after a row of the same entity is part of that gesture.
+    if ((row.action === "set" || row.action === "unset") && last && last[1] === row.entity_id) {
+      continue
+    }
+    const action = row.action === "set" || row.action === "unset" ? "update" : row.action
+    out.push([`${row.entity}.${action}`, row.entity_id])
+  }
+  return out
+}
+const ofEntity = (events: KeyEvent[], entity: KeyEvent["entity"]) =>
   events.filter((event) => event.entity === entity)
 
 /** A note's markdown projection off the store's live graph, or null. */
@@ -415,11 +432,18 @@ describe("database mode saves", () => {
     expect(walked("note-a")).toBe(edited)
     expect(calls.changes).toHaveLength(1)
     expect(calls.changes[0].noteIds).toEqual(["note-a"])
-    expect(
-      ofEntity(await store.unpushedEvents(), "block")
-        .map((event) => `${event.action}:${event.entity_id}`)
-        .sort(),
-    ).toEqual(["create:blk_n000000000", "update:blk_a000000000"])
+    // Each block's rows as the gesture they are: a create with its sets, or
+    // an update.
+    const gestures = new Map<string, string>()
+    for (const row of ofEntity(await store.unpushedEvents(), "block")) {
+      if (row.action === "create" || !gestures.has(row.entity_id)) {
+        gestures.set(row.entity_id, row.action === "set" ? "update" : row.action)
+      }
+    }
+    expect([...gestures].map(([id, action]) => `${action}:${id}`).sort()).toEqual([
+      "create:blk_n000000000",
+      "update:blk_a000000000",
+    ])
   })
 
   it("a run of ops is one store write, and a later batch never lands ahead of it", async () => {
@@ -443,7 +467,7 @@ describe("database mode saves", () => {
       (event) => event.entity_id === "blk_a000000000",
     )
     expect(typed).toHaveLength(1)
-    expect(typed[0]).toMatchObject({ action: "update", patch: { text: "A123" } })
+    expect(typed[0]).toMatchObject({ action: "set", key: "text", value: "A123" })
   })
 
   it("a pull never clobbers ops still coalescing", async () => {
@@ -750,9 +774,9 @@ describe("database mode reads the fold", () => {
       pullRetryMs: 10 * 60_000,
     })
     try {
-      // Folding a page of 2,000 events takes a moment.
+      // Folding a page of 2,000 rows — 500 of these creates — takes a moment.
       await vi.waitFor(() => expect(asked).toBe(2), { timeout: 30_000 })
-      await vi.waitFor(() => expect(graph().nodes.size).toBe(2_000), { timeout: 5_000 })
+      await vi.waitFor(() => expect(graph().nodes.size).toBe(500), { timeout: 5_000 })
     } finally {
       release()
     }
@@ -761,7 +785,8 @@ describe("database mode reads the fold", () => {
   }, 60_000)
 
   it("pulls a long log to its end before the check, and shows all of it", async () => {
-    const events = Array.from({ length: 20_001 }, (_, i) => placed(i + 1, `note-${i}`, `N${i}`))
+    // Four rows per create: just past ten pages of 2,000 rows.
+    const events = Array.from({ length: 5_001 }, (_, i) => placed(i + 1, `note-${i}`, `N${i}`))
     const { source, calls } = stubSource({
       full: { nodes: [], links: [], views: [], cursor: "0" },
       events,
@@ -770,10 +795,10 @@ describe("database mode reads the fold", () => {
     await flushDatabaseMode()
     // Ten pages in the pull, then the next run of pages queued at once.
     expect(calls.events).toHaveLength(11)
-    expect(graph().nodes.size).toBe(20_001)
+    expect(graph().nodes.size).toBe(5_001)
     await checked()
     expect(reported()).toEqual([])
-  })
+  }, 30_000)
 })
 
 /**
@@ -790,12 +815,14 @@ describe("database mode event log", () => {
     })
     const store = await boot({ source, replica: stubReplica().handle })
     expect(calls.events).toEqual([[0, 2_000]])
-    expect(await store.getMeta("events_pull_cursor")).toBe("2")
+    // The cursor is the per-key log's own seq: the last row of the second event.
+    expect(await store.getMeta("events_pull_cursor")).toBe("203")
     expect((await store.eventLog()).map((event) => [event.seq, event.origin, event.actor])).toEqual(
-      [
-        [1, "replica", 111],
-        [2, "replica", 111],
-      ],
+      keyed([placed(1, "note-a", "A"), placed(2, "note-b", "B")]).map((row) => [
+        row.seq,
+        "replica",
+        111,
+      ]),
     )
     // The pulled events are the cache: note-b is there, though no row of
     // it was pulled.
@@ -803,7 +830,7 @@ describe("database mode event log", () => {
 
     requestDatabasePull()
     await flushDatabaseMode()
-    expect(calls.events.at(-1)).toEqual([2, 2_000])
+    expect(calls.events.at(-1)).toEqual([203, 2_000])
     expect(jotai.get(eventLogVersionAtom)).toBeGreaterThan(0)
   })
 
@@ -817,11 +844,12 @@ describe("database mode event log", () => {
     await flushDatabaseMode()
     const own = await store.unpushedEvents()
     expect(own.length).toBeGreaterThan(0)
-    const log = (await databaseEventLog()) as LoggedEvent[]
-    // Placed first, then the unpushed, provisionally after them.
-    expect(log[0]).toMatchObject({ seq: 1, id: "evt_remote_1" })
-    expect(log.slice(1).map((event) => event.pending)).toEqual(own.map(() => true))
-    expect(log.slice(1).map((event) => event.seq)).toEqual(own.map((_, i) => 2 + i))
+    const log = (await databaseEventLog()) as LoggedKeyEvent[]
+    // Placed first (the remote create's four rows), then the unpushed,
+    // provisionally after them.
+    expect(log[0]).toMatchObject({ seq: 100, event: "evt_remote_1" })
+    expect(log.slice(4).map((event) => event.pending)).toEqual(own.map(() => true))
+    expect(log.slice(4).map((event) => event.seq)).toEqual(own.map((_, i) => 104 + i))
   })
 
   it("a wiped cache pulls the log again from the start", async () => {
@@ -835,7 +863,9 @@ describe("database mode event log", () => {
     // The stale generation wiped the cache, cursors included, so the log
     // was pulled from zero and holds what the replica serves.
     expect(calls.events[0]).toEqual([0, 2_000])
-    expect((await store.eventLog()).map((event) => event.id)).toEqual(["evt_remote_1"])
+    expect(new Set((await store.eventLog()).map((event) => event.event))).toEqual(
+      new Set(["evt_remote_1"]),
+    )
   })
 })
 
@@ -1234,13 +1264,15 @@ describe("database mode views", () => {
     expect(calls.changes.at(-1)!.viewIds).toEqual(["note-a"])
     // The row the atom held nothing for is a create, carrying the whole row.
     expect(await queued(store)).toEqual([["view.create", "note-a"]])
-    expect((await store.unpushedEvents())[0].patch).toEqual({
-      root_id: "note-a",
-      filter: "type:todo",
-      sort: null,
-      pinned: true,
-      sort_key: null,
-    })
+    const rows = ofEntity(await store.unpushedEvents(), "view")
+    expect(rows.map((row) => [row.action, row.key, row.value])).toEqual([
+      ["create", "", null],
+      ["set", "root_id", "note-a"],
+      ["set", "filter", "type:todo"],
+      ["set", "sort", null],
+      ["set", "pinned", true],
+      ["set", "sort_key", null],
+    ])
   })
 
   it("deleting a node tombstones the view rooted at it, and the tombstone travels", async () => {
