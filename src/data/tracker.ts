@@ -574,6 +574,56 @@ export function monthGrid(month: MonthString): (DayString | null)[][] {
   return rows
 }
 
+/** The run of days the page shows at once (Finn, 2026-10-28): a week from
+ * Monday, a month, or a year. The cell is always one day. */
+export const TRACKER_RANGES = ["week", "month", "year"] as const
+export type TrackerRange = (typeof TRACKER_RANGES)[number]
+
+/** Every day of the year, in order: 365, or 366 in a leap year. */
+export function yearDays(year: number): DayString[] {
+  return Array.from({ length: 12 }, (_, m) => monthDays(`${year}-${pad2(m + 1)}`)).flat()
+}
+
+/** The first day of the range `day` falls in: its Monday, the first of its
+ * month, or the first of its year. */
+export function rangeStart(range: TrackerRange, day: DayString): DayString {
+  if (range === "week") return weekStart(day)
+  if (range === "month") return `${monthOf(day)}-01`
+  return `${day.slice(0, 4)}-01-01`
+}
+
+/** Every day of the range `day` falls in, in order. */
+export function rangeDays(range: TrackerRange, day: DayString): DayString[] {
+  const start = rangeStart(range, day)
+  if (range === "week") return Array.from({ length: 7 }, (_, i) => addDays(start, i))
+  if (range === "month") return monthDays(monthOf(start))
+  return yearDays(Number(start.slice(0, 4)))
+}
+
+/** The first day of the range `n` ranges after the one `day` falls in
+ * (before, when negative): what the arrows move to. */
+export function shiftRange(range: TrackerRange, day: DayString, n: number): DayString {
+  const start = rangeStart(range, day)
+  if (range === "week") return addDays(start, 7 * n)
+  if (range === "month") return `${addMonths(monthOf(start), n)}-01`
+  return `${Number(start.slice(0, 4)) + n}-01-01`
+}
+
+/**
+ * The year as a grid of weeks, Monday first, for the compact year card: each
+ * column seven cells, a day or null before the year begins and after it
+ * ends. 53 or 54 columns.
+ */
+export function yearWeeks(year: number): (DayString | null)[][] {
+  const days = yearDays(year)
+  const lead = weekdayFromMonday(days[0])
+  const cells: (DayString | null)[] = [...Array<null>(lead).fill(null), ...days]
+  while (cells.length % 7 !== 0) cells.push(null)
+  const weeks: (DayString | null)[][] = []
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7))
+  return weeks
+}
+
 /** The locale the labels are spelled in: the app's copy is British, and a
  * fixed locale keeps a label the same in every test environment. */
 const LABEL_LOCALE = "en-GB"
@@ -584,6 +634,35 @@ export function monthLabel(month: MonthString, locale: string = LABEL_LOCALE): s
   return new Date(Date.UTC(year, m - 1, 1)).toLocaleDateString(locale, {
     month: "long",
     year: "numeric",
+    timeZone: "UTC",
+  })
+}
+
+/** A range's name for a heading: "26 Oct – 1 Nov 2026", "October 2026",
+ * "2026". */
+export function rangeLabel(
+  range: TrackerRange,
+  day: DayString,
+  locale: string = LABEL_LOCALE,
+): string {
+  const start = rangeStart(range, day)
+  if (range === "month") return monthLabel(monthOf(start), locale)
+  if (range === "year") return start.slice(0, 4)
+  const end = addDays(start, 6)
+  const short = (d: DayString) =>
+    new Date(utcOf(d)).toLocaleDateString(locale, {
+      day: "numeric",
+      month: "short",
+      timeZone: "UTC",
+    })
+  return `${short(start)} – ${short(end)} ${end.slice(0, 4)}`
+}
+
+/** A month's short name: "Oct". */
+export function monthShortLabel(month: MonthString, locale: string = LABEL_LOCALE): string {
+  const [year, m] = month.split("-").map(Number)
+  return new Date(Date.UTC(year, m - 1, 1)).toLocaleDateString(locale, {
+    month: "short",
     timeZone: "UTC",
   })
 }

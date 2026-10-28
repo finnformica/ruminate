@@ -23,10 +23,14 @@ import {
   monthLabel,
   newTrackerOps,
   periodDays,
+  rangeDays,
+  rangeLabel,
+  rangeStart,
   removeSeriesOps,
   rollup,
   seriesOf,
   setEntryOps,
+  shiftRange,
   stepValue,
   streak,
   targetProgress,
@@ -35,6 +39,8 @@ import {
   updateSeriesOps,
   weekStart,
   weekdayFromMonday,
+  yearDays,
+  yearWeeks,
   type Series,
   type SeriesState,
 } from "./tracker"
@@ -141,6 +147,81 @@ describe("monthGrid", () => {
     expect(grid).toHaveLength(4)
     expect(grid[0][0]).toBe("2027-02-01")
     expect(grid[3][6]).toBe("2027-02-28")
+  })
+})
+
+describe("ranges", () => {
+  it("shows a week of seven days from Monday", () => {
+    // 2026-10-28 is a Wednesday; its week runs Monday 26 Oct to Sunday 1 Nov.
+    expect(rangeStart("week", "2026-10-28")).toBe("2026-10-26")
+    expect(rangeDays("week", "2026-10-28")).toEqual([
+      "2026-10-26",
+      "2026-10-27",
+      "2026-10-28",
+      "2026-10-29",
+      "2026-10-30",
+      "2026-10-31",
+      "2026-11-01",
+    ])
+    // A Sunday belongs to the week before it, and a Monday starts its own.
+    expect(rangeStart("week", "2026-11-01")).toBe("2026-10-26")
+    expect(rangeStart("week", "2026-11-02")).toBe("2026-11-02")
+    // A week that crosses the new year.
+    expect(rangeDays("week", "2027-01-01")[0]).toBe("2026-12-28")
+    expect(rangeDays("week", "2027-01-01")[6]).toBe("2027-01-03")
+    expect(rangeLabel("week", "2026-10-28")).toBe("26 Oct – 1 Nov 2026")
+  })
+
+  it("shows a month as every day of it", () => {
+    expect(rangeStart("month", "2026-10-28")).toBe("2026-10-01")
+    const october = rangeDays("month", "2026-10-28")
+    expect(october).toHaveLength(31)
+    expect(october[30]).toBe("2026-10-31")
+    expect(rangeDays("month", "2026-11-15")).toHaveLength(30)
+    expect(rangeLabel("month", "2026-10-28")).toBe("October 2026")
+  })
+
+  it("shows a year as 365 days, or 366 in a leap year", () => {
+    expect(rangeStart("year", "2026-10-28")).toBe("2026-01-01")
+    const year = rangeDays("year", "2026-10-28")
+    expect(year).toHaveLength(365)
+    expect(year[0]).toBe("2026-01-01")
+    expect(year[364]).toBe("2026-12-31")
+    expect(rangeLabel("year", "2026-10-28")).toBe("2026")
+    // 2028 is a leap year: 29 February is in it. 2100 is not (a century).
+    expect(yearDays(2028)).toHaveLength(366)
+    expect(yearDays(2028)).toContain("2028-02-29")
+    expect(yearDays(2100)).toHaveLength(365)
+    expect(yearDays(2000)).toHaveLength(366)
+  })
+
+  it("moves by the range shown", () => {
+    expect(shiftRange("week", "2026-10-28", 1)).toBe("2026-11-02")
+    expect(shiftRange("week", "2026-10-28", -1)).toBe("2026-10-19")
+    expect(shiftRange("month", "2026-10-28", 1)).toBe("2026-11-01")
+    expect(shiftRange("month", "2026-01-31", -1)).toBe("2025-12-01")
+    expect(shiftRange("year", "2028-02-29", 1)).toBe("2029-01-01")
+    expect(shiftRange("year", "2026-10-28", -1)).toBe("2025-01-01")
+  })
+
+  it("lays a year out in weeks from Monday for the compact card", () => {
+    // 2026 begins on a Thursday: three blanks lead the first week.
+    const weeks = yearWeeks(2026)
+    expect(weeks[0]).toEqual([
+      null,
+      null,
+      null,
+      "2026-01-01",
+      "2026-01-02",
+      "2026-01-03",
+      "2026-01-04",
+    ])
+    expect(weeks).toHaveLength(53)
+    expect(weeks.every((week) => week.length === 7)).toBe(true)
+    expect(weeks.flat().filter(Boolean)).toHaveLength(365)
+    // 2028 is a leap year that begins on a Saturday.
+    expect(yearWeeks(2028).flat().filter(Boolean)).toHaveLength(366)
+    expect(yearWeeks(2028)[0][5]).toBe("2028-01-01")
   })
 })
 
