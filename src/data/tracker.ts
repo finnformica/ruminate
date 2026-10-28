@@ -145,7 +145,9 @@ const numberOr = (value: unknown, fallback: number | null): number | null =>
  * The series a block's props declare, or null when they declare none. Read
  * leniently, as a board's features are: `kind` must be one of the two, and
  * every other key falls back when it is missing or malformed — a hand-written
- * block in the outline is still a series rather than content.
+ * block in the outline is still a series rather than content. The block's
+ * type is never asked: a series reads the same whatever type it is stored
+ * as (a bullet, `SERIES_TYPE`, or a plain row from before this change).
  */
 export function seriesOf(block: { id: string; text: string; props: string | null }): Series | null {
   const props = parseProps(block.props)
@@ -264,8 +266,17 @@ export function trackerSeries(snapshot: GraphSnapshot, trackerId: NoteId): Serie
 // Writing the graph
 // -----------------------------------------------------------------------------
 
-/** The block type a series, or a number entry, is stored as: a plain row,
- * so the outline draws it as one. */
+/** The block type a new series is stored as: the editor's ordinary bullet
+ * list type, so the outline shows its name as a normal bullet (Finn,
+ * 2026-10-28, follow-up to #301). The reader does not look at a block's
+ * type at all (`seriesOf`, below) — only at its props — so a series block
+ * can be any type: a series made before this change, still typed `text`,
+ * reads exactly the same. No migration, as the entry shape's own
+ * transition above took (there are no production trackers yet). */
+const SERIES_TYPE = "ul"
+
+/** The block type a number entry is stored as: a plain row, so the outline
+ * draws it as one. */
 const ROW_TYPE = "text"
 
 /** What **Add series** writes before it is configured. */
@@ -374,7 +385,7 @@ export function addSeriesOps(
     {
       op: "create",
       id: seriesId,
-      type: ROW_TYPE,
+      type: SERIES_TYPE,
       text: patch.name ?? NEW_SERIES_NAME,
       props: propsJson(props),
       notesId: trackerId,

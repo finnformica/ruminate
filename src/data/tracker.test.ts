@@ -400,6 +400,9 @@ describe("writing the graph", () => {
     )
     expect(childIdsOf(snapshot, "t1")).toEqual(["s1", "s2"])
     expect(snapshot.nodes.get("s2")?.notes_id).toBe("t1")
+    // A series is a bullet block, so its name shows as a normal bullet.
+    expect(snapshot.nodes.get("s1")?.type).toBe("ul")
+    expect(snapshot.nodes.get("s2")?.type).toBe("ul")
     expect(parseProps(snapshot.nodes.get("s2")?.props ?? null)).toEqual({
       kind: "number",
       colour: "blue",
@@ -416,6 +419,27 @@ describe("writing the graph", () => {
     // Not a tracker, or an id in use: nothing.
     expect(addSeriesOps(EMPTY, "t1", "s9")).toEqual([])
     expect(addSeriesOps(snapshot, "t1", "s1")).toEqual([])
+  })
+
+  it("reads a series written as a plain text block, from before series were bullets", () => {
+    let snapshot = tracker()
+    snapshot = apply(snapshot, [
+      {
+        op: "create",
+        id: "s1",
+        type: "text",
+        text: "Read",
+        props: JSON.stringify({ kind: "check", colour: "amber" }),
+        notesId: "t1",
+      },
+      { op: "link", source: "t1", destination: "s1", sortKey: "a0" },
+    ])
+    expect(
+      seriesOf({ id: "s1", text: "Read", props: snapshot.nodes.get("s1")?.props ?? null }),
+    ).not.toBeNull()
+    const states = trackerSeries(snapshot, "t1")
+    expect(states).toHaveLength(1)
+    expect(states[0].series).toMatchObject({ name: "Read", kind: "check", colour: "amber" })
   })
 
   it("updates a series's name as text and its keys as props, clearing a null", () => {
