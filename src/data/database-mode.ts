@@ -35,6 +35,7 @@ import type { ReplicaSyncHandle } from "./replica-sync"
 import type { CorpusRows } from "./deleted-notes"
 import type { NoteStore } from "./note-store"
 import { loadFirstScreen, type FirstScreenFrame } from "./first-screen"
+import { keysOfEvents, patchGraph } from "./graph-patch"
 import { isBrowserOffline } from "../utils/network"
 import { sampleViews } from "./sample-graph"
 import {
@@ -351,6 +352,9 @@ interface DatabaseModeRuntime {
   /** The replica's `delta_mat_values` rows the pulls brought since the last
    * fold check: compared with the cache's. */
   replicaValues: DeltaMatValueRow[]
+  /** The cache was cleared under the atom: the next refresh reads the whole
+   * graph, not only what a page names (`refreshTouched`). */
+  wholeReadDue: boolean
 }
 
 let runtime: DatabaseModeRuntime | null = null
@@ -452,6 +456,7 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     foldCheckKeys: noKeys(),
     replicaValues: [],
     replicaRows: noRows(),
+    wholeReadDue: false,
   }
   runtime = activation
   // The sample corpus's views are the signed-out screen's; signed in, the
@@ -877,7 +882,28 @@ async function flushOps(activation: DatabaseModeRuntime) {
  * applied on screen already and will land in the cache on their own flush. */
 async function refreshGraph(activation: DatabaseModeRuntime) {
   if (runtime !== activation || !activation.store) return
+  activation.wholeReadDue = false
   const graph = await activation.store.getGraph()
+  const views = await activation.store.getViews()
+  if (runtime !== activation) return
+  jotai().set(databaseGraphAtom, applyOps(graph, activation.pendingOps, Date.now()))
+  jotai().set(viewsAtom, applyViewRows(viewMapOf(views), activation.pendingViews))
+}
+
+/** Re-read only what a pulled page changed (`patchGraph`): the rows its
+ * events name. Every other row keeps its object, so the notes and the block
+ * index build again only what changed. With ops still pending, the atom is
+ * ahead of the cache, and after a clear it is behind it: then the whole graph
+ * is read instead. Ops that arrive
+ * during the read are applied on top, as `refreshGraph` does. */
+async function refreshTouched(activation: DatabaseModeRuntime, events: readonly KeyEvent[]) {
+  if (runtime !== activation || !activation.store) return
+  const whole = jotai().get(databaseGraphWholeAtom)
+  if (activation.wholeReadDue || activation.pendingOps.length > 0 || !whole) {
+    return refreshGraph(activation)
+  }
+  const before = jotai().get(databaseGraphAtom)
+  const graph = await patchGraph(activation.store, before, keysOfEvents(events))
   const views = await activation.store.getViews()
   if (runtime !== activation) return
   jotai().set(databaseGraphAtom, applyOps(graph, activation.pendingOps, Date.now()))
@@ -1168,6 +1194,7 @@ function runPull(activation: DatabaseModeRuntime) {
       // cache generation, then the full corpus of the new one.
       if (replicaIdentityChanged(await store.getMeta(REPLICA_ID_KEY), body.replica_id)) {
         await store.clear()
+        activation.wholeReadDue = true
         await resetCursors(store)
         if (useSince) body = await activation.source.pullFull()
         if (runtime !== activation) return
@@ -1247,7 +1274,7 @@ async function pullEventLog(activation: DatabaseModeRuntime, store: NoteStore) {
         if (stamp !== null) activation.lastStamp = receiveHlc(activation.lastStamp, stamp)
       }
       await saveStamp(activation, store)
-      await refreshGraph(activation)
+      await refreshTouched(activation, events)
       if (runtime !== activation) return
       changed = true
     }

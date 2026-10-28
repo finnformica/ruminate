@@ -388,8 +388,20 @@ export interface GraphSnapshot {
   parentLinks: Map<string, LinkRow[]>
 }
 
+/** Sibling order: by sort key. Deterministic even under a sort-key collision
+ * (concurrent same-gap inserts on two devices): destination id breaks the
+ * tie. */
+export const bySibling = (a: LinkRow, b: LinkRow) =>
+  a.sort_key < b.sort_key
+    ? -1
+    : a.sort_key > b.sort_key
+      ? 1
+      : a.destination_id < b.destination_id
+        ? -1
+        : 1
+
 /** Parent order: by source id — unique per destination, so never a tie. */
-const byParent = (a: LinkRow, b: LinkRow) =>
+export const byParent = (a: LinkRow, b: LinkRow) =>
   a.source_id < b.source_id ? -1 : a.source_id > b.source_id ? 1 : 0
 
 /** The reverse index of a set of child-link lists: the same rows keyed by
@@ -439,19 +451,7 @@ export function buildGraphSnapshot(nodes: NodeRow[], links: LinkRow[]): GraphSna
     if (list) list.push(link)
     else childLinks.set(link.source_id, [link])
   }
-  for (const list of childLinks.values()) {
-    // Deterministic sibling order even under a sort-key collision (concurrent
-    // same-gap inserts on two devices): destination id breaks the tie.
-    list.sort((a, b) =>
-      a.sort_key < b.sort_key
-        ? -1
-        : a.sort_key > b.sort_key
-          ? 1
-          : a.destination_id < b.destination_id
-            ? -1
-            : 1,
-    )
-  }
+  for (const list of childLinks.values()) list.sort(bySibling)
   return { nodes: nodeMap, childLinks, parentLinks: indexParents(childLinks) }
 }
 

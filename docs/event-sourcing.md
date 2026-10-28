@@ -335,14 +335,31 @@ does not wait for the whole graph (`src/data/first-screen.ts`).
    closed, and each note gets only its first child (`firstChildLinksOf`,
    one index seek per note), which draws the chevron. A note's top-level
    blocks can be most of the corpus.
-2. **The whole graph.** After the browser paints (`nextPaint`), the
+2. **A limit in display order.** Each frame reads at most 300 rows
+   (`FIRST_SCREEN_ROWS`), the first in display order, so the top of the
+   page is whole and a long note costs no more than a short one. Each
+   round reads, in one batch, the lists of all the first rows not read
+   yet; a round adds rows only deeper down, so a frame takes at most
+   depth + 1 rounds. In the Root frame, the first 300 notes get their
+   first child. The rows past the limit are not drawn until the whole
+   graph lands.
+3. **The whole graph.** After the browser paints (`nextPaint`), the
    runtime reads the whole live graph (`getGraph`), as before, and it
-   replaces the first screen. Every later read (a pull, a repair) is the
-   whole graph.
-3. **No writes in between.** Until the whole graph is read
+   replaces the first screen. A repair, and a pull after the cache was
+   cleared, read the whole graph again.
+4. **No writes in between.** Until the whole graph is read
    (`databaseGraphWholeAtom`), the editor is read-only and the runtime
    refuses ops. A delete counts a block's places and reaches across notes
    (`deleteBlockOps`, `deleteSubtreeOps`), so it must see the whole graph.
+5. **A pulled page reads what it names.** After each page of the events
+   pull, the runtime reads only the rows the page's events name, and the
+   links at each named node (`patchGraph`, `src/data/graph-patch.ts`). It
+   sorts again only the lists those links are in. Every other row keeps
+   its object, so the notes and the block index build again only what
+   changed. Before, each page read the whole graph, and this device's own
+   events come back in the pull, so that was after most edits. With ops
+   still pending, the atom is ahead of the cache, and the whole graph is
+   read instead.
 
 What still reads the whole graph, and why: everything that derives from
 `graphSnapshotAtom` reads all of it — the notes (`notesAtom`: each note's
@@ -350,8 +367,8 @@ text, for search, and its dates, for the calendar), the block index (search,
 `type:` queries, the sidebar's block views), backlinks and up pivots
 (`parentLinks`), the boards, the delete rules, and the writes. With the
 first screen they read part of the graph for the moment before the whole
-graph lands. To make them lazy is a separate change: each needs an index
-of its own in the store.
+graph lands. To make them lazy is a separate change: search, parent paths
+and counts each need an index of their own in the store.
 
 An expand reads nothing. A row the first screen draws closed has its
 children in memory, and after the whole graph lands every row has. A lazy
@@ -363,20 +380,23 @@ The boot writes one line to the console with its two times:
 
 Cost, measured 2026-10-28 with `node:sqlite` on a store file, the median of
 six reloads. The browser's OPFS store is slower, and the console line above
-gives its times.
+gives its times. "30 times m93" is 750 notes of 44 blocks and one long note
+of 3,000 rows.
 
-| corpus                         | before: first screen | Root  | a note | whole graph | expand |
-| ------------------------------ | -------------------- | ----- | ------ | ----------- | ------ |
-| m93: 1,125 nodes, 17,000 edits | 23.5 ms              | 2 ms  | 2.1 ms | 20 ms       | 0.3 ms |
-| 30 times m93: 33,750 blocks    | 987 ms               | 40 ms | 15 ms  | 913 ms      | 0.3 ms |
+| corpus                         | before: first screen | Root    | a note | long note | whole graph | pulled page (before) | pulled page |
+| ------------------------------ | -------------------- | ------- | ------ | --------- | ----------- | -------------------- | ----------- |
+| m93: 1,125 nodes, 17,000 edits | 18.8 ms              | 1.8 ms  | 2.1 ms | none      | 21 ms       | 17 ms                | 1.9 ms      |
+| 30 times m93: 36,750 blocks    | 866 ms               | 20.5 ms | 9.7 ms | 37.9 ms   | 802 ms      | 869 ms               | 69 ms       |
 
 - **Before:** the open, the whole graph, the notes and the block index.
-- **Root, a note:** the first screen of the Root frame (depth 1), or of a
-  note (depth 2), and the notes built from it.
+- **Root, a note, long note:** the first screen of the Root frame
+  (depth 1), or of a note (depth 2), and the notes built from it. Without
+  the limit the long note took 64.5 ms, and Root 40.7 ms.
 - **Whole graph:** the read after the first screen, with the notes and the
   block index.
-- **Expand:** the lazy read of one block's children. In the app an expand
-  reads nothing (above).
+- **Pulled page:** a page with one text edit, then the notes and the block
+  index: the whole graph read again (before), or `patchGraph` (33 ms of
+  the 69 at the larger size; the rest is the notes builder).
 
 ### The fold check
 
