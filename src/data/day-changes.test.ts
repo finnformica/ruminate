@@ -82,7 +82,7 @@ function writer(tz: number | null = 0, device = "dev.tab") {
         pinned: true,
         sort_key: null,
       }),
-    /** A row the replica seeded the log with (`planReconcile`): stamped with
+    /** A row the genesis snapshot recorded (migration 0030): stamped with
      * its last save, no zone, batch `snapshot`. */
     snapshot: (at: number, id: string, text: string, note: string | null, deletedAt?: number) => ({
       ...make(at, "block", id, "create", {

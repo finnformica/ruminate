@@ -7,7 +7,7 @@ import { expandLog } from "../../src/data/key-events"
 import type { SqlDriver } from "../../src/data/sql-driver"
 import { ensureTenantMeta, forTenant, type TenantDb } from "../tenancy-db"
 import type { Env } from "../types"
-import { planKeyAppend, planReconcile } from "./event-log"
+import { planKeyAppend } from "./event-log"
 import { corpusPullFull, corpusPullSince, corpusPut, corpusStatus } from "./replica-corpus"
 import {
   REPLICA_PROTOCOL_HEADERS,
@@ -132,8 +132,8 @@ describe("the planned write", () => {
   const keys = expandLog(events)
 
   it("every statement names its tenant with the :tenant token, never a parameter", () => {
-    const statements = [...planReconcile(write), ...planKeyAppend(keys, write)]
-    expect(statements).toHaveLength(16)
+    const statements = planKeyAppend(keys, write)
+    expect(statements).toHaveLength(8)
     for (const statement of statements) {
       expect(statement.sql).toContain("user_id")
       expect(statement.sql).toContain(":tenant")
@@ -967,11 +967,11 @@ describe("tenant scoping — the adversarial suite", () => {
       expect(log.events).toEqual([])
     })
 
-    it("the pull of rows reconciles the log once; a page of the log does not", async () => {
-      // A row written around the log (an old Worker, the console) holds a
-      // seq the log has no event at. Each page of the log used to reconcile,
-      // which cost a fresh device's 27 pages a scan of `events` each; now
-      // the pull of rows that precedes them does, once.
+    it("neither the pull of rows nor a page of the log reconciles: a row around the log stays out", async () => {
+      // A row written around the log (the console) holds a seq the log has no
+      // event at. Until migration 0030 the pull of rows recorded it as a
+      // snapshot, and read the whole log four times to find it; now the
+      // rows are served as they are and the log is read as it is.
       const { env, driver } = await seededEnv()
       await driver.exec(
         "INSERT INTO nodes (user_id, id, type, text, props, updated_at, seq) " +
@@ -988,10 +988,7 @@ describe("tenant scoping — the adversarial suite", () => {
       }
       expect(pulled.nodes.some((node) => node.id === "blk_aroundlog1")).toBe(true)
       const after = await page()
-      // The snapshot's create, read per key: the create row and its fields.
-      expect(
-        after.events.filter((event) => event.entity_id === "blk_aroundlog1").map((e) => e.action),
-      ).toEqual(["create", "set", "set", "set"])
+      expect(after.events.some((event) => event.entity_id === "blk_aroundlog1")).toBe(false)
     })
 
     it("one tenant's log and past are not another's to read", async () => {

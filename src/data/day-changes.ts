@@ -131,7 +131,7 @@ export interface Sitting {
   notes: NoteChange[]
 }
 
-/** The batch the replica seeds the log with (`planReconcile`). */
+/** The batch of the genesis snapshot of a row (migration 0030). */
 const SNAPSHOT_BATCH = "snapshot"
 const isSnapshot = (event: LoggedKeyEvent) => event.batch === SNAPSHOT_BATCH
 /** The old-shaped event a row is one key of: what the calendar counts as one

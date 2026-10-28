@@ -151,7 +151,7 @@ type EventOf<E extends Entity, A extends Action, P> = EventEnvelope & {
 }
 
 /** A `create` holds every field. It may add `deleted_at` when the entity
- * arrives already tombstoned — a snapshot of a row that was (`planReconcile`),
+ * arrives already tombstoned — a genesis snapshot of a row that was (migration 0030),
  * or a block made and deleted before its device next pushed: there is a final
  * state to record and no history to replay. */
 type CreatePatch<E extends Entity> = FieldsOf<E> & { deleted_at?: number | null }
