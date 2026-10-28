@@ -43,22 +43,32 @@ held per key in the event log (docs/event-sourcing.md, "Per-key events"),
 so two devices that change two settings offline both keep their change. An
 entry carries no keys at all: its text is the truth. No table is added.
 
-| on the page | in the graph                                                                                                                                                                                                                                                                                                                                                                               |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| the tracker | a note whose root node is of type `tracker`                                                                                                                                                                                                                                                                                                                                                |
-| a series    | a direct child of the page whose props carry `kind`: `check` or `number`. Its text is its name; the block is its identity. Its settings are its other keys: `colour` (a palette name, below), `unit`, `min`, `max`, `step`, `target`, `period` (`day`, `week` or `month`: what the target is for) and `rollup` (`sum` or `avg`: how a number series adds up). A key not set is the default |
-| an entry    | a child of a series, one per day, in date order. Under a check series a to-do block whose text is the day (`YYYY-MM-DD`, the viewer's local day): ticked (`done`) is done, open (`todo`) is not, missing is not. Under a number series a plain block whose text is the day, a separator and the value with its unit (`2026-10-28 · 5 km`); the first number after the day is the value     |
+A series's block type is never read: `trackerSeries` reads a series from a
+child's props alone (`seriesOf`), so a child of any type is a series the
+moment its props carry `kind`. **Add series** writes a bullet block
+(`SERIES_TYPE`, `src/data/tracker.ts`, the editor's ordinary bullet list
+type, `ul`) so the series name shows as a normal bullet in the note's
+outline (Finn, follow-up to #301, 2026-10-28). A series from before that
+change, still typed `text`, keeps reading as one — no migration, as there
+are no production trackers yet (the same reasoning behind the entry
+shape's own transition below).
+
+| on the page | in the graph                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the tracker | a note whose root node is of type `tracker`                                                                                                                                                                                                                                                                                                                                                                           |
+| a series    | a direct child of the page whose props carry `kind`: `check` or `number`, whatever the block's type. Its text is its name; the block is its identity. Its settings are its other keys: `colour` (a palette name, below), `unit`, `min`, `max`, `step`, `target`, `period` (`day`, `week` or `month`: what the target is for) and `rollup` (`sum` or `avg`: how a number series adds up). A key not set is the default |
+| an entry    | a child of a series, one per day, in date order. Under a check series a to-do block whose text is the day (`YYYY-MM-DD`, the viewer's local day): ticked (`done`) is done, open (`todo`) is not, missing is not. Under a number series a plain block whose text is the day, a separator and the value with its unit (`2026-10-28 · 5 km`); the first number after the day is the value                                |
 
 So a tracker's outline reads, with the series's keys shown as the
 outline's props:
 
 ```
 Habits
-  Read                      kind: check · colour: green · target: 20 · period: month
+  - Read                    kind: check · colour: green · target: 20 · period: month
     [x] 2026-10-26
     [x] 2026-10-27
     [ ] 2026-10-28
-  Run                       kind: number · colour: blue · unit: km · step: 0.5 · target: 15 · period: week
+  - Run                     kind: number · colour: blue · unit: km · step: 0.5 · target: 15 · period: week
     2026-10-27 · 3 km
     2026-10-28 · 5 km
 ```
@@ -82,11 +92,12 @@ and no readable text, is still read from those and left as it is; there
 are no production trackers, so there is no migration.
 
 The series's keys have a zod schema in the per-block-type validation
-(`validateProps`, `src/data/key-events.ts`): a series is a text block, so a
-`text` block's `kind`, `colour`, `period`, `rollup` and `step` are held to
-their shapes, and the per-key `set` events are held to the same
-(`KNOWN_PROP_VALUES`). The replica refuses a push that breaks them, as PR 1
-does for every known key. An entry has no keys to validate.
+(`validateProps`, `src/data/key-events.ts`): a series is a bullet block (or,
+from before this change, a text block), so a `ul` or `text` block's `kind`,
+`colour`, `period`, `rollup` and `step` are held to their shapes, and the
+per-key `set` events are held to the same (`KNOWN_PROP_VALUES`). The replica
+refuses a push that breaks them, as PR 1 does for every known key. An entry
+has no keys to validate.
 
 ## The page
 

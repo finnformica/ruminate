@@ -767,9 +767,10 @@ const nullableInteger = z.int().nullable()
  * `src/data/tracker.ts`). Other keys are allowed with any JSON value, held
  * to `KEY_PATTERN`. */
 const BLOCK_PROP_SCHEMAS = {
-  // A tracker's series is a text block (docs/trackers.md); its entries are
-  // text, with no keys of their own.
+  // A tracker's series is a bullet block (docs/trackers.md), or a text block
+  // from before 2026-10-28; its entries are text, with no keys of their own.
   text: trackerSeriesKeys,
+  ul: trackerSeriesKeys,
   note: z.object({
     title: z.string().optional(),
     font: z.string().optional(),

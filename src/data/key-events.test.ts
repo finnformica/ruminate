@@ -499,8 +499,13 @@ describe("validation", () => {
     expect(validateProps("image", { align: "left", size: 50, custom: [1] })).toEqual({ ok: true })
     expect(validateProps("image", { align: "middle" })).toMatchObject({ ok: false })
     expect(validateProps("note", { "bad key": 1 })).toMatchObject({ ok: false })
-    // A tracker's series (docs/trackers.md): a text block held to its keys.
-    // An entry is text, with no keys of its own.
+    // A tracker's series (docs/trackers.md): a bullet block held to its
+    // keys, or a text block from before series were bullets. An entry is
+    // text, with no keys of its own.
+    expect(
+      validateProps("ul", { kind: "number", colour: "blue", unit: "km", target: 5, step: 0.5 }),
+    ).toEqual({ ok: true })
+    expect(validateProps("ul", { kind: "habit" })).toMatchObject({ ok: false })
     expect(
       validateProps("text", { kind: "number", colour: "blue", unit: "km", target: 5, step: 0.5 }),
     ).toEqual({ ok: true })
