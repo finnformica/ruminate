@@ -327,17 +327,25 @@ function YearHeatmap({
               role="columnheader"
               className="overflow-visible whitespace-nowrap text-xs leading-4 text-text-secondary"
             >
-              {first ? monthShortLabel(monthOf(first)) : null}
+              {/* A phone has room for a letter over each month, not a name. */}
+              {first ? (
+                <>
+                  <span className="sm:hidden">{monthShortLabel(monthOf(first)).slice(0, 1)}</span>
+                  <span className="hidden sm:inline">{monthShortLabel(monthOf(first))}</span>
+                </>
+              ) : null}
             </div>
           )
         })}
       </div>
       {WEEKDAY_NAMES.map((weekday, d) => (
         <div key={weekday} role="row" aria-label={weekday} className="contents">
+          {/* No height of its own: the row is a cell high, however small,
+              and the letter is centred on it. */}
           <div
             role="rowheader"
             aria-label={weekday}
-            className="pr-1 text-xs leading-none text-text-secondary"
+            className="flex h-0 items-center self-center pr-1 text-xs leading-none text-text-secondary"
           >
             {d % 2 === 0 ? WEEKDAY_LABELS[d] : null}
           </div>
