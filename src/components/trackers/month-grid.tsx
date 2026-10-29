@@ -341,13 +341,15 @@ function YearHeatmap({
       {WEEKDAY_NAMES.map((weekday, d) => (
         <div key={weekday} role="row" aria-label={weekday} className="contents">
           {/* No height of its own: the row is a cell high, however small,
-              and the letter is centred on it. */}
+              and the letter is centred on it. A phone's rows are too thin
+              for letters at all, but the header keeps its place in the
+              grid. */}
           <div
             role="rowheader"
             aria-label={weekday}
-            className="flex h-0 items-center self-center pr-1 text-xs leading-none text-text-secondary"
+            className="flex h-0 items-center self-center text-xs leading-none text-text-secondary sm:pr-1"
           >
-            {d % 2 === 0 ? WEEKDAY_LABELS[d] : null}
+            {d % 2 === 0 ? <span className="hidden sm:inline">{WEEKDAY_LABELS[d]}</span> : null}
           </div>
           {weeks.map((week, w) => {
             const day = week[d]
