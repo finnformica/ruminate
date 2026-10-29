@@ -579,6 +579,131 @@ the drop waits a week and runs last.
    link's id and as a row (this document), for the edge kinds the schema
    reserved?
 
+10. **A delete implies its links are dead.** Section 12 recommends it: a
+    block delete writes only the block's `deleted` key, links are retained,
+    and every reader drops a link with a dead end. Confirm.
+
+## 12. A delete implies its links are dead (Finn, 2026-10-28)
+
+Finn asked: "Do we need to delete the link? We can just leave the link
+hanging and discard it in the rollup?" This section evaluates the rule
+**a delete of a block implies its links are dead**: the delete writes only
+the block's `deleted` key, and the client rollup and every server reader
+drop a link whose source or destination is deleted.
+
+### Today
+
+- `deleteBlockOps` (`src/data/ops.ts`) writes one `unlink` per parent link
+  from outside the deleted set, then the `delete`, then `strandedBlankOps`.
+  `deleteSubtreeOps` does the same for a subtree. In the log that is one
+  link `delete` per parent plus the block `delete`: 98 of the 175 block
+  delete batches on production carry a link delete beside the block's.
+- `deleteNoteOps` writes **deletes only**. It leaves every link in place,
+  and `restoreNoteOps` (`src/data/deleted-notes.ts`) depends on that: it
+  re-links a restored note along the links that were kept. So the rule
+  Finn proposes is already in force for notes, and the readers already
+  live with it: production holds 184 live links with a tombstoned end.
+- Every reader already drops a link with a dead end. `buildGraphSnapshot`
+  skips it (docs/graph-storage.md, "Read-time discard, never write-time
+  cascade"). The client's lazy reads (`LIVE_LINKS`) exclude it in SQL. The
+  MCP loaders join the far node with `deleted_at IS NULL` at every hop
+  (`linksFrom`, `linksBelow`, `linksAbove`, `scopeNodeIds`). The share
+  closure joins `nodes c … AND c.deleted_at IS NULL` at every hop and
+  `sliceRows` keeps only links with both ends in the closure. `corpusStatus`
+  joins both ends. `search` reads the in-memory snapshot.
+- `applyOps` on the in-memory graph already treats a `delete` this way: "a
+  deleted node takes its links out of the snapshot with it, exactly as
+  read-time discard would".
+
+So the unlinks a block delete writes are redundant for every reader. They
+exist for the log: they say "X left P" in so many words.
+
+### The rule, point by point
+
+**The filter or join in each reader.** Nothing new. Each reader keeps the
+far-end check it has today, moved to the cache: the children read of
+section 2 reads the link's `deleted` row and the destination's `deleted`
+row, one primary-key seek each per child. The parents read does the same
+on the source. A recursive walk joins the `deleted` row of the node at each
+hop, as it joins `nodes.deleted_at` today. The client rollup drops a link
+whose end is missing from the live node map, as `buildGraphSnapshot` does.
+The one invariant, stated once in `cache-rows.ts` and pinned by a test:
+**a link is drawn only when its own `deleted` is `null` and both ends'
+`deleted` are `null`.** Under the rule this invariant is the whole
+definition of a dead link, so a reader that forgets the far-end check is a
+bug the tests catch, not a slow leak as it is today.
+
+**Dead link rows in the cache.** Rows are never deleted either way. Under
+the unlink rule a deleted block's parent links are tombstoned rows; under
+this rule they are live rows into a dead block. Both cost 5 rows per link
+and both are read by the children read of the parent and dropped. The
+count is the same: one row set per link ever made. No compaction. The rows
+into a dead block are the positions a restore puts it back into, which is
+the reason docs/graph-storage.md gives for retaining them.
+
+**A concurrent link to a deleted block.** Device A deletes X. Device B,
+offline, pastes X as a link under P2 (`link` op: a link `create`). Both
+land. Under both rules the link P2→X is live and X is dead, so nothing
+shows it. Under this rule a later restore of X shows it under P2 and under
+its old parents; under the unlink rule only under P2, because the old
+parent links were tombstoned and a plain revive of X does not revive them.
+A concurrent reorder of P→X on B (`set sort_key`) is a different key from
+the link's `deleted`, so it lands on the link row under both rules; under
+this rule the link stays live and the sort key counts when X comes back.
+
+**Undo and restore of a deleted block.** Under this rule a deleted block
+comes back with one event: a `restore` (or a `create`) of the block, and
+every link it had is live and in place. Under the unlink rule an undo
+needs the inverse batch, one link revive per old parent, worked out
+against the graph as it stood (`src/hooks/board.ts`, `undoable`, does
+this for a board's deletes). The server's `/restore` (`planRestoreSubtree`)
+restores each link that differs between then and now; under this rule the
+parent links do not differ, so it writes fewer events and the result is
+the same. A block removed from the outline earlier (an `unlink` through
+`docToOps`) stays out: that link was tombstoned in its own right. A "Recently
+deleted" list for blocks, like the one for notes, becomes the same walk.
+
+**The delete-rescue of children.** `strandedBlankOps` works on the
+in-memory parent index after the batch's own ops: a deleted block's child
+links count as gone (`loosen`), a blank child nothing else holds is
+deleted, a child with content goes to the basket by reachability. None of
+that reads the parent links of the deleted block, so it is unchanged. The
+basket itself is reachability from the notes (`unassignedIds`), which
+already ignores a dead parent.
+
+**History and the calendar.** The log loses the explicit "X left P" rows.
+A day's diff (`src/data/day-changes.ts`) folds before and after and walks
+each note, so a deleted block drops out of the walk either way and is
+marked as removed. The link's own history (`GET /events?entity=link`) no
+longer shows a delete for a block delete; it shows the block's.
+
+**What changes in code, if adopted.** `deleteBlockOps` and
+`deleteSubtreeOps` stop writing unlinks (the `delete` of a link stays, for
+`docToOps`'s remove-a-row and the basket's unlink). The MCP `delete_block`
+tool (`worker/mcp/tools.ts`) uses the same functions. Their tests change.
+One test pins the invariant above on the assembler, the children read and
+the recursive walks. Nothing in the migration changes: the backfill carries
+the tombstoned links as they are.
+
+### Trade-offs
+
+| for the rule                                                                   | against the rule                                                                  |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| One event per deleted block, not one per parent plus one                       | The log no longer says "X left P" for a delete; a reader infers it from the block |
+| Undo and restore are one event, and the block comes back in every place it was | A reader that reads links alone must check both ends (it must today, for notes)   |
+| Notes and blocks delete by one rule; `restoreNoteOps` is the model             | Link rows into dead blocks stay live in the cache (today they stay as tombstones) |
+| Every reader already does the far-end check                                    | One more `deleted` seek per child in the children read (today a `nodes` join)     |
+
+### Recommendation
+
+Adopt the rule. A delete writes the block's `deleted` key and nothing else.
+Links are retained, live, and every reader drops a link with a dead end by
+the one invariant above. The readers already pay for that check, the note
+delete already works this way, and the restore path gets simpler. Keep
+`unlink` for removing a row from the outline, which is a different act
+(the block survives in the basket). No compaction. Finn confirms in
+section 11, question 10.
+
 ## Decisions in one list
 
 - Two tables, same shape on the server and on every device: `events_log`
@@ -600,3 +725,5 @@ the drop waits a week and runs last.
   rises.
 - The client boots from one `GROUP BY` statement and patches only the
   touched entities after each batch.
+- A delete of a block writes only its `deleted` key. Its links stay live
+  and every reader drops a link with a dead end (section 12, recommended).
