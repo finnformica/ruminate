@@ -143,8 +143,9 @@ has no keys to validate.
   **Grid** (`journal-grid.tsx`): one table, a row per series with its
   colour, name and rollup at the left, a column per day with its weekday
   and number on top, as a bullet journal's habit page is drawn. A tap on a
-  grid cell logs as a tap on a card's cell does. On a narrow screen the
-  days scroll sideways under a series column that stays put, and the grid
+  grid cell logs as a tap on a card's cell does. On a phone a week
+  fits beside the series column with smaller cells; a month or a year
+  scrolls sideways under a series column that stays put, and the grid
   opens scrolled to today. The switches are page state: a reload shows
   this month as cards.
 - The range shown moves with the arrows beside its name, by a week, a

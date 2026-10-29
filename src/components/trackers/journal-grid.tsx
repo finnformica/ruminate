@@ -16,14 +16,16 @@ import { cx } from "../../utils/cx"
 import { Surface } from "../ui/surface"
 import { ColourDot, DayCell } from "./month-grid"
 
-/** A day's column and the cell in it, per range: a week has room for big
- * cells, a year needs small ones. The column is the cell plus 2 px, which
- * is the gap between cells, so the sticky series column covers what
- * scrolls under it. */
-const SIZES: Record<TrackerRange, { column: number; cell: string }> = {
-  week: { column: 42, cell: "size-10" },
-  month: { column: 26, cell: "size-6" },
-  year: { column: 18, cell: "size-4" },
+/** A day's column (`--day-column`) and the cell in it, per range: a week
+ * has room for big cells, a year needs small ones. The column is the cell
+ * plus 2 px, which is the gap between cells, so the sticky series column
+ * covers what scrolls under it. A week on a phone (390 px) takes smaller
+ * cells, so its seven days fit beside the series column with no sideways
+ * scroll (Finn, 2026-10-29). */
+const SIZES: Record<TrackerRange, { column: string; cell: string }> = {
+  week: { column: "[--day-column:34px] sm:[--day-column:42px]", cell: "size-8 sm:size-10" },
+  month: { column: "[--day-column:26px]", cell: "size-6" },
+  year: { column: "[--day-column:18px]", cell: "size-4" },
 }
 
 /**
@@ -71,8 +73,8 @@ export function JournalGrid({
       return
     }
     const fixed = names?.offsetWidth ?? 0
-    box.scrollLeft = head.offsetLeft - fixed - (box.clientWidth - fixed - column) / 2
-  }, [days, today, column])
+    box.scrollLeft = head.offsetLeft - fixed - (box.clientWidth - fixed - head.offsetWidth) / 2
+  }, [days, today])
 
   const sticky = "sticky left-0 z-10 bg-bg-card pl-3 pr-2"
   return (
@@ -81,8 +83,8 @@ export function JournalGrid({
         <div
           role="grid"
           aria-label="Series by day"
-          className="relative grid w-max items-center gap-y-0.5"
-          style={{ gridTemplateColumns: `auto repeat(${days.length}, ${column}px)` }}
+          className={cx("relative grid w-max items-center gap-y-0.5", column)}
+          style={{ gridTemplateColumns: `auto repeat(${days.length}, var(--day-column))` }}
         >
           {range === "year" ? (
             <div role="row" className="contents">
