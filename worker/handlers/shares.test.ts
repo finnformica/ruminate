@@ -2,8 +2,10 @@
 // tombstones included) on purpose: that is how it proves the slice holds.
 import { beforeEach, describe, expect, it } from "vitest"
 import migration0012 from "../../migrations/0012_shares.sql?raw"
+import migration0015 from "../../migrations/0015_views.sql?raw"
 import migration0017 from "../../migrations/0017_share_views.sql?raw"
 import migration0020 from "../../migrations/0020_share_revoked_by.sql?raw"
+import migration0031 from "../../migrations/0031_drop_views.sql?raw"
 import { createMcpTestEnv, type McpTestEnv } from "../mcp/test-support"
 import type { SharesListBody, SliceBody } from "../shares/wire"
 import { buildGraphSnapshot, noteDoc } from "../../src/data/graph"
@@ -151,9 +153,13 @@ async function ownerNode(id: string): Promise<Record<string, unknown> | undefine
 
 beforeEach(async () => {
   harness = await createMcpTestEnv()
+  // Production's order: 0017 ran while `views` was there, and 0031 dropped
+  // it after (docs/removing-views.md).
   await harness.control.execScript(migration0012)
+  await harness.control.execScript(migration0015)
   await harness.control.execScript(migration0017)
   await harness.control.execScript(migration0020)
+  await harness.control.execScript(migration0031)
   // `addUser` records `u<id>@example.com` — what the sign-in callback would.
   await harness.addUser(OWNER)
   await harness.addUser(GRANTEE)
@@ -444,8 +450,9 @@ describe("slice", () => {
     expect(sliceIds(body)).not.toContain(A3)
   })
 
-  it("is the owner's view of the root: their filter and sort ride along, and follow their edits", async () => {
-    // The owner saved a view of NOTE_A before sharing it.
+  it("names its root, with no filter and no sort — a view row the owner still pushes changes nothing", async () => {
+    const id = await share()
+    // A build from before docs/removing-views.md pushes a saved filter.
     await corpusPut(
       harness.tenant(OWNER),
       {
@@ -465,111 +472,16 @@ describe("slice", () => {
       },
       T0 + 1,
     )
-    const id = await share()
-    // Creating the share kept the view the owner had, and answers with it.
+    const bare = { id: NOTE_A, rootId: NOTE_A, filter: null, sort: null }
     const listed: SharesListBody = await bodyOf(await send(apiRequest("GET")))
-    expect(listed.given[0].view).toEqual({
-      id: NOTE_A,
-      rootId: NOTE_A,
-      filter: "type:todo",
-      sort: null,
-    })
-    // The grantee sees the same view, on the listing and on the slice —
-    // and the whole subtree beneath it: the filter is how it opens, not
-    // what it holds.
+    expect(listed.given[0].view).toEqual(bare)
     const theirs: SharesListBody = await bodyOf(
       await send(apiRequest("GET", "", undefined, "grantee")),
     )
-    expect(theirs.received[0].view.filter).toBe("type:todo")
-    let body: SliceBody = await bodyOf(await slice(id))
-    expect(body.view).toEqual({ id: NOTE_A, rootId: NOTE_A, filter: "type:todo", sort: null })
-    expect(sliceIds(body)).toEqual([A1, A2, A3, SHARED_TWICE, NOTE_A].sort())
-
-    // The owner changes their view: the share follows, with no write to it.
-    await corpusPut(
-      harness.tenant(OWNER),
-      {
-        nodes: [],
-        links: [],
-        views: [
-          {
-            id: NOTE_A,
-            root_id: NOTE_A,
-            filter: null,
-            sort: "text:desc",
-            pinned: true,
-            sort_key: null,
-            updated_at: T0 + 2,
-          },
-        ],
-      },
-      T0 + 2,
-    )
-    body = await bodyOf(await slice(id))
-    expect(body.view).toEqual({ id: NOTE_A, rootId: NOTE_A, filter: null, sort: "text:desc" })
-  })
-
-  it("makes the owner's view where they had none, with a seq their devices will pull", async () => {
-    const before = await harness.control.exec(
-      "SELECT id FROM views WHERE user_id = ?1 AND id = ?2",
-      [OWNER, NOTE_A],
-    )
-    expect(before).toEqual([])
-    await share()
-    const after = await harness.control.exec(
-      "SELECT id, root_id, filter, sort, pinned, seq, deleted_at FROM views WHERE user_id = ?1 AND id = ?2",
-      [OWNER, NOTE_A],
-    )
-    expect(after).toEqual([
-      {
-        id: NOTE_A,
-        root_id: NOTE_A,
-        filter: null,
-        sort: null,
-        pinned: 0,
-        // Past every row the corpus holds, so a since-pull steps onto it.
-        seq: expect.any(Number),
-        deleted_at: null,
-      },
-    ])
-    const [{ top }] = await harness.control.exec(
-      "SELECT MAX(seq) AS top FROM nodes WHERE user_id = ?1",
-      [OWNER],
-    )
-    expect(Number(after[0].seq)).toBeGreaterThan(Number(top))
-    // Sharing the same node again writes nothing over it.
-    await share(["read"], NOTE_A, "u9@example.com")
-    expect(
-      await harness.control.exec("SELECT COUNT(*) AS n FROM views WHERE user_id = ?1", [OWNER]),
-    ).toEqual([{ n: 1 }])
-  })
-
-  it("keeps serving the subtree when the owner clears their view (a tombstone still names the root)", async () => {
-    const id = await share()
-    await corpusPut(
-      harness.tenant(OWNER),
-      {
-        nodes: [],
-        links: [],
-        views: [
-          {
-            id: NOTE_A,
-            root_id: NOTE_A,
-            filter: "type:todo",
-            sort: null,
-            pinned: false,
-            sort_key: null,
-            updated_at: T0 + 3,
-            deleted_at: T0 + 3,
-          },
-        ],
-      },
-      T0 + 3,
-    )
+    expect(theirs.received[0].view).toEqual(bare)
     const body: SliceBody = await bodyOf(await slice(id))
+    expect(body.view).toEqual(bare)
     expect(sliceIds(body)).toEqual([A1, A2, A3, SHARED_TWICE, NOTE_A].sort())
-    // ...in document order: a cleared view lends no filter.
-    expect(body.view).toEqual({ id: NOTE_A, rootId: NOTE_A, filter: null, sort: null })
   })
 
   it("skips tombstoned nodes and the links through them", async () => {

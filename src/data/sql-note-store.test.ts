@@ -7,19 +7,24 @@ import { parse } from "../blocks/parse"
 import type { BlockProps } from "../blocks/types"
 import { linkEntityId } from "./events"
 import { rollup } from "./graph"
-import { opsToKeyEvents, viewChangeToKeyEvents, type KeyEvent } from "./key-events"
+import { KEY_EVENT_VERSION, opsToKeyEvents, type KeyEvent } from "./key-events"
 import type { NoteStore } from "./note-store"
 import { deleteBlockOps, deleteNoteOps, docToOps, type Op } from "./ops"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import { CACHE_STAMPS_KEY, openSqlNoteStore } from "./sql-note-store"
 import { applyOpsToStore, keyed, testEventContext } from "./store-test-support"
-import type { ViewRow } from "./views"
 
 /** Undo the v13 step on a current store, to build an older one by hand. */
+/** What step v17 takes away, put back: the `views` table as v16 left it,
+ * which the steps below v17 alter. */
+const UNDO_V17 =
+  "CREATE TABLE views (id TEXT PRIMARY KEY, root_id TEXT NOT NULL, filter TEXT, sort TEXT, " +
+  "pinned INTEGER NOT NULL DEFAULT 0, sort_key TEXT, updated_at INTEGER NOT NULL, " +
+  "deleted_at INTEGER, seq INTEGER, stamps TEXT, stack TEXT);"
 /** What step v16 adds, taken away: a store as it was at v15. */
-const UNDO_V16 = "DROP INDEX events_log_position;"
+const UNDO_V16 = UNDO_V17 + "DROP INDEX events_log_position;"
 /** What step v15 adds, taken away: a store as it was at v14. */
-const UNDO_V15 = "DROP TABLE events_log; DROP TABLE delta_mat_values;"
+const UNDO_V15 = UNDO_V17 + "DROP TABLE events_log; DROP TABLE delta_mat_values;"
 /** What step v14 adds, taken away: a store as it was at v13. */
 const UNDO_V14 = UNDO_V15 + "ALTER TABLE views DROP COLUMN stack;"
 const UNDO_V13 =
@@ -217,12 +222,12 @@ describe("openSqlNoteStore", () => {
     const store = await openSqlNoteStore(driver)
     expect((await store.getGraph()).nodes.size).toBe(0)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "17" },
     ])
     expect(
       await driver.exec("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"),
-      // The v1 tables are gone and v5's `views` and v9's `events` are there —
-      // the ladder ran to the top, not just to 0002.
+      // The v1 tables are gone, v9's `events` is there and v5's `views` has
+      // gone again at v17 — the ladder ran to the top, not just to 0002.
     ).toEqual([
       { name: "delta_mat_values" },
       { name: "events" },
@@ -230,7 +235,6 @@ describe("openSqlNoteStore", () => {
       { name: "link" },
       { name: "meta" },
       { name: "nodes" },
-      { name: "views" },
     ])
   })
 
@@ -250,7 +254,7 @@ describe("openSqlNoteStore", () => {
     // columns, it never rewrites rows.
     expect(await noteOf(store, "a")).toBe("\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "17" },
     ])
     // The row is live: a nullable column means NULL = never deleted.
     expect(await driver.exec("SELECT deleted_at FROM nodes WHERE id = ?", ["a"])).toEqual([
@@ -276,7 +280,7 @@ describe("openSqlNoteStore", () => {
     const store = await openSqlNoteStore(driver)
     expect(await noteOf(store, "a")).toBe("\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "17" },
     ])
     // No note id until a pull brings the replica's backfill down.
     expect(await driver.exec("SELECT notes_id FROM nodes WHERE id = ?", ["a"])).toEqual([
@@ -335,7 +339,7 @@ describe("openSqlNoteStore", () => {
 
     const store = await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "17" },
     ])
     // The old queue is kept as it was (the old log is not read any more), and
     // a pulled event is placed in the per-key log.
@@ -382,7 +386,7 @@ describe("openSqlNoteStore", () => {
     )
     const store = await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "17" },
     ])
     // An event made before stamps is never given one in place. The old queue
     // is kept as it was, and not read: the per-key log is the queue now.
@@ -405,7 +409,7 @@ describe("openSqlNoteStore", () => {
     )
     await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "17" },
     ])
     expect((await driver.exec("SELECT id FROM events")).map((row) => row.id)).toEqual(["evt_1"])
     // v12 made snapshots and v13 took them away: the cache replaces them.
@@ -436,30 +440,20 @@ describe("openSqlNoteStore", () => {
     expect(await reopened.getMeta(CACHE_STAMPS_KEY)).not.toBeNull()
   })
 
-  it("adds the stack column to a v13 store, keeping its views", async () => {
-    const driver = createNodeSqlDriver()
-    const store = await openSqlNoteStore(driver)
-    const view: ViewRow = {
-      id: "v1",
-      root_id: "a",
-      filter: "type:todo",
-      sort: null,
-      pinned: true,
-      sort_key: null,
-      updated_at: 10,
-    }
-    const events = viewChangeToKeyEvents(undefined, view, testEventContext({ at: 10, device: "d" }))
-    await store.applyEvents(events)
+  it("drops the views table from a v16 store, keeping its rows and its log", async () => {
+    const { driver, store } = await makeStoreWithDriver()
+    await seed(store, "a", "- kept\n  id:: blk_aaaaaaaaaa\n")
+    const logged = (await store.eventLog()).length
     await driver.execScript(
-      UNDO_V14 + "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '13');",
+      UNDO_V17 + "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '16');",
     )
     const reopened = await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "17" },
     ])
-    // A row from before the column is a one-frame View: it holds no stack.
-    expect(await reopened.getViews()).toEqual([view])
-    expect(await driver.exec("SELECT stack FROM views")).toEqual([{ stack: null }])
+    expect(await driver.exec("SELECT name FROM sqlite_master WHERE name = 'views'")).toEqual([])
+    expect(await noteOf(reopened, "a")).toBe("- kept\n  id:: blk_aaaaaaaaaa\n")
+    expect(await reopened.eventLog()).toHaveLength(logged)
   })
 
   it("adds the position index to a v15 store, keeping its log", async () => {
@@ -470,7 +464,7 @@ describe("openSqlNoteStore", () => {
     )
     const reopened = await openSqlNoteStore(driver)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "17" },
     ])
     // The index this step adds is the fix: without it, a pulled row's
     // `(SELECT MAX(position) + 1 FROM events_log)` scans the whole log.
@@ -490,7 +484,7 @@ describe("openSqlNoteStore", () => {
     const reopened = await openSqlNoteStore(driver)
     expect((await reopened.getGraph()).nodes.size).toBe(0)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "17" },
     ])
   })
 
@@ -545,7 +539,7 @@ describe("openSqlNoteStore", () => {
     const reopened = await openSqlNoteStore(driver)
     expect(await noteOf(reopened, "a")).toBe("- kept\n  id:: blk_aaaaaaaaaa\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "16" },
+      { value: "17" },
     ])
     expect(await driver.exec("SELECT seq FROM nodes WHERE id = 'a'")).toEqual([{ seq: null }])
     expect(await reopened.unpushedEvents()).toEqual([])
@@ -971,75 +965,24 @@ describe("the device's log", () => {
     expect(log[0]).toMatchObject({ origin: "replica", actor: 222, received_at: 600, tz: -300 })
   })
 
-  it("projects a view's events onto its row: create, update, delete, revival", async () => {
+  it("logs a pulled view event as history, and keeps no cache row for it", async () => {
     const { driver, store } = await makeStoreWithDriver()
-    const view: ViewRow = {
-      id: "v1",
-      root_id: "a",
-      filter: null,
-      sort: null,
-      pinned: true,
-      sort_key: null,
-      updated_at: 10,
+    // A view event from before docs/removing-views.md, as a pull brings it.
+    const event = {
+      id: "evt_view",
+      entity: "view" as const,
+      entity_id: "v1",
+      action: "create" as const,
+      key: "",
+      value: null,
+      batch: "bat_view",
+      device: "dev.other",
+      at: 10,
+      v: KEY_EVENT_VERSION,
+      seq: 1,
     }
-    const apply = async (before: ViewRow | undefined, after: ViewRow | undefined, at: number) => {
-      const events = viewChangeToKeyEvents(before, after, ctx(at))
-      if (events.length > 0) await store.applyEvents(events)
-      return events
-    }
-    await apply(undefined, view, 10)
-    expect(await store.getViews()).toEqual([{ ...view, updated_at: 10 }])
-    await apply(view, { ...view, filter: "type:todo", updated_at: 20 }, 20)
-    expect((await store.getViews())[0]).toMatchObject({ filter: "type:todo", updated_at: 20 })
-    await apply(view, { ...view, deleted_at: 30, updated_at: 30 }, 30)
-    expect(await store.getViews()).toEqual([])
-    expect(await driver.exec("SELECT deleted_at FROM views WHERE id = 'v1'")).toEqual([
-      { deleted_at: 30 },
-    ])
-    await apply({ ...view, deleted_at: 30 }, { ...view, updated_at: 40 }, 40)
-    expect((await store.getViews())[0]).toMatchObject({ id: "v1", updated_at: 40 })
-    // The liveness rows, in order, with the one key the update set between.
-    const rows = await store.unpushedEvents()
-    expect(rows.filter((e) => e.key === "").map((e) => e.action)).toEqual([
-      "create",
-      "delete",
-      "restore",
-    ])
-    expect(rows.filter((e) => e.key === "filter").map((e) => [e.action, e.value])).toEqual([
-      ["set", null],
-      ["set", "type:todo"],
-      ["set", null],
-    ])
-  })
-
-  it("projects a view's stack: set, kept by an update that does not name it, cleared", async () => {
-    const { driver, store } = await makeStoreWithDriver()
-    const view: ViewRow = {
-      id: "v1",
-      root_id: "a",
-      filter: null,
-      sort: null,
-      pinned: true,
-      sort_key: null,
-      updated_at: 10,
-    }
-    const stacked = { ...view, stack: "corpus_root:base", updated_at: 20 }
-    await store.applyEvents(viewChangeToKeyEvents(undefined, view, ctx(10)))
-    await store.applyEvents(viewChangeToKeyEvents(view, stacked, ctx(20)))
-    expect(await store.getViews()).toEqual([stacked])
-    // An older client's update names only the field it changed.
-    const older = viewChangeToKeyEvents(
-      view,
-      { ...view, filter: "type:todo", updated_at: 30 },
-      ctx(30),
-    )
-    expect(older.map((e) => [e.action, e.key, e.value])).toEqual([["set", "filter", "type:todo"]])
-    await store.applyEvents(older)
-    expect(await store.getViews()).toEqual([{ ...stacked, filter: "type:todo", updated_at: 30 }])
-    const cleared = viewChangeToKeyEvents(stacked, { ...view, updated_at: 40 }, ctx(40))
-    expect(cleared.map((e) => [e.action, e.key, e.value])).toEqual([["set", "stack", null]])
-    await store.applyEvents(cleared)
-    expect(await driver.exec("SELECT stack FROM views")).toEqual([{ stack: null }])
-    expect((await store.getViews())[0]).not.toHaveProperty("stack")
+    await store.applyPulledEvents([event])
+    expect((await store.eventLog()).map((logged) => logged.id)).toEqual(["evt_view"])
+    expect(await driver.exec("SELECT name FROM sqlite_master WHERE name = 'views'")).toEqual([])
   })
 })

@@ -1,0 +1,24 @@
+-- Migration number: 0031    2026-10-29
+--
+-- Views are gone (docs/removing-views.md). The notes page, the outline from
+-- the root, is the one place to navigate; a pin is the `pinned_at` prop of a
+-- node (src/data/pins.ts). Nothing reads or writes `views` any more: the row
+-- pull sends `views: []`, a share names its root by `shares.view_id` (a
+-- view's id was always its root's), and a view event a client still pushes is
+-- logged and never projected (worker/handlers/event-log.ts).
+--
+-- It comes after 0030: that genesis snapshot reads the `views` rows the log
+-- holds no event for, and records them as view events first. So no view
+-- leaves without a trace in the log.
+--
+-- Ships WITH that code. `npm run deploy` runs this BEFORE `wrangler deploy`,
+-- so between the two the old Worker runs against a database with no `views`
+-- table. Its view reads then fail; the window is the length of one deploy.
+--
+-- The view events in `events_log` stay, as history: the log is never
+-- rewritten, and its CHECK still names `view`. The old `events` table's view
+-- rows stay too. The table's indexes go with it.
+--
+-- Re-runnable: `IF EXISTS`.
+
+DROP TABLE IF EXISTS views;

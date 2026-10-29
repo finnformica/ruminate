@@ -3,7 +3,7 @@
 // migrations/0023, 0028, 0029).
 //
 // `events_log` is the truth: one row per change to ONE KEY of one entity
-// (docs/event-sourcing.md, "Per-key events"). `nodes`, `link`, `views` and
+// (docs/event-sourcing.md, "Per-key events"). `nodes`, `link` and
 // `delta_mat_values` are its PROJECTIONS — what folding the log yields — and
 // they are written in exactly one place, `planKeyAppend`, inside the same
 // atomic batch that appends the rows they follow from. So the projections
@@ -112,14 +112,7 @@ import {
 import { nodePropsSql } from "../../src/data/node-props-sql"
 import type { SqlStatement, SqlValue } from "../../src/data/sql-driver"
 import type { TenantDb } from "../tenancy-db"
-import {
-  toLinkRow,
-  toNodeRow,
-  toViewRow,
-  type LinkRow,
-  type NodeRow,
-  type ViewRow,
-} from "./replica-payload"
+import { toLinkRow, toNodeRow, type LinkRow, type NodeRow, type ViewRow } from "./replica-payload"
 
 /** The door a write came through. */
 type EventOrigin = "replica" | "mcp" | "share" | "system"
@@ -533,7 +526,6 @@ async function readCurrent(tenant: TenantDb, write: RowWrite): Promise<HeldRows>
     ...write.links.map((link) => [link.source_id, link.destination_id, link.kind]),
     ...(write.deleteLinks ?? []).map((key) => [...key]),
   ]
-  const viewIds = (write.views ?? []).map((view) => view.id)
 
   const stamps = new Map<string, Record<string, string> | null>()
   const keyStamps = new Map<string, string>()
@@ -585,20 +577,8 @@ async function readCurrent(tenant: TenantDb, write: RowWrite): Promise<HeldRows>
       stamps.set(`link\x1f${key}`, parseStamps(raw.stamps))
     }
   }
+  // A view is history only (docs/removing-views.md): no row is held.
   const views = new Map<string, ViewRow>()
-  if (viewIds.length > 0) {
-    const rows = await all.exec(
-      "SELECT v.id, v.root_id, v.filter, v.sort, v.pinned, v.sort_key, v.stack, " +
-        "v.updated_at, v.deleted_at, v.seq, v.stamps " +
-        "FROM json_each(?1) AS j CROSS JOIN views v ON v.user_id = :tenant AND v.id = j.value",
-      [JSON.stringify(viewIds)],
-    )
-    for (const raw of rows) {
-      const row = toViewRow(raw)
-      views.set(row.id, row)
-      stamps.set(`view\x1f${row.id}`, parseStamps(raw.stamps))
-    }
-  }
   return { nodes, links, views, stamps, keyStamps }
 }
 
@@ -655,9 +635,12 @@ export async function writeRows(
   extra: SqlStatement[] = [],
 ): Promise<{ events: number }> {
   const append = appendContext(ctx)
-  const current = await readCurrent(tenant, write)
+  // View rows (a full push from a build before docs/removing-views.md) are
+  // dropped: there is no table for them.
+  const rows: RowWrite = { ...write, views: [] }
+  const current = await readCurrent(tenant, rows)
   const stamp = serverStamps(append.now, append.origin, highestHeld(current))
-  const events = rowsToEvents(current, write, {
+  const events = rowsToEvents(current, rows, {
     batch: append.appendId,
     device: ctx.device ?? "unknown",
     cause: ctx.cause,
@@ -905,7 +888,7 @@ export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
   const all = tenant.includingDeleted()
   const keyLog = await readKeyLog(tenant)
   const legacy = await legacyReader(tenant)
-  const { links, views } = legacy.rows
+  const { links } = legacy.rows
   const { stamps } = legacy
   const linkKey = (row: LinkRow) => linkEntityId(row.source_id, row.destination_id, row.kind)
   const valueRows = await all.exec(
@@ -966,7 +949,8 @@ export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
   const drift = {
     nodes: compare("block", nodes, folded.nodes, (row) => row.id),
     links: compare("link", links, folded.links, linkKey),
-    views: compare("view", views, folded.views, (row) => row.id),
+    // A view is history only (docs/removing-views.md): no table to compare.
+    views: [] as string[],
   }
 
   // delta_mat_values against the per-key fold: every block's keys.
@@ -1016,7 +1000,7 @@ export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
     rows: {
       nodes: nodes.length,
       links: links.length,
-      views: views.length,
+      views: 0,
       deltaMatValues: valueRows.length,
     },
     drift,
@@ -1296,33 +1280,8 @@ function planKeyChunk(events: readonly KeyEvent[], ctx: AppendContext): SqlState
         "/* includes-deleted: re-linking a pair revives its tombstoned row */",
       params: params(changesFor(changes, "link")),
     },
-
-    // Views → views
-    {
-      sql:
-        "INSERT INTO views (user_id, id, root_id, filter, sort, pinned, sort_key, stack, " +
-        "updated_at, deleted_at, seq, stamps) SELECT :tenant, " +
-        "json_extract(j.value, '$.entity_id'), " +
-        `${createdField("root_id")}, ${createdField("filter")}, ${createdField("sort")}, ` +
-        `COALESCE(${createdField("pinned")}, 0), ${createdField("sort_key")}, ` +
-        `${createdField("stack")}, ` +
-        "json_extract(j.value, '$.created.top.at'), " +
-        "json_extract(j.value, '$.created.alive.deleted_at'), " +
-        `${SEQ_OF_LAST_EVENT}, ${createdKeyStamps("view")} FROM json_each(?1) AS j ` +
-        `WHERE ${created} AND ${INSERTED_BY_THIS_APPEND} ` +
-        "ON CONFLICT (user_id, id) DO NOTHING",
-      params: params(changesFor(changes, "view")),
-    },
-    {
-      sql:
-        keyChangesAs("view", "entity_id") +
-        `UPDATE views SET ${RESOLVED.view.map((name) => field("views", name)).join(", ")}, ` +
-        `${tombstone("views")}, ${stampsAfter("views", "view")}, ${updatedAt("views", "view")}, ` +
-        `seq = ${SEQ_OF_LAST_EVENT} ` +
-        "FROM j WHERE views.user_id = :tenant AND views.id = j.entity_id " +
-        `AND ${INSERTED_BY_THIS_APPEND} AND ${notJustInserted("views")}`,
-      params: params(changesFor(changes, "view")),
-    },
+    // A view event is history only (docs/removing-views.md): logged, never
+    // projected.
   ]
 }
 
@@ -1779,13 +1738,9 @@ async function legacyReader(tenant: TenantDb): Promise<{
     "SELECT source_id, destination_id, kind, sort_key, updated_at, deleted_at, seq, stamps " +
       "FROM link WHERE user_id = :tenant /* includes-deleted: the fold holds tombstones too */",
   )
-  const viewRows = await all.exec(
-    "SELECT id, root_id, filter, sort, pinned, sort_key, stack, updated_at, deleted_at, seq, " +
-      "stamps FROM views WHERE user_id = :tenant",
-  )
   const nodes = nodeRows.map(toNodeRow)
   const links = linkRows.map(toLinkRow)
-  const views = viewRows.map(toViewRow)
+  const views: ViewRow[] = []
   const mirror = new Map(
     nodeRows.map((raw) => [String(raw.id), raw.mirror === null ? null : String(raw.mirror)]),
   )
@@ -1798,7 +1753,6 @@ async function legacyReader(tenant: TenantDb): Promise<{
   }
   nodeRows.forEach((raw, i) => note(`block\x1f${nodes[i].id}`, raw, nodes[i].seq))
   linkRows.forEach((raw, i) => note(`link\x1f${linkKey(links[i])}`, raw, links[i].seq))
-  viewRows.forEach((raw, i) => note(`view\x1f${views[i].id}`, raw, views[i].seq))
   const of = (entity: Entity, id: string) => {
     const key = `${entity}\x1f${id}`
     if (!stamps.has(key)) return 0

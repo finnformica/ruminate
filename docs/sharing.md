@@ -35,7 +35,7 @@ grant, and that choice decides everything else:
   reads and writes those rows through a second door.
 - **The share names the root.** `shares.view_id` holds the root's id
   (migrations/0017 named the owner's view, and a view's id was its root's;
-  migrations/0030 dropped the views). The wire still carries a `view`
+  migrations/0031 dropped the views). The wire still carries a `view`
   object, `{ id, rootId, filter: null, sort: null }`, for the clients that
   read it.
 - **The slice is computed, never stored.** What is visible beneath the root

@@ -397,4 +397,3 @@ describe("shared mode", () => {
     expect(store.get(sharedModeStatusAtom).status).toBe("off")
   })
 })
-

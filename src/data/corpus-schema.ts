@@ -87,7 +87,7 @@ export interface CorpusMigrations {
 /** Which v3 shape the ladder should produce (see the module header). */
 export type CorpusTenancy = "single" | "columns"
 
-const CORPUS_SCHEMA_VERSION = 16
+const CORPUS_SCHEMA_VERSION = 17
 
 /**
  * The single-tenant v5 step: the `views` table (migrations/0015) — the
@@ -342,6 +342,16 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '16');
 `
 
 /**
+ * The single-tenant v17 step: the `views` table goes (docs/removing-views.md).
+ * Nothing reads or writes it any more; a view event pulled into the log is
+ * history and has no cache row. DDL only: no rows elsewhere change.
+ */
+const LOCAL_V17_SQL = `
+DROP TABLE IF EXISTS views;
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '17');
+`
+
+/**
  * The single-tenant v4 step: `notes_id` on nodes (migrations/0006) and nothing
  * else — no backfill, because the local store is a cache and re-pulls the
  * note ids the replica computed (`CACHE_GENERATION`, database-mode.ts).
@@ -569,6 +579,13 @@ async function applyV16(driver: SqlDriver, tenancy: CorpusTenancy): Promise<void
   if (tenancy === "single") await driver.execScript(LOCAL_V16_SQL)
 }
 
+/** The v17 step: the local `views` table dropped. On D1 (`"columns"`) it
+ * is migrations/0031, which runs after 0030's genesis has read the table:
+ * a data step, as 0029 is, outside this ladder. */
+async function applyV17(driver: SqlDriver, tenancy: CorpusTenancy): Promise<void> {
+  if (tenancy === "single") await driver.execScript(LOCAL_V17_SQL)
+}
+
 /**
  * Every local step that has shipped, by the version it leaves behind — for
  * `corpus-schema.test.ts`, which pins a hash of each. A step that has reached
@@ -590,6 +607,7 @@ export const SHIPPED_LOCAL_STEPS: Readonly<Record<number, string>> = {
   14: LOCAL_V14_SQL,
   15: LOCAL_V15_SQL,
   16: LOCAL_V16_SQL,
+  17: LOCAL_V17_SQL,
 }
 
 type Step = (
@@ -616,6 +634,7 @@ const STEPS: readonly [number, Step][] = [
   [14, applyV14],
   [15, applyV15],
   [16, (driver, _migrations, tenancy) => applyV16(driver, tenancy)],
+  [17, (driver, _migrations, tenancy) => applyV17(driver, tenancy)],
 ]
 
 /**

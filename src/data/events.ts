@@ -167,7 +167,7 @@ type EventsFor<E extends Entity> =
 
 type BlockEvent = EventsFor<"block">
 type LinkEvent = EventsFor<"link">
-export type ViewEvent = EventsFor<"view">
+type ViewEvent = EventsFor<"view">
 export type RuminateEvent = BlockEvent | LinkEvent | ViewEvent
 
 /**

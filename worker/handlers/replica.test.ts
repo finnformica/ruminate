@@ -133,7 +133,7 @@ describe("the planned write", () => {
 
   it("every statement names its tenant with the :tenant token, never a parameter", () => {
     const statements = planKeyAppend(keys, write)
-    expect(statements).toHaveLength(8)
+    expect(statements).toHaveLength(6)
     for (const statement of statements) {
       expect(statement.sql).toContain("user_id")
       expect(statement.sql).toContain(":tenant")
@@ -551,19 +551,6 @@ describe("tenant scoping — the adversarial suite", () => {
       { id: "blk_noteaaaaaa", type: "note", text: "alice's note", props: null, updated_at: 100 },
       { id: "blk_secret0001", type: "text", text: "alice's secret", props: null, updated_at: 100 },
     ],
-    // A view of Alice's too, so the cross-tenant suite covers the third
-    // corpus table rather than only the two it was written for.
-    views: [
-      {
-        id: "view_alice001",
-        root_id: "blk_noteaaaaaa",
-        filter: "type:todo",
-        sort: null,
-        pinned: true,
-        sort_key: "a0",
-        updated_at: 100,
-      },
-    ],
     links: [
       {
         source_id: "blk_noteaaaaaa",
@@ -833,13 +820,13 @@ describe("tenant scoping — the adversarial suite", () => {
       const { events, cursor } = (await (
         await get(env, "alice-token", "/api/replica/events-log")
       ).json()) as { events: Record<string, unknown>[]; cursor: number }
-      // Four rows per block, six for the view, five for the link.
+      // Four rows per block, five for the link.
       expect(
         events
           .filter((event) => event.key === "")
           .map((event) => `${event.entity}.${event.action}`),
-      ).toEqual(["block.create", "block.create", "view.create", "link.create"])
-      expect(cursor).toBe(19)
+      ).toEqual(["block.create", "block.create", "link.create"])
+      expect(cursor).toBe(13)
       expect(events[0]).toMatchObject({
         actor: 111,
         origin: "replica",
@@ -1016,12 +1003,12 @@ describe("tenant scoping — the adversarial suite", () => {
       const edited = { ...aliceRows.nodes[1], text: "rewritten", updated_at: 200 }
       await push(env, "alice-token", { nodes: [edited], links: [] })
 
-      // The first push was 19 rows: the moment at its end.
-      const then = (await (await get(env, "alice-token", "/api/replica/at?seq=19")).json()) as {
+      // The first push was 13 rows: the moment at its end.
+      const then = (await (await get(env, "alice-token", "/api/replica/at?seq=13")).json()) as {
         seq: number
         nodes: { id: string; text: string }[]
       }
-      expect(then.seq).toBe(19)
+      expect(then.seq).toBe(13)
       expect(then.nodes.find((row) => row.id === "blk_secret0001")?.text).toBe("alice's secret")
 
       const history = (await (
@@ -1040,7 +1027,7 @@ describe("tenant scoping — the adversarial suite", () => {
       ])
 
       const verdict = await (await get(env, "alice-token", "/api/replica/verify")).json()
-      expect(verdict).toMatchObject({ ok: true, keyEvents: 20, rejected: 0 })
+      expect(verdict).toMatchObject({ ok: true, keyEvents: 14, rejected: 0 })
     })
 
     it("restores by appending — for the tenant, and only with a well-formed request", async () => {
@@ -1053,17 +1040,17 @@ describe("tenant scoping — the adversarial suite", () => {
       // Bob naming Alice's block restores nothing: it is not in HIS log.
       const bob = await post(env, "bob-token", "/api/replica/restore", {
         block: "blk_secret0001",
-        seq: 19,
+        seq: 13,
       })
       expect(await bob.json()).toEqual({ ok: true, events: 0 })
 
       const ok = await post(env, "alice-token", "/api/replica/restore", {
         block: "blk_secret0001",
-        seq: 19,
+        seq: 13,
       })
       expect(await ok.json()).toEqual({ ok: true, events: 1 })
       const pulled = (await (
-        await get(env, "alice-token", "/api/replica/notes?since=20")
+        await get(env, "alice-token", "/api/replica/notes?since=14")
       ).json()) as {
         nodes: { id: string; text: string }[]
       }

@@ -73,7 +73,7 @@ export interface LinkRow {
 
 /** The `link` table's primary key (within one tenant): [source, dest, kind]. */
 /**
- * One row of the old `views` table (migrations/0015, dropped by 0030,
+ * One row of the old `views` table (migrations/0015, dropped by 0031,
  * docs/removing-views.md). Kept on the wire only: a build from before still
  * pushes these and reads `views` off a pull. The replica writes nothing for
  * a pushed row and answers every pull with none.
@@ -138,26 +138,6 @@ export function toNodeRow(row: Record<string, unknown>): NodeRow {
   if (row.seq !== null && row.seq !== undefined) node.seq = Number(row.seq)
   if (row.notes_id !== null && row.notes_id !== undefined) node.notes_id = String(row.notes_id)
   return node
-}
-
-/** Read one view row out of a driver result (see `toNodeRow`). `pinned` is
- * an INTEGER column on both engines and a boolean on the wire. */
-export function toViewRow(row: Record<string, unknown>): ViewRow {
-  const view: ViewRow = {
-    id: String(row.id),
-    root_id: String(row.root_id),
-    filter: row.filter === null || row.filter === undefined ? null : String(row.filter),
-    sort: row.sort === null || row.sort === undefined ? null : String(row.sort),
-    pinned: Number(row.pinned) === 1,
-    sort_key: row.sort_key === null || row.sort_key === undefined ? null : String(row.sort_key),
-    updated_at: Number(row.updated_at),
-  }
-  if (row.deleted_at !== null && row.deleted_at !== undefined) {
-    view.deleted_at = Number(row.deleted_at)
-  }
-  if (row.seq !== null && row.seq !== undefined) view.seq = Number(row.seq)
-  if (typeof row.stack === "string" && row.stack !== "") view.stack = row.stack
-  return view
 }
 
 /** Read one link row out of a driver result (see `toNodeRow`). */
