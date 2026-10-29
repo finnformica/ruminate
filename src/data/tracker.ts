@@ -866,7 +866,7 @@ export function activeSummary(series: readonly SeriesState[], today: DayString):
 
 /** How many weeks the heatmap shows: about three months, which fits a phone
  * (390 px) with cells big enough to read and no sideways scroll. */
-export const HEATMAP_WEEKS = 12
+const HEATMAP_WEEKS = 12
 
 /**
  * The heatmap's columns: `weeks` weeks from Monday, oldest first, the last
