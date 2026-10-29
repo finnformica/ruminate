@@ -34,8 +34,11 @@ const SIZES: Record<TrackerRange, { column: string; cell: string }> = {
  * above the grid are its legend, and the name is the column's label for a
  * screen reader.
  *
- * The grid scrolls in its own box, under a row of colours and a day column
- * that stay put, and opens scrolled to today, so the day you log is in view
+ * The card fills the space left under the Today strip and date row, down to
+ * the bottom of the viewport, rather than scroll the page: it is a flex
+ * item (`flex-1 min-h-0` from its caller) and a flex column itself, so its
+ * own box is the one that scrolls, under a row of colours and a day column
+ * that stay put. It opens scrolled to today, so the day you log is in view
  * and its columns are still coloured. Past six series or so a phone scrolls
  * it sideways too.
  */
@@ -80,8 +83,14 @@ export function JournalGrid({
   const stickyTop = "sticky top-0 z-10 self-stretch bg-bg-card pb-2 pt-3"
   const stickyLeft = "sticky left-0 z-10 bg-bg-card pl-3 pr-2"
   return (
-    <Surface tier="card" motion={false} data-testid="journal-grid" data-range={range}>
-      <div ref={scroller} className="max-h-[70svh] overflow-auto pb-3">
+    <Surface
+      tier="card"
+      motion={false}
+      data-testid="journal-grid"
+      data-range={range}
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <div ref={scroller} className="min-h-0 flex-1 overflow-auto pb-3">
         <div
           role="grid"
           aria-label="Days by series"

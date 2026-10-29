@@ -30,6 +30,7 @@ import {
 } from "../data/tracker"
 import { useNoteById } from "../hooks/note"
 import { useTracker, useTrackerWrites } from "../hooks/tracker"
+import { cx } from "../utils/cx"
 
 /**
  * A tracker (docs/trackers.md): a note whose root node is of type `tracker`,
@@ -183,7 +184,16 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
         </div>
       }
     >
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4">
+      <div
+        className={cx(
+          "mx-auto flex w-full max-w-6xl flex-col gap-4 p-4",
+          // Grid layout fills the page rather than scroll it: the card below
+          // is the flex item that takes the space left over, and scrolls
+          // inside itself (journal-grid.tsx). Cards layout keeps the page's
+          // own scroll, so this column stays its natural, unbounded height.
+          layout === "grid" && "h-full min-h-0",
+        )}
+      >
         {!exists ? (
           <Notice>
             {note ? (
