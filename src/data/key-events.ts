@@ -49,11 +49,9 @@
 // (`parseStoredKeyEvent`), never thrown over: a log is forever.
 
 import { z } from "zod"
-import type { ViewRow } from "../../worker/handlers/replica-payload"
 import {
   eventStamp,
   linkEntityId,
-  viewChangeToEvent,
   type Entity,
   type EventContext,
   type LogState,
@@ -528,7 +526,7 @@ export function propsStampOf(
 /**
  * A per-key state in the old fold's shape: each block's `props.*` registers
  * become one `props` field (`derivedProps`) with the highest of their stamps,
- * so `readOutEntities`, `toGraphSnapshot` and `toViewRows` read it.
+ * so `readOutEntities` and `toGraphSnapshot` read it.
  */
 export function assembleStamped(state: StampedState): StampedState {
   const blocks = new Map<string, AnyStamped>()
@@ -702,20 +700,6 @@ export function opsToKeyEvents(
     }
   }
   return events
-}
-
-/** The key events a change to a view row amounts to (`viewChangeToEvent`,
- * expanded): none when nothing changed. */
-export function viewChangeToKeyEvents(
-  before: ViewRow | undefined,
-  after: ViewRow | undefined,
-  ctx: EventContext,
-): KeyEvent[] {
-  const event = viewChangeToEvent(before, after, ctx)
-  if (event === null) return []
-  const rows = expandEvent(event, null, () => ctx.mintId())
-  for (const row of rows) delete row.event
-  return rows
 }
 
 /**

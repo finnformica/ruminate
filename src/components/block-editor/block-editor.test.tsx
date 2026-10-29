@@ -17,8 +17,11 @@ import {
   type BoardRequest,
   type LinkRequest,
 } from "./block-editor"
-import { getDefaultStore } from "jotai"
-import { viewRootIdsAtom, viewsAtom } from "../../data/views"
+
+// A pin is a `setProps` through the write seam, which the harness has no
+// graph behind; the tests read what the menu asked for instead.
+const pins = vi.hoisted(() => ({ setPinned: vi.fn() }))
+vi.mock("../../hooks/pins", () => ({ useSetPinned: () => pins.setPinned }))
 
 // The context menu (Base UI) measures its popup with a ResizeObserver and
 // scrolls the highlighted item into view; jsdom implements neither.
@@ -31,9 +34,7 @@ globalThis.ResizeObserver = class {
 
 afterEach(() => {
   cleanup()
-  // A view made from a menu lands in the default store; the next test
-  // starts with none.
-  getDefaultStore().set(viewsAtom, new Map())
+  pins.setPinned.mockReset()
 })
 
 /** The rows' block ids, in document order. */
@@ -2964,21 +2965,27 @@ describe("BlockEditor context menu", () => {
     expect(serializedLines(getByTestId)).toEqual(["A", "C"])
   })
 
-  it("adds a block to Views from its menu, as a view rooted at it, and removes it again", async () => {
-    const { container } = render(<Harness initial={"A\nB"} noteId="n" />)
-    let menu = await openMenuOn(container, 1)
-    expect(menu.textContent).toContain("Add to Views")
-    expect(menu.textContent).not.toContain("Remove from Views")
-    await pick("Add to Views")
-    // The block has a view row now, and nothing in the row itself says so:
-    // the sidebar's list is where a view shows.
-    const blockId = idsOf(container)[1]
-    expect(getDefaultStore().get(viewRootIdsAtom).has(blockId)).toBe(true)
+  it("pins a block from its menu, and offers Unpin on a pinned one", async () => {
+    // B carries a pin; markdown cannot say so, so the doc is built by hand.
+    const doc = parse("A\nB\n  id:: blk_b\nC")
+    const pinnedDoc: BlockDoc = {
+      ...doc,
+      blocks: { ...doc.blocks, blk_b: { ...doc.blocks.blk_b, props: { pinned_at: 5 } } },
+    }
+    const { container } = render(<Harness initialDoc={pinnedDoc} noteId="n" />)
+    let menu = await openMenuOn(container, 2)
+    expect(menu.textContent).toContain("Pin")
+    expect(menu.textContent).not.toContain("Unpin")
+    await pick("Pin")
+    const blockId = idsOf(container)[2]
+    expect(pins.setPinned).toHaveBeenCalledWith([blockId], true)
+    // Nothing in the row itself says so: the sidebar's list is where a pin
+    // shows.
     expect(container.querySelector('[data-testid="block-pinned"]')).toBeNull()
     menu = await openMenuOn(container, 1)
-    expect(menu.textContent).toContain("Remove from Views")
-    await pick("Remove from Views")
-    expect(getDefaultStore().get(viewRootIdsAtom).has(blockId)).toBe(false)
+    expect(menu.textContent).toContain("Unpin")
+    await pick("Unpin")
+    expect(pins.setPinned).toHaveBeenLastCalledWith(["blk_b"], false)
   })
 
   it("a read-only editor has no menu of its own, and draws its host's list when given one", async () => {
@@ -2994,7 +3001,7 @@ describe("BlockEditor context menu", () => {
     })
     expect(screen.queryByTestId("block-context-menu")).toBeNull()
     unmount()
-    // A browsed list (the Views page): the host says what a row's menu holds.
+    // A browsed list (the palette): the host says what a row's menu holds.
     const onSelect = vi.fn()
     const { container: browsed } = render(
       <BlockEditor
@@ -3019,12 +3026,12 @@ describe("BlockEditor context menu", () => {
     expect(onSelect).toHaveBeenCalled()
   })
 
-  it("offers Add to Views only where the rows are a note's own", async () => {
+  it("offers Pin only where the rows are a note's own", async () => {
     // No note behind the editor (a clipboard fragment, Storybook): nothing
-    // to list the block under, so no view to make.
+    // to pin.
     const { container } = render(<Harness initial={"A\nB"} />)
     const menu = await openMenuOn(container, 1)
-    expect(menu.textContent).not.toContain("Views")
+    expect(menu.textContent).not.toContain("Pin")
   })
 
   it("offers Add downstream link and Add upstream link with a corpus to pick from, on one row", async () => {
@@ -5079,7 +5086,7 @@ describe("every surface runs the one action set", () => {
     expect(fromMenu).toHaveBeenCalledWith(["blk_b", "blk_c"])
   })
 
-  it("the per-block actions take each selected block: Add to Views adds them all", async () => {
+  it("the per-block actions take each selected block: Pin pins them all", async () => {
     const { container } = render(<Harness initial={FOUR} noteId="n" />)
     selectRows(editorRoot(container), 1, 2)
     await act(async () => {
@@ -5088,10 +5095,9 @@ describe("every surface runs the one action set", () => {
         clientY: 10,
       })
     })
-    await pick("Add to Views")
+    await pick("Pin")
     const ids = idsOf(container)
-    const roots = getDefaultStore().get(viewRootIdsAtom)
-    expect(ids.map((id) => roots.has(id))).toEqual([false, true, true, false])
+    expect(pins.setPinned).toHaveBeenCalledWith([ids[1], ids[2]], true)
   })
 })
 

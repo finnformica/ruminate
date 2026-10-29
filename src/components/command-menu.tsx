@@ -1,13 +1,12 @@
 import { useMatch, useNavigate } from "@tanstack/react-router"
-import { useOpenNote, useOpenView } from "../hooks/open-note"
+import { useOpenNote } from "../hooks/open-note"
 import { parseDate } from "chrono-node"
 import { Command } from "cmdk"
 import { useAtom, useAtomValue } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useDebounce } from "use-debounce"
-import { viewRootsAtom } from "../global-state"
-import { useViewHints } from "../hooks/view-hints"
+import { pinnedRootsAtom } from "../global-state"
 import { useRecentRoots } from "../hooks/recent-roots"
 import { useCreateNote } from "../hooks/note"
 import { keepResults, useSearchResults } from "../hooks/search-results"
@@ -66,26 +65,23 @@ const NAVIGATION_KEYS = new Set(["ArrowUp", "ArrowDown", "Home", "End"])
 export function CommandMenu() {
   const navigate = useNavigate()
   const openNote = useOpenNote()
-  const openView = useOpenView()
   const createNote = useCreateNote()
   // The request the palette is a picker for, if any (`usePalettePicker`).
   const [request, setRequest] = useAtom(paletteRequestAtom)
   const picking = request !== null
   // With nothing typed: the places most used lately — notes, and blocks
   // focused on — ranked by frecency (`useRecentRoots`), at most five; then
-  // the Views beneath, the notes and the block views in the sidebar's order
-  // (docs/metadata.md), each a row that opens its note (focused on the
-  // block, for a block). A place used lately is in both: Recent is what you
-  // use, Views is everything there is.
+  // the pinned notes and blocks beneath, in the sidebar's order
+  // (`src/data/pins.ts`), each a row that opens its note (focused on the
+  // block, for a block). A place used lately and pinned is in both: Recent
+  // is what you use, Pinned is what you keep to hand.
   const recentRoots = useRecentRoots()
-  const viewRoots = useAtomValue(viewRootsAtom)
-  // Each View's path, after its name, as the sidebar shows it.
-  const viewHints = useViewHints()
+  const pinnedRoots = useAtomValue(pinnedRootsAtom)
   const [isOpen, setIsOpen] = useAtom(isCommandMenuOpenAtom)
 
   // The open note, if any: it leads the `in:` suggestions, and ⌘P searches
   // its headings — or, focused on a block, the headings under that block.
-  const noteMatch = useMatch({ from: "/_appRoot/views_/$", shouldThrow: false })
+  const noteMatch = useMatch({ from: "/_appRoot/notes_/$", shouldThrow: false })
   const noteId = noteMatch?.params._splat
   const focusBlockId = noteMatch?.search?.block
   const headingsQuery = useMemo(
@@ -243,24 +239,24 @@ export function CommandMenu() {
   // The typed text as a row of its own, when the picker takes a value.
   const textRow = picking && request.textRow && text.trim() ? request.textRow(text.trim()) : ""
   // What is listed with nothing typed: a picker's own suggestions, where it
-  // has them — in place of Recent, and of Views beneath it — else Recent.
+  // has them — in place of Recent, and of Pinned beneath it — else Recent.
   const suggested = request?.suggested
   const browseRoots = suggested ?? recentRoots
-  const viewsListed = !deferredQuery && !suggested && viewRoots.length > 0
-  const hasRows = deferredQuery ? results.rows.length > 0 : browseRoots.length > 0 || viewsListed
+  const pinnedListed = !deferredQuery && !suggested && pinnedRoots.length > 0
+  const hasRows = deferredQuery ? results.rows.length > 0 : browseRoots.length > 0 || pinnedListed
 
   // The keyboard's way through the rows. With nothing typed there are two
-  // lists, Recent and then Views, walked as one: ↓ from the query lands on
+  // lists, Recent and then Pinned, walked as one: ↓ from the query lands on
   // the first row of the first list there is; ↓ past the last recent row
-  // lands on the first view row (`recentToViews`); ↑ past the first
-  // view row lands on the last recent row (`viewsToRecent`); ↑ past the
+  // lands on the first pinned row (`recentToPinned`); ↑ past the first
+  // pinned row lands on the last recent row (`pinnedToRecent`); ↑ past the
   // first row of the first list returns to the query. Each hop is a signal
   // the editor concerned acts on.
   const [focusFirstSignal, setFocusFirstSignal] = useState(0)
   const [recentLastSignal, setRecentLastSignal] = useState(0)
-  const [viewsFirstSignal, setViewsFirstSignal] = useState(0)
-  const recentToViews = useCallback(() => setViewsFirstSignal((n) => n + 1), [])
-  const viewsToRecent = useCallback(() => setRecentLastSignal((n) => n + 1), [])
+  const [pinnedFirstSignal, setPinnedFirstSignal] = useState(0)
+  const recentToPinned = useCallback(() => setPinnedFirstSignal((n) => n + 1), [])
+  const pinnedToRecent = useCallback(() => setRecentLastSignal((n) => n + 1), [])
   /** ↓ in the query with cmdk's highlight on the last item (or no items at
    * all) hands the keyboard to the result rows: the editor takes focus
    * (cmdk's highlight stays on the last item, dimmed — command-menu.css —
@@ -291,12 +287,11 @@ export function CommandMenu() {
     const id = generateNoteId()
     createNote(id, title ? { title } : {})
     leave()
-    navigate({ to: "/views/$", params: { _splat: id }, search: { query: undefined } })
+    navigate({ to: "/notes/$", params: { _splat: id }, search: { query: undefined } })
   }, [picking, text, createNote, leave, navigate])
 
   // Commit the typed query: open its top result, the note or the block
-  // ranked first. There is no Views page to list them on any more; the
-  // palette is where the results are. Nothing to open, nothing happens.
+  // ranked first. The palette is where the results are. Nothing to open, nothing happens.
   const openTopResult = useCallback(() => {
     const top = results.rows[0]
     if (!top) return
@@ -331,18 +326,6 @@ export function CommandMenu() {
       void openNote(noteId, blockId)
     },
     [picking, pick, leave, openNote],
-  )
-  // Open a View row: its saved stack, in place of the pane's (`useOpenView`).
-  const openViewResult = useCallback(
-    (noteId: string, blockId?: string) => {
-      if (picking) {
-        pick(blockId ? { kind: "block", noteId, blockId } : { kind: "note", noteId })
-        return
-      }
-      leave()
-      void openView(noteId, blockId)
-    },
-    [picking, pick, leave, openView],
   )
 
   // cmdk reports every change of the highlighted item here — both the user
@@ -462,7 +445,7 @@ export function CommandMenu() {
                   description={formatDateDistance(dateString)}
                   onSelect={handleSelect(() => {
                     navigate({
-                      to: "/views/$",
+                      to: "/notes/$",
                       params: {
                         _splat: dateString,
                       },
@@ -499,28 +482,27 @@ export function CommandMenu() {
                   focusFirstSignal={focusFirstSignal}
                   focusLastSignal={recentLastSignal}
                   onExitTop={takeBackFromRows}
-                  onExitBottom={viewsListed ? recentToViews : undefined}
+                  onExitBottom={pinnedListed ? recentToPinned : undefined}
                 />
               </Command.Group>
             ) : null}
-            {viewsListed ? (
-              // The Views list, beneath the recent places: a second results
+            {pinnedListed ? (
+              // The Pinned list, beneath the recent places: a second results
               // block, browsed the same way, walked into from the recent
               // rows and back out of them (or, with nothing recent, straight
               // from the query).
-              <Command.Group heading="Views">
+              <Command.Group heading="Pinned">
                 <ResultsList
                   variant="palette"
                   query=""
                   results={results}
-                  browseRoots={viewRoots}
-                  rootHints={viewHints}
+                  browseRoots={pinnedRoots}
                   limit={NUM_VISIBLE_RESULTS}
                   readOnly
                   initialSelection="none"
-                  onOpen={openViewResult}
-                  focusFirstSignal={recentRoots.length > 0 ? viewsFirstSignal : focusFirstSignal}
-                  onExitTop={recentRoots.length > 0 ? viewsToRecent : takeBackFromRows}
+                  onOpen={openResult}
+                  focusFirstSignal={recentRoots.length > 0 ? pinnedFirstSignal : focusFirstSignal}
+                  onExitTop={recentRoots.length > 0 ? pinnedToRecent : takeBackFromRows}
                 />
               </Command.Group>
             ) : null}

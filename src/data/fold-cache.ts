@@ -11,7 +11,7 @@ import {
 import type { SqlStatement, SqlValue } from "./sql-driver"
 
 /**
- * The client's `nodes`, `link` and `views` as a cache of the fold
+ * The client's `nodes` and `link` as a cache of the fold
  * (docs/event-only-sync.md, "The cache"). The log is the truth; each row is
  * the fold of one entity's events (`foldKeysByStamp`), every register with
  * its stamp in the row's `stamps` column, a JSON object with one key per
@@ -40,6 +40,13 @@ import type { SqlStatement, SqlValue } from "./sql-driver"
  *   `getAllRows` leaves it out.
  */
 
+/** The entities the cache holds. A view (docs/removing-views.md) is in the
+ * log as history and nowhere else: its events are not cached. */
+export type CachedEntity = Exclude<Entity, "view">
+
+/** Is this one of the entities the cache holds? */
+export const isCachedEntity = (entity: Entity): entity is CachedEntity => entity !== "view"
+
 /** The table of each entity, and the columns its fields live in. */
 export const CACHE_TABLES = {
   block: { table: "nodes", key: ["id"], fields: ["type", "text", "props", "notes_id"] },
@@ -48,24 +55,19 @@ export const CACHE_TABLES = {
     key: ["source_id", "destination_id", "kind"],
     fields: ["source_id", "destination_id", "kind", "sort_key"],
   },
-  view: {
-    table: "views",
-    key: ["id"],
-    fields: ["root_id", "filter", "sort", "pinned", "sort_key", "stack"],
-  },
 } as const satisfies Record<
-  Entity,
+  CachedEntity,
   { table: string; key: readonly string[]; fields: readonly string[] }
 >
 
 type AnyEntity = StampedEntity<Record<string, unknown>>
 
 /** An entity's key columns from its entity id (`linkEntityId` for a link). */
-export const keyValues = (entity: Entity, id: string): string[] =>
+export const keyValues = (entity: CachedEntity, id: string): string[] =>
   entity === "link" ? id.split("|") : [id]
 
 /** The entity id of a cache row. */
-export const entityIdOfRow = (entity: Entity, row: Record<string, SqlValue>): string =>
+export const entityIdOfRow = (entity: CachedEntity, row: Record<string, SqlValue>): string =>
   entity === "link"
     ? `${String(row.source_id)}|${String(row.destination_id)}|${String(row.kind)}`
     : String(row.id)
@@ -81,14 +83,14 @@ const parseStamps = (raw: SqlValue): Record<string, string> => {
 }
 
 /** The fold's entity a cache row holds, its props as `props.<name>` registers. */
-export function entityOfRow(entity: Entity, row: Record<string, SqlValue>): AnyEntity {
+export function entityOfRow(entity: CachedEntity, row: Record<string, SqlValue>): AnyEntity {
   const held = parseStamps(row.stamps)
   const fields: Record<string, unknown> = {}
   const stamps: Record<string, string> = {}
   for (const field of CACHE_TABLES[entity].fields) {
     if (field === "props" || !(field in held)) continue
     const value = row[field]
-    fields[field] = field === "pinned" ? Boolean(value) : value
+    fields[field] = value
     stamps[field] = held[field]
   }
   if ("alive" in held) stamps.alive = held.alive
@@ -131,8 +133,6 @@ const FILLER: Record<string, SqlValue> = {
   type: "",
   text: "",
   sort_key: "",
-  root_id: "",
-  pinned: 0,
 }
 
 const toSql = (value: unknown): SqlValue =>
@@ -150,7 +150,7 @@ const ROWS_PER_WRITE = 500
 
 /** The `stamps` column a block's row takes: its registers' stamps, and
  * `props` as the highest of its keys'. */
-function stampsColumn(entity: Entity, value: AnyEntity): string {
+function stampsColumn(entity: CachedEntity, value: AnyEntity): string {
   if (entity !== "block") return JSON.stringify(value.stamps)
   const stamps: Record<string, string> = {}
   for (const [name, stamp] of Object.entries(value.stamps)) {
@@ -171,7 +171,7 @@ function stampsColumn(entity: Entity, value: AnyEntity): string {
  * A block's keys go to `delta_mat_values` beside its row.
  */
 export function cacheRowStatements(
-  entity: Entity,
+  entity: CachedEntity,
   entries: readonly (readonly [id: string, value: AnyEntity])[],
 ): SqlStatement[] {
   const { table, key, fields } = CACHE_TABLES[entity]
@@ -280,7 +280,7 @@ function deltaMatValueStatements(
  * migration). A block's props keys read at the `props` stamp (`entityOfRow`).
  */
 export function derivedStamps(
-  entity: Entity,
+  entity: CachedEntity,
   row: { updated_at: number; seq?: number | null },
 ): string {
   const stamp = eventStamp({ at: row.updated_at, seq: row.seq ?? 0 } as RuminateEvent)
@@ -297,7 +297,7 @@ export function derivedStamps(
  * together. One statement per table, so the fill is one transaction.
  */
 export function fillStampsStatements(): SqlStatement[] {
-  return (Object.keys(CACHE_TABLES) as Entity[]).map((entity) => {
+  return (Object.keys(CACHE_TABLES) as CachedEntity[]).map((entity) => {
     const { table, fields } = CACHE_TABLES[entity]
     const stamp =
       "printf('%015d-0000-seq:%015d', MIN(MAX(CAST(updated_at AS INTEGER), 0), 999999999999999), " +

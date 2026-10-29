@@ -56,7 +56,6 @@ import { fetchLinkPreview } from "../data/link-previews"
 import { notePropsOps } from "../data/note-meta"
 import { applyOps, deleteBlockOps, type Op } from "../data/ops"
 import { useApplyOps } from "../data/store"
-import { LISTED_VIEW } from "../data/views"
 import { requestNotesSuggestion } from "../data/suggest-notes"
 import { requestTagSuggestion, SuggestError } from "../data/suggest-tags"
 import { emittedNoteTitle } from "../data/note-identity"
@@ -90,13 +89,7 @@ export function useMakeBoard(): (noteId: NoteId, create?: { title: string }) => 
       } else if (create) {
         ops.push(...newBoardOps(snapshot, noteId, create.title))
       } else return
-      // A board made from nothing is listed as a note is, by a view row
-      // written beside it (`LISTED_VIEW`); a note made a board keeps the
-      // row it has — one row per root, and the root is the same.
-      apply(
-        ops,
-        snapshot.nodes.has(noteId) ? {} : { views: [{ rootId: noteId, patch: LISTED_VIEW }] },
-      )
+      apply(ops)
     },
     [store, apply],
   )

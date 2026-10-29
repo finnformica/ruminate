@@ -12,7 +12,7 @@ import {
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { DEFAULT_EXPANDED_LEVELS, clampExpandedLevels } from "./blocks/default-collapsed"
 import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
-import { isNoteType, type GraphSnapshot } from "./data/graph"
+import { isNoteType, rootChildIds, type GraphSnapshot } from "./data/graph"
 import { asBlockType, type BlockType } from "./blocks/types"
 import { orderedNoteIds } from "./data/note-order"
 import {
@@ -24,7 +24,7 @@ import {
 import type { ReceivedShareSummary } from "./data/shares"
 import { createNotesBuilder } from "./data/note-meta"
 import { sampleGraph } from "./data/sample-graph"
-import { orderViews, viewByRootAtom, viewRootIdsAtom } from "./data/views"
+import { pinnedIdsOf } from "./data/pins"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
 import { createBlockIndexer, searchBlocks, type BlockHit } from "./utils/block-search"
 import { parseQuery, type Query } from "./utils/search"
@@ -249,22 +249,6 @@ export const isBootingAtom = atom((get) => {
   )
 })
 
-/**
- * How the Views list is ordered — the sidebar's, which the palette follows, so no two surfaces disagree about where a view is.
- *
- * - **title**: A–Z. The default, and stable: nothing moves while you read.
- * - **updated**: most recently changed first. What this used to do always,
- *   which is why it is no longer the default — `updated_at` is stamped on
- *   every edit (`src/hooks/note-doc.ts`), so the note you are typing in
- *   climbs to the top of the list while you are looking at it.
- * - **manual**: the order you dragged the sidebar into (`viewEntriesAtom`:
- *   the views' `sort_key`). Views you have never dragged have no position
- *   of their own and follow beneath the ones you have.
- */
-export type NoteSort = "title" | "updated" | "manual"
-
-export const noteSortAtom = atomWithStorage<NoteSort>("note-sort", "title")
-
 /** A–Z by the name on the row, with the opaque id breaking an exact tie so
  * the order is total (two notes can share a display name). */
 const byDisplayName = (a: Note, b: Note) => {
@@ -273,8 +257,8 @@ const byDisplayName = (a: Note, b: Note) => {
 }
 
 /** Most recently updated first; a note with no timestamp at all sorts to the
- * bottom, by name among its fellows. The Views list's "Recently updated",
- * and the order the board picker lists boards in (`board-picker.tsx`). */
+ * bottom, by name among its fellows: the order the board picker lists
+ * boards in (`board-picker.tsx`). */
 export const byUpdatedAt = (a: Note, b: Note) => {
   if (a.updatedAt !== null && b.updatedAt !== null) {
     if (a.updatedAt !== b.updatedAt) return b.updatedAt - a.updatedAt
@@ -286,32 +270,19 @@ export const byUpdatedAt = (a: Note, b: Note) => {
   return byDisplayName(a, b)
 }
 
-const NO_ORDER: readonly NoteId[] = []
-
-/** The manual note order the graph used to hold (`src/data/note-order.ts`):
- * the ids the corpus root holds, live ones only, in sort-key order. Nothing
- * writes it any more — the Views list is ordered on the view rows — but a
- * corpus dragged into an order before then still reads in it, until the
- * first drag of the Views list keys every row and this stops mattering. */
+/** The notes page's order (`src/data/note-order.ts`): the ids the corpus
+ * root holds, live ones only, in sort-key order. */
 const noteOrderAtom = atom((get) => orderedNoteIds(get(graphSnapshotAtom)))
 
 /**
- * Every note, in the chosen order (`noteSortAtom`). This is the order the
- * notes take within the Views list before the views' own keys are laid
- * over it (`viewEntriesAtom`), and the order everything that lists notes
- * alone (search, the calendar, the block index) uses.
- *
- * Manual is two bands rather than one: the notes the corpus root holds, in
- * their dragged order, then the notes it does not — which is every note until
- * something is dragged, so switching to manual on a fresh corpus shows the
- * name order rather than an empty list.
+ * Every note, in the notes page's order (docs/removing-views.md): the notes
+ * the corpus root holds, in the order they were dragged into, then the notes
+ * it does not, A–Z. The one order everything that lists notes uses (search,
+ * the calendar, the block index), so no two surfaces disagree.
  */
 export const sortedNotesAtom = atom((get) => {
   const notes = [...get(notesAtom).values()]
-  const sort = get(noteSortAtom)
-
-  const compare = sort === "updated" ? byUpdatedAt : byDisplayName
-  const placed = sort === "manual" ? get(noteOrderAtom) : NO_ORDER
+  const placed = get(noteOrderAtom)
   const rank = new Map(placed.map((id, index) => [id, index]))
 
   return notes.sort((a, b) => {
@@ -322,7 +293,7 @@ export const sortedNotesAtom = atom((get) => {
     if (aRank !== undefined && bRank !== undefined) return aRank - bRank
     if (aRank !== undefined) return -1
     if (bRank !== undefined) return 1
-    return compare(a, b)
+    return byDisplayName(a, b)
   })
 })
 
@@ -336,17 +307,23 @@ export const ownSortedNotesAtom = atom((get) => {
 })
 
 /**
- * The own notes in the Views list: those whose root's view row says so
- * (`pinned`, `src/data/views.ts`), in `ownSortedNotesAtom` order. Every
- * note and board is created with such a row, so this is every note until
- * one is removed from Views — which takes it off this list and nothing
- * else: `sortedNotesAtom` and the rest keep every note, so the note is still
- * found by search, Recent, the calendar and its links.
+ * The sidebar's **Notes** list (docs/removing-views.md): the rows of the
+ * notes page, the Root frame (`rootChildIds`), as notes — the same notes in
+ * the same order, so the two never disagree. Shared notes are left out, as
+ * the notes page leaves them out: they are listed under Shared.
  */
-const listedNotesAtom = atom((get) => {
-  const byRoot = get(viewByRootAtom)
-  return get(ownSortedNotesAtom).filter((note) => byRoot.get(note.id)?.pinned === true)
+export const rootNotesAtom = atom((get): Note[] => {
+  const notes = get(notesAtom)
+  if (notes.size === 0) return NO_NOTES
+  const origin = get(sharedOriginAtom)
+  const exclude = origin.size === 0 ? undefined : new Set(origin.keys())
+  return rootChildIds(get(graphSnapshotAtom), exclude).flatMap((id) => {
+    const note = notes.get(id)
+    return note ? [note] : []
+  })
 })
+
+const NO_NOTES: Note[] = []
 
 /** The notes shared with the user, each with the share it came through, in
  * `sortedNotesAtom` order — one list, whoever shared them (the sidebar's
@@ -361,82 +338,48 @@ export const sharedNotesAtom = atom((get) => {
   })
 })
 
-/** One row of the Views list: a note, or a block made a view of its own. */
-export type ViewEntry =
+/** One row of the Pinned list: a note, or a block (`src/data/pins.ts`). */
+export type PinnedEntry =
   | { kind: "note"; id: NoteId; noteId: NoteId; note: Note }
-  | { kind: "block"; id: string; noteId: NoteId; block: BlockView }
-
-/** A–Z by what the row is called, the id breaking an exact tie. */
-const byEntryName = (a: ViewEntry, b: ViewEntry) => {
-  const byName = entryName(a).localeCompare(entryName(b))
-  return byName !== 0 ? byName : a.id.localeCompare(b.id)
-}
-
-const entryName = (entry: ViewEntry) =>
-  entry.kind === "note" ? entry.note.displayName : entry.block.text
-
-/** Most recently updated first; a row with no timestamp sorts to the bottom,
- * by name among its fellows. */
-const byEntryUpdatedAt = (a: ViewEntry, b: ViewEntry) => {
-  const at = (entry: ViewEntry) =>
-    entry.kind === "note" ? entry.note.updatedAt : entry.block.updatedAt
-  const aAt = at(a)
-  const bAt = at(b)
-  if (aAt !== null && bAt !== null) {
-    if (aAt !== bAt) return bAt - aAt
-  } else if (aAt !== null) {
-    return -1
-  } else if (bAt !== null) {
-    return 1
-  }
-  return byEntryName(a, b)
-}
+  | { kind: "block"; id: string; noteId: NoteId; block: PinnedBlock }
 
 /**
- * **The Views list**: the roots whose view row lists them — the user's own
- * notes and boards that are (`listedNotesAtom`), and every block made a
- * view of its own (`blockViewsAtom`) — as one list in the chosen order
- * (`noteSortAtom`): what the sidebar draws under **Views**, and the
- * palette's Views group holds with nothing typed. Shared
- * notes are not here: they are rows in someone else's corpus, listed apart
- * (`sharedNotesAtom`); a block view IN a shared note is, since the view is
- * this user's own.
- *
- * One list for both kinds, because a view means one thing — *a way in* —
- * and which kind of node it is rooted at is a detail the row itself shows.
- * Two headings would have made the reader sort out a distinction the list
- * does not draw, and would have made the order two orders.
- *
- * In the automatic sorts the two kinds interleave by name or by date. In the
- * manual sort the views' own keys decide (`orderViews`): the rows that have
- * been dragged sit where they were put, and the rest follow — the notes in
- * their own order, then the blocks in index order — until they are dragged
- * too.
+ * **The Pinned list** (docs/removing-views.md): the user's own notes and
+ * blocks that carry a pin (`pinned_at`), oldest pin first — what the
+ * sidebar draws under **Pinned**, and the palette's Pinned group holds with
+ * nothing typed. A pin is a prop of the node, so a node in a note someone
+ * shared is never here: those are listed under Shared. A pinned node the
+ * graph no longer reaches from a note is left out rather than drawn as a row
+ * that opens nothing.
  */
-export const viewEntriesAtom = atom((get): ViewEntry[] => {
-  const entries: ViewEntry[] = [
-    ...get(listedNotesAtom).map((note): ViewEntry => ({
-      kind: "note",
-      id: note.id,
-      noteId: note.id,
-      note,
-    })),
-    ...get(blockViewsAtom).map((block): ViewEntry => ({
-      kind: "block",
-      id: block.id,
-      noteId: block.noteId,
-      block,
-    })),
-  ]
-  const sort = get(noteSortAtom)
-  if (sort === "manual") return orderViews(entries, get(viewByRootAtom))
-  return entries.sort(sort === "updated" ? byEntryUpdatedAt : byEntryName)
+export const pinnedEntriesAtom = atom((get): PinnedEntry[] => {
+  const graph = get(graphSnapshotAtom)
+  const ids = pinnedIdsOf(graph)
+  if (ids.length === 0) return NO_PINS
+  const origin = get(sharedOriginAtom)
+  const notes = get(notesAtom)
+  const blocks = new Map(get(pinnedBlocksAtom).map((block) => [block.id, block]))
+  const entries: PinnedEntry[] = []
+  for (const id of ids) {
+    const note = notes.get(id)
+    if (note) {
+      if (!origin.has(id)) entries.push({ kind: "note", id, noteId: id, note })
+      continue
+    }
+    const block = blocks.get(id)
+    if (block && !origin.has(block.noteId)) {
+      entries.push({ kind: "block", id, noteId: block.noteId, block })
+    }
+  }
+  return entries
 })
 
-/** The Views list as roots the results editor can walk: a note opens
+const NO_PINS: PinnedEntry[] = []
+
+/** The Pinned list as roots the results editor can walk: a note opens
  * itself, a block opens its note focused on it. */
-export const viewRootsAtom = atom((get) =>
-  get(viewEntriesAtom).map(({ id, noteId }) => ({ id, noteId })),
+export const pinnedRootsAtom = atom((get) =>
+  get(pinnedEntriesAtom).map(({ id, noteId }) => ({ id, noteId })),
 )
 
 export const noteSearcherAtom = atom((get) => {
@@ -497,13 +440,10 @@ export const searchBlocksAtom = atom((get) => {
 })
 
 /**
- * A BLOCK made a view of its own (docs/metadata.md): a block with a view
- * row rooted at it, and the note to open it in. A row is what lists a node,
- * a note's and a block's alike; a block's puts it in the Views list beside
- * the notes, from where it opens focused on — a focused view of that one
- * block and what is beneath it.
+ * A pinned BLOCK (`src/data/pins.ts`), and the note to open it in: its row
+ * in the Pinned list opens that note focused on the block.
  */
-export interface BlockView {
+export interface PinnedBlock {
   id: string
   /** The note the block opens in, focused: the note it was written in
    * while that note still reaches it, else the first note (in
@@ -515,57 +455,48 @@ export interface BlockView {
   text: string
   /** The block's type — what the sidebar's row draws the glyph of. */
   type: BlockType
-  /** When the block was last edited (ms epoch), for the Recently updated
-   * sort; null when the row carries no stamp. */
-  updatedAt: number | null
   /** The note it opens in. */
   note: Note
 }
 
-const NO_BLOCK_VIEWS: BlockView[] = []
+const NO_PINNED_BLOCKS: PinnedBlock[] = []
 
 /**
- * The block views, in the block index's order (the notes' `sortedNotesAtom`
- * order, document order within a note). A block in a note someone shared is
- * here when this user made it a view, as the view is theirs. A view whose
- * root the graph no longer holds — deleted elsewhere, a share taken back —
- * is left out rather than drawn as a row that opens nothing. Blocks no note
- * reaches come last.
+ * The pinned blocks, each with the note it opens in, in no order of their
+ * own (`pinnedEntriesAtom` puts them in pin order). Blocks no note reaches
+ * open in the note they were written in, where its basket is.
  */
-export const blockViewsAtom = atom((get) => {
+const pinnedBlocksAtom = atom((get) => {
   const graph = get(graphSnapshotAtom)
-  const viewIds = new Set<string>()
-  for (const id of get(viewRootIdsAtom)) {
+  const pinnedIds = new Set<string>()
+  for (const id of pinnedIdsOf(graph)) {
     const node = graph.nodes.get(id)
-    if (node && !isNoteType(node.type)) viewIds.add(id)
+    if (node && !isNoteType(node.type)) pinnedIds.add(id)
   }
-  if (viewIds.size === 0) return NO_BLOCK_VIEWS
-
-  const stampOf = (id: string) => graph.nodes.get(id)?.updated_at ?? null
+  if (pinnedIds.size === 0) return NO_PINNED_BLOCKS
 
   // Where each opens: its first hit in index order, unless a later hit is in
   // the note it was written in. A Map keeps a key's first position, so the
   // list stays in index order either way.
   const homes = new Map<string, BlockHit>()
   for (const hit of get(blockIndexAtom).hits) {
-    if (!viewIds.has(hit.blockId)) continue
+    if (!pinnedIds.has(hit.blockId)) continue
     const written = graph.nodes.get(hit.blockId)?.notes_id ?? null
     const held = homes.get(hit.blockId)
     if (!held || (hit.noteId === written && held.noteId !== written)) homes.set(hit.blockId, hit)
   }
-  const blocks: BlockView[] = []
+  const blocks: PinnedBlock[] = []
   for (const [id, hit] of homes) {
     blocks.push({
       id,
       noteId: hit.noteId,
       text: hit.text,
       type: hit.type,
-      updatedAt: stampOf(id),
       note: hit.note,
     })
   }
   const notes = get(notesAtom)
-  for (const id of viewIds) {
+  for (const id of pinnedIds) {
     if (homes.has(id)) continue
     const node = graph.nodes.get(id)
     const note = node?.notes_id ? notes.get(node.notes_id) : undefined
@@ -575,7 +506,6 @@ export const blockViewsAtom = atom((get) => {
       noteId: note.id,
       text: node.text,
       type: asBlockType(node.type),
-      updatedAt: stampOf(id),
       note,
     })
   }

@@ -1,4 +1,4 @@
-import type { LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
+import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import { linkEntityId, type Entity } from "./events"
 import { canonicalJson, propsEqual, type DeltaMatValueRow } from "./key-events"
 
@@ -16,7 +16,6 @@ import { canonicalJson, propsEqual, type DeltaMatValueRow } from "./key-events"
 export interface FoldCheckRows {
   nodes: readonly NodeRow[]
   links: readonly LinkRow[]
-  views: readonly ViewRow[]
 }
 
 /**
@@ -128,6 +127,5 @@ export function foldDifferences(
     new Map(rows.map((row) => [linkEntityId(row.source_id, row.destination_id, row.kind), row]))
   compare("block", byId(first.nodes), byId(second.nodes), skip, sides, out)
   compare("link", byLink(first.links), byLink(second.links), skip, sides, out)
-  compare("view", byId(first.views), byId(second.views), skip, sides, out)
   return out
 }

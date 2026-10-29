@@ -6,7 +6,6 @@ import {
   type ReplicaPutPayload,
   type ReplicaPutResult,
   type ReplicaStatusBody,
-  type ViewRow,
 } from "../../worker/handlers/replica-payload"
 import { MAX_KEY_EVENTS_PER_PUT, type KeyEvent, type KeyEventsPutResult } from "./key-events"
 import { writerHeaders } from "./writer-identity"
@@ -101,9 +100,9 @@ export interface ReplicaSyncOptions {
    * note count to notice a replica left drastically behind. */
   getNoteCount: () => number
   /** Every current row of every corpus table — the full-push source (the
-   * store). Views included: a delete only reaches other devices if its
+   * store). Tombstones included: a delete only reaches other devices if its
    * tombstone travels, and a full push is how a repaired replica catches up. */
-  getAllRows: () => Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }>
+  getAllRows: () => Promise<{ nodes: NodeRow[]; links: LinkRow[] }>
   /** The store's unpushed events, oldest first — the queue. */
   getUnpushedEvents: () => Promise<KeyEvent[]>
   /** Stamp pushed events with the `seq` the replica gave each. */
@@ -120,8 +119,8 @@ export interface ReplicaSyncOptions {
 
 export interface ReplicaSyncHandle {
   /** The store took a write: its events are in the queue. `noteIds` are the
-   * notes it touched and `viewIds` the views, for the pull guards below. */
-  notifyChange(noteIds: NoteId[], viewIds: string[]): void
+   * notes it touched, for the pull guards below. */
+  notifyChange(noteIds: NoteId[]): void
   /**
    * Note ids with local changes/deletes not yet confirmed pushed (queued or
    * in flight). The pull side consults this before applying a pull, so a
@@ -131,9 +130,6 @@ export interface ReplicaSyncHandle {
    * implementation always provides it.)
    */
   pendingNoteIds?(): Set<NoteId>
-  /** The same, for views (`src/data/views.ts`): the ids of rows queued or in
-   * flight, which a pull must leave alone. */
-  pendingViewIds?(): Set<string>
   /** The ids of events in a push that has not finished: the store must not
    * coalesce a typing run into one of these (`NoteStore.applyEvents`), or
    * the replica would hold an event this device's log no longer does. */
@@ -174,8 +170,6 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   const dirtyNoteIds = new Set<NoteId>()
   /** Ids snapshotted into a push that has not finished yet (see `pendingNoteIds`). */
   let inFlightNoteIds = new Set<NoteId>()
-  const dirtyViewIds = new Set<string>()
-  let inFlightViewIds = new Set<string>()
   let inFlightEventIds = new Set<string>()
   let fullPushRequested = false
   let stopped = false
@@ -352,36 +346,23 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   }
 
   /** Split rows into payload chunks: every node row precedes every link row
-   * (links reference nodes), views follow both (they name a node by id with
-   * no key to satisfy, so they need nothing to land first — they go last only
-   * to keep the order the reader expects), cursor the last. */
+   * (links reference nodes), cursor the last. */
   function buildRowPayloads(
     nodes: NodeRow[],
     links: LinkRow[],
-    views: ViewRow[],
     cursor: string,
   ): ReplicaPutPayload[] {
     const payloads: ReplicaPutPayload[] = []
     let nodeIndex = 0
     let linkIndex = 0
-    let viewIndex = 0
     do {
       const chunkNodes = nodes.slice(nodeIndex, nodeIndex + chunkRows)
       nodeIndex += chunkNodes.length
       const room = chunkRows - chunkNodes.length
       const chunkLinks = nodeIndex >= nodes.length ? links.slice(linkIndex, linkIndex + room) : []
       linkIndex += chunkLinks.length
-      const roomAfterLinks = room - chunkLinks.length
-      const chunkViews =
-        nodeIndex >= nodes.length && linkIndex >= links.length
-          ? views.slice(viewIndex, viewIndex + roomAfterLinks)
-          : []
-      viewIndex += chunkViews.length
-      const payload: ReplicaPutPayload = { nodes: chunkNodes, links: chunkLinks }
-      // Optional on the wire, so absent when empty.
-      if (chunkViews.length > 0) payload.views = chunkViews
-      payloads.push(payload)
-    } while (nodeIndex < nodes.length || linkIndex < links.length || viewIndex < views.length)
+      payloads.push({ nodes: chunkNodes, links: chunkLinks })
+    } while (nodeIndex < nodes.length || linkIndex < links.length)
     payloads[payloads.length - 1].cursor = cursor
     return payloads
   }
@@ -390,7 +371,7 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   async function pushAllRows(keepalive: boolean): Promise<{ cursor: string; committed: boolean }> {
     const all = await options.getAllRows()
     const cursor = nextCursor()
-    const payloads = buildRowPayloads(all.nodes, all.links, all.views, cursor)
+    const payloads = buildRowPayloads(all.nodes, all.links, cursor)
     // The cursor rides the final chunk, so the final response is the one
     // that confirms it — no follow-up request.
     let committed: string | null = null
@@ -442,9 +423,6 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     const snapshotNoteIds = new Set(dirtyNoteIds)
     dirtyNoteIds.clear()
     inFlightNoteIds = snapshotNoteIds
-    const snapshotViewIds = new Set(dirtyViewIds)
-    dirtyViewIds.clear()
-    inFlightViewIds = snapshotViewIds
     const keepalive = useKeepalive
     useKeepalive = false
 
@@ -458,7 +436,6 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
         : await pushEvents(events, keepalive)
 
       inFlightNoteIds = new Set()
-      inFlightViewIds = new Set()
       inFlightEventIds = new Set()
       queuedDeletes = 0
       backoffMs = null
@@ -485,12 +462,10 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       // The events are still in the store's queue; put the guards back and
       // retry with backoff. Never touches the local rows.
       inFlightNoteIds = new Set()
-      inFlightViewIds = new Set()
       inFlightEventIds = new Set()
       if (wasFullPush) fullPushRequested = true
       else queued = true
       for (const id of snapshotNoteIds) dirtyNoteIds.add(id)
-      for (const id of snapshotViewIds) dirtyViewIds.add(id)
       reportPending()
       recordError(error)
       backoffMs = backoffMs === null ? backoffStartMs : Math.min(backoffMs * 2, backoffMaxMs)
@@ -527,11 +502,10 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   schedule(debounceMs)
 
   return {
-    notifyChange(noteIds, viewIds) {
+    notifyChange(noteIds) {
       if (stopped) return
       queued = true
       for (const id of noteIds) dirtyNoteIds.add(id)
-      for (const id of viewIds) dirtyViewIds.add(id)
       reportPending()
       schedule(debounceMs)
     },
@@ -543,9 +517,6 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     },
     pendingNoteIds() {
       return new Set([...dirtyNoteIds, ...inFlightNoteIds])
-    },
-    pendingViewIds() {
-      return new Set([...dirtyViewIds, ...inFlightViewIds])
     },
     inFlightEventIds() {
       return new Set(inFlightEventIds)

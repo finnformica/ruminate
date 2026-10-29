@@ -47,10 +47,10 @@ block inside it, a palette result, a Root row — opens its board page, as
 a new history entry, so Back returns to the view as it was
 (`useFocusBlock`, `src/hooks/open-note.ts`: the one focus, which a
 tracker row takes too, docs/trackers.md). A link to a board block
-(`/views/<note>?block=<board>`, as **Copy link** writes it) opens the
+(`/notes/<note>?block=<board>`, as **Copy link** writes it) opens the
 board in the link's place. In a split the pane keeps such a link as a
 focus: the board page has no panes. The board's own outline
-(`/views/<board>`, **Open note**) is not a focus, and stays.
+(`/notes/<board>`, **Open note**) is not a focus, and stays.
 
 Until 2026-W41 a board was a `note` row whose props carried `board: true`;
 migrations/0020 retyped every such row. While that migration has yet to run
@@ -435,7 +435,7 @@ a note someone shared with you has no such entry. Picking it opens the
 popover hung off the row's line (`Popover`, `src/components/ui/popover.tsx`;
 on a phone a sheet from the foot of the screen, as the Features editor is)
 with a search box at the top and, beneath it, your boards — the most
-recently updated first, as the Views list's "Recently updated" orders them
+recently updated first
 (`byUpdatedAt`), the first eight until something is typed, and then every
 board whose name holds what was typed — and, last and always, **Create new
 board**. <kbd>Enter</kbd> picks the highlighted row, the arrows move it,
@@ -452,12 +452,8 @@ parent, and `linkBoardOps` refuses both again.
   its default features (`newBoardOps`) and that link. With a name typed the
   row reads Create “name” and the board is named so; with nothing typed it
   makes an untitled board, as **New board** allows a blank name. Nothing
-  navigates: the card appears in place, selected. **No view row is
-  written**: a board made inside a note is not in the Views list, since
-  the note is its place (docs/metadata.md, "Views"); **Add to Views** in
-  the card's menu lists it from there, as any node. (**New board** in the
-  header is still the way to a board of its own, listed and opened on its
-  page.)
+  navigates: the card appears in place, selected. (**New board** in the
+  header is still the way to a board of its own, opened on its page.)
 
 Either way the editor records a structural step of its own once the graph
 holds the board (`BoardRequest.place`, `block-editor.tsx`): the row goes

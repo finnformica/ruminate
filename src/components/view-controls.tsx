@@ -19,7 +19,6 @@ import {
   withFilterText,
   type AncestorFilterKey,
 } from "../utils/view-filter"
-import { Button } from "./ui/button"
 import { DropdownMenu } from "./ui/dropdown-menu"
 import { IconButton } from "./ui/icon-button"
 import { FilterIcon16, SearchIcon16, SortAlphabetAscIcon16 } from "./icons"
@@ -56,66 +55,15 @@ import { QualifierPicture } from "./qualifier-suggestions"
  * the focused block — that have children: pick a row and the filter names
  * it by id; take the typed text, offered as the first row ("Contains
  * “alice”"), and the filter names every row containing it.
- *
- * A button carries a **dot** when what is on screen differs from the view
- * this note or block saved (docs/metadata.md), and the menu behind it grows
- * a footer offering to settle it. The dot says which half moved; the buttons
- * act on the WHOLE view, because a node holds one view and saving half of it
- * would leave the other half behind.
  */
-
-/** The dot on a button whose value is not the saved view's. */
-function DirtyDot() {
-  return (
-    <span
-      aria-hidden
-      className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-border-focus"
-    />
-  )
-}
-
-/**
- * What a saved view is worth doing about, when the view has moved away from
- * it. Both act on the whole view — filter and sort together — so settling
- * one from the Sort menu keeps whatever the Filter is set to.
- */
-export interface SavedViewActions {
-  /** Whether THIS menu's half differs from what was saved (drives the dot). */
-  dirty: boolean
-  /** Write the whole view onto the note or block it is rooted at. */
-  onUpdateDefault: () => void
-  /** Put the whole saved view back. */
-  onResetDefault: () => void
-}
-
-function DefaultFooter({ onUpdateDefault, onResetDefault }: SavedViewActions) {
-  // Stacked on a phone, where the menu is narrow (see `MENU_WIDTH`), each
-  // the footer's full width. A finger's side padding (`coarse:px-4`) is
-  // for a button standing on its own; here it only made the label wider
-  // than the column, and the menu cut the buttons off at its edge.
-  const button = "whitespace-nowrap coarse:px-1 sm:w-0 sm:grow"
-  return (
-    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
-      <Button size="small" className={button} onClick={onUpdateDefault}>
-        Update to default
-      </Button>
-      <Button size="small" className={button} onClick={onResetDefault}>
-        Reset to default
-      </Button>
-    </div>
-  )
-}
 
 /**
  * How wide the Filter and Sort menus are. Their branches open beside them
  * (`DropdownMenu.Content`, nested), and on a phone the two have the
  * screen's width to share: the menu keeps to a narrow column at the right
- * edge, where its button is, so its branch has the room to the left. With
- * a footer (the saved-view buttons) it widens where there is room; on a
- * phone the buttons fit the column instead (`DefaultFooter`).
+ * edge, where its button is, so its branch has the room to the left.
  */
 const MENU_WIDTH = "max-sm:w-44"
-const MENU_WIDTH_WITH_FOOTER = "max-sm:w-44 sm:w-80"
 
 /** The ancestor branches as the menu names them. */
 const ANCESTOR_LABELS: Record<AncestorFilterKey, string> = { parent: "Parent", under: "Under" }
@@ -140,15 +88,12 @@ export interface FilterBranch {
 export function FilterMenu({
   filter,
   onFilterChange,
-  saved,
   scope,
   branches,
 }: {
   /** The view's filter, as the query language writes it. */
   filter: string
   onFilterChange: (filter: string) => void
-  /** The note or block's saved view, when this session may write one. */
-  saved?: SavedViewActions
   /** What the view is rooted at — the note, or the focused block — and so
    * what the Parent and Under pickers search within (`in:`). */
   scope?: string
@@ -211,15 +156,10 @@ export function FilterMenu({
             className="relative shrink-0"
           >
             <FilterIcon16 className={cx(active && "text-text")} />
-            {saved?.dirty ? <DirtyDot /> : null}
           </IconButton>
         }
       />
-      <DropdownMenu.Content
-        align="end"
-        className={saved?.dirty ? MENU_WIDTH_WITH_FOOTER : MENU_WIDTH}
-        footer={saved?.dirty ? <DefaultFooter {...saved} /> : undefined}
-      >
+      <DropdownMenu.Content align="end" className={MENU_WIDTH}>
         {/* The surface's own branches first: each row ticks a block into
             the branch's own `parent:` qualifier — several at once a comma
             list, any of them, as the language reads a list — and each
@@ -390,13 +330,10 @@ export function FilterMenu({
 export function SortMenu({
   sort,
   onSortChange,
-  saved,
 }: {
   /** The view's sort (`text`, `text:desc`), or empty for document order. */
   sort: string
   onSortChange: (sort: string) => void
-  /** The note or block's saved view, when this session may write one. */
-  saved?: SavedViewActions
 }) {
   const summary = describeSort(sort)
   const active = summary !== ""
@@ -416,15 +353,10 @@ export function SortMenu({
             className="relative shrink-0"
           >
             <SortAlphabetAscIcon16 className={cx(active && "text-text")} />
-            {saved?.dirty ? <DirtyDot /> : null}
           </IconButton>
         }
       />
-      <DropdownMenu.Content
-        align="end"
-        className={saved?.dirty ? MENU_WIDTH_WITH_FOOTER : MENU_WIDTH}
-        footer={saved?.dirty ? <DefaultFooter {...saved} /> : undefined}
-      >
+      <DropdownMenu.Content align="end" className={MENU_WIDTH}>
         {/* Document order is the note's own order, and the absence of a sort. */}
         <DropdownMenu.Item selected={!active} onClick={() => onSortChange("")}>
           Document order

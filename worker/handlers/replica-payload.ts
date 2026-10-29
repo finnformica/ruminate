@@ -73,10 +73,10 @@ export interface LinkRow {
 
 /** The `link` table's primary key (within one tenant): [source, dest, kind]. */
 /**
- * One row of the `views` table (migrations/0015) — an entrypoint into the
- * graph, and the viewer's own: `user_id` is the key's first column, so a view
- * may name a `root_id` belonging to somebody else (a share) without touching
- * their node.
+ * One row of the old `views` table (migrations/0015, dropped by 0031,
+ * docs/removing-views.md). Kept on the wire only: a build from before still
+ * pushes these and reads `views` off a pull. The replica writes nothing for
+ * a pushed row and answers every pull with none.
  */
 export interface ViewRow {
   /** Minted per view; several per root are allowed. */
@@ -140,26 +140,6 @@ export function toNodeRow(row: Record<string, unknown>): NodeRow {
   return node
 }
 
-/** Read one view row out of a driver result (see `toNodeRow`). `pinned` is
- * an INTEGER column on both engines and a boolean on the wire. */
-export function toViewRow(row: Record<string, unknown>): ViewRow {
-  const view: ViewRow = {
-    id: String(row.id),
-    root_id: String(row.root_id),
-    filter: row.filter === null || row.filter === undefined ? null : String(row.filter),
-    sort: row.sort === null || row.sort === undefined ? null : String(row.sort),
-    pinned: Number(row.pinned) === 1,
-    sort_key: row.sort_key === null || row.sort_key === undefined ? null : String(row.sort_key),
-    updated_at: Number(row.updated_at),
-  }
-  if (row.deleted_at !== null && row.deleted_at !== undefined) {
-    view.deleted_at = Number(row.deleted_at)
-  }
-  if (row.seq !== null && row.seq !== undefined) view.seq = Number(row.seq)
-  if (typeof row.stack === "string" && row.stack !== "") view.stack = row.stack
-  return view
-}
-
 /** Read one link row out of a driver result (see `toNodeRow`). */
 export function toLinkRow(row: Record<string, unknown>): LinkRow {
   const link: LinkRow = {
@@ -190,9 +170,8 @@ export function toLinkRow(row: Record<string, unknown>): LinkRow {
 export interface GraphDiff {
   nodes: NodeRow[]
   links: LinkRow[]
-  /** View rows (migrations/0015). A delete is a tombstoned row here, as it is
-   * for nodes and links — there is no purge channel for views, because none
-   * was ever needed. */
+  /** Always empty now (docs/removing-views.md): kept for the builds that
+   * read it. */
   views: ViewRow[]
   deleteNodes: string[]
   deleteLinks: LinkKey[]

@@ -22,7 +22,7 @@ export function RootLink({
 }) {
   return (
     <Link
-      to="/views/$"
+      to="/notes/$"
       params={{ _splat: CORPUS_ROOT_ID }}
       search={{ query: undefined }}
       aria-label={ROOT_LABEL}

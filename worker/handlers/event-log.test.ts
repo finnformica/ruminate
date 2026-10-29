@@ -7,7 +7,6 @@ import {
   eventStamp,
   linkEntityId,
   projectRows,
-  toViewRows,
   type RuminateEvent,
 } from "../../src/data/events"
 import { encodeHlc } from "../../src/data/hlc"
@@ -16,13 +15,12 @@ import { ensureTenantMeta, forTenant, type TenantDb } from "../tenancy-db"
 import migration0028 from "../../migrations/0028_events_log.sql?raw"
 import migration0029 from "../../migrations/0029_backfill_delta_mat_values.sql?raw"
 import migration0030 from "../../migrations/0030_genesis_unlogged_rows.sql?raw"
+import migration0031 from "../../migrations/0031_drop_views.sql?raw"
 import {
   assembleLogState,
-  assembleStamped,
   editsOf,
   expandLog,
   foldKeys,
-  foldKeysByStamp,
   keyEventStamp,
   type KeyEvent,
 } from "../../src/data/key-events"
@@ -41,13 +39,15 @@ import {
   type StoredKeyEvent,
 } from "./event-log"
 import { corpusPullFull, corpusPullSince, corpusPut } from "./replica-corpus"
-import type { LinkRow, NodeRow, ViewRow } from "./replica-payload"
+import type { LinkRow, NodeRow } from "./replica-payload"
 import { createTenantTestDriver } from "./sqlite-test-driver"
 
 const identityOf = (id: number) => ({ id, login: `u${id}`, name: null })
 
-async function open(): Promise<{ driver: SqlDriver; alice: TenantDb; bob: TenantDb }> {
-  const driver = await createTenantTestDriver()
+async function open(
+  options: { views?: boolean } = {},
+): Promise<{ driver: SqlDriver; alice: TenantDb; bob: TenantDb }> {
+  const driver = await createTenantTestDriver(options)
   const alice = forTenant(driver, identityOf(111))
   const bob = forTenant(driver, identityOf(222))
   await ensureTenantMeta(alice)
@@ -194,7 +194,7 @@ async function insertOldEvents(driver: SqlDriver, events: readonly RuminateEvent
 }
 
 describe("appending events", () => {
-  it("projects an append into nodes, link and views — and the fold agrees with the tables", async () => {
+  it("projects an append into nodes and link, logs view events as history — and the fold agrees with the tables", async () => {
     const { driver, alice } = await open()
     const w = writer()
     await append(alice, [
@@ -225,12 +225,12 @@ describe("appending events", () => {
     expect(await verifyLog(alice)).toMatchObject({ mirror: [] })
   })
 
-  it("plans the same eight statements for one event or three hundred", () => {
+  it("plans the same six statements for one event or three hundred", () => {
     const w = writer()
     const ctx = { appendId: "x", actor: 111, origin: "replica" as const, client: null, now: 1 }
     const many = Array.from({ length: 300 }, (_, i) => w.block(`blk_${i}`, "text", `Block ${i}`))
-    expect(planKeyAppend(expandLog([w.block("a", "text", "A")]), ctx)).toHaveLength(8)
-    expect(planKeyAppend(expandLog(many), ctx)).toHaveLength(8)
+    expect(planKeyAppend(expandLog([w.block("a", "text", "A")]), ctx)).toHaveLength(6)
+    expect(planKeyAppend(expandLog(many), ctx)).toHaveLength(6)
   })
 
   it("cuts an append that would not fit one bound value into runs that do, in one batch", async () => {
@@ -246,7 +246,7 @@ describe("appending events", () => {
     const ctx = { appendId: "x", actor: 111, origin: "replica" as const, client: null, now: 1 }
     // A limit so small every edit is its own run: the hardest case for order.
     const statements = planKeyAppend(expandLog(events), ctx, 1)
-    expect(statements).toHaveLength(8 * events.length)
+    expect(statements).toHaveLength(6 * events.length)
     await alice.includingDeleted().batch(statements)
     expect((await readLog(alice)).map((row) => row.seq)).toEqual(
       Array.from({ length: 11 }, (_, i) => i + 1),
@@ -740,8 +740,9 @@ describe("genesis (migration 0030)", () => {
       [id, text, seq, deletedAt ?? null],
     )
 
-  it("records every row the log has no event for, once, as a snapshot", async () => {
-    const { driver, alice } = await open()
+  it("records every row the log has no event for, once, as a snapshot — views too, before 0031 drops them", async () => {
+    // Production's order: 0030 runs while `views` is there, then 0031.
+    const { driver, alice } = await open({ views: true })
     await stray(driver, "old-1", "from before the log", 1)
     await stray(driver, "old-2", "deleted before the log", 2, 2)
     await driver.exec(
@@ -797,10 +798,16 @@ describe("genesis (migration 0030)", () => {
       { hlc: eventStamp({ at: 1, seq: 5 } as RuminateEvent), seq: 5 },
     ])
     expect(await verifyLog(alice)).toMatchObject({ ok: true, keyEvents: 25 })
+
+    // 0031 drops the table; the view's events stay in the log as history.
+    await driver.execScript(migration0031)
+    expect(await driver.exec("SELECT name FROM sqlite_master WHERE name = 'views'")).toEqual([])
+    expect(edits(await readLog(alice))).toContain("view.create v")
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, keyEvents: 25 })
   })
 
   it("runs once: a row written around the log after it is not recorded by a write", async () => {
-    const { driver, alice } = await open()
+    const { driver, alice } = await open({ views: true })
     await corpusPut(alice, { nodes: [node("a", "text", "A", 100)], links: [] })
     await driver.execScript(migration0030)
     expect(edits(await readLog(alice))).toEqual(["block.create a"])
@@ -818,7 +825,7 @@ describe("genesis (migration 0030)", () => {
   })
 
   it("verify names drift it cannot heal: a row changed without taking a sequence", async () => {
-    const { driver, alice } = await open()
+    const { driver, alice } = await open({ views: true })
     await corpusPut(alice, { nodes: [node("a", "text", "A", 100)], links: [] })
     await driver.exec("UPDATE nodes SET text = 'edited in the console' WHERE user_id = 111")
     const verdict = await verifyLog(alice)
@@ -827,7 +834,7 @@ describe("genesis (migration 0030)", () => {
   })
 
   it("verify names a key changed without taking a sequence", async () => {
-    const { driver, alice } = await open()
+    const { driver, alice } = await open({ views: true })
     await corpusPut(alice, {
       nodes: [node("a", "image", "A", 100, { props: '{"size":40}' })],
       links: [],
@@ -1028,10 +1035,6 @@ describe("by stamp", () => {
         "SELECT source_id, destination_id, kind, sort_key, updated_at, deleted_at, stamps " +
           "FROM link WHERE user_id = 111 ORDER BY source_id, destination_id",
       ),
-      views: await read(
-        "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at, stamps " +
-          "FROM views WHERE user_id = 111 ORDER BY id",
-      ),
     }
   }
 
@@ -1082,7 +1085,6 @@ describe("by stamp", () => {
     expect(block?.deleted_at).not.toBeNull()
     expect(results[0].links[0]).toMatchObject({ sort_key: "a5" })
     expect(results[0].links[0].deleted_at).not.toBeNull()
-    expect(results[0].views[0]).toMatchObject({ pinned: 0, filter: "type:todo" })
   })
 
   it("keeps both of two devices' changes to two fields of one block", async () => {
@@ -1209,114 +1211,6 @@ describe("by stamp", () => {
   })
 })
 
-describe("a view's stack (migrations/0027)", () => {
-  const viewRow = (at: number, extra: Partial<ViewRow> = {}): ViewRow => ({
-    id: "v",
-    root_id: "note",
-    filter: null,
-    sort: null,
-    pinned: true,
-    sort_key: null,
-    updated_at: at,
-    ...extra,
-  })
-  const stackOf = async (driver: SqlDriver) =>
-    (await driver.exec("SELECT stack FROM views WHERE user_id = 111 AND id = 'v'"))[0]?.stack
-
-  it("is set by an update, kept by an update that does not name it, and pulled", async () => {
-    const { driver, alice } = await open()
-    const w = writer()
-    // A create as every client before the field writes it: no `stack`.
-    await append(alice, [w.view("v", "note", true)])
-    expect(await stackOf(driver)).toBeNull()
-    await append(alice, [w.editView("v", { stack: "corpus_root:tasks" })])
-    // An older client changes another field and says nothing of the stack.
-    await append(alice, [w.editView("v", { filter: "type:todo" })])
-    expect(await stackOf(driver)).toBe("corpus_root:tasks")
-
-    const pulled = await corpusPullSince(alice, 0)
-    expect(pulled.views[0]).toMatchObject({ filter: "type:todo", stack: "corpus_root:tasks" })
-    expect(await verifyLog(alice)).toMatchObject({ ok: true, rejected: 0 })
-
-    await append(alice, [w.editView("v", { stack: null })])
-    expect(await stackOf(driver)).toBeNull()
-    expect((await corpusPullSince(alice, 0)).views[0]).not.toHaveProperty("stack")
-    expect(await verifyLog(alice)).toMatchObject({ ok: true, rejected: 0 })
-  })
-
-  it("is kept by a row pushed without it, and cleared by a row that says null", async () => {
-    const { driver, alice } = await open()
-    const ctx = { actor: 111, origin: "replica" as const, device: "tab", now: 5_000 }
-    await writeRows(alice, { nodes: [], links: [], views: [viewRow(1_000, { stack: "a.b" })] }, ctx)
-    expect(await stackOf(driver)).toBe("a.b")
-    // A client that predates 0027 pushes the row it holds, without a stack.
-    await writeRows(
-      alice,
-      { nodes: [], links: [], views: [viewRow(2_000, { filter: "type:todo" })] },
-      ctx,
-    )
-    expect(await stackOf(driver)).toBe("a.b")
-    const update = (await readLog(alice)).at(-1)!
-    expect(update).toMatchObject({ action: "set", key: "filter", value: "type:todo" })
-    await writeRows(alice, { nodes: [], links: [], views: [viewRow(3_000, { stack: null })] }, ctx)
-    expect(await stackOf(driver)).toBeNull()
-    expect(await verifyLog(alice)).toMatchObject({ ok: true, rejected: 0 })
-  })
-
-  it("is set on a row from before the field by any event that names it", async () => {
-    const { driver, alice } = await open()
-    const a = writer("dev.a")
-    await append(alice, [stampedAt(a.view("v", "note", true), 5_000)])
-    // The stamps a row projected before 0027 holds: none for `stack`.
-    await driver.exec(
-      "UPDATE views SET stamps = json_remove(stamps, '$.stack') WHERE user_id = 111 AND id = 'v'",
-    )
-    // Behind every stamp the row holds, but the first to name the stack.
-    const b = writer("dev.b")
-    await append(alice, [stampedAt(b.editView("v", { stack: "x", filter: "old" }), 4_000)])
-    const [row] = await driver.exec(
-      "SELECT filter, stack, stamps FROM views WHERE user_id = 111 AND id = 'v'",
-    )
-    expect(row).toMatchObject({ filter: null, stack: "x" })
-    expect(JSON.parse(String(row.stamps)).stack).toBe(
-      encodeHlc({ ms: 4_000, counter: 0, device: "dev.b" }),
-    )
-    expect(await verifyLog(alice)).toMatchObject({ ok: true, rejected: 0 })
-  })
-
-  it("lands the same in any order, and the client's fold agrees with the tables", async () => {
-    const a = writer("dev.a")
-    const b = writer("dev.b")
-    const create = [stampedAt(a.view("v", "note", true), 1_000)]
-    const edits = [
-      stampedAt(a.editView("v", { stack: "by.a" }), 3_000),
-      stampedAt(b.editView("v", { stack: "by.b", sort: "text:asc" }), 2_000),
-      stampedAt(b.editView("v", { filter: "type:todo" }), 4_000),
-    ]
-    const results = []
-    for (const order of [edits, [...edits].reverse()]) {
-      const { driver, alice } = await open()
-      await append(alice, create)
-      for (const event of order) await append(alice, [event])
-      expect(await verifyLog(alice)).toMatchObject({ ok: true, rejected: 0 })
-      const views = (await corpusPullSince(alice, 0)).views
-      const folded = toViewRows(assembleStamped(foldKeysByStamp(await readLog(alice))))
-      expect(folded.map(({ seq: _, ...row }) => row)).toEqual(
-        views.map(({ seq: _, ...row }) => row),
-      )
-      results.push(
-        await driver.exec("SELECT filter, sort, stack FROM views WHERE user_id = 111 AND id = 'v'"),
-      )
-    }
-    expect(results[0]).toEqual([{ filter: "type:todo", sort: "text:asc", stack: "by.a" }])
-    expect(results[1]).toEqual(results[0])
-  })
-})
-
-// -----------------------------------------------------------------------------
-// The per-key log (docs/event-sourcing.md, "Per-key events"; migrations/0028)
-// -----------------------------------------------------------------------------
-
 describe("the per-key log", () => {
   /** A client's key events, as `opsToKeyEvents` would make them, stamped. */
   function keyWriter(device: string) {
@@ -1382,7 +1276,7 @@ describe("the per-key log", () => {
     for (const statement of planKeyAppend(events, ctx)) {
       expect(terms(statement.sql)).toBeLessThanOrEqual(5)
     }
-    for (const migration of [migration0028, migration0029, migration0030]) {
+    for (const migration of [migration0028, migration0029, migration0030, migration0031]) {
       for (const statement of migration.split(";")) {
         expect(terms(statement)).toBeLessThanOrEqual(5)
       }
@@ -1666,7 +1560,7 @@ describe("the per-key log", () => {
     const ctx = { appendId: "x", actor: 111, origin: "replica" as const, client: null, now: 1 }
     // A limit so small every edit is its own run: the hardest case for order.
     const statements = planKeyAppend(named, ctx, 1)
-    expect(statements).toHaveLength(8 * 3)
+    expect(statements).toHaveLength(6 * 3)
     await alice.includingDeleted().batch(statements)
     expect(await driver.exec("SELECT sort_key FROM link WHERE user_id = 111")).toEqual([
       { sort_key: "a0" },

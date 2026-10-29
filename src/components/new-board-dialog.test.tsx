@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import { buildGraphSnapshot, docToGraph } from "../data/graph"
-import { viewsAtom } from "../data/views"
 import { graphSnapshotAtom, sampleGraphAtom } from "../global-state"
 import { NewBoardDialog, newBoardDialogAtom } from "./new-board-dialog"
 
@@ -40,7 +39,6 @@ describe("NewBoardDialog", () => {
     const snapshot = store.get(graphSnapshotAtom)
     const board = [...snapshot.nodes.values()].find((node) => node.type === "board")
     expect(board?.text).toBe("Kitchen")
-    expect(store.get(viewsAtom).get(board!.id)?.pinned).toBe(true)
     expect(mocks.navigate).toHaveBeenCalledWith({ to: "/boards/$", params: { _splat: board!.id } })
     expect(store.get(newBoardDialogAtom)).toBe(false)
   })

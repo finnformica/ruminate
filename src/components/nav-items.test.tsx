@@ -6,9 +6,9 @@ import type { BlockType } from "../blocks/types"
 import type { Note } from "../schema"
 
 // The sidebar sits inside the router and the whole global-state machine. Only
-// the pieces the Views list needs are real here: the sort preference, the
-// view rows (the order is written onto them), and the list's entries.
-// Everything the surrounding chrome wants is stubbed.
+// the pieces the Pinned list needs are real here: the graph (a pin is a prop
+// on it) and the list's entries. Everything the surrounding chrome wants is
+// stubbed.
 const mocks = vi.hoisted(() => ({
   pathname: "/",
   navigate: vi.fn(),
@@ -59,26 +59,23 @@ vi.mock("../global-state", async (importOriginal) => {
     graphSnapshotAtom: atom(buildGraphSnapshot([], [])),
     isBootingAtom: atom(false),
     isSignedOutAtom: atom(false),
-    // Derived from the graph and the views in the real module; a plain
-    // writable atom here, so a test can state the rows and be about the
-    // list rather than the sort.
-    viewEntriesAtom: atom([]),
+    // Derived from the graph in the real module; a plain writable atom
+    // here, so a test can state the rows and be about the list.
+    pinnedEntriesAtom: atom([]),
+    rootNotesAtom: atom([]),
     sharedNotesAtom: atom([]),
-    noteSortAtom: atom("manual"),
   }
 })
 
 import {
   graphSnapshotAtom,
-  noteSortAtom,
+  pinnedEntriesAtom,
+  rootNotesAtom,
   sharedNotesAtom,
-  viewEntriesAtom,
-  type NoteSort,
 } from "../global-state"
-import { buildGraphSnapshot, CHILD_KIND, type GraphSnapshot } from "../data/graph"
+import { buildGraphSnapshot } from "../data/graph"
 import { layoutFromSearch, layoutToSearch, type PaneLayout } from "../data/panes"
 import { isRootFrame, rootFrame } from "../data/root-frame"
-import { viewsAtom, viewMapOf } from "../data/views"
 import { NavItems } from "./nav-items"
 
 const noteOf = (id: string, name: string): Note =>
@@ -102,59 +99,45 @@ beforeEach(() => {
   mocks.matches = []
 })
 
-type BlockViewRow = { id: string; noteId: string; text: string; type: BlockType; note: Note }
+type PinnedBlockRow = { id: string; noteId: string; text: string; type: BlockType; note: Note }
 
 function renderSidebar({
   notes,
-  sort = "manual",
   blocks = [],
   shared = [],
-  graph,
-  stacks = {},
+  all = [],
 }: {
   notes: Note[]
-  sort?: NoteSort
-  /** The block views, listed after the notes — what the real atom yields
-   * until something is dragged. */
-  blocks?: BlockViewRow[]
+  /** Every note, as the notes page lists them (`rootNotesAtom`). */
+  all?: Note[]
+  /** The pinned blocks, listed after the notes. */
+  blocks?: PinnedBlockRow[]
   shared?: Note[]
-  /** The graph the Views are restored over; empty by default. */
-  graph?: GraphSnapshot
-  /** A saved stack per block view (`stack`, docs/graph-walk.md section 7). */
-  stacks?: Record<string, string>
 }) {
   const store = createStore()
-  store.set(noteSortAtom, sort)
-  if (graph) store.set(graphSnapshotAtom as never, graph as never)
+  // Every row here is pinned: its node carries the prop, as the real list's.
+  const pinned = JSON.stringify({ pinned_at: 1 })
   store.set(
-    viewEntriesAtom as never,
+    graphSnapshotAtom as never,
+    buildGraphSnapshot(
+      [...notes, ...blocks].map((row) => ({
+        id: row.id,
+        type: "note",
+        text: "",
+        props: pinned,
+        updated_at: 0,
+      })),
+      [],
+    ) as never,
+  )
+  store.set(
+    pinnedEntriesAtom as never,
     [
       ...notes.map((note) => ({ kind: "note", id: note.id, noteId: note.id, note })),
-      ...blocks.map((block) => ({
-        kind: "block",
-        id: block.id,
-        noteId: block.noteId,
-        block: { ...block, updatedAt: null },
-      })),
+      ...blocks.map((block) => ({ kind: "block", id: block.id, noteId: block.noteId, block })),
     ] as never,
   )
-  // A block is a view by having a row (src/data/views.ts): the block rows
-  // above are written as views here, as the real list would have them.
-  store.set(
-    viewsAtom,
-    viewMapOf(
-      blocks.map((block) => ({
-        id: block.id,
-        root_id: block.id,
-        filter: null,
-        sort: null,
-        pinned: true,
-        sort_key: null,
-        updated_at: 1,
-        ...(stacks[block.id] ? { stack: stacks[block.id] } : {}),
-      })),
-    ),
-  )
+  store.set(rootNotesAtom as never, all as never)
   store.set(
     sharedNotesAtom as never,
     shared.map((note) => ({
@@ -170,270 +153,119 @@ function renderSidebar({
   return store
 }
 
-/** The Views list's rows — the top nav is a list of its own. */
-const viewRows = () => within(screen.getByTestId("view-rows")).getAllByRole("listitem")
+/** The Pinned list's rows — the top nav is a list of its own. */
+const pinnedRows = () => within(screen.getByTestId("pinned-rows")).getAllByRole("listitem")
 
 /** The rows' names, in the order drawn — the label alone, without the
  * glyph a block row leads with. */
 const rowNames = () =>
-  viewRows().map((li) => li.querySelector(".nav-item .truncate")?.textContent?.trim() ?? "")
+  pinnedRows().map((li) => li.querySelector(".nav-item .truncate")?.textContent?.trim() ?? "")
 
 /** The section headings, in order. */
 const headings = () => screen.getAllByTestId("section-heading").map((el) => el.textContent?.trim())
 
-/** The sort key of each view row, by root. */
-const keysOf = (store: ReturnType<typeof createStore>, ids: string[]) =>
-  ids.map((id) => store.get(viewsAtom).get(id)?.sort_key)
-
-const transfer = () => ({ effectAllowed: "", dropEffect: "", setData: vi.fn(), getData: () => "" })
-
-/** Drag `from` and drop it on the top half of `onto`, so it lands above. */
-const dragAbove = (from: HTMLElement, onto: HTMLElement) => {
-  const data = transfer()
-  fireEvent.dragStart(from, { dataTransfer: data })
-  fireEvent.dragOver(onto, { dataTransfer: data, clientY: 0 })
-  fireEvent.drop(onto, { dataTransfer: data, clientY: 0 })
-}
-
 const THREE = [noteOf("a", "Alpha"), noteOf("b", "Bravo"), noteOf("c", "Charlie")]
-const BLOCK: BlockViewRow = {
+const BLOCK: PinnedBlockRow = {
   id: "blk_x",
   noteId: "a",
-  text: "A block view",
+  text: "A pinned block",
   type: "ul",
   note: THREE[0],
 }
 
-describe("the sidebar's Views list", () => {
-  it("is the one list of the user's own — notes and block views under one heading, no Notes", () => {
+describe("the sidebar's Pinned list", () => {
+  it("is the pinned notes and blocks under one heading", () => {
     renderSidebar({ notes: THREE, blocks: [BLOCK] })
-    expect(headings()).toEqual(["Views"])
-    expect(rowNames()).toEqual(["Alpha", "Bravo", "Charlie", "A block view"])
+    expect(headings()).toEqual(["Pinned"])
+    expect(rowNames()).toEqual(["Alpha", "Bravo", "Charlie", "A pinned block"])
+  })
+
+  it("is not there with nothing pinned: Notes is the list of every note", () => {
+    renderSidebar({ notes: [] })
+    expect(screen.queryByTestId("pinned-rows")).toBeNull()
+    expect(screen.queryAllByTestId("section-heading")).toEqual([])
+  })
+
+  it("lists every note under Notes with nothing pinned, in the order given", () => {
+    // Finn's report of 2026-10-29: with no pins the sidebar showed no notes.
+    renderSidebar({ notes: [], all: THREE })
+    expect(headings()).toEqual(["Notes"])
+    const rows = within(screen.getByTestId("note-rows")).getAllByRole("listitem")
+    expect(rows.map((row) => row.textContent?.trim())).toEqual(["Alpha", "Bravo", "Charlie"])
+  })
+
+  it("keeps Pinned above Notes when something is pinned", () => {
+    renderSidebar({ notes: [THREE[0]], blocks: [BLOCK], all: THREE })
+    expect(headings()).toEqual(["Pinned", "Notes"])
   })
 
   it("lists what other people shared apart, beneath it", () => {
     renderSidebar({ notes: THREE, shared: [noteOf("s", "Shared one")] })
-    expect(headings()).toEqual(["Views", "Shared"])
+    expect(headings()).toEqual(["Pinned", "Shared"])
     expect(rowNames()).toEqual(["Alpha", "Bravo", "Charlie"])
     expect(screen.getByText("Shared one")).toBeTruthy()
   })
 
-  it("leads with Notes, the list of every note, reached by g then v — and no Views page", () => {
+  it("leads with Notes, the list of every note, reached by g then v — and no Views", () => {
     renderSidebar({ notes: THREE })
     const links = screen.getAllByRole("link")
     expect(links[0].textContent).toMatch(/^Notes/)
-    expect(links[0].getAttribute("href")).toBe("/views/$")
+    expect(links[0].getAttribute("href")).toBe("/notes/$")
     expect(links[0].textContent?.toUpperCase()).toContain("V")
-    expect(screen.queryByRole("link", { name: /^Views/ })).toBeNull()
+    expect(screen.queryByText("Views")).toBeNull()
   })
 
-  it("offers the three sorts, with the current one marked", async () => {
-    renderSidebar({ notes: THREE, sort: "title" })
-    fireEvent.click(screen.getByRole("button", { name: /^Sort views by/ }))
+  it("has no sort menu and no drag: the order is the pins'", () => {
+    renderSidebar({ notes: THREE, blocks: [BLOCK] })
+    expect(screen.queryByRole("button", { name: /^Sort/ })).toBeNull()
+    for (const row of pinnedRows()) expect(row.getAttribute("draggable")).toBeNull()
+  })
+
+  it("a pinned note's ⋯ offers Unpin", async () => {
+    renderSidebar({ notes: [THREE[0]] })
+    fireEvent.click(within(pinnedRows()[0]).getByRole("button", { name: "Note actions" }))
     await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
-    const items = within(screen.getByRole("menu")).getAllByRole("menuitem")
-    expect(items.map((item) => item.textContent)).toEqual(["Name", "Recently updated", "Manual"])
+    expect(screen.getByRole("menuitem", { name: "Unpin" })).toBeTruthy()
+    expect(screen.queryByRole("menuitem", { name: /Views/ })).toBeNull()
   })
 
-  it("changes the sort preference when one is picked", async () => {
-    const store = renderSidebar({ notes: THREE, sort: "title" })
-    fireEvent.click(screen.getByRole("button", { name: /^Sort views by/ }))
-    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
-    fireEvent.click(screen.getByRole("menuitem", { name: "Manual" }))
-    await waitFor(() => expect(store.get(noteSortAtom)).toBe("manual"))
-  })
-
-  it("makes the rows draggable only in the manual sort — a block row too", () => {
-    renderSidebar({ notes: THREE, blocks: [BLOCK], sort: "title" })
-    expect(viewRows().every((li) => li.getAttribute("draggable") === null)).toBe(true)
-    cleanup()
-    renderSidebar({ notes: THREE, blocks: [BLOCK], sort: "manual" })
-    expect(viewRows().every((li) => li.getAttribute("draggable") === "true")).toBe(true)
-  })
-
-  it("draws the rows in the order it is given", () => {
-    renderSidebar({ notes: THREE })
-    expect(rowNames()).toEqual(["Alpha", "Bravo", "Charlie"])
-  })
-
-  it("a drag keys every view in the dropped order, notes and blocks alike — a note gets a row for it", () => {
-    const store = renderSidebar({ notes: THREE, blocks: [BLOCK] })
-    const rows = viewRows()
-    // Drag the block above `Alpha`.
-    dragAbove(rows[3], rows[0])
-    // Nothing was keyed before, so the first drag keys the whole list, in
-    // the dropped order — the notes had no view rows, and have them now.
-    const keys = keysOf(store, ["blk_x", "a", "b", "c"])
-    expect(keys.every((key) => typeof key === "string")).toBe(true)
-    expect([...keys].sort()).toEqual(keys)
-  })
-
-  it("moves a note row up from its actions menu — the keyboard's way to the same move", async () => {
-    const store = renderSidebar({ notes: THREE })
-    const rows = viewRows()
-    fireEvent.click(within(rows[1]).getByRole("button", { name: "Note actions" }))
-    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
-    fireEvent.click(screen.getByRole("menuitem", { name: "Move up" }))
-    const keys = keysOf(store, ["b", "a", "c"])
-    expect(keys.every((key) => typeof key === "string")).toBe(true)
-    expect([...keys].sort()).toEqual(keys)
-  })
-
-  it("moves a block row from its menu, for the keyboard", async () => {
-    const store = renderSidebar({ notes: [THREE[0]], blocks: [BLOCK] })
-    const rows = viewRows()
-    fireEvent.click(within(rows[1]).getByRole("button", { name: "Block view actions" }))
-    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
-    // Last row: nothing below it to move past.
-    expect(screen.getByRole("menuitem", { name: "Move down" }).getAttribute("aria-disabled")).toBe(
-      "true",
-    )
-    fireEvent.click(screen.getByRole("menuitem", { name: "Move up" }))
-    const keys = keysOf(store, ["blk_x", "a"])
-    expect(keys[0]! < keys[1]!).toBe(true)
-  })
-
-  it("offers no move at all outside the manual sort", async () => {
-    renderSidebar({ notes: THREE, blocks: [BLOCK], sort: "title" })
-    const rows = viewRows()
-    fireEvent.click(within(rows[1]).getByRole("button", { name: "Note actions" }))
-    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
-    expect(screen.queryByRole("menuitem", { name: "Move up" })).toBeNull()
-    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
-    fireEvent.click(within(rows[3]).getByRole("button", { name: "Block view actions" }))
-    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
-    expect(screen.queryByRole("menuitem", { name: "Move up" })).toBeNull()
-  })
-
-  it("offers no Pin anywhere: a note's menu has none, and a block's row is removed instead", async () => {
-    const store = renderSidebar({ notes: [THREE[0]], blocks: [BLOCK] })
-    const rows = viewRows()
-    fireEvent.click(within(rows[0]).getByRole("button", { name: "Note actions" }))
-    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
-    expect(screen.queryByRole("menuitem", { name: /pin/i })).toBeNull()
-    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
-    fireEvent.click(within(rows[1]).getByRole("button", { name: "Block view actions" }))
-    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
-    fireEvent.click(screen.getByRole("menuitem", { name: "Remove from Views" }))
-    // The block's row is gone from the views: it is no view at all now.
-    expect(store.get(viewsAtom).has("blk_x")).toBe(false)
-  })
-
-  it("a note's ⋯ offers Remove from Views while its row lists it, and Add to Views after", async () => {
-    const store = renderSidebar({ notes: [THREE[0]], blocks: [] })
-    // The row the note was created with, carrying a saved filter too.
-    store.set(
-      viewsAtom,
-      viewMapOf([
-        {
-          id: "a",
-          root_id: "a",
-          filter: "type:todo",
-          sort: null,
-          pinned: true,
-          sort_key: "a0",
-          updated_at: 1,
-        },
-      ]),
-    )
-    fireEvent.click(within(viewRows()[0]).getByRole("button", { name: "Note actions" }))
-    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
-    fireEvent.click(screen.getByRole("menuitem", { name: "Remove from Views" }))
-    // Only the listing goes: the note still opens with its filter, and its
-    // place is kept for when it is added back.
-    expect(store.get(viewsAtom).get("a")).toMatchObject({
-      pinned: false,
-      filter: "type:todo",
-      sort_key: "a0",
-    })
-    fireEvent.click(within(viewRows()[0]).getByRole("button", { name: "Note actions" }))
-    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
-    expect(screen.queryByRole("menuitem", { name: "Remove from Views" })).toBeNull()
-    fireEvent.click(screen.getByRole("menuitem", { name: "Add to Views" }))
-    expect(store.get(viewsAtom).get("a")?.pinned).toBe(true)
-  })
-
-  it("a block view's ⋯ is the block's menu — the list's moves, then Copy, Copy link, Share, Rename, Remove from Views", async () => {
+  it("a pinned block's ⋯ is the block's menu — Copy, Copy link, Share, Rename, Unpin", async () => {
     renderSidebar({ notes: [THREE[0]], blocks: [BLOCK] })
-    fireEvent.click(within(viewRows()[1]).getByRole("button", { name: "Block view actions" }))
+    fireEvent.click(within(pinnedRows()[1]).getByRole("button", { name: "Pinned block actions" }))
     await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
     const items = within(screen.getByRole("menu")).getAllByRole("menuitem")
     expect(items.map((item) => item.textContent)).toEqual([
-      "Move up",
-      "Move down",
       "Copy",
       "Copy link to block",
       "Share",
       "Rename",
-      "Remove from Views",
+      "Unpin",
     ])
-    // Every item leads with an icon, as the note's menu does; Remove wears
-    // the delete icon, the same one the note's Delete wears.
+    // Every item leads with an icon, as the note's menu does.
     expect(items.every((item) => item.querySelector("svg") !== null)).toBe(true)
-    const removeIcon = items[6].querySelector("svg")!.innerHTML
-    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
-    fireEvent.click(within(viewRows()[0]).getByRole("button", { name: "Note actions" }))
-    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
-    const deleteIcon = screen.getByRole("menuitem", { name: "Delete" }).querySelector("svg")!
-    expect(deleteIcon.innerHTML).toBe(removeIcon)
   })
 
-  it("shows a View's path after its name: the frames below its top, from Notes", () => {
-    // Finn's Todos: Notes › Tasks › Todos, saved from a note Tasks.
-    const node = (id: string, text: string, type = "text") => ({
-      id,
-      type,
-      text,
-      props: null,
-      updated_at: 0,
-    })
-    const graph = buildGraphSnapshot(
-      [node("a", "Alpha", "note"), node("blk_x", "A block view")],
-      [
-        {
-          source_id: "a",
-          destination_id: "blk_x",
-          kind: CHILD_KIND,
-          sort_key: "a0",
-          updated_at: 0,
-        },
-      ],
-    )
-    renderSidebar({ notes: [THREE[1]], blocks: [BLOCK], graph, stacks: { blk_x: "a,a:blk_x" } })
-    expect(screen.getAllByTestId("view-hint").map((el) => el.textContent)).toEqual([
-      "Notes › Alpha",
-    ])
-    // The name stays the row's name; a one-frame View has no hint.
-    expect(rowNames()).toEqual(["Bravo", "A block view"])
-  })
-
-  it("shows no hint for a one-frame View", () => {
-    renderSidebar({ notes: THREE, blocks: [BLOCK] })
-    expect(screen.queryByTestId("view-hint")).toBeNull()
-  })
-
-  it("opens the row's menu on a right-click too, so a View is managed where it is listed", async () => {
+  it("opens the row's menu on a right-click too, so a pin is managed where it is listed", async () => {
     renderSidebar({ notes: [THREE[0]], blocks: [BLOCK] })
-    fireEvent.contextMenu(within(viewRows()[1]).getByRole("link"))
+    fireEvent.contextMenu(within(pinnedRows()[1]).getByRole("link"))
     const menu = await screen.findByTestId("row-context-menu")
     const items = within(menu)
       .getAllByRole("menuitem")
       .map((item) => item.textContent)
     expect(items).toContain("Rename")
-    expect(items).toContain("Remove from Views")
-    expect(items).toContain("Move up")
+    expect(items).toContain("Unpin")
   })
 
-  it("a block row opens its note focused on it, at the views address", () => {
+  it("a block row opens its note focused on it", () => {
     renderSidebar({ notes: [THREE[0]], blocks: [BLOCK] })
-    const link = within(viewRows()[1]).getByRole("link")
-    expect(link.getAttribute("href")).toBe("/views/$")
-    expect(link.getAttribute("title")).toBe("Alpha › A block view")
+    const link = within(pinnedRows()[1]).getByRole("link")
+    expect(link.getAttribute("href")).toBe("/notes/$")
+    expect(link.getAttribute("title")).toBe("Alpha › A pinned block")
   })
 
   it("draws a note row's icon and a block row's glyph through the same slot, neither tinted", () => {
     renderSidebar({ notes: [THREE[0]], blocks: [BLOCK] })
-    const icons = viewRows().map((row) =>
+    const icons = pinnedRows().map((row) =>
       row.querySelector(".nav-item .nav-item-icon:not(.hidden)"),
     )
     expect(icons.every((icon) => icon !== null)).toBe(true)
@@ -449,7 +281,7 @@ describe("the sidebar's Views list", () => {
   })
 
   it("leads a block row with the block's key, as the editor draws it, whatever its type", () => {
-    const rows: BlockViewRow[] = [
+    const rows: PinnedBlockRow[] = [
       { ...BLOCK, id: "blk_todo", type: "todo" },
       { ...BLOCK, id: "blk_h2", type: "h2" },
       { ...BLOCK, id: "blk_ol", type: "ol" },
@@ -457,7 +289,7 @@ describe("the sidebar's Views list", () => {
       { ...BLOCK, id: "blk_code", type: "code" },
     ]
     renderSidebar({ notes: [], blocks: rows })
-    const keys = viewRows().map((row) =>
+    const keys = pinnedRows().map((row) =>
       row.querySelector(".nav-item-icon:not(.hidden) [data-key]")!,
     )
     // A to-do's box, a heading's #, a number, a pilcrow — the keys the
@@ -472,7 +304,7 @@ describe("the sidebar's Views list", () => {
   })
 
   it("lights the note's row only at the note's root, and the block's only focused on it", () => {
-    mocks.pathname = "/views/a"
+    mocks.pathname = "/notes/a"
     renderSidebar({ notes: [THREE[0]], blocks: [BLOCK] })
     // The Calendar link reads the path the same way the note page does.
     expect(screen.getByRole("link", { name: /Calendar/ }).getAttribute("aria-current")).toBeNull()
@@ -480,7 +312,7 @@ describe("the sidebar's Views list", () => {
 })
 
 describe("the sidebar while Settings is open", () => {
-  it("keeps the links above and the rows below, and lists the pages in the Views list's place", () => {
+  it("keeps the links above and the rows below, and lists the pages in the Pinned list's place", () => {
     mocks.pathname = "/settings/preferences"
     renderSidebar({ notes: THREE, shared: [noteOf("shared", "Theirs")] })
     // The chrome every page has.
@@ -493,11 +325,11 @@ describe("the sidebar while Settings is open", () => {
     )
     expect(screen.getByRole("link", { name: /^Changelog/ })).toBeTruthy()
     expect(screen.getByRole("button", { name: /^Help/ })).toBeTruthy()
-    // The pages, where the views were — and no way back, since Notes is
+    // The pages, where the pins were — and no way back, since Notes is
     // right there above them.
     const headings = screen.getAllByTestId("section-heading").map((el) => el.textContent)
     expect(headings).toEqual(["Settings"])
-    expect(screen.queryByTestId("view-rows")).toBeNull()
+    expect(screen.queryByTestId("pinned-rows")).toBeNull()
     expect(screen.queryByText("Theirs")).toBeNull()
     expect(screen.queryByText("Back to notes")).toBeNull()
     for (const page of ["Account", "Preferences", "About"]) {
@@ -510,10 +342,10 @@ describe("the sidebar while Settings is open", () => {
     expect(screen.queryByRole("link", { name: "Admin" })).toBeNull()
   })
 
-  it("lists the views again once Settings is left", () => {
+  it("lists the pins again once Settings is left", () => {
     mocks.pathname = "/"
     renderSidebar({ notes: THREE })
-    expect(screen.getByTestId("view-rows")).toBeTruthy()
+    expect(screen.getByTestId("pinned-rows")).toBeTruthy()
     expect(screen.queryByRole("link", { name: "Account" })).toBeNull()
     expect(screen.getByRole("link", { name: /^Settings/ }).getAttribute("aria-pressed")).toBeNull()
   })
@@ -525,7 +357,7 @@ describe("a sidebar row's actions", () => {
     // A wrapper that went `display: none` then would take the anchor with
     // it, and the fading menu would snap to the page's corner (RowActions).
     renderSidebar({ notes: [THREE[0]], blocks: [BLOCK] })
-    for (const row of viewRows()) {
+    for (const row of pinnedRows()) {
       const wrapper = within(row).getByRole("button").parentElement!
       expect(wrapper.className).not.toContain("hidden")
       expect(wrapper.className).toContain("opacity-0")
@@ -548,7 +380,7 @@ describe("a shared note's row in a split", () => {
   /** The router on a note page with `layout` in its URL. */
   const onSplitPage = (layout: PaneLayout) => {
     const { noteId, search } = layoutToSearch(layout)
-    mocks.matches = [{ routeId: "/_appRoot/views_/$", params: { _splat: noteId }, search }]
+    mocks.matches = [{ routeId: "/_appRoot/notes_/$", params: { _splat: noteId }, search }]
   }
 
   it("restarts the stack of the pane with the keyboard: Root › the note, the other pane as it is", () => {

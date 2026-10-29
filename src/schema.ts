@@ -35,8 +35,7 @@ export type Note = {
   /** Depending on the type, either the title or the date */
   displayName: string
   /** The note node's props — the note's metadata (width, font, updated_at,
-   * dates…). Whether the note is pinned is not here: a pin is a view
-   * (`src/data/views.ts`), a row about the note rather than a prop of it. */
+   * dates, a pin's `pinned_at`, `src/data/pins.ts`). */
   props: Record<string, unknown>
   /** The note node's text, falling back to the first heading block. */
   title: string

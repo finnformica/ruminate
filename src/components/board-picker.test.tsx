@@ -8,7 +8,6 @@ import { serialize } from "../blocks/serialize"
 import { boardFeatures, DEFAULT_FEATURES, linkBoardOps } from "../data/boards"
 import { BOARD_TYPE, buildGraphSnapshot, childIdsOf, docToGraph } from "../data/graph"
 import { applyOps } from "../data/ops"
-import { viewsAtom } from "../data/views"
 import { graphSnapshotAtom, sampleGraphAtom } from "../global-state"
 import { BoardPicker, boardPickerAtom, RECENT_BOARDS } from "./board-picker"
 
@@ -154,7 +153,6 @@ describe("BoardPicker", () => {
     expect(boardFeatures(snapshot, board.id).map((s) => s.feature.label)).toEqual(
       DEFAULT_FEATURES.map((entry) => entry.label),
     )
-    expect(store.get(viewsAtom).get(board.id)).toBeUndefined()
     expect(place).toHaveBeenCalledWith(
       expect.objectContaining({ id: board.id, type: "board", text: "Pantry" }),
     )

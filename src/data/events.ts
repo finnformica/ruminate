@@ -167,7 +167,7 @@ type EventsFor<E extends Entity> =
 
 type BlockEvent = EventsFor<"block">
 type LinkEvent = EventsFor<"link">
-export type ViewEvent = EventsFor<"view">
+type ViewEvent = EventsFor<"view">
 export type RuminateEvent = BlockEvent | LinkEvent | ViewEvent
 
 /**
@@ -466,12 +466,12 @@ export function foldByStamp(
   return into
 }
 
-/** Entities named by kind: block ids, link entity ids (`linkEntityId`) and
- * view ids. What a batch touched, for the fold check. */
+/** Entities named by kind: block ids and link entity ids (`linkEntityId`).
+ * What a batch touched, for the fold check. A view is history only
+ * (docs/removing-views.md), so no reader names one. */
 export interface EntityKeys {
   blocks: ReadonlySet<string>
   links: ReadonlySet<string>
-  views: ReadonlySet<string>
 }
 
 /** The rows the fold by stamp projects to: every created entity, with its
@@ -498,7 +498,7 @@ function stampedRows(state: StampedState, only?: EntityKeys) {
   const rows = projectRows({
     blocks: created(state.blocks, only?.blocks),
     links: created(state.links, only?.links),
-    views: created(state.views, only?.views),
+    views: created(state.views, only ? new Set() : undefined),
   })
   for (const row of [...rows.nodes, ...rows.links, ...rows.views]) {
     if (row.seq === 0) delete row.seq
@@ -508,14 +508,14 @@ function stampedRows(state: StampedState, only?: EntityKeys) {
 
 /**
  * The live rows of the named entities, by the rules of the whole read-out
- * (`toGraphSnapshot`, then `viewMapOf`): a live node; a live child link
- * whose ends are not tombstoned; a live view. The fold check reads a batch
- * with this, without the cost of the whole graph.
+ * (`toGraphSnapshot`): a live node; a live child link whose ends are not
+ * tombstoned. The fold check reads a batch with this, without the cost of
+ * the whole graph.
  */
 export function readOutEntities(
   state: StampedState,
   keys: EntityKeys,
-): { nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] } {
+): { nodes: NodeRow[]; links: LinkRow[] } {
   const rows = stampedRows(state, keys)
   const tombstoned = (id: string) => {
     const node = state.blocks.get(id)
@@ -530,7 +530,6 @@ export function readOutEntities(
         !tombstoned(row.source_id) &&
         !tombstoned(row.destination_id),
     ),
-    views: rows.views.filter((row) => !isTombstoned(row)),
   }
 }
 
@@ -538,12 +537,6 @@ export function readOutEntities(
 export function toGraphSnapshot(state: StampedState): GraphSnapshot {
   const { nodes, links } = stampedRows(state)
   return buildGraphSnapshot(nodes, links)
-}
-
-/** Every view row the fold by stamp holds, tombstones too, as the store's
- * `getAllRows` gives them (`viewMapOf` keeps the live ones). */
-export function toViewRows(state: StampedState): ViewRow[] {
-  return stampedRows(state).views
 }
 
 // -----------------------------------------------------------------------------
@@ -853,82 +846,6 @@ export function opsToEvents(
     }
   }
   return events
-}
-
-/**
- * The event a change to a view row amounts to (views are written as rows,
- * not ops — `src/data/views.ts`). Null when nothing changed. The event's `at`
- * is the ROW's `updated_at`, not the context's clock: the row is stamped by
- * whoever made it, the projection writes `at` back as `updated_at`, and the
- * two must agree for the atom and the store to hold the same row.
- */
-const withoutNullStack = ({ stack, ...fields }: ViewFields): ViewFields =>
-  stack === null || stack === undefined ? fields : { ...fields, stack }
-
-export function viewChangeToEvent(
-  before: ViewRow | undefined,
-  after: ViewRow | undefined,
-  ctx: EventContext,
-): ViewEvent | null {
-  const fieldsOf = (row: ViewRow): ViewFields => ({
-    root_id: row.root_id,
-    filter: row.filter,
-    sort: row.sort,
-    pinned: row.pinned,
-    sort_key: row.sort_key,
-    stack: row.stack ?? null,
-  })
-  const live = (row: ViewRow | undefined) => row !== undefined && row.deleted_at === undefined
-  const stamped = (row: ViewRow, baseSeq: number | null = null): EventEnvelope => ({
-    ...envelope(ctx, baseSeq),
-    at: row.updated_at,
-  })
-  if (!live(before) && live(after)) {
-    const row = after as ViewRow
-    return before
-      ? {
-          ...stamped(row, before.seq ?? null),
-          entity: "view",
-          entity_id: row.id,
-          action: "restore",
-          patch: fieldsOf(row),
-        }
-      : {
-          ...stamped(row),
-          entity: "view",
-          entity_id: row.id,
-          action: "create",
-          // A create without a stack names none, as every create before 0027.
-          patch: withoutNullStack(fieldsOf(row)),
-        }
-  }
-  if (live(before) && !live(after)) {
-    const row = after as ViewRow
-    const deletedAt = row.deleted_at as number
-    return {
-      ...stamped(row, (before as ViewRow).seq ?? null),
-      entity: "view",
-      entity_id: row.id,
-      action: "delete",
-      // The tombstone's stamp rides only when it is not the event's own.
-      patch: deletedAt === row.updated_at ? {} : { deleted_at: deletedAt },
-    }
-  }
-  if (!before || !after) return null
-  const patch: Partial<ViewFields> = {}
-  const was = fieldsOf(before)
-  const now = fieldsOf(after)
-  for (const key of Object.keys(now) as (keyof ViewFields)[]) {
-    if (was[key] !== now[key]) Object.assign(patch, { [key]: now[key] })
-  }
-  if (Object.keys(patch).length === 0) return null
-  return {
-    ...stamped(after, before.seq ?? null),
-    entity: "view",
-    entity_id: after.id,
-    action: "update",
-    patch,
-  }
 }
 
 // -----------------------------------------------------------------------------

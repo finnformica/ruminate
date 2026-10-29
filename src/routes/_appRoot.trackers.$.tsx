@@ -200,7 +200,7 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
               <>
                 This note is not a tracker.{" "}
                 <Link
-                  to="/views/$"
+                  to="/notes/$"
                   params={{ _splat: trackerId }}
                   search={{ query: undefined }}
                   className="link"

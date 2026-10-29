@@ -275,7 +275,6 @@ describe("the read-outs agree (the two ES-4 differences)", () => {
     const keys = {
       blocks: new Set(["a", "c", "e"]),
       links: new Set(["a|c|child", "a|e|child"]),
-      views: new Set<string>(),
     }
     const cached = await store.getLiveRows(keys)
     expect(cached.nodes.map((row) => row.id).sort()).toEqual(["a", "e"])
@@ -335,22 +334,11 @@ describe("the stamp fill", () => {
       links: [
         { source_id: "a", destination_id: "b", kind: "child", sort_key: "a0", updated_at: 20 },
       ],
-      views: [
-        {
-          id: "vw_a",
-          root_id: "a",
-          filter: null,
-          sort: null,
-          pinned: true,
-          sort_key: "a0",
-          updated_at: 10,
-          seq: 5,
-        },
-      ],
+      views: [],
       deleteNodes: [],
       deleteLinks: [],
     })
-    for (const table of ["nodes", "link", "views"]) {
+    for (const table of ["nodes", "link"]) {
       await driver.exec(`UPDATE ${table} SET stamps = NULL`)
     }
     await driver.exec("DELETE FROM meta WHERE key = ?", [CACHE_STAMPS_KEY])
@@ -369,8 +357,6 @@ describe("the stamp fill", () => {
     expect(node.text).toBe(eventStamp({ at: 10, seq: 3 } as RuminateEvent))
     const [link] = await stampsOf(driver, "link")
     expect(link).toEqual(JSON.parse(derivedStamps("link", { updated_at: 20 })))
-    const [view] = await stampsOf(driver, "views")
-    expect(view.pinned).toBe(eventStamp({ at: 10, seq: 5 } as RuminateEvent))
   })
 
   it("runs once: the flag alone decides", async () => {

@@ -83,7 +83,7 @@ export function NavBar() {
           shortcut={["⌘", "⇧", "O"]}
           onClick={() =>
             navigate({
-              to: "/views/$",
+              to: "/notes/$",
               params: { _splat: generateNoteId() },
               search: {
                 query: undefined,

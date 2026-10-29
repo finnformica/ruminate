@@ -41,7 +41,7 @@ export function DateMentions({ periodId }: { periodId: string }) {
         {mentioned.map((note) => (
           <li key={note.id}>
             <Link
-              to="/views/$"
+              to="/notes/$"
               params={{ _splat: note.id }}
               search={{ query: undefined }}
               className={cx(listRow(), "focus-ring text-text")}

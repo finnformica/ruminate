@@ -511,7 +511,7 @@ the rows it found.
 
 There are no daily or weekly notes: a day is not a note and nothing is written
 on the calendar page itself. A note that was kept under a date-shaped id
-before is an ordinary note now, still at `/views/<id>`; such an id with no
+before is an ordinary note now, still at `/notes/<id>`; such an id with no
 note behind it goes on to `/calendar/<id>`.
 
 **Whose day.** An edit belongs to the day it was for the person making it,

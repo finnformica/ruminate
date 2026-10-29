@@ -38,8 +38,8 @@ describe("noteFromNode", () => {
     )
     expect(n.title).toBe("Plan")
     expect(n.displayName).toBe("Plan")
-    // A pin is a view now (src/data/views.ts), not a note prop; a `pinned`
-    // key a row still carries is just a prop, read like any other.
+    // A pin is `pinned_at` (src/data/pins.ts); a retired `pinned` key a row
+    // still carries is just a prop, read like any other.
     expect(n.props.pinned).toBe(true)
     expect(n.dates).toContain("2026-03-04")
     expect(n.updatedAt).toBe(Date.parse("2026-01-02T03:04:05.000Z"))

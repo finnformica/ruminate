@@ -148,11 +148,11 @@ keep it. Every push and pop is a push of the URL; a change of the active
 pane replaces the entry.
 
 ```
-/views/<note>?block=<root>&stack=<frames>&pane1=<frames>&active=1
+/notes/<note>?block=<root>&stack=<frames>&pane1=<frames>&active=1
 ```
 
 - The first pane is the page's own address: the path's note and `block`,
-  as before. An old `/views/<note>?block=<id>` link opens one pane, focused
+  as before. An old `/notes/<note>?block=<id>` link opens one pane, focused
   on the block, with an empty stack.
 - `stack` holds the first pane's frames beneath the view on screen.
 - `pane1` holds the second pane's whole stack, the view on screen last.
@@ -174,7 +174,7 @@ The encoding is short:
 - A filter or sort escapes `%`, `,`, `:` and `;`.
 
 ```
-/views/A?block=blk_b2&stack=A::x1/b1,A:blk_b1:@;f=type%3Atodo&folds=-c4&pane1=B,B:blk_c1&active=1
+/notes/A?block=blk_b2&stack=A::x1/b1,A:blk_b1:@;f=type%3Atodo&folds=-c4&pane1=B,B:blk_c1&active=1
 ```
 
 Here the first pane shows block `b2` of note A, with row `c4` closed.

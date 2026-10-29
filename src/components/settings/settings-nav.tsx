@@ -108,7 +108,7 @@ export function useCurrentSettingsPage(): SettingsPage | undefined {
 
 /**
  * The pages as sidebar rows, in the sidebar's own recipe (`.nav-item`) and
- * at its size, for the place the Views list holds while Settings is open
+ * at its size, for the place the Pinned list holds while Settings is open
  * (src/components/nav-items.tsx). The admin's page is set off beneath a
  * rule, the sidebar's own way of setting a row apart.
  */

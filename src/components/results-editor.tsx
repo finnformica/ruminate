@@ -39,7 +39,6 @@ export function ResultsEditor({
   onExitTop,
   onExitBottom,
   initialSelection,
-  rootHints,
 }: {
   /** Memoized by the caller (see `useResultsDoc`). */
   roots: readonly ResultRoot[]
@@ -60,8 +59,6 @@ export function ResultsEditor({
   /** The first row highlighted on mount (the page), or nothing until the
    * keyboard arrives (the palette's lists). */
   initialSelection?: "first" | "none"
-  /** Quiet text after a root row, by root id: a View's path. */
-  rootHints?: ReadonlyMap<string, string>
 }) {
   const { doc, collapsed, toggleCollapse, setDoc, noteOf } = useResultsDoc({ roots, resetKey })
 
@@ -103,7 +100,6 @@ export function ResultsEditor({
       // own, as in a note.
       menuEntries={readOnly ? menuEntries : undefined}
       fixedRoots
-      rootHints={rootHints}
       collapsed={collapsed}
       onToggleCollapse={toggleCollapse}
       focusRootId={null}

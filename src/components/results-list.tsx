@@ -41,7 +41,6 @@ export function ResultsList({
   onExitTop,
   onExitBottom,
   initialSelection,
-  rootHints,
 }: {
   /** The full query the results are for — empty when browsing. */
   query: string
@@ -72,9 +71,6 @@ export function ResultsList({
   /** The first row highlighted on mount (the page), or nothing until the
    * keyboard arrives (the palette's lists). */
   initialSelection?: "first" | "none"
-  /** Quiet text after a root row, by root id: the Views list's paths
-   * (`useViewHints`). */
-  rootHints?: ReadonlyMap<string, string>
 }) {
   const { mode, hits, notes, titleMatches, rows: ranked } = results
   const showBlocks = mode === "blocks"
@@ -154,7 +150,6 @@ export function ResultsList({
           onExitTop={onExitTop}
           onExitBottom={onExitBottom}
           initialSelection={initialSelection}
-          rootHints={rootHints}
         />
       </div>
       {more && total > visible ? (

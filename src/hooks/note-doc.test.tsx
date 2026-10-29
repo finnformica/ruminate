@@ -9,13 +9,12 @@ import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
 import type { ExpandedRule } from "../blocks/view"
 import { buildGraphSnapshot, childIdsOf, docToGraph } from "../data/graph"
-import { viewByRootAtom, viewsAtom } from "../data/views"
 import {
   githubUserAtom,
   graphSnapshotAtom,
   isSignedOutAtom,
+  ownSortedNotesAtom,
   sampleGraphAtom,
-  viewEntriesAtom,
 } from "../global-state"
 import { useNoteDoc } from "./note-doc"
 
@@ -85,7 +84,7 @@ function renderNote(wrapper: Wrapper, filter = "", sort = "", keep?: ReadonlySet
 }
 
 describe("useNoteDoc, a note not in the graph yet", () => {
-  it("a first edit creates the note and the row that lists it, in one write", async () => {
+  it("a first edit creates the note, which the notes page lists at once", async () => {
     const { store, wrapper, unsubscribe } = await signedOutStore(NOTE)
     // Nothing of the note: a fresh address nobody has typed into yet.
     store.set(sampleGraphAtom, buildGraphSnapshot([], []))
@@ -93,7 +92,6 @@ describe("useNoteDoc, a note not in the graph yet", () => {
       () => useNoteDoc({ noteId: NOTE_ID, defaultDoc: EMPTY_DOC, filter: "", sort: "" }),
       { wrapper },
     )
-    expect(store.get(viewByRootAtom).has(NOTE_ID)).toBe(false)
     const first = emptyBlock("text", "first words")
     act(() => {
       result.current.setDoc({
@@ -103,22 +101,7 @@ describe("useNoteDoc, a note not in the graph yet", () => {
       })
     })
     expect(store.get(sampleGraphAtom).nodes.get(NOTE_ID)?.type).toBe("note")
-    expect(store.get(viewByRootAtom).get(NOTE_ID)).toMatchObject({ pinned: true, filter: null })
-    expect(store.get(viewEntriesAtom).map((entry) => entry.id)).toContain(NOTE_ID)
-    unsubscribe()
-  })
-
-  it("a later edit writes no row: the note has the one it was made with", async () => {
-    const { store, wrapper, unsubscribe } = await signedOutStore(NOTE)
-    // Taken off the list by hand, which the edit must not undo.
-    store.set(viewsAtom, new Map())
-    const { result } = renderNote(wrapper)
-    const fresh = emptyBlock("text", "eggs")
-    act(() => {
-      result.current.setDoc(insertAfter(result.current.doc, "blk_shop000000/blk_milk000000", fresh))
-    })
-    expect(store.get(sampleGraphAtom).nodes.has(fresh.id)).toBe(true)
-    expect(store.get(viewByRootAtom).has(NOTE_ID)).toBe(false)
+    expect(store.get(ownSortedNotesAtom).map((note) => note.id)).toContain(NOTE_ID)
     unsubscribe()
   })
 })

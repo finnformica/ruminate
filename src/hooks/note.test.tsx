@@ -11,10 +11,9 @@ import {
   githubUserAtom,
   isSignedOutAtom,
   notesAtom,
+  ownSortedNotesAtom,
   sampleGraphAtom,
-  viewEntriesAtom,
 } from "../global-state"
-import { viewByRootAtom } from "../data/views"
 import { useCreateNote, useDeleteNote, useRenameNote, useSetNoteProps } from "./note"
 
 /**
@@ -129,15 +128,8 @@ describe("useCreateNote", () => {
     expect(note.title).toBe("Fresh")
     expect(note.props.width).toBe("full")
     expect(note.updatedAt).not.toBeNull()
-    // Created listed: the view row that puts it in Views lands with the
-    // node (src/data/views.ts), and it is a Views entry at once.
-    expect(store.get(viewByRootAtom).get("blk_fresh00000")).toMatchObject({
-      root_id: "blk_fresh00000",
-      pinned: true,
-      filter: null,
-      sort: null,
-    })
-    expect(store.get(viewEntriesAtom).map((entry) => entry.id)).toContain("blk_fresh00000")
+    // On the notes page at once.
+    expect(store.get(ownSortedNotesAtom).map((note) => note.id)).toContain("blk_fresh00000")
     // A second create of the same id is a no-op.
     act(() => result.current("blk_fresh00000", { title: "Again" }))
     expect(store.get(notesAtom).get("blk_fresh00000")?.title).toBe("Fresh")

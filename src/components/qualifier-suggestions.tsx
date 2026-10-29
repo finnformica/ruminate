@@ -78,7 +78,7 @@ export function useQualifierSuggestions({
       case "in": {
         // Notes by name, most recent first (the sorted order), the open note
         // leading — with nothing typed and among whatever the typing keeps.
-        // A note open before it exists (a fresh `/views/<id>`) is not in the
+        // A note open before it exists (a fresh `/notes/<id>`) is not in the
         // corpus yet, so it gets a row of its own, named by its id.
         const options: SuggestionItem[] = notes.map((note) => ({
           value: note.id,

@@ -25,9 +25,8 @@ import {
   type PaneLayout,
 } from "../data/panes"
 import { isRootFrame, rootFrame } from "../data/root-frame"
-import { viewMapOf, viewsAtom, type ViewRow } from "../data/views"
 import { sampleGraphAtom } from "../global-state"
-import { useFocusBlock, useNotePageFocus, useOpenNote, useOpenView } from "./open-note"
+import { useFocusBlock, useNotePageFocus, useOpenNote } from "./open-note"
 
 /**
  * A focus on a board or a tracker block opens its own page (docs/boards.md,
@@ -104,14 +103,13 @@ const KINDS: Record<string, typeof BOARD_TYPE | typeof TRACKER_TYPE> = {
 /** Note `n` with a plain block, a board block (Hall, its own `board` node)
  * and a tracker block (Runs, its own `tracker` node), each with a block
  * under it. The editor's doc and the graph agree. */
-function setup(views: ViewRow[] = []) {
+function setup() {
   const doc: BlockDoc = parse(OUTLINE)
   for (const [id, type] of Object.entries(KINDS)) doc.blocks[id] = { ...doc.blocks[id], type }
   const g = docToGraph("n", serialize(parse(OUTLINE)), 1)
   const nodes = g.nodes.map((node) => (KINDS[node.id] ? { ...node, type: KINDS[node.id] } : node))
   const store = createStore()
   store.set(sampleGraphAtom, buildGraphSnapshot(nodes, g.links))
-  store.set(viewsAtom, viewMapOf(views))
   const wrapper = ({ children }: { children: React.ReactNode }) => (
     <Provider store={store}>{children}</Provider>
   )
@@ -323,13 +321,6 @@ describe("the palette (useOpenNote: ↵, and f on a result)", () => {
       act(() => result.current(id))
       expect(mocks.navigate).toHaveBeenCalledWith(toPage(to, id))
     })
-
-    it(`opens a ${kind} View row on its own page, not its saved stack`, () => {
-      const { wrapper } = setup([viewRow(id, "n")])
-      const { result } = renderHook(() => useOpenView(), { wrapper })
-      act(() => result.current("n", id))
-      expect(mocks.navigate).toHaveBeenCalledWith(toPage(to, id))
-    })
   }
 
   it("opens a plain block focused in its note, as before", () => {
@@ -337,7 +328,7 @@ describe("the palette (useOpenNote: ↵, and f on a result)", () => {
     const { result } = renderHook(() => useOpenNote(), { wrapper })
     act(() => result.current("n", PLAIN))
     expect(mocks.navigate).toHaveBeenCalledWith({
-      to: "/views/$",
+      to: "/notes/$",
       params: { _splat: "n" },
       search: { query: undefined, block: PLAIN },
     })
@@ -358,16 +349,15 @@ const files = Object.entries(SOURCES).map(([path, text]) => ({
 
 describe("every focus entry point calls the one focus", () => {
   const file = (path: string) => files.find((f) => f.path === path)!.text
-  const page = file("routes/_appRoot.views_.$.tsx")
+  const page = file("routes/_appRoot.notes_.$.tsx")
 
   it("a kind is read in one place: kindPageOf", () => {
     const hook = file("hooks/open-note.ts")
     expect(hook.match(/isBoard\(/g)).toHaveLength(1)
     expect(hook.match(/isTracker\(/g)).toHaveLength(1)
     expect(hook.match(/kindPageOf\(/g)!.length).toBeGreaterThan(1)
-    // The palette's ways in (↵, f on a result, a View row) open through it.
+    // The palette's ways in (↵, f on a result, a pinned row) open through it.
     expect(hook).toMatch(/export function useOpenNote[\s\S]*?focusBlock\(block \?\? noteId/)
-    expect(hook).toMatch(/export function useOpenView[\s\S]*?kindPageOf\(graph, rootId\)/)
   })
 
   it("the note page's focus, crumbs and link go through it", () => {
@@ -391,22 +381,10 @@ describe("every focus entry point calls the one focus", () => {
       "components/block-editor/block-note-editor.tsx",
       // A palette result: a focus is an open, through `useOpenNote`.
       "components/results-editor.tsx",
-      "routes/_appRoot.views_.$.tsx",
+      "routes/_appRoot.notes_.$.tsx",
     ])
     expect(file("components/command-menu.tsx")).toMatch(/useOpenNote\(\)/)
   })
-})
-
-/** A View row rooted at `rootId`, with the stack it saves. */
-const viewRow = (rootId: string, stack?: string): ViewRow => ({
-  id: rootId,
-  root_id: rootId,
-  filter: null,
-  sort: null,
-  pinned: true,
-  sort_key: null,
-  updated_at: 1,
-  ...(stack ? { stack } : {}),
 })
 
 const frame = (root: string | null): FocusFrame => ({ noteId: "n", root, selected: null })
@@ -414,7 +392,7 @@ const frame = (root: string | null): FocusFrame => ({ noteId: "n", root, selecte
 /** The router on a note page with `layout` in its URL. */
 function onPage(layout: PaneLayout) {
   const { noteId, search } = layoutToSearch(layout)
-  mocks.matches = [{ routeId: "/_appRoot/views_/$", params: { _splat: noteId }, search }]
+  mocks.matches = [{ routeId: "/_appRoot/notes_/$", params: { _splat: noteId }, search }]
 }
 
 /** The layout the last navigation leads to, read back as the page reads it. */
@@ -483,33 +461,5 @@ describe("a palette pick restarts the stack", () => {
     const { result } = renderHook(() => useOpenNote(), { wrapper })
     void result.current("n", PLAIN)
     expect(stackOf(navigatedLayout().panes[1])).toEqual(["Root", PLAIN])
-  })
-
-  it("a View, in one pane: its saved stack, in place of the old frames", () => {
-    // The View "Under plain" saves the whole note beneath it.
-    const { wrapper } = setup([viewRow(UNDER, "n")])
-    onPage({ panes: [{ frames: [rootFrame(), frame(PLAIN)] }], active: 0 })
-    const { result } = renderHook(() => useOpenView(), { wrapper })
-    void result.current("n", UNDER)
-    expect(stackOf(navigatedLayout().panes[0])).toEqual(["Root", "n", UNDER])
-  })
-
-  it("a View, in a split: its saved stack in the active pane, the other pane as it is", () => {
-    const { wrapper } = setup([viewRow(UNDER, "n")])
-    onPage(SPLIT)
-    const { result } = renderHook(() => useOpenView(), { wrapper })
-    void result.current("n", UNDER)
-    expect(navigatedLayout().panes.map(stackOf)).toEqual([
-      ["Root", UNDER],
-      ["Root", "n", UNDER],
-    ])
-  })
-
-  it("a View with no saved stack opens as a note does: Root › its root", () => {
-    const { wrapper } = setup([viewRow(PLAIN)])
-    onPage({ panes: [{ frames: [rootFrame(), frame(null), frame(UNDER)] }], active: 0 })
-    const { result } = renderHook(() => useOpenView(), { wrapper })
-    void result.current("n", PLAIN)
-    expect(stackOf(navigatedLayout().panes[0])).toEqual(["Root", PLAIN])
   })
 })

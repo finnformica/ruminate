@@ -19,10 +19,9 @@ import type { NoteId } from "../schema"
  * Sibling order for a block is a `sort_key` on the `child` link from its
  * parent, and notes once got exactly the same mechanism: the corpus root
  * (`ROOT_TYPE`) holds every note that was placed by hand, and the key on its
- * link says where the note sits. The Views list has since taken the order
- * onto the view rows themselves (`src/data/views.ts`, `sort_key`), where a
- * block view can sit between two notes. The root's links order the Root
- * frame (`src/data/root-frame.ts`): the notes the root holds lead, in its
+ * link says where the note sits. The root's links order the Root frame
+ * (`src/data/root-frame.ts`) and every list of notes (`sortedNotesAtom`,
+ * docs/removing-views.md): the notes the root holds lead, in its
  * order, then the rest by title, and a drag of a row there writes them.
  *
  * The root is **ordering-only**: a note it does not hold is an ordinary note

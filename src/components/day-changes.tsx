@@ -337,7 +337,7 @@ function NoteSection({ change }: { change: NoteChange }) {
           />
         ) : null}
         <Link
-          to="/views/$"
+          to="/notes/$"
           params={{ _splat: change.id }}
           search={{ query: undefined }}
           className="focus-ring flex min-w-0 items-center gap-2 rounded text-lg font-bold text-text hover:underline"

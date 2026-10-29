@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
-import { viewMapOf, viewsAtom } from "../data/views"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { Provider, createStore } from "jotai"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import { buildGraphSnapshot, docToGraph } from "../data/graph"
-import { githubUserAtom, isSignedOutAtom, sampleGraphAtom } from "../global-state"
+import {
+  githubUserAtom,
+  graphSnapshotAtom,
+  isSignedOutAtom,
+  sampleGraphAtom,
+} from "../global-state"
 import { resultsDoc, resultsToOps, type ResultRoot } from "../hooks/results-doc"
-import { viewRootIdsAtom } from "../data/views"
+import { pinnedAtOf } from "../data/pins"
 import { ResultsEditor } from "./results-editor"
 import type { NodeRow } from "../../worker/handlers/replica-payload"
 
@@ -70,22 +74,13 @@ const onOpen = vi.fn()
 
 async function renderResults(
   roots: ResultRoot[],
-  {
-    readOnly = true,
-    rootHints,
-  }: { readOnly?: boolean; rootHints?: ReadonlyMap<string, string> } = {},
+  { readOnly = true }: { readOnly?: boolean } = {},
 ) {
   onOpen.mockClear()
   const { store, unsubscribe } = await signedOutStore({ research: RESEARCH, journal: JOURNAL })
   const rendered = render(
     <Provider store={store}>
-      <ResultsEditor
-        roots={roots}
-        resetKey="q"
-        readOnly={readOnly}
-        onOpen={onOpen}
-        rootHints={rootHints}
-      />
+      <ResultsEditor roots={roots} resetKey="q" readOnly={readOnly} onOpen={onOpen} />
     </Provider>,
   )
   return { store, unsubscribe, ...rendered }
@@ -186,19 +181,6 @@ describe("resultsToOps", () => {
 })
 
 describe("ResultsEditor (browsing the notes list)", () => {
-  it("shows a root's hint after its name — a View's path in the palette — and on no other row", async () => {
-    await renderResults(NOTE_ROOTS, { rootHints: new Map([["research", "Root › Projects"]]) })
-    const hints = () =>
-      Array.from(document.querySelectorAll<HTMLElement>('[data-testid="row-hint"]')).map((hint) => [
-        hint.closest("[data-block-row]")?.getAttribute("data-block-row"),
-        hint.textContent,
-      ])
-    expect(hints()).toEqual([["research", "Root › Projects"]])
-    // Opened, the rows beneath it have none.
-    fireEvent.click(screen.getAllByLabelText("Expand")[0])
-    expect(hints()).toEqual([["research", "Root › Projects"]])
-  })
-
   it("lists every note as a closed root with the editor's chevron, and opens one to its blocks", async () => {
     const { store } = await renderResults(NOTE_ROOTS)
     expect(rowIds()).toEqual(["research", "journal"])
@@ -267,70 +249,53 @@ describe("ResultsEditor (a browsed row's menu)", () => {
 
   it("a note's row opens the note's menu — what its sidebar row's ⋯ holds", async () => {
     const { store } = await renderResults(NOTE_ROOTS)
-    // The row every note is created with, listing it (src/data/views.ts).
-    store.set(
-      viewsAtom,
-      viewMapOf([
-        {
-          id: "journal",
-          root_id: "journal",
-          filter: null,
-          sort: null,
-          pinned: true,
-          sort_key: null,
-          updated_at: 1,
-        },
-      ]),
-    )
     const menu = await menuOn("journal")
     expect(labels(menu)).toEqual([
       "Copy markdown",
       "Copy ID",
       "Share",
       "Rename",
-      "Remove from Views",
+      "Pin",
       "Print",
       "Delete",
     ])
     // Nothing of the note editor's block menu: a note's row is not a block.
     expect(menu.textContent).not.toContain("Duplicate")
-    // Remove from Views clears the note's listing and nothing else: the
-    // row stays, and the menu then offers the way back.
+    // Pin writes the note's `pinned_at`, and the menu then offers Unpin.
     await act(async () => {
-      fireEvent.click(screen.getByText("Remove from Views"))
+      fireEvent.click(screen.getByText("Pin"))
     })
-    // The note had saved nothing, so its row held nothing but the listing
-    // and goes whole, as a block's does (`patchedView`); a note that saved a
-    // filter keeps its row, unlisted (nav-items.test.tsx).
-    expect(store.get(viewsAtom).has("journal")).toBe(false)
-    expect(labels(await menuOn("journal"))).toContain("Add to Views")
+    const journal = store.get(graphSnapshotAtom).nodes.get("journal")!
+    expect(pinnedAtOf(journal)).not.toBeNull()
+    expect(labels(await menuOn("journal"))).toContain("Unpin")
   })
 
-  it("a block's row opens the block's menu away from its note, with Add to Views for a block that is none", async () => {
+  it("a block's row opens the block's menu away from its note, with Pin for a block that is not pinned", async () => {
     await renderResults([{ id: "blk_semis", noteId: "research" }])
     const menu = await menuOn("blk_semis")
-    expect(labels(menu)).toEqual(["Copy", "Copy link to block", "Share", "Add to Views"])
+    expect(labels(menu)).toEqual(["Copy", "Copy link to block", "Share", "Pin"])
     for (const absent of ["Move up", "Duplicate", "Delete", "Unlink", "Turn into"]) {
       expect(menu.textContent).not.toContain(absent)
     }
     // Each item leads with an icon, as the sidebar's menus do; the last is
-    // the Views item.
+    // the pin.
     expect(menu.querySelectorAll('[role="menuitem"] svg').length).toBeGreaterThanOrEqual(4)
   })
 
-  it("Add to Views makes the block a view; its menu then offers Remove from Views", async () => {
+  it("Pin pins the block; its menu then offers Unpin, which takes the pin out", async () => {
     const { store } = await renderResults([{ id: "blk_semis", noteId: "research" }])
+    const pinned = () => pinnedAtOf(store.get(graphSnapshotAtom).nodes.get("blk_semis")!) !== null
     let menu = await menuOn("blk_semis")
     await act(async () => {
-      fireEvent.click(screen.getByText("Add to Views"))
+      fireEvent.click(screen.getByText("Pin"))
     })
-    expect(store.get(viewRootIdsAtom).has("blk_semis")).toBe(true)
+    expect(pinned()).toBe(true)
     menu = await menuOn("blk_semis")
-    expect(menu.textContent).toContain("Remove from Views")
+    expect(menu.textContent).toContain("Unpin")
     await act(async () => {
-      fireEvent.click(screen.getByText("Remove from Views"))
+      fireEvent.click(screen.getByText("Unpin"))
     })
-    expect(store.get(viewRootIdsAtom).has("blk_semis")).toBe(false)
+    expect(pinned()).toBe(false)
   })
 
   it("Copy link to block links into the block's own note", async () => {
@@ -340,7 +305,7 @@ describe("ResultsEditor (a browsed row's menu)", () => {
       fireEvent.click(screen.getByText("Copy link to block"))
     })
     expect(clipboard.copy).toHaveBeenLastCalledWith(
-      `${window.location.origin}/views/journal?block=blk_elsewhere`,
+      `${window.location.origin}/notes/journal?block=blk_elsewhere`,
     )
   })
 

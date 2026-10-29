@@ -6,8 +6,6 @@ import type { GraphSnapshot } from "../data/graph"
 import { layoutFromSearch, layoutToSearch, withPane, type FocusFrame } from "../data/panes"
 import { rootFrame } from "../data/root-frame"
 import { isTracker } from "../data/tracker"
-import { restoreViewFrames } from "../data/view-stack"
-import { viewByRootAtom } from "../data/views"
 import { graphSnapshotAtom } from "../global-state"
 import type { NoteId } from "../schema"
 
@@ -29,7 +27,7 @@ export function useOpenNote() {
       focusBlock(block ?? noteId, () => {
         if (openFramesInPane([rootFrame(), { noteId, root: block ?? null, selected: null }])) return
         void navigate({
-          to: "/views/$",
+          to: "/notes/$",
           params: { _splat: noteId },
           search: { query: undefined, block },
         })
@@ -40,41 +38,7 @@ export function useOpenNote() {
 }
 
 /**
- * Where the palette opens a View row: its saved stack (`restoreViewFrames`,
- * docs/graph-walk.md section 7), as the sidebar's row does, in place of the
- * pane's stack. A View with no saved stack, a board or a tracker, or a row
- * that is not a View (a block revealed under a View's row) opens as
- * `useOpenNote` does.
- */
-export function useOpenView() {
-  const navigate = useNavigate()
-  const openNote = useOpenNote()
-  const openFramesInPane = useOpenFramesInPane()
-  const store = useStore()
-  return React.useCallback(
-    (noteId: NoteId, block?: string) => {
-      const rootId = block ?? noteId
-      const graph = store.get(graphSnapshotAtom)
-      const stack = store.get(viewByRootAtom).get(rootId)?.stack
-      const frames =
-        stack && kindPageOf(graph, rootId) === null
-          ? restoreViewFrames({ rootId, noteId, stack }, graph)
-          : null
-      if (!frames) return openNote(noteId, block)
-      if (openFramesInPane(frames)) return
-      const { noteId: first, search } = layoutToSearch({ panes: [{ frames }], active: 0 })
-      return navigate({
-        to: "/views/$",
-        params: { _splat: first },
-        search: { query: undefined, ...search },
-      })
-    },
-    [navigate, openNote, openFramesInPane, store],
-  )
-}
-
-/**
- * Open a whole stack (a View's, `restoreViewFrames`) in the pane with the
+ * Open a whole stack in the pane with the
  * keyboard while the page is split: that pane's stack becomes the frames,
  * the other pane is left as it is. Returns whether it did — false when the
  * page is not a split note page, and the caller follows its link.
@@ -84,14 +48,14 @@ export function useOpenFramesInPane() {
   const router = useRouter()
   return React.useCallback(
     (frames: FocusFrame[]): boolean => {
-      const page = router.state.matches.find((match) => match.routeId === "/_appRoot/views_/$")
+      const page = router.state.matches.find((match) => match.routeId === "/_appRoot/notes_/$")
       const pageNote = (page?.params as { _splat?: string } | undefined)?._splat
       if (!page || !pageNote) return false
       const layout = layoutFromSearch(pageNote, page.search as Record<string, unknown>)
       if (layout.panes.length < 2) return false
       const { noteId: first, search } = layoutToSearch(withPane(layout, layout.active, { frames }))
       void navigate({
-        to: "/views/$",
+        to: "/notes/$",
         params: { _splat: first },
         search: { query: undefined, ...search },
       })

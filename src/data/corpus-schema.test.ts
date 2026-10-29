@@ -62,6 +62,7 @@ describe("the migrations that have shipped", () => {
       14: "134c78d5eee39fd1",
       15: "d69c8d3a054e43c4",
       16: "53866f4d4b3aed53",
+      17: "705edf478f628df4",
     }
     expect(await hashes(SHIPPED_LOCAL_STEPS), RULE).toEqual(pinned)
   })
@@ -98,6 +99,7 @@ describe("the migrations that have shipped", () => {
       "0028_events_log.sql": "bbd7c8a9240ae38c",
       "0029_backfill_delta_mat_values.sql": "78c2478f5346977d",
       "0030_genesis_unlogged_rows.sql": "439905659178bc6b",
+      "0031_drop_views.sql": "ccea3b83d4b170e3",
     }
     const files = Object.fromEntries(
       Object.entries(MIGRATION_FILES).map(([path, sql]) => [path.split("/").pop()!, sql]),
