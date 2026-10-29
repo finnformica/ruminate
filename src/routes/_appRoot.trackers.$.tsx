@@ -5,6 +5,7 @@ import {
   ChevronLeftIcon16,
   ChevronRightIcon16,
   PlusIcon16,
+  SettingsIcon16,
 } from "../components/icons"
 import { NoteActionsMenu } from "../components/note-actions-menu"
 import { Notice } from "../components/notice"
@@ -15,6 +16,7 @@ import { MonthGrid } from "../components/trackers/month-grid"
 import { SeriesDialog } from "../components/trackers/series-dialog"
 import { TodayStrip } from "../components/trackers/today-strip"
 import { Button } from "../components/ui/button"
+import { DropdownMenu } from "../components/ui/dropdown-menu"
 import { IconButton } from "../components/ui/icon-button"
 import { PillButton } from "../components/ui/pill-button"
 import {
@@ -37,9 +39,9 @@ import { useTracker, useTrackerWrites } from "../hooks/tracker"
  * through the same seams. A note of another type is refused: it is opened
  * as a note.
  *
- * The range switch shows a week, a month or a year; the layout switch draws
- * it as cards (one per series) or as the journal grid (a row per series, a
- * column per day). The cell is one day in all six.
+ * The display menu in the header shows a week, a month or a year, drawn as
+ * cards (one per series) or as the journal grid (a row per day, a column
+ * per series). The cell is one day in all six.
  */
 
 const RANGE_LABELS: Record<TrackerRange, string> = { week: "Week", month: "Month", year: "Year" }
@@ -48,35 +50,66 @@ const LAYOUTS = ["cards", "grid"] as const
 type TrackerLayout = (typeof LAYOUTS)[number]
 const LAYOUT_LABELS: Record<TrackerLayout, string> = { cards: "Cards", grid: "Grid" }
 
-/** A row of buttons of which one is chosen, as Settings → Theme is drawn. */
-function Switch<T extends string>({
-  label,
-  options,
-  labels,
-  value,
-  onChange,
+/**
+ * The display menu, beside the note's ⋯ menu (Finn, 2026-10-29): the range
+ * and the layout, as two groups of which one row each is ticked. A pick
+ * leaves the menu open, so both can be set at once.
+ */
+function DisplayMenu({
+  range,
+  layout,
+  onRangeChange,
+  onLayoutChange,
 }: {
-  label: string
-  options: readonly T[]
-  labels: Record<T, string>
-  value: T
-  onChange: (value: T) => void
+  range: TrackerRange
+  layout: TrackerLayout
+  onRangeChange: (range: TrackerRange) => void
+  onLayoutChange: (layout: TrackerLayout) => void
 }) {
   return (
-    <div role="group" aria-label={label} className="flex gap-1">
-      {options.map((option) => (
-        <Button
-          key={option}
-          size="small"
-          data-option={option}
-          aria-pressed={option === value}
-          selected={option === value}
-          onClick={() => onChange(option)}
-        >
-          {labels[option]}
-        </Button>
-      ))}
-    </div>
+    <DropdownMenu modal={false}>
+      <DropdownMenu.Trigger
+        render={
+          <IconButton
+            aria-label={`Display: ${RANGE_LABELS[range]}, ${LAYOUT_LABELS[layout]}`}
+            size="small"
+            disableTooltip
+            className="shrink-0"
+          >
+            <SettingsIcon16 />
+          </IconButton>
+        }
+      />
+      <DropdownMenu.Content align="end" className="w-48">
+        <DropdownMenu.Group>
+          <DropdownMenu.GroupLabel>Range</DropdownMenu.GroupLabel>
+          {TRACKER_RANGES.map((option) => (
+            <DropdownMenu.Item
+              key={option}
+              closeOnClick={false}
+              selected={option === range}
+              onClick={() => onRangeChange(option)}
+            >
+              {RANGE_LABELS[option]}
+            </DropdownMenu.Item>
+          ))}
+        </DropdownMenu.Group>
+        <DropdownMenu.Separator />
+        <DropdownMenu.Group>
+          <DropdownMenu.GroupLabel>Layout</DropdownMenu.GroupLabel>
+          {LAYOUTS.map((option) => (
+            <DropdownMenu.Item
+              key={option}
+              closeOnClick={false}
+              selected={option === layout}
+              onClick={() => onLayoutChange(option)}
+            >
+              {LAYOUT_LABELS[option]}
+            </DropdownMenu.Item>
+          ))}
+        </DropdownMenu.Group>
+      </DropdownMenu.Content>
+    </DropdownMenu>
   )
 }
 
@@ -104,8 +137,8 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
   const { exists, series } = useTracker(trackerId)
   const writes = useTrackerWrites(trackerId, exists)
   const today = useToday()
-  // The range shown, and how: this month as cards until the switches say
-  // otherwise.
+  // The range shown, and how: this month as cards until the display menu
+  // says otherwise.
   const [range, setRange] = React.useState<TrackerRange>("month")
   const [layout, setLayout] = React.useState<TrackerLayout>("cards")
   // The first day of the range shown: the one today is in until the arrows
@@ -132,12 +165,22 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
         </RootLink>
       }
       actions={
-        <NoteActionsMenu
-          noteId={trackerId}
-          align="end"
-          surface="tracker"
-          onSeries={exists ? () => setSeriesOpen(true) : undefined}
-        />
+        <div className="flex items-center">
+          {exists ? (
+            <DisplayMenu
+              range={range}
+              layout={layout}
+              onRangeChange={changeRange}
+              onLayoutChange={setLayout}
+            />
+          ) : null}
+          <NoteActionsMenu
+            noteId={trackerId}
+            align="end"
+            surface="tracker"
+            onSeries={exists ? () => setSeriesOpen(true) : undefined}
+          />
+        </div>
       }
     >
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4">
@@ -169,46 +212,28 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
               onSetEntry={writes.setEntry}
               onBackToToday={() => setPickedDay(null)}
             />
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <div className="flex min-w-0 items-center gap-1">
-                <IconButton
-                  aria-label={`Previous ${range}`}
-                  onClick={() => setStart(shiftRange(range, start, -1))}
-                >
-                  <ChevronLeftIcon16 />
-                </IconButton>
-                <h2 className="min-w-0 truncate font-bold [font-variant-numeric:tabular-nums]">
-                  {rangeLabel(range, start)}
-                </h2>
-                <IconButton
-                  aria-label={`Next ${range}`}
-                  disabled={start >= current}
-                  onClick={() => setStart(shiftRange(range, start, 1))}
-                >
-                  <ChevronRightIcon16 />
-                </IconButton>
-                {start !== current ? (
-                  <PillButton variant="dashed" onClick={() => setStart(current)}>
-                    This {range}
-                  </PillButton>
-                ) : null}
-              </div>
-              <div className="flex items-center gap-3 sm:ml-auto">
-                <Switch
-                  label="Range"
-                  options={TRACKER_RANGES}
-                  labels={RANGE_LABELS}
-                  value={range}
-                  onChange={changeRange}
-                />
-                <Switch
-                  label="Layout"
-                  options={LAYOUTS}
-                  labels={LAYOUT_LABELS}
-                  value={layout}
-                  onChange={setLayout}
-                />
-              </div>
+            <div className="flex min-w-0 items-center gap-1">
+              <IconButton
+                aria-label={`Previous ${range}`}
+                onClick={() => setStart(shiftRange(range, start, -1))}
+              >
+                <ChevronLeftIcon16 />
+              </IconButton>
+              <h2 className="min-w-0 truncate font-bold [font-variant-numeric:tabular-nums]">
+                {rangeLabel(range, start)}
+              </h2>
+              <IconButton
+                aria-label={`Next ${range}`}
+                disabled={start >= current}
+                onClick={() => setStart(shiftRange(range, start, 1))}
+              >
+                <ChevronRightIcon16 />
+              </IconButton>
+              {start !== current ? (
+                <PillButton variant="dashed" onClick={() => setStart(current)}>
+                  This {range}
+                </PillButton>
+              ) : null}
             </div>
             {series.length === 0 ? (
               <div className="flex flex-col items-center gap-3 py-12 text-center text-text-secondary">

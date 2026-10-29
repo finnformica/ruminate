@@ -1,12 +1,10 @@
 import React from "react"
 import {
   WEEKDAY_LABELS,
-  formatAmount,
+  dayLabel,
   monthOf,
   monthShortLabel,
   rangeDays,
-  rollup,
-  streak,
   weekdayFromMonday,
   type DayString,
   type SeriesState,
@@ -16,28 +14,30 @@ import { cx } from "../../utils/cx"
 import { Surface } from "../ui/surface"
 import { ColourDot, DayCell } from "./month-grid"
 
-/** A day's column (`--day-column`) and the cell in it, per range: a week
- * has room for big cells, a year needs small ones. The column is the cell
- * plus 2 px, which is the gap between cells, so the sticky series column
- * covers what scrolls under it. A week on a phone (390 px) takes smaller
- * cells, so its seven days fit beside the series column with no sideways
- * scroll (Finn, 2026-10-29). */
+/** A series's column (`--series-column`) and the cell in it, per range: a
+ * week has room for big cells, a year needs small ones. The column is the
+ * cell plus 4 px, the gap between cells. At these sizes a phone (390 px)
+ * shows six series beside the day column with no sideways scroll, a week's
+ * big cells too (Finn, 2026-10-29). */
 const SIZES: Record<TrackerRange, { column: string; cell: string }> = {
-  week: { column: "[--day-column:34px] sm:[--day-column:42px]", cell: "size-8 sm:size-10" },
-  month: { column: "[--day-column:26px]", cell: "size-6" },
-  year: { column: "[--day-column:18px]", cell: "size-4" },
+  week: { column: "[--series-column:44px]", cell: "size-10" },
+  month: { column: "[--series-column:32px]", cell: "size-7" },
+  year: { column: "[--series-column:24px]", cell: "size-5" },
 }
 
 /**
  * The journal grid (docs/trackers.md, Finn 2026-10-28): the range as one
- * table, a row per series and a column per day, as a bullet journal's habit
- * page is drawn. Above the days, their weekday and their number (and, for a
- * year, the month over its first day); at the left, the series's colour,
- * name and rollup for the range.
+ * table, a row per day and a column per series, as a bullet journal's habit
+ * page is drawn (Finn turned it on its side, 2026-10-29). At the left of each
+ * day, its weekday and its number; a year names each month above its first
+ * day. Above each column, only the series's colour: the Today strip's chips
+ * above the grid are its legend, and the name is the column's label for a
+ * screen reader.
  *
- * On a narrow screen the days scroll sideways under a series column that
- * stays put, and the grid opens scrolled to today, so the day you log is in
- * view and the row it is on is still named.
+ * The grid scrolls in its own box, under a row of colours and a day column
+ * that stay put, and opens scrolled to today, so the day you log is in view
+ * and its columns are still coloured. Past six series or so a phone scrolls
+ * it sideways too.
  */
 export function JournalGrid({
   series,
@@ -66,107 +66,97 @@ export function JournalGrid({
   React.useLayoutEffect(() => {
     const box = scroller.current
     if (!box) return
-    const head = box.querySelector<HTMLElement>(`[data-day="${today}"]`)
-    const names = box.querySelector<HTMLElement>("[data-series-column]")
-    if (!head) {
-      box.scrollLeft = 0
+    box.scrollLeft = 0
+    const row = box.querySelector<HTMLElement>(`[data-day-row="${today}"]`)
+    const colours = box.querySelector<HTMLElement>("[data-series-row]")
+    if (!row) {
+      box.scrollTop = 0
       return
     }
-    const fixed = names?.offsetWidth ?? 0
-    box.scrollLeft = head.offsetLeft - fixed - (box.clientWidth - fixed - head.offsetWidth) / 2
+    const fixed = colours?.offsetHeight ?? 0
+    box.scrollTop = row.offsetTop - fixed - (box.clientHeight - fixed - row.offsetHeight) / 2
   }, [days, today])
 
-  const sticky = "sticky left-0 z-10 bg-bg-card pl-3 pr-2"
+  const stickyTop = "sticky top-0 z-10 self-stretch bg-bg-card pb-2 pt-3"
+  const stickyLeft = "sticky left-0 z-10 bg-bg-card pl-3 pr-2"
   return (
     <Surface tier="card" motion={false} data-testid="journal-grid" data-range={range}>
-      <div ref={scroller} className="overflow-x-auto py-3">
+      <div ref={scroller} className="max-h-[70svh] overflow-auto pb-3">
         <div
           role="grid"
-          aria-label="Series by day"
-          className={cx("relative grid w-max items-center gap-y-0.5", column)}
-          style={{ gridTemplateColumns: `auto repeat(${days.length}, var(--day-column))` }}
+          aria-label="Days by series"
+          className={cx("relative grid w-max items-center gap-y-0.5 pr-3", column)}
+          style={{ gridTemplateColumns: `auto repeat(${series.length}, var(--series-column))` }}
         >
-          {range === "year" ? (
-            <div role="row" className="contents">
-              <div aria-hidden data-series-column className={cx(sticky, "self-stretch")} />
-              {days.map((day) => (
-                <div
-                  key={day}
-                  aria-hidden
-                  className="overflow-visible whitespace-nowrap text-xs leading-4 text-text-secondary"
-                >
-                  {day.endsWith("-01") ? monthShortLabel(monthOf(day)) : null}
-                </div>
-              ))}
-            </div>
-          ) : null}
           <div role="row" className="contents">
-            <div
-              role="columnheader"
-              data-series-column
-              className={cx(sticky, "self-stretch text-sm text-text-secondary")}
-            >
-              <span className="sr-only">Series</span>
+            <div role="columnheader" data-series-row className={cx(stickyTop, stickyLeft, "z-20")}>
+              <span className="sr-only">Day</span>
             </div>
-            {days.map((day) => {
-              const weekday = weekdayFromMonday(day)
+            {series.map((state) => {
+              const name = state.series.name.trim() || "Untitled"
               return (
                 <div
-                  key={day}
+                  key={state.series.id}
                   role="columnheader"
-                  aria-label={day}
-                  data-day={day}
-                  className={cx(
-                    "flex flex-col items-center leading-4 tabular-nums",
-                    range === "year" ? "text-[10px]" : "text-xs",
-                    day === today ? "font-bold text-text" : "text-text-secondary",
-                    // A weekend reads lighter, as a journal's ruled page does.
-                    day !== today && weekday >= 5 && "text-text-tertiary",
-                  )}
+                  aria-label={name}
+                  title={name}
+                  data-testid="journal-column"
+                  className={cx(stickyTop, "flex items-center justify-center")}
                 >
-                  <span>{WEEKDAY_LABELS[weekday]}</span>
-                  <span>{Number(day.slice(8))}</span>
+                  <ColourDot colour={state.series.colour} />
                 </div>
               )
             })}
           </div>
-          {series.map((state) => {
-            const name = state.series.name.trim() || "Untitled"
-            const total = rollup(state, days)
+          {days.map((day) => {
+            const weekday = weekdayFromMonday(day)
             return (
-              <div key={state.series.id} role="row" data-testid="journal-row" className="contents">
-                <div
-                  role="rowheader"
-                  className={cx(sticky, "flex h-full w-28 items-center gap-2 self-stretch sm:w-44")}
-                >
-                  <ColourDot colour={state.series.colour} />
-                  <span className="min-w-0 flex-1 truncate font-bold leading-4">{name}</span>
-                  <span
-                    className="hidden shrink-0 text-sm text-text-secondary tabular-nums sm:inline"
-                    title={`Days in a row: ${streak(state, today)}`}
+              <React.Fragment key={day}>
+                {range === "year" && day.endsWith("-01") ? (
+                  // The month over its first day, across the row.
+                  <div
+                    aria-hidden
+                    className={cx(
+                      stickyLeft,
+                      "col-span-full pt-2 text-xs font-bold leading-4 text-text-secondary",
+                    )}
                   >
-                    {total === null
-                      ? "–"
-                      : state.series.kind === "check"
-                        ? `${total}×`
-                        : formatAmount(state.series, total)}
-                  </span>
+                    {monthShortLabel(monthOf(day))}
+                  </div>
+                ) : null}
+                <div role="row" data-testid="journal-row" className="contents">
+                  <div
+                    role="rowheader"
+                    aria-label={dayLabel(day)}
+                    data-day-row={day}
+                    className={cx(
+                      stickyLeft,
+                      "flex h-full items-center gap-1.5 self-stretch leading-4 tabular-nums",
+                      range === "year" ? "text-[10px]" : "text-xs",
+                      day === today ? "font-bold text-text" : "text-text-secondary",
+                      // A weekend reads lighter, as a journal's ruled page does.
+                      day !== today && weekday >= 5 && "text-text-tertiary",
+                    )}
+                  >
+                    <span className="w-2 text-center">{WEEKDAY_LABELS[weekday]}</span>
+                    <span className="w-4 text-right">{Number(day.slice(8))}</span>
+                  </div>
+                  {series.map((state) => (
+                    <DayCell
+                      key={state.series.id}
+                      compact={range === "year"}
+                      className={cx(cell, "justify-self-center")}
+                      state={state}
+                      day={day}
+                      days={days}
+                      today={today}
+                      selected={day === selectedDay && selectedDay !== today}
+                      onToggle={onToggle}
+                      onPickDay={onPickDay}
+                    />
+                  ))}
                 </div>
-                {days.map((day) => (
-                  <DayCell
-                    key={day}
-                    compact={range === "year"}
-                    className={cx(cell, "justify-self-center")}
-                    state={state}
-                    day={day}
-                    days={days}
-                    today={today}
-                    selected={day === selectedDay && selectedDay !== today}
-                    onToggle={onToggle}
-                    onPickDay={onPickDay}
-                  />
-                ))}
-              </div>
+              </React.Fragment>
             )
           })}
         </div>

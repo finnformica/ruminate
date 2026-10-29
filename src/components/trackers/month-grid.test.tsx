@@ -83,7 +83,20 @@ describe("MonthGrid ranges", () => {
 })
 
 describe("JournalGrid", () => {
-  it("draws a row per series and a column per day, and logs a tap", () => {
+  const grid = (range: "week" | "month" | "year", start = TODAY) =>
+    render(
+      <JournalGrid
+        series={[READ, RUN]}
+        range={range}
+        start={start}
+        today={TODAY}
+        selectedDay={TODAY}
+        onToggle={vi.fn()}
+        onPickDay={vi.fn()}
+      />,
+    )
+
+  it("draws a row per day and a column per series, and logs a tap", () => {
     const onToggle = vi.fn()
     const onPickDay = vi.fn()
     render(
@@ -98,14 +111,64 @@ describe("JournalGrid", () => {
       />,
     )
     const rows = screen.getAllByTestId("journal-row")
-    expect(rows).toHaveLength(2)
-    expect(within(rows[0]).getByRole("rowheader").textContent).toContain("Read")
-    expect(within(rows[0]).getAllByTestId("day-cell")).toHaveLength(31)
-    expect(screen.getAllByRole("columnheader")).toHaveLength(32)
-    fireEvent.click(within(rows[0]).getByLabelText("Sat 24 Oct: nothing"))
+    expect(rows).toHaveLength(31)
+    expect(within(rows[0]).getByRole("rowheader").getAttribute("data-day-row")).toBe("2026-10-01")
+    expect(within(rows[30]).getByRole("rowheader").getAttribute("data-day-row")).toBe("2026-10-31")
+    // Each row holds a cell per series, in the series's order.
+    const today = within(rows[26]).getAllByTestId("day-cell")
+    expect(today.map((cell) => cell.getAttribute("aria-label"))).toEqual([
+      "Tue 27 Oct: nothing",
+      "Tue 27 Oct: 4 km",
+    ])
+    fireEvent.click(within(rows[23]).getAllByTestId("day-cell")[0])
     expect(onToggle).toHaveBeenCalledWith("s1", "2026-10-24", true)
-    fireEvent.click(within(rows[1]).getByLabelText("Tue 27 Oct: 4 km"))
+    fireEvent.click(today[1])
     expect(onPickDay).toHaveBeenCalledWith("2026-10-27")
+  })
+
+  it("heads each column with its series's colour and no name, named for a screen reader", () => {
+    grid("month")
+    const columns = screen.getAllByTestId("journal-column")
+    expect(columns.map((column) => column.getAttribute("aria-label"))).toEqual(["Read", "Run"])
+    for (const column of columns) expect(column.textContent).toBe("")
+    // The corner over the days, then one header per series.
+    expect(screen.getAllByRole("columnheader")).toHaveLength(3)
+    expect(screen.queryByText("Read")).toBeNull()
+  })
+
+  it("draws a week as seven rows from Monday and a year as a row a day", () => {
+    grid("week")
+    const week = screen.getAllByTestId("journal-row")
+    expect(week).toHaveLength(7)
+    expect(within(week[0]).getByRole("rowheader").getAttribute("data-day-row")).toBe("2026-10-26")
+    expect(within(week[1]).getByRole("rowheader").getAttribute("aria-label")).toBe("Tue 27 Oct")
+    cleanup()
+    grid("year")
+    const year = screen.getAllByTestId("journal-row")
+    expect(year).toHaveLength(365)
+    expect(within(year[0]).getAllByTestId("day-cell")).toHaveLength(2)
+  })
+
+  it("opens scrolled to today's row, under the row of colours", () => {
+    const top = vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.dataset.dayRow === TODAY ? 900 : 0
+    })
+    const height = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(20)
+    const view = vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(300)
+    const scrolled = vi.spyOn(Element.prototype, "scrollTop", "set")
+    try {
+      grid("month")
+      // 900 down, less the 20 px of colours, less half of what is left
+      // around the row: (300 - 20 - 20) / 2.
+      expect(scrolled).toHaveBeenLastCalledWith(750)
+    } finally {
+      top.mockRestore()
+      height.mockRestore()
+      view.mockRestore()
+      scrolled.mockRestore()
+    }
   })
 })
 
