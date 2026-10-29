@@ -142,20 +142,25 @@ has no keys to validate.
   selected. Remove asks first (`ConfirmDialog`, danger): the entries go
   with it. On a phone the list is a sheet.
 - **The range and the layout** (Finn, 2026-10-28, a first cut to judge
-  from screenshots): a switch shows a **Week** (seven days from Monday), a
-  **Month** or a **Year** (`TRACKER_RANGES`, `rangeDays`, `rangeStart`,
-  `shiftRange` in `src/data/tracker.ts`); the cell is one day in each. A
-  second switch draws the range as **Cards**, one per series as above (a
-  week as one row of seven, a year as a heatmap of its weeks, `yearWeeks`,
-  sized to the card so a phone does not scroll sideways), or as the
-  **Grid** (`journal-grid.tsx`): one table, a row per series with its
-  colour, name and rollup at the left, a column per day with its weekday
-  and number on top, as a bullet journal's habit page is drawn. A tap on a
-  grid cell logs as a tap on a card's cell does. On a phone a week
-  fits beside the series column with smaller cells; a month or a year
-  scrolls sideways under a series column that stays put, and the grid
-  opens scrolled to today. The switches are page state: a reload shows
-  this month as cards.
+  from screenshots; moved into a menu and the grid turned on its side,
+  2026-10-29): the display menu, a sliders button in the header beside the
+  note's ⋯ menu, shows a **Week** (seven days from Monday), a **Month** or
+  a **Year** (`TRACKER_RANGES`, `rangeDays`, `rangeStart`, `shiftRange` in
+  `src/data/tracker.ts`); the cell is one day in each. Its second group
+  draws the range as **Cards**, one per series as above (a week as one row
+  of seven, a year as a heatmap of its weeks, `yearWeeks`, sized to the
+  card so a phone does not scroll sideways), or as the **Grid**
+  (`journal-grid.tsx`): one table, a row per day with its weekday and
+  number at the left (a year names each month above its first day), a
+  column per series, as a bullet journal's habit page is drawn. A column is
+  headed by its series's colour alone: the Today strip's chips are the
+  legend, and the name is the column's `aria-label`. A tap on a grid cell
+  logs as a tap on a card's cell does. The grid scrolls in its own box
+  under the row of colours and beside the day column, both of which stay
+  put, and opens scrolled to today's row. A phone (390 px) shows six series
+  with no sideways scroll; more scroll sideways. A pick leaves the menu
+  open, so both can be set at once. The range and the layout are page
+  state: a reload shows this month as cards.
 - The range shown moves with the arrows beside its name, by a week, a
   month or a year; **This week**, **This month** or **This year** comes
   back. The page refreshes its idea of today every minute, so a tab
