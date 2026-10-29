@@ -868,7 +868,7 @@ describe("a tap on a root row that opens (the notes page, `openRoots`)", () => {
           doc={doc}
           onChange={setDoc}
           openRoots
-          focusBlockId={null}
+          focusRootId={null}
           onFocusNavigate={onFocusNavigate}
         />
         <pre data-testid="serialized">{serialize(doc)}</pre>
