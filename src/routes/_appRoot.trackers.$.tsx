@@ -1,5 +1,5 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
-import React from "react"
+import React, { useSyncExternalStore } from "react"
 import {
   TrackerIcon16,
   ChevronLeftIcon16,
@@ -10,6 +10,7 @@ import { NoteActionsMenu } from "../components/note-actions-menu"
 import { Notice } from "../components/notice"
 import { PageLayout } from "../components/page-layout"
 import { RootLink } from "../components/root-link"
+import { ActivityCard, ActivitySummary } from "../components/trackers/activity"
 import { JournalGrid } from "../components/trackers/journal-grid"
 import { MonthGrid } from "../components/trackers/month-grid"
 import { SeriesDialog } from "../components/trackers/series-dialog"
@@ -42,6 +43,13 @@ import { cx } from "../utils/cx"
  * The display options in the note's ⋯ menu show a week, a month or a year,
  * drawn as cards (one per series) or as the journal grid (a row per day, a column
  * per series). The cell is one day in all six.
+ *
+ * Over it all, the summary line of active days; beside the range, the
+ * activity card (a heatmap of the last twelve weeks and the newest entries,
+ * activity.tsx). A phone or a narrow window has room for one of the two:
+ * the activity card until the menu picks a range or a layout, and
+ * **Heatmap**, first in the menu's Range group, comes back (Finn,
+ * 2026-10-29). A wide window shows both, and the menu has no Heatmap row.
  */
 
 const RANGE_LABELS: Record<TrackerRange, string> = { week: "Week", month: "Month", year: "Year" }
@@ -49,6 +57,32 @@ const RANGE_LABELS: Record<TrackerRange, string> = { week: "Week", month: "Month
 const LAYOUTS = ["cards", "grid"] as const
 type TrackerLayout = (typeof LAYOUTS)[number]
 const LAYOUT_LABELS: Record<TrackerLayout, string> = { cards: "Cards", grid: "Grid" }
+
+/** What a narrow window shows under the Today strip: the activity card or
+ * the range. A wide window shows both, side by side. */
+type NarrowView = "activity" | "range"
+
+/** The width at which the activity card and the range sit side by side:
+ * Tailwind's `lg`, which the classes below key off too. */
+const WIDE_QUERY = "(min-width: 1024px)"
+
+function wideQuery(): MediaQueryList | null {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return null
+  return window.matchMedia(WIDE_QUERY)
+}
+
+function subscribeWide(onChange: () => void): () => void {
+  const list = wideQuery()
+  if (!list) return () => {}
+  list.addEventListener("change", onChange)
+  return () => list.removeEventListener("change", onChange)
+}
+
+/** Whether the window is wide enough for both views (`WIDE_QUERY`): the
+ * menu's Heatmap row is only there when it is not. */
+function useWide(): boolean {
+  return useSyncExternalStore(subscribeWide, () => wideQuery()?.matches ?? false, () => false)
+}
 
 /**
  * The display options, in the note's ⋯ menu on a phone and a desktop alike
@@ -59,11 +93,17 @@ const LAYOUT_LABELS: Record<TrackerLayout, string> = { cards: "Cards", grid: "Gr
 function DisplayGroups({
   range,
   layout,
+  heatmap,
+  onHeatmap,
   onRangeChange,
   onLayoutChange,
 }: {
   range: TrackerRange
   layout: TrackerLayout
+  /** On a narrow window, whether the activity card is shown (the Heatmap
+   * row is ticked); undefined on a wide one, which has no Heatmap row. */
+  heatmap: boolean | undefined
+  onHeatmap: () => void
   onRangeChange: (range: TrackerRange) => void
   onLayoutChange: (layout: TrackerLayout) => void
 }) {
@@ -71,11 +111,16 @@ function DisplayGroups({
     <>
       <DropdownMenu.Group>
         <DropdownMenu.GroupLabel>Range</DropdownMenu.GroupLabel>
+        {heatmap !== undefined ? (
+          <DropdownMenu.Item closeOnClick={false} selected={heatmap} onClick={onHeatmap}>
+            Heatmap
+          </DropdownMenu.Item>
+        ) : null}
         {TRACKER_RANGES.map((option) => (
           <DropdownMenu.Item
             key={option}
             closeOnClick={false}
-            selected={option === range}
+            selected={option === range && heatmap !== true}
             onClick={() => onRangeChange(option)}
           >
             {RANGE_LABELS[option]}
@@ -142,6 +187,8 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
     setRange(next)
   }
   const [seriesOpen, setSeriesOpen] = React.useState(false)
+  const [narrowView, setNarrowView] = React.useState<NarrowView>("activity")
+  const wide = useWide()
 
   return (
     <PageLayout
@@ -162,8 +209,16 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
               <DisplayGroups
                 range={range}
                 layout={layout}
-                onRangeChange={changeRange}
-                onLayoutChange={setLayout}
+                heatmap={wide ? undefined : narrowView === "activity"}
+                onHeatmap={() => setNarrowView("activity")}
+                onRangeChange={(next) => {
+                  changeRange(next)
+                  setNarrowView("range")
+                }}
+                onLayoutChange={(next) => {
+                  setLayout(next)
+                  setNarrowView("range")
+                }}
               />
             ) : undefined
           }
@@ -201,6 +256,7 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
           </Notice>
         ) : (
           <>
+            <ActivitySummary series={series} today={today} />
             <TodayStrip
               series={series}
               day={day}
@@ -208,29 +264,6 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
               onSetEntry={writes.setEntry}
               onBackToToday={() => setPickedDay(null)}
             />
-            <div className="flex min-w-0 items-center gap-1">
-              <IconButton
-                aria-label={`Previous ${range}`}
-                onClick={() => setStart(shiftRange(range, start, -1))}
-              >
-                <ChevronLeftIcon16 />
-              </IconButton>
-              <h2 className="min-w-0 truncate font-bold [font-variant-numeric:tabular-nums]">
-                {rangeLabel(range, start)}
-              </h2>
-              <IconButton
-                aria-label={`Next ${range}`}
-                disabled={start >= current}
-                onClick={() => setStart(shiftRange(range, start, 1))}
-              >
-                <ChevronRightIcon16 />
-              </IconButton>
-              {start !== current ? (
-                <PillButton variant="dashed" onClick={() => setStart(current)}>
-                  This {range}
-                </PillButton>
-              ) : null}
-            </div>
             {series.length === 0 ? (
               <div className="flex flex-col items-center gap-3 py-12 text-center text-text-secondary">
                 <p>No series yet. Add one to start logging.</p>
@@ -238,30 +271,76 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
                   Add series
                 </Button>
               </div>
-            ) : layout === "grid" ? (
-              <JournalGrid
-                series={series}
-                range={range}
-                start={start}
-                today={today}
-                selectedDay={day}
-                onToggle={(seriesId, cellDay, done) =>
-                  writes.setEntry(seriesId, cellDay, done ? true : null)
-                }
-                onPickDay={(cellDay) => setPickedDay(cellDay === today ? null : cellDay)}
-              />
             ) : (
-              <MonthGrid
-                series={series}
-                range={range}
-                start={start}
-                today={today}
-                selectedDay={day}
-                onToggle={(seriesId, cellDay, done) =>
-                  writes.setEntry(seriesId, cellDay, done ? true : null)
-                }
-                onPickDay={(cellDay) => setPickedDay(cellDay === today ? null : cellDay)}
-              />
+              <div
+                className={cx(
+                  "flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start",
+                  layout === "grid" && "min-h-0 flex-1",
+                )}
+              >
+                <ActivityCard
+                  series={series}
+                  today={today}
+                  className={cx("lg:w-80 lg:shrink-0", narrowView === "range" && "max-lg:hidden")}
+                />
+                <div
+                  data-testid="tracker-range"
+                  className={cx(
+                    "flex min-w-0 flex-1 flex-col gap-4",
+                    narrowView === "activity" && "max-lg:hidden",
+                    layout === "grid" && "min-h-0 lg:self-stretch",
+                  )}
+                >
+                  <div className="flex min-w-0 items-center gap-1">
+                    <IconButton
+                      aria-label={`Previous ${range}`}
+                      onClick={() => setStart(shiftRange(range, start, -1))}
+                    >
+                      <ChevronLeftIcon16 />
+                    </IconButton>
+                    <h2 className="min-w-0 truncate font-bold [font-variant-numeric:tabular-nums]">
+                      {rangeLabel(range, start)}
+                    </h2>
+                    <IconButton
+                      aria-label={`Next ${range}`}
+                      disabled={start >= current}
+                      onClick={() => setStart(shiftRange(range, start, 1))}
+                    >
+                      <ChevronRightIcon16 />
+                    </IconButton>
+                    {start !== current ? (
+                      <PillButton variant="dashed" onClick={() => setStart(current)}>
+                        This {range}
+                      </PillButton>
+                    ) : null}
+                  </div>
+                  {layout === "grid" ? (
+                    <JournalGrid
+                      series={series}
+                      range={range}
+                      start={start}
+                      today={today}
+                      selectedDay={day}
+                      onToggle={(seriesId, cellDay, done) =>
+                        writes.setEntry(seriesId, cellDay, done ? true : null)
+                      }
+                      onPickDay={(cellDay) => setPickedDay(cellDay === today ? null : cellDay)}
+                    />
+                  ) : (
+                    <MonthGrid
+                      series={series}
+                      range={range}
+                      start={start}
+                      today={today}
+                      selectedDay={day}
+                      onToggle={(seriesId, cellDay, done) =>
+                        writes.setEntry(seriesId, cellDay, done ? true : null)
+                      }
+                      onPickDay={(cellDay) => setPickedDay(cellDay === today ? null : cellDay)}
+                    />
+                  )}
+                </div>
+              </div>
             )}
             <SeriesDialog
               open={seriesOpen && exists}
