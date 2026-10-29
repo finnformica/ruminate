@@ -541,7 +541,7 @@ describe("writing the graph", () => {
     expect(updateSeriesOps(snapshot, "t1", { name: "x" })).toEqual([])
   })
 
-  it("logs a check as a ticked to-do whose text is the day, and opens it to clear", () => {
+  it("logs a check as a ticked to-do whose text is the day, and deletes it to clear", () => {
     let snapshot = tracker()
     snapshot = apply(snapshot, addSeriesOps(snapshot, "t1", "s1"))
     snapshot = apply(snapshot, setEntryOps(snapshot, "s1", "2026-10-27", true))
@@ -553,16 +553,27 @@ describe("writing the graph", () => {
       notes_id: "t1",
     })
     expect(trackerSeries(snapshot, "t1")[0].entries.get("2026-10-27")?.value).toBe(true)
-    // Ticking again writes nothing; clearing opens the to-do and keeps the row.
+    // Ticking again writes nothing; clearing deletes the row and its link
+    // (Finn, 2026-10-28), so the graph has no entry for the day.
     expect(setEntryOps(snapshot, "s1", "2026-10-27", true)).toEqual([])
     const clear = setEntryOps(snapshot, "s1", "2026-10-27", null)
-    expect(clear).toEqual([{ op: "setType", id: entryId, type: "todo" }])
+    expect(clear.some((op) => op.op === "delete" && op.id === entryId)).toBe(true)
+    expect(clear.some((op) => op.op === "setType")).toBe(false)
     snapshot = apply(snapshot, clear)
-    expect(trackerSeries(snapshot, "t1")[0].entries.get("2026-10-27")?.value).toBe(false)
+    expect(snapshot.nodes.has(entryId)).toBe(false)
+    expect(childIdsOf(snapshot, "s1")).toEqual([])
+    expect(trackerSeries(snapshot, "t1")[0].entries.has("2026-10-27")).toBe(false)
     expect(isDone(trackerSeries(snapshot, "t1")[0], "2026-10-27")).toBe(false)
+    // `false` clears as `null` does; a tick after it is a new row.
+    snapshot = apply(snapshot, setEntryOps(snapshot, "s1", "2026-10-27", true))
+    const [again] = childIdsOf(snapshot, "s1")
+    expect(again).not.toBe(entryId)
+    expect(snapshot.nodes.get(again)).toMatchObject({ type: "done", text: "2026-10-27" })
+    snapshot = apply(snapshot, setEntryOps(snapshot, "s1", "2026-10-27", false))
+    expect(childIdsOf(snapshot, "s1")).toEqual([])
     // A number on a check is a tick; clearing a day with no row writes nothing.
     snapshot = apply(snapshot, setEntryOps(snapshot, "s1", "2026-10-28", 7))
-    expect(snapshot.nodes.get(childIdsOf(snapshot, "s1")[1])).toMatchObject({ type: "done" })
+    expect(snapshot.nodes.get(childIdsOf(snapshot, "s1")[0])).toMatchObject({ type: "done" })
     expect(setEntryOps(snapshot, "s1", "2026-10-29", false)).toEqual([])
   })
 

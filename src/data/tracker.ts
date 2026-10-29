@@ -427,8 +427,9 @@ export function removeSeriesOps(snapshot: GraphSnapshot, seriesId: string): Op[]
  * A day logged — the Today strip, or a tap on a cell: one entry per series
  * per day, written as text (above). On a check series a value ticks the
  * day's to-do, creating it (`done`, its text the day) when the day has none;
- * `null` or `false` opens it again (`todo`), so the row stays in the log.
- * On a number series a value writes the day's row (`2026-10-28 · 5 km`),
+ * `null` or `false` deletes the day's row (Finn, 2026-10-28: an untick in
+ * the tracker leaves nothing behind), so a tick after it makes a new row.
+ * A to-do opened in the note itself is still read as not done. On a number series a value writes the day's row (`2026-10-28 · 5 km`),
  * creating it when the day has none; `null` deletes the row (and any
  * duplicate of it). A new row goes in among the entries in date order.
  * Nothing when the block is not a series.
@@ -463,10 +464,12 @@ export function setEntryOps(
     ]
   }
   if (series.kind === "check") {
-    const type = clears ? TODO_TYPE : DONE_TYPE
-    if (onDay.length === 0) return clears ? [] : create(DONE_TYPE, date)
+    if (clears) return onDay.length === 0 ? [] : deleteBlockOps(onDay, snapshot)
+    if (onDay.length === 0) return create(DONE_TYPE, date)
     return onDay.flatMap((id) =>
-      snapshot.nodes.get(id)?.type === type ? [] : [{ op: "setType", id, type } as Op],
+      snapshot.nodes.get(id)?.type === DONE_TYPE
+        ? []
+        : [{ op: "setType", id, type: DONE_TYPE } as Op],
     )
   }
   if (clears) return onDay.length === 0 ? [] : deleteBlockOps(onDay, snapshot)

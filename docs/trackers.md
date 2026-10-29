@@ -82,8 +82,10 @@ decimal as a point, and a row it cannot read — `Knee felt fine` under Run —
 is an ordinary row the grid leaves out). `newTrackerOps`, `addSeriesOps`,
 `updateSeriesOps`, `removeSeriesOps` and `setEntryOps` write it. Logging a
 day writes one entry per series per day. On a check series a value ticks
-the day's to-do, creating it as `done` when the day has none; a clear opens
-it again (`todo`), so the row stays in the log. On a number series a value
+the day's to-do, creating it as `done` when the day has none; a clear
+deletes the row and its link (Finn, 2026-10-28: an untick leaves no row
+behind), so a tick after it makes a new row. A to-do unticked in the note
+itself stays as a `todo` row and reads as not done. On a number series a value
 writes the day's row (`entryText`), creating it when the day has none; a
 clear deletes the row (and any duplicate of it — two devices that logged
 the same day offline). A new row goes in among the entries in date order
