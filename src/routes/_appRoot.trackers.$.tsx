@@ -10,13 +10,22 @@ import { NoteActionsMenu } from "../components/note-actions-menu"
 import { Notice } from "../components/notice"
 import { PageLayout } from "../components/page-layout"
 import { RootLink } from "../components/root-link"
+import { JournalGrid } from "../components/trackers/journal-grid"
 import { MonthGrid } from "../components/trackers/month-grid"
 import { SeriesDialog } from "../components/trackers/series-dialog"
 import { TodayStrip } from "../components/trackers/today-strip"
 import { Button } from "../components/ui/button"
 import { IconButton } from "../components/ui/icon-button"
 import { PillButton } from "../components/ui/pill-button"
-import { addMonths, localDay, monthLabel, monthOf, type DayString } from "../data/tracker"
+import {
+  TRACKER_RANGES,
+  localDay,
+  rangeLabel,
+  rangeStart,
+  shiftRange,
+  type DayString,
+  type TrackerRange,
+} from "../data/tracker"
 import { useNoteById } from "../hooks/note"
 import { useTracker, useTrackerWrites } from "../hooks/tracker"
 
@@ -27,7 +36,49 @@ import { useTracker, useTrackerWrites } from "../hooks/tracker"
  * the note's own graph — the same rows its outline shows — read and written
  * through the same seams. A note of another type is refused: it is opened
  * as a note.
+ *
+ * The range switch shows a week, a month or a year; the layout switch draws
+ * it as cards (one per series) or as the journal grid (a row per series, a
+ * column per day). The cell is one day in all six.
  */
+
+const RANGE_LABELS: Record<TrackerRange, string> = { week: "Week", month: "Month", year: "Year" }
+
+const LAYOUTS = ["cards", "grid"] as const
+type TrackerLayout = (typeof LAYOUTS)[number]
+const LAYOUT_LABELS: Record<TrackerLayout, string> = { cards: "Cards", grid: "Grid" }
+
+/** A row of buttons of which one is chosen, as Settings → Theme is drawn. */
+function Switch<T extends string>({
+  label,
+  options,
+  labels,
+  value,
+  onChange,
+}: {
+  label: string
+  options: readonly T[]
+  labels: Record<T, string>
+  value: T
+  onChange: (value: T) => void
+}) {
+  return (
+    <div role="group" aria-label={label} className="flex gap-1">
+      {options.map((option) => (
+        <Button
+          key={option}
+          size="small"
+          data-option={option}
+          aria-pressed={option === value}
+          selected={option === value}
+          onClick={() => onChange(option)}
+        >
+          {labels[option]}
+        </Button>
+      ))}
+    </div>
+  )
+}
 
 export const Route = createFileRoute("/_appRoot/trackers/$")({
   component: RouteComponent,
@@ -53,12 +104,23 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
   const { exists, series } = useTracker(trackerId)
   const writes = useTrackerWrites(trackerId, exists)
   const today = useToday()
-  // The month shown: this one until the arrows say otherwise.
-  const [month, setMonth] = React.useState(() => monthOf(today))
+  // The range shown, and how: this month as cards until the switches say
+  // otherwise.
+  const [range, setRange] = React.useState<TrackerRange>("month")
+  const [layout, setLayout] = React.useState<TrackerLayout>("cards")
+  // The first day of the range shown: the one today is in until the arrows
+  // say otherwise.
+  const [start, setStart] = React.useState(() => rangeStart("month", today))
   // The day the strip logs: today, or a day picked on a number series's grid.
   const [pickedDay, setPickedDay] = React.useState<DayString | null>(null)
   const day = pickedDay ?? today
-  const thisMonth = monthOf(today)
+  const current = rangeStart(range, today)
+  // A new range keeps today in view when the old one held it, else the
+  // range the old one began in.
+  const changeRange = (next: TrackerRange) => {
+    setStart(rangeStart(next, start === current ? today : start))
+    setRange(next)
+  }
   const [seriesOpen, setSeriesOpen] = React.useState(false)
 
   return (
@@ -107,28 +169,46 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
               onSetEntry={writes.setEntry}
               onBackToToday={() => setPickedDay(null)}
             />
-            <div className="flex items-center gap-1">
-              <IconButton
-                aria-label="Previous month"
-                onClick={() => setMonth(addMonths(month, -1))}
-              >
-                <ChevronLeftIcon16 />
-              </IconButton>
-              <h2 className="min-w-0 truncate font-bold [font-variant-numeric:tabular-nums]">
-                {monthLabel(month)}
-              </h2>
-              <IconButton
-                aria-label="Next month"
-                disabled={month >= thisMonth}
-                onClick={() => setMonth(addMonths(month, 1))}
-              >
-                <ChevronRightIcon16 />
-              </IconButton>
-              {month !== thisMonth ? (
-                <PillButton variant="dashed" onClick={() => setMonth(thisMonth)}>
-                  This month
-                </PillButton>
-              ) : null}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <div className="flex min-w-0 items-center gap-1">
+                <IconButton
+                  aria-label={`Previous ${range}`}
+                  onClick={() => setStart(shiftRange(range, start, -1))}
+                >
+                  <ChevronLeftIcon16 />
+                </IconButton>
+                <h2 className="min-w-0 truncate font-bold [font-variant-numeric:tabular-nums]">
+                  {rangeLabel(range, start)}
+                </h2>
+                <IconButton
+                  aria-label={`Next ${range}`}
+                  disabled={start >= current}
+                  onClick={() => setStart(shiftRange(range, start, 1))}
+                >
+                  <ChevronRightIcon16 />
+                </IconButton>
+                {start !== current ? (
+                  <PillButton variant="dashed" onClick={() => setStart(current)}>
+                    This {range}
+                  </PillButton>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-3 sm:ml-auto">
+                <Switch
+                  label="Range"
+                  options={TRACKER_RANGES}
+                  labels={RANGE_LABELS}
+                  value={range}
+                  onChange={changeRange}
+                />
+                <Switch
+                  label="Layout"
+                  options={LAYOUTS}
+                  labels={LAYOUT_LABELS}
+                  value={layout}
+                  onChange={setLayout}
+                />
+              </div>
             </div>
             {series.length === 0 ? (
               <div className="flex flex-col items-center gap-3 py-12 text-center text-text-secondary">
@@ -137,10 +217,23 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
                   Add series
                 </Button>
               </div>
+            ) : layout === "grid" ? (
+              <JournalGrid
+                series={series}
+                range={range}
+                start={start}
+                today={today}
+                selectedDay={day}
+                onToggle={(seriesId, cellDay, done) =>
+                  writes.setEntry(seriesId, cellDay, done ? true : null)
+                }
+                onPickDay={(cellDay) => setPickedDay(cellDay === today ? null : cellDay)}
+              />
             ) : (
               <MonthGrid
                 series={series}
-                month={month}
+                range={range}
+                start={start}
                 today={today}
                 selectedDay={day}
                 onToggle={(seriesId, cellDay, done) =>

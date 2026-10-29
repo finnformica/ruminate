@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Series, SeriesState } from "../../data/tracker"
+import { JournalGrid } from "./journal-grid"
 import { MonthGrid } from "./month-grid"
 import { TodayStrip } from "./today-strip"
 
@@ -36,12 +37,84 @@ const RUN = stateOf(
   { "2026-10-27": 4 },
 )
 
+describe("MonthGrid ranges", () => {
+  it("draws a week as one row of seven days from Monday", () => {
+    render(
+      <MonthGrid
+        series={[READ]}
+        range="week"
+        start={TODAY}
+        today={TODAY}
+        selectedDay={TODAY}
+        onToggle={() => {}}
+        onPickDay={() => {}}
+      />,
+    )
+    const cells = screen.getAllByTestId("day-cell")
+    expect(cells.map((c) => c.getAttribute("data-day"))).toEqual([
+      "2026-10-26",
+      "2026-10-27",
+      "2026-10-28",
+      "2026-10-29",
+      "2026-10-30",
+      "2026-10-31",
+      "2026-11-01",
+    ])
+    expect(cells[0].getAttribute("data-level")).toBe("4")
+  })
+
+  it("draws a year as every day of it, a row a weekday", () => {
+    render(
+      <MonthGrid
+        series={[READ]}
+        range="year"
+        start={TODAY}
+        today={TODAY}
+        selectedDay={TODAY}
+        onToggle={() => {}}
+        onPickDay={() => {}}
+      />,
+    )
+    const cells = screen.getAllByTestId("day-cell")
+    expect(cells).toHaveLength(365)
+    // The first row is the Mondays: 5 January 2026 is the first.
+    expect(cells[0].getAttribute("data-day")).toBe("2026-01-05")
+  })
+})
+
+describe("JournalGrid", () => {
+  it("draws a row per series and a column per day, and logs a tap", () => {
+    const onToggle = vi.fn()
+    const onPickDay = vi.fn()
+    render(
+      <JournalGrid
+        series={[READ, RUN]}
+        range="month"
+        start={TODAY}
+        today={TODAY}
+        selectedDay={TODAY}
+        onToggle={onToggle}
+        onPickDay={onPickDay}
+      />,
+    )
+    const rows = screen.getAllByTestId("journal-row")
+    expect(rows).toHaveLength(2)
+    expect(within(rows[0]).getByRole("rowheader").textContent).toContain("Read")
+    expect(within(rows[0]).getAllByTestId("day-cell")).toHaveLength(31)
+    expect(screen.getAllByRole("columnheader")).toHaveLength(32)
+    fireEvent.click(within(rows[0]).getByLabelText("Sat 24 Oct: nothing"))
+    expect(onToggle).toHaveBeenCalledWith("s1", "2026-10-24", true)
+    fireEvent.click(within(rows[1]).getByLabelText("Tue 27 Oct: 4 km"))
+    expect(onPickDay).toHaveBeenCalledWith("2026-10-27")
+  })
+})
+
 describe("MonthGrid", () => {
   it("draws one card per series, seven columns from Monday, with every day of the month", () => {
     render(
       <MonthGrid
         series={[READ, RUN]}
-        month="2026-10"
+        start="2026-10-01"
         today={TODAY}
         selectedDay={TODAY}
         onToggle={() => {}}
@@ -75,7 +148,7 @@ describe("MonthGrid", () => {
     render(
       <MonthGrid
         series={[READ]}
-        month="2026-10"
+        start="2026-10-01"
         today={TODAY}
         selectedDay={TODAY}
         onToggle={() => {}}
@@ -96,7 +169,7 @@ describe("MonthGrid", () => {
     render(
       <MonthGrid
         series={[READ, RUN]}
-        month="2026-10"
+        start="2026-10-01"
         today={TODAY}
         selectedDay={TODAY}
         onToggle={() => {}}
@@ -124,7 +197,7 @@ describe("MonthGrid", () => {
     render(
       <MonthGrid
         series={[READ, RUN]}
-        month="2026-10"
+        start="2026-10-01"
         today={TODAY}
         selectedDay={TODAY}
         onToggle={onToggle}
