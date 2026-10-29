@@ -143,9 +143,10 @@ has no keys to validate.
   with it. On a phone the list is a sheet.
 - **The range and the layout** (Finn, 2026-10-28, a first cut to judge
   from screenshots; moved into a menu and the grid turned on its side,
-  2026-10-29): the display menu, a sliders button in the header beside the
-  note's ⋯ menu, shows a **Week** (seven days from Monday), a **Month** or
-  a **Year** (`TRACKER_RANGES`, `rangeDays`, `rangeStart`, `shiftRange` in
+  2026-10-29; moved into the note's ⋯ menu, the same on a phone and a
+  desktop, later that day): the ⋯ menu's first group, **Range**, shows a
+  **Week** (seven days from Monday), a **Month** or a **Year**
+  (`TRACKER_RANGES`, `rangeDays`, `rangeStart`, `shiftRange` in
   `src/data/tracker.ts`); the cell is one day in each. Its second group
   draws the range as **Cards**, one per series as above (a week as one row
   of seven, a year as a heatmap of its weeks, `yearWeeks`, sized to the
