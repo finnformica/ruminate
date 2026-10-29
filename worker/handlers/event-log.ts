@@ -70,14 +70,14 @@
 // the old log's `seq`; the per-key log mirrors every old event above it
 // (`event_seq`, 0028), so an old `seq` never reaches past a new one.
 //
-// ## Reconcile: the log heals itself
+// ## Genesis
 //
-// That invariant is also how a row the log does not know is recognised: it
-// holds a `seq` above anything in the log. `planReconcile` runs first in
-// every write's batch and records each such row as a snapshot `create` with
-// a `set` per register, its props as `delta_mat_values` holds them. Ever
-// after it is a no-op that reads nothing, unless something wrote around the
-// log, in which case the next write repairs it.
+// Every row the log holds no event for was recorded once, as a snapshot
+// `create` with a `set` per register, by migration 0030. Until then the
+// Worker's reconcile did the same on every pull and every write, and read
+// the whole tenant log four times to find nothing (bench of 2026-10-28:
+// 186,526 rows for a sync pull with nothing new). A row written around the
+// log is not repaired any more: `verify` reports it.
 
 import {
   eventStamp,
@@ -191,152 +191,6 @@ const derivedStamp = (at: string, seq: string) =>
 const LOG_COLUMNS =
   "user_id, seq, id, entity, entity_id, action, key, value, v, batch, origin, device, client, " +
   "cause, actor, base_seq, ref_seq, at, tz, hlc, received_at, append, event_id, event_seq"
-
-/**
- * The column registers of each entity, in the order a snapshot numbers them
- * — `COLUMN_REGISTERS` (src/data/key-events.ts) as a table, as one JSON
- * literal for `json_each`. D1 allows at most five terms in a compound
- * SELECT (`SQLITE_LIMIT_COMPOUND_SELECT`), so a UNION ALL per column is not
- * an option; migration 0028's backfill spelled the same list.
- */
-const COLUMN_ORDINALS =
-  '[{"entity":"block","name":"type","ordinal":1},{"entity":"block","name":"text","ordinal":2},{"entity":"block","name":"notes_id","ordinal":3},{"entity":"link","name":"source_id","ordinal":1},{"entity":"link","name":"destination_id","ordinal":2},{"entity":"link","name":"kind","ordinal":3},{"entity":"link","name":"sort_key","ordinal":4},{"entity":"view","name":"root_id","ordinal":1},{"entity":"view","name":"filter","ordinal":2},{"entity":"view","name":"sort","ordinal":3},{"entity":"view","name":"pinned","ordinal":4},{"entity":"view","name":"sort_key","ordinal":5},{"entity":"view","name":"stack","ordinal":6}]'
-const COLUMNS_CTE =
-  "columns AS (SELECT json_extract(c.value, '$.entity') AS entity, " +
-  "json_extract(c.value, '$.name') AS name, json_extract(c.value, '$.ordinal') AS ordinal " +
-  `FROM json_each('${COLUMN_ORDINALS}') AS c)`
-
-// -----------------------------------------------------------------------------
-// Reconcile
-// -----------------------------------------------------------------------------
-
-/** The rows of the snapshot this request appended, as `alias`, found by the
- * index on `received_at`: `?1` is the request's clock. */
-const snapshotRows = (alias: string) =>
-  `${alias}.user_id = :tenant AND ${alias}.received_at = ?1 AND ${alias}.batch = 'snapshot'`
-
-/**
- * Record every row the log does not know as a snapshot: a `create` and a
- * `set` per register, a block's props keys as `delta_mat_values` holds
- * them, under one stamp — the one the row's `updated_at` and its new `seq`
- * derive, which is the stamp a row without `stamps` resolves every register
- * by (`heldStamp`). The row then takes that `seq`, the last of its snapshot,
- * so the pull cursor finds it once more and the log's invariant holds.
- *
- * ONE insert, deliberately. Each arm asks for rows above the log's MAX;
- * three inserts would let the first arm's rows raise that MAX under the
- * other two, and rows between would be skipped. As one INSERT … SELECT the
- * MAX is read once, before anything is written. The rows of one row's
- * snapshot name one edit (`event_id`), as the rows of one old event do.
- *
- * Before it, the same rows lose their `stamps`: a write around the log left
- * them naming values the row no longer holds. With none, the row resolves by
- * the stamp its snapshot derives, as a row from before 0025 does, and `verify`
- * folds its log up to the snapshot by `seq`. After it, the rows the snapshot
- * read are found again by where it began: the first row of a snapshot is
- * one past the MAX the insert read, so every row above that is one it read.
- */
-export function planReconcile(ctx: { now: number; appendId: string }): SqlStatement[] {
-  const above = "seq > (SELECT COALESCE(MAX(l.seq), 0) FROM events_log l WHERE l.user_id = :tenant)"
-  const unstamp = (table: string): SqlStatement => ({
-    sql:
-      `UPDATE ${table} SET stamps = NULL WHERE user_id = :tenant AND ${above} ` +
-      "AND stamps IS NOT NULL /* includes-deleted: a tombstone written around the log too */",
-  })
-  // Where this request's snapshot began: the MAX the insert read. No
-  // snapshot, no row above the largest integer.
-  const snapshotBase = `(SELECT COALESCE(MIN(m.seq) - 1, 9223372036854775807) FROM events_log m WHERE ${snapshotRows("m")})`
-  const snapshotSeq = (entity: Entity, id: string) =>
-    `(SELECT MAX(m.seq) FROM events_log m WHERE ${snapshotRows("m")} AND m.entity = '${entity}' ` +
-    `AND m.entity_id = ${id})`
-  return [
-    unstamp("nodes"),
-    unstamp("link"),
-    unstamp("views"),
-    {
-      sql:
-        `INSERT INTO events_log (${LOG_COLUMNS}) ` +
-        "WITH stray AS (" +
-        "SELECT 'block' AS entity, id AS entity_id, seq, updated_at AS at, deleted_at, " +
-        "json_object('type', type, 'text', text, 'notes_id', notes_id) AS fields " +
-        `FROM nodes WHERE user_id = :tenant AND ${above} ` +
-        "UNION ALL SELECT 'link', source_id || '|' || destination_id || '|' || kind, seq, " +
-        "updated_at, deleted_at, json_object('source_id', source_id, " +
-        "'destination_id', destination_id, 'kind', kind, 'sort_key', sort_key) " +
-        `FROM link WHERE user_id = :tenant AND ${above} ` +
-        "UNION ALL SELECT 'view', id, seq, updated_at, deleted_at, " +
-        "json_object('root_id', root_id, 'filter', filter, 'sort', sort, " +
-        "'pinned', json(CASE pinned WHEN 1 THEN 'true' ELSE 'false' END), " +
-        "'sort_key', sort_key, 'stack', stack) " +
-        `FROM views WHERE user_id = :tenant AND ${above}), ` +
-        `${COLUMNS_CTE}, ` +
-        "rows AS (SELECT s.*, 0 AS ordinal, 'create' AS action, '' AS k, " +
-        "CASE WHEN s.deleted_at IS NULL THEN 'null' ELSE CAST(s.deleted_at AS TEXT) END AS val " +
-        "FROM stray s " +
-        "UNION ALL SELECT s.*, c.ordinal, 'set', c.name, s.fields -> ('$.' || c.name) " +
-        "FROM stray s JOIN columns c ON c.entity = s.entity " +
-        "WHERE json_type(s.fields, '$.' || c.name) IS NOT NULL " +
-        "UNION ALL SELECT s.*, 10, 'set', 'props.' || b.key, b.value " +
-        "FROM stray s JOIN delta_mat_values b ON b.user_id = :tenant AND b.block_id = s.entity_id " +
-        "AND b.value IS NOT NULL WHERE s.entity = 'block'), " +
-        "numbered AS (SELECT r.*, " +
-        "ROW_NUMBER() OVER (ORDER BY r.seq, r.entity, r.entity_id, r.ordinal, r.k) AS rn, " +
-        "ROW_NUMBER() OVER (PARTITION BY r.entity, r.entity_id ORDER BY r.ordinal, r.k) - 1 AS n " +
-        "FROM rows r), " +
-        "base AS (SELECT COALESCE(MAX(l.seq), 0) AS seq FROM events_log l WHERE l.user_id = :tenant) " +
-        "SELECT :tenant, base.seq + m.rn, " +
-        "'snap_' || m.entity || '_' || m.entity_id || '_' || m.seq || '#' || m.n, " +
-        "m.entity, m.entity_id, m.action, m.k, m.val, 2, 'snapshot', 'system', 'replica', NULL, " +
-        "'snapshot', :tenant, NULL, NULL, m.at, NULL, " +
-        `${derivedStamp("m.at", "base.seq + MAX(m.rn) OVER (PARTITION BY m.entity, m.entity_id)")}, ` +
-        "?1, ?2, 'snap_' || m.entity || '_' || m.entity_id || '_' || m.seq, NULL " +
-        "FROM numbered m, base WHERE true " +
-        "ON CONFLICT DO NOTHING " +
-        "/* includes-deleted: a snapshot records tombstones as it finds them */",
-      params: [ctx.now, ctx.appendId],
-    },
-    {
-      sql:
-        `UPDATE nodes SET seq = ${snapshotSeq("block", "nodes.id")} ` +
-        `WHERE user_id = :tenant AND seq > ${snapshotBase} ` +
-        "/* includes-deleted: a snapshotted tombstone takes its seq too */",
-      params: [ctx.now],
-    },
-    {
-      sql:
-        "UPDATE link SET seq = " +
-        `${snapshotSeq("link", "link.source_id || '|' || link.destination_id || '|' || link.kind")} ` +
-        `WHERE user_id = :tenant AND seq > ${snapshotBase} ` +
-        "/* includes-deleted: a snapshotted tombstone takes its seq too */",
-      params: [ctx.now],
-    },
-    {
-      sql:
-        `UPDATE views SET seq = ${snapshotSeq("view", "views.id")} ` +
-        `WHERE user_id = :tenant AND seq > ${snapshotBase}`,
-      params: [ctx.now],
-    },
-    {
-      // The keys the snapshot read, at its stamp and seq: the row was
-      // written around the log and its stamps went with it, so its keys
-      // read as the snapshot says, as its other registers do.
-      sql:
-        "INSERT INTO delta_mat_values (user_id, block_id, key, value, hlc, seq, updated_at) " +
-        `SELECT :tenant, l.entity_id, substr(l.key, 7), l.value, l.hlc, ` +
-        `${snapshotSeq("block", "l.entity_id")}, l.at FROM events_log l ` +
-        `WHERE ${snapshotRows("l")} AND l.entity = 'block' AND l.key GLOB 'props.*' ` +
-        "ON CONFLICT (user_id, block_id, key) DO UPDATE SET value = excluded.value, " +
-        "hlc = excluded.hlc, seq = excluded.seq, updated_at = excluded.updated_at",
-      params: [ctx.now],
-    },
-  ]
-}
-
-/** Reconcile on its own — for a read of the log by a tenant who has not
- * written since 0023, whose log would otherwise be empty. */
-export async function reconcileLog(tenant: TenantDb, now: number = Date.now()): Promise<void> {
-  await tenant.includingDeleted().batch(planReconcile({ now, appendId: mintAppendId() }))
-}
 
 // -----------------------------------------------------------------------------
 // Append
@@ -644,7 +498,7 @@ async function heldEditSeqs(
 ): Promise<Map<string, number>> {
   if (events.length === 0) return new Map()
   const rows = await tenant.exec(
-    "SELECT l.event_id AS id, MAX(l.seq) AS seq FROM json_each(?1) AS j JOIN events_log l " +
+    "SELECT l.event_id AS id, MAX(l.seq) AS seq FROM json_each(?1) AS j CROSS JOIN events_log l " +
       "ON l.user_id = :tenant AND l.event_id = j.value GROUP BY l.event_id",
     [JSON.stringify(events.map((event) => event.id))],
   )
@@ -687,7 +541,7 @@ async function readCurrent(tenant: TenantDb, write: RowWrite): Promise<HeldRows>
   if (nodeIds.length > 0) {
     const rows = await all.exec(
       "SELECT n.id, n.type, n.text, n.updated_at, n.deleted_at, n.notes_id, n.seq, n.stamps " +
-        "FROM json_each(?1) AS j JOIN nodes n ON n.user_id = :tenant AND n.id = j.value " +
+        "FROM json_each(?1) AS j CROSS JOIN nodes n ON n.user_id = :tenant AND n.id = j.value " +
         "/* includes-deleted: a write is diffed against the row as it stands, tombstone or not */",
       [JSON.stringify(nodeIds)],
     )
@@ -698,7 +552,7 @@ async function readCurrent(tenant: TenantDb, write: RowWrite): Promise<HeldRows>
     }
     const keyRows = await all.exec(
       "SELECT b.block_id, b.key, b.value, b.hlc FROM json_each(?1) AS j " +
-        "JOIN delta_mat_values b ON b.user_id = :tenant AND b.block_id = j.value",
+        "CROSS JOIN delta_mat_values b ON b.user_id = :tenant AND b.block_id = j.value",
       [JSON.stringify(nodeIds)],
     )
     const live = new Map<string, Record<string, unknown>>()
@@ -717,7 +571,7 @@ async function readCurrent(tenant: TenantDb, write: RowWrite): Promise<HeldRows>
   if (linkKeys.length > 0) {
     const rows = await all.exec(
       "SELECT l.source_id, l.destination_id, l.kind, l.sort_key, l.updated_at, l.deleted_at, " +
-        "l.seq, l.stamps FROM json_each(?1) AS j JOIN link l ON l.user_id = :tenant " +
+        "l.seq, l.stamps FROM json_each(?1) AS j CROSS JOIN link l ON l.user_id = :tenant " +
         "AND l.source_id = json_extract(j.value, '$[0]') " +
         "AND l.destination_id = json_extract(j.value, '$[1]') " +
         "AND l.kind = json_extract(j.value, '$[2]') " +
@@ -736,7 +590,7 @@ async function readCurrent(tenant: TenantDb, write: RowWrite): Promise<HeldRows>
     const rows = await all.exec(
       "SELECT v.id, v.root_id, v.filter, v.sort, v.pinned, v.sort_key, v.stack, " +
         "v.updated_at, v.deleted_at, v.seq, v.stamps " +
-        "FROM json_each(?1) AS j JOIN views v ON v.user_id = :tenant AND v.id = j.value",
+        "FROM json_each(?1) AS j CROSS JOIN views v ON v.user_id = :tenant AND v.id = j.value",
       [JSON.stringify(viewIds)],
     )
     for (const raw of rows) {
@@ -938,7 +792,6 @@ export async function corpusAt(
   tenant: TenantDb,
   moment: { seq: number } | { at: number },
 ): Promise<CorpusAt> {
-  await reconcileLog(tenant)
   const bounds = await logBounds(tenant)
   let seq: number
   if ("seq" in moment) {
@@ -965,7 +818,6 @@ export async function restoreSubtree(
   seq: number,
   ctx: WriteContext,
 ): Promise<{ events: number }> {
-  await reconcileLog(tenant)
   const append = appendContext(ctx)
   let n = 0
   const log = await readKeyLog(tenant)
@@ -1049,7 +901,6 @@ const canonStamps = (stamps: Record<string, string> | null) =>
  * and a tombstone of a key it never held live is let be.
  */
 export async function verifyLog(tenant: TenantDb): Promise<LogVerdict> {
-  await reconcileLog(tenant)
   await seedDeltaMatValues(tenant, appendContext({ actor: tenant.userId, origin: "system" }))
   const all = tenant.includingDeleted()
   const keyLog = await readKeyLog(tenant)
@@ -1537,12 +1388,8 @@ async function appendKeyEvents(
   const append = appendContext(ctx)
   const edits = editsOf(events)
   const named = events.map((event) => ({ ...event, event: edits.get(event.id) }))
-  const seeded = await seedDeltaMatValues(tenant, append)
-  const statements = [
-    ...(seeded ? [] : planReconcile(append)),
-    ...planKeyAppend(named, append),
-    ...extra,
-  ]
+  await seedDeltaMatValues(tenant, append)
+  const statements = [...planKeyAppend(named, append), ...extra]
   await tenant.includingDeleted().batch(statements)
 }
 
@@ -1551,17 +1398,15 @@ async function appendKeyEvents(
  * (`projectKeyLog`): exactly the rows `verify` expects, key by key, for the
  * blocks the fold stamps. A tenant that wrote nothing between 0028 and
  * 0029 holds its props at one stamp per block from the migration's
- * backfill; this gives each key its own. Runs the reconcile first, in a
- * batch of its own, so the fold reads every row there is. Returns whether
- * it ran (the caller's batch then needs no reconcile of its own).
+ * backfill; this gives each key its own, in a batch of its own ahead of
+ * the caller's.
  */
-async function seedDeltaMatValues(tenant: TenantDb, ctx: AppendContext): Promise<boolean> {
+async function seedDeltaMatValues(tenant: TenantDb, ctx: AppendContext): Promise<void> {
   const [flag] = await tenant.exec(
     `SELECT value FROM meta WHERE user_id = :tenant AND key = '${DELTA_MAT_VALUES_SEEDED}'`,
   )
-  if (flag) return false
+  if (flag) return
   const all = tenant.includingDeleted()
-  await all.batch(planReconcile(ctx))
   const log = await readKeyLog(tenant)
   const legacy = await legacyReader(tenant)
   const { tables } = projectKeyLog(log, legacy.of)
@@ -1602,7 +1447,6 @@ async function seedDeltaMatValues(tenant: TenantDb, ctx: AppendContext): Promise
     params: [DELTA_MAT_VALUES_SEEDED, String(ctx.now)],
   })
   await all.batch(statements)
-  return true
 }
 
 /**
@@ -1678,14 +1522,17 @@ export async function appendClientKeyEvents(
 }
 
 /** The `seq` the log holds each of these key events at, by id — absent when
- * not (yet) appended. One primary-key seek per id, driven from the JSON. */
+ * not (yet) appended. One primary-key seek per id, driven from the JSON:
+ * CROSS JOIN, so `json_each` is the outer loop. As a plain JOIN the planner
+ * walked the whole log once per id (93,241 rows at 46,620 events, twice per
+ * push); the same holds for every `json_each` lookup of rows below. */
 async function heldKeySeqs(
   tenant: TenantDb,
   events: readonly { id: string }[],
 ): Promise<Map<string, number>> {
   if (events.length === 0) return new Map()
   const rows = await tenant.exec(
-    "SELECT l.id, l.seq FROM json_each(?1) AS j JOIN events_log l " +
+    "SELECT l.id, l.seq FROM json_each(?1) AS j CROSS JOIN events_log l " +
       "ON l.user_id = :tenant AND l.id = j.value",
     [JSON.stringify(events.map((event) => event.id))],
   )
@@ -1956,7 +1803,7 @@ async function legacyReader(tenant: TenantDb): Promise<{
     const key = `${entity}\x1f${id}`
     if (!stamps.has(key)) return 0
     // A row with no stamps has been projected by the old rule up to its own
-    // seq: from before 0025, or snapshotted since (`planReconcile`).
+    // seq: from before 0025, or snapshotted since (migration 0030's genesis).
     const held = stamps.get(key)
     if (held === null || held === undefined) return Number(rowSeq.get(key) ?? 0)
     return Number(held.legacy ?? 0)

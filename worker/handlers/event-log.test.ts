@@ -15,6 +15,7 @@ import type { SqlDriver } from "../../src/data/sql-driver"
 import { ensureTenantMeta, forTenant, type TenantDb } from "../tenancy-db"
 import migration0028 from "../../migrations/0028_events_log.sql?raw"
 import migration0029 from "../../migrations/0029_backfill_delta_mat_values.sql?raw"
+import migration0030 from "../../migrations/0030_genesis_unlogged_rows.sql?raw"
 import {
   assembleLogState,
   assembleStamped,
@@ -32,7 +33,6 @@ import {
   appendEvents,
   corpusAt,
   planKeyAppend,
-  planReconcile,
   readEvents,
   readKeyEvents,
   restoreSubtree,
@@ -349,7 +349,7 @@ describe("what a push costs", () => {
       w.view("v", "note", true),
       w.editView("v", { pinned: false }),
     ]
-    for (const statement of [...planReconcile(ctx), ...planKeyAppend(expandLog(events), ctx)]) {
+    for (const statement of planKeyAppend(expandLog(events), ctx)) {
       const sql = statement.sql.replace(/:tenant\b/g, "111")
       const plan = await driver.exec(`EXPLAIN QUERY PLAN ${sql}`, statement.params ?? [])
       const details = (plan as { detail: string }[]).map((row) => row.detail)
@@ -712,23 +712,25 @@ describe("a client's own events, old-shaped", () => {
     expect(await verifyLog(alice)).toMatchObject({ ok: true, keyEvents: 5 })
   })
 
-  it("reconciles first, like every write: a tenant's genesis can be its first push of events", async () => {
+  it("does not reconcile: a row written around the log stays out of it", async () => {
     const { driver, alice } = await open()
-    // A row written around the log — the old Worker, before this one.
+    // A row written around the log — a statement run in the console. Until
+    // migration 0030 every write recorded it first; that cost four scans of
+    // the whole log on every pull and push, and genesis now runs once, in
+    // the migration (the tests of "genesis" below).
     await driver.exec(
       "INSERT INTO nodes (user_id, id, type, text, updated_at, deleted_at, notes_id, seq) " +
         "VALUES (111, 'old', 'text', 'before the log', 50, NULL, NULL, 7)",
     )
     const w = writer("dev.tab")
     await client(alice, [w.block("a", "text", "A")])
-    expect(edits(await readLog(alice))).toEqual(["block.create old", "block.create a"])
-    expect(await verifyLog(alice)).toMatchObject({ ok: true })
+    expect(edits(await readLog(alice))).toEqual(["block.create a"])
   })
 })
 
-describe("reconcile", () => {
-  /** A row that reached the tables around the log — the old Worker during a
-   * deploy, a hand-run statement in the console. */
+describe("genesis (migration 0030)", () => {
+  /** A row that reached the tables around the log — the Worker before the
+   * log, a hand-run statement in the console. */
   const stray = (driver: SqlDriver, id: string, text: string, seq: number, deletedAt?: number) =>
     driver.exec(
       "INSERT INTO nodes (user_id, id, type, text, updated_at, deleted_at, notes_id, seq) " +
@@ -738,7 +740,7 @@ describe("reconcile", () => {
       [id, text, seq, deletedAt ?? null],
     )
 
-  it("genesis: a tenant's first write seeds the log from the corpus it already has", async () => {
+  it("records every row the log has no event for, once, as a snapshot", async () => {
     const { driver, alice } = await open()
     await stray(driver, "old-1", "from before the log", 1)
     await stray(driver, "old-2", "deleted before the log", 2, 2)
@@ -756,6 +758,7 @@ describe("reconcile", () => {
         "VALUES (111, 'old-1', 'size', '40', 'x', 1, 1)",
     )
 
+    await driver.execScript(migration0030)
     await corpusPut(alice, { nodes: [node("new", "text", "the first write", 50)], links: [] })
 
     const log = await readLog(alice)
@@ -796,20 +799,20 @@ describe("reconcile", () => {
     expect(await verifyLog(alice)).toMatchObject({ ok: true, keyEvents: 25 })
   })
 
-  it("heals: a row written around the log is recorded by the next write", async () => {
+  it("runs once: a row written around the log after it is not recorded by a write", async () => {
     const { driver, alice } = await open()
     await corpusPut(alice, { nodes: [node("a", "text", "A", 100)], links: [] })
-    await stray(driver, "a", "changed behind the log's back", 9)
-    expect((await verifyLog(alice)).ok).toBe(true) // verify reconciles first…
-    expect(edits(await readLog(alice))).toEqual(["block.create a", "block.create a"])
-
+    await driver.execScript(migration0030)
+    expect(edits(await readLog(alice))).toEqual(["block.create a"])
     await stray(driver, "b", "another", 20)
     await corpusPut(alice, { nodes: [node("c", "text", "C", 100)], links: [] })
+    expect(edits(await readLog(alice))).toEqual(["block.create a", "block.create c"])
+    // The migration again finds the row the log does not know, and nothing else.
+    await driver.execScript(migration0030)
     expect(edits(await readLog(alice))).toEqual([
       "block.create a",
-      "block.create a",
-      "block.create b",
       "block.create c",
+      "block.create b",
     ])
     expect((await verifyLog(alice)).ok).toBe(true)
   })
@@ -1376,11 +1379,13 @@ describe("the per-key log", () => {
       w.link("note", "a", "a0"),
       w.view("v", "note", true),
     ])
-    for (const statement of [...planReconcile(ctx), ...planKeyAppend(events, ctx)]) {
+    for (const statement of planKeyAppend(events, ctx)) {
       expect(terms(statement.sql)).toBeLessThanOrEqual(5)
     }
-    for (const statement of [...migration0028.split(";"), ...migration0029.split(";")]) {
-      expect(terms(statement)).toBeLessThanOrEqual(5)
+    for (const migration of [migration0028, migration0029, migration0030]) {
+      for (const statement of migration.split(";")) {
+        expect(terms(statement)).toBeLessThanOrEqual(5)
+      }
     }
   })
 
@@ -1662,7 +1667,7 @@ describe("the per-key log", () => {
     // A limit so small every edit is its own run: the hardest case for order.
     const statements = planKeyAppend(named, ctx, 1)
     expect(statements).toHaveLength(8 * 3)
-    await alice.includingDeleted().batch([...planReconcile(ctx), ...statements])
+    await alice.includingDeleted().batch(statements)
     expect(await driver.exec("SELECT sort_key FROM link WHERE user_id = 111")).toEqual([
       { sort_key: "a0" },
     ])

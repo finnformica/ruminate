@@ -7,7 +7,7 @@ append. The browser makes the events itself — each batch of the editor's ops
 becomes the events it amounts to, kept in a log of the device's own and pushed
 from there — and the replica takes them in as made. Code: `src/data/events.ts`
 (the vocabulary, the fold, ops → events, the wire's validation),
-`worker/handlers/event-log.ts` (append, reconcile, reading the past),
+`worker/handlers/event-log.ts` (append, reading the past),
 `src/data/sql-note-store.ts` (the device's log and its projection),
 `src/data/replica-sync.ts` (the push), `src/data/hlc.ts` (the stamp),
 `src/data/fold-cache.ts` (the client's tables as a cache of the fold),
@@ -178,7 +178,7 @@ in `writeRows`:
 
 1. read the rows the write names (three primary-key lookups),
 2. derive the events the difference amounts to (`rowsToEvents`),
-3. reconcile + append + project, in one atomic batch.
+3. append + project, in one atomic batch.
 
 ### The client speaks events
 
@@ -230,7 +230,7 @@ row it changed — with the `seq` the replica answers. The queue is therefore
 durable: a reload no longer loses what had not pushed, and a previous
 session's leftovers go first. The replica (`appendClientKeyEvents`) answers a
 re-sent event with the seq it already has, drops a **stale** event, and
-appends the rest, reconcile first. An event is stale when it would set no
+appends the rest. An event is stale when it would set no
 register: every field it names, and its liveness for a create, delete or
 restore, already holds a stamp at least as high. So an offline device's old
 edit to the text is dropped, and its old edit to the type of the same block
@@ -373,11 +373,9 @@ it is near the first line.
 
 ### Cost, by construction
 
-- **A fixed number of statements**: 4 reconcile (one insert, after one
-  statement per table that clears the stamps of the rows it snapshots) + 7
-  per append (one insert over `json_each`, then insert-created /
-  update-changed per table), however many events. D1's free plan allows 50
-  queries per invocation.
+- **A fixed number of statements**: 7 per append (one insert over
+  `json_each`, then insert-created / update-changed per table), however many
+  events. D1's free plan allows 50 queries per invocation.
 - **Reads what it touches.** `UPDATE t … FROM json_each(?) WHERE t.id = …`
   _looks_ like a lookup and is a walk of every row the tenant has; hinting the
   key fixes that and leaves each row re-scanning the JSON for its values (n²
@@ -395,39 +393,51 @@ it is near the first line.
   largest tenant; the log roughly 1.5× the size of the tables it describes.
   D1 bills index entries as rows written — an event is ~5 (row + 4 indexes).
 
-## Reconcile: no backfill, and the log heals itself
+## Genesis: one migration, and no reconcile
 
-A projection row's `seq` names the event it came from, so a row the log does
-not know is recognisable: it holds a `seq` above anything in the log.
-`planReconcile` runs **first in every write's batch** and records each such
-row as a snapshot `create` under the `seq` it already holds (no cursor moves).
+A projection row's `seq` names the event it came from. Every row the log held
+no event for was recorded once, by migration `0030`, as a snapshot: a
+`create` and a `set` per register, a block's props keys as
+`delta_mat_values` holds them, under one stamp — the one the row's
+`updated_at` and its new `seq` derive, which is the stamp a row without
+`stamps` resolves every register by. The row took that `seq`, the last of
+its snapshot, and lost its `stamps`.
 
-- **Genesis is just the first reconcile.** There is no backfill migration,
-  because `npm run deploy` applies migrations _before_ uploading the Worker:
-  rows the old Worker wrote in between would be missing from a log seeded by
-  SQL. A tenant's first write — or first pull of its rows — seeds it instead.
-  A pull reconciles once, on the rows (`replicaPull`); the pages of the log
-  that follow (`replicaKeyEvents`) read without one. Each page used to
-  reconcile, and the scan of `events` it took cost a fresh device's pages
-  more than the read did.
-- **A write around the log is repaired by the next write**, not left to
-  drift: the old Worker during a rollout, a statement run in the console.
-  The rows it snapshots also lose their `stamps`, which named values the row
-  no longer holds: each then resolves by the stamp its snapshot derives.
+Until 0030 the Worker did this itself, as `planReconcile`, first in every
+write's batch and once on every pull of rows: it looked for rows above the
+log's MAX and snapshotted them. A row is unlogged only once, at genesis, so
+after a tenant's first request the reconcile found nothing — and read the
+whole tenant log four times to find it (the planner answered its `MIN(seq)`
+over the `(user_id, seq)` key by walking the log, and materialised its MAX
+without the index). At 46,620 events that was 186,526 rows for a sync pull
+with nothing new and 378,961 for a push of one edit; production read 108M
+rows on 2026-10-26. It is gone: a pull reads rows, a page reads the log, a
+push appends.
+
+- **Unlogged means "no event for this entity"**, not "a `seq` above the
+  log's MAX". A tenant whose rows were snapshotted into the OLD log by 0023's
+  reconcile holds them at that log's sparse `seq` (one tenant in production:
+  703 rows at `seq` 6,424 to 13,618 above a per-key log of 6,393 rows that
+  mirrors every one of them). 0030 gives such a row the `seq` of its last
+  key event, so no row sits above its log, and writes it no event.
+- **A write around the log is not repaired.** A statement run in the console
+  that writes a row stays out of the log: `verify` reports it (a manual
+  report, nothing a request runs). The genesis statement of 0030 is
+  idempotent — it finds only rows the log holds no event for — and can be
+  run again by hand against D1 if that ever matters.
 - **A Worker from before 0025 does not keep `stamps`.** After a rollback to
   one, a row it changed through the log keeps stamps for values it no longer
   holds, and `verify` reports it as drift. Do not roll back past 0025.
-- What it cannot see is a row changed _without_ taking a new `seq`. That is
-  what `verify` is for.
+- What none of this can see is a row changed _without_ taking a new `seq`.
+  That is what `verify` is for.
 
 History therefore begins at each tenant's snapshot. Earlier states were never
 recorded; a moment before it is answered as the snapshot, and the response
 says so (`earliest`).
 
 `0023` also renumbers the views that 0015/0017 deliberately left at `seq = 0`
-and 0021 did not reach (the ones rooted at blocks): reconcile finds rows by
-`seq`, so a row at 0 would never enter the log. Each device pulls those few
-rows once.
+and 0021 did not reach (the ones rooted at blocks): a row at 0 would never
+have entered the log by `seq`. Each device pulls those few rows once.
 
 ## Reading the past
 
@@ -486,7 +496,7 @@ device's run of edits with no pause over half an hour (`sittingsIn`), labelled
 with the writer's clock and, where it is not the reader's, the writer's zone.
 
 **Before history began.** The log was seeded from the rows the replica held
-(the reconcile above): one snapshot `create` per row, stamped with the row's
+(the genesis above): one snapshot `create` per row, stamped with the row's
 last save. The calendar reads a snapshot as the row written on that day —
 the last save before the log is the nearest thing to a date it has — so a
 note's rows show as added on the days they were last saved, and history
@@ -522,7 +532,7 @@ the tables are projected from it. **Cut over 2026-10-27** (migrations/0029,
 block's props are read from its rows of `delta_mat_values`, with
 `nodes.props` kept as a mirror until a later PR drops it. Code: `src/data/key-events.ts` (the vocabulary, the
 validation, the folds, ops → key events, the expansion of an old event),
-`worker/handlers/event-log.ts` (the append, the reconcile, `delta_mat_values`,
+`worker/handlers/event-log.ts` (the append, `delta_mat_values`,
 verify), `src/data/node-props-sql.ts` (a block's props in SQL),
 `src/data/fold-cache.ts` and `src/data/sql-note-store.ts` (the device's log
 and cache), `migrations/0028_events_log.sql`,
@@ -631,15 +641,16 @@ event that named props left; `expandLog` is the same reading in
 TypeScript, and a test pins the two together. A props key that does not
 match the pattern was left out of the backfill rather than fail it.
 
-### Reconcile, per key
+### Genesis, per key
 
-A row the log does not know holds a `seq` above anything in the log.
-`planReconcile` records it as a snapshot: a `create` and a `set` per
-register, a block's props keys as `delta_mat_values` holds them, under one
-stamp — the one the row's `updated_at` and its new `seq` derive, which is
-the stamp a row without `stamps` resolves every register by. The row takes
-that `seq`, the last of its snapshot, so the pull cursor finds it once more
-and the log's invariant holds (a row's `seq` names the row it came from).
+A row the log holds no event for is recorded by migration 0030 as a
+snapshot: a `create` and a `set` per register, a block's props keys as
+`delta_mat_values` holds them, under one stamp — the one the row's
+`updated_at` and its new `seq` derive, which is the stamp a row without
+`stamps` resolves every register by. The row takes that `seq`, the last of
+its snapshot, so the log's invariant holds (a row's `seq` names the event it
+came from). The Worker's own reconcile, which did this on every request, is
+gone ("Genesis: one migration, and no reconcile" above).
 
 ### Validation
 
@@ -751,8 +762,10 @@ named in `event_purges` — the one door, for erasing an account.
 ## Rolling back
 
 Safe in both directions. The table is additive, so the previous Worker runs
-beside it untouched; whatever it writes meanwhile goes around the log, and the
-first write after this Worker returns reconciles it. Nothing needs undoing.
+beside it untouched; whatever it writes meanwhile goes around the log and is
+not recorded (a Worker from before 0030 reconciled it on its next write; this
+one does not): `verify` reports it, and the genesis statement of 0030 records
+it when run again by hand. Nothing needs undoing.
 
 ## Open
 
