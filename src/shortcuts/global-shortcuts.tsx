@@ -52,7 +52,7 @@ export function GlobalShortcuts() {
     const machine = new GChordMachine({
       v: () =>
         navigate({
-          to: "/views/$",
+          to: "/notes/$",
           params: { _splat: CORPUS_ROOT_ID },
           search: { query: undefined },
         }),

@@ -712,6 +712,10 @@ route, and Cloudflare refuses a URL over 16 KB.
 
 ## 7. Views save stacks
 
+**Removed 2026-10-28** ([removing-views.md](./removing-views.md)). Views
+are gone. A stack lives in the address only, so a link or a bookmark opens
+it again. The rest of this section is the record of the old design.
+
 Status: **Decided 2026-10-20** (Finn's proposal, made after the first
 decisions). A View saves a stack of frames. A one-frame View is the simple
 case.

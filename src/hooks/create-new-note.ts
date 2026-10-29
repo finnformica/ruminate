@@ -9,7 +9,7 @@ export function useCreateNewNote() {
     const noteId = generateNoteId()
 
     navigate({
-      to: "/views/$",
+      to: "/notes/$",
       params: { _splat: noteId },
       search: { query: undefined },
     })

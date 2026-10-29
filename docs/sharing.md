@@ -4,21 +4,21 @@ Share a subgraph of your notes with another Ruminate user. From a note's or a
 block's menu, type the email address they sign in to GitHub with; they see
 that root and everything beneath it — including blocks you add later — under
 a **Shared** heading in their sidebar, and can edit or delete there only
-if you said so. **A share is a view shared with someone** (docs/metadata.md,
-"Views"): the share row holds the grant — who, which view, which verbs — and
-the view holds what is shared and how it opens. Save a filter or a sort on
-the note you shared and the person you shared it with opens it that way.
+if you said so. **A share is a root shared with someone**: the share row
+holds the grant — who, which root, which verbs. Views are removed
+([removing-views.md](./removing-views.md)), so a share has no filter or sort
+of its own. The column that names the root keeps its old name, `view_id`: a
+view's id was always its root's id.
 
-|                |                                                                                                                  |
-| -------------- | ---------------------------------------------------------------------------------------------------------------- |
-| The unit       | A **scoped grant** on a view: owner, `view_id`, grantee address, verbs                                           |
-| What is shared | The reachability closure beneath the view's root, computed per request                                           |
-| How it opens   | The view's filter and sort — presentation; the slice is the whole subtree                                        |
-| Who            | An email address, matched to the primary verified GitHub email                                                   |
-| Verbs          | `read` (always), `write`, `delete`                                                                               |
-| Endpoints      | `/api/shares`, `/api/shares/:id`, `/api/shares/:id/notes`                                                        |
-| Storage        | Control plane: `shares` (0012, 0017, 0020), `users.email` (0010, 0011); the view is a corpus row (`views`, 0015) |
-| Where it lives | `worker/shares/`, `worker/handlers/shares.ts`, `src/data/shared-mode.ts`                                         |
+|                |                                                                                        |
+| -------------- | -------------------------------------------------------------------------------------- |
+| The unit       | A **scoped grant** on a root: owner, `view_id` (the root's id), grantee address, verbs |
+| What is shared | The reachability closure beneath the root, computed per request                        |
+| Who            | An email address, matched to the primary verified GitHub email                         |
+| Verbs          | `read` (always), `write`, `delete`                                                     |
+| Endpoints      | `/api/shares`, `/api/shares/:id`, `/api/shares/:id/notes`                              |
+| Storage        | Control plane: `shares` (0012, 0017, 0020), `users.email` (0010, 0011)                 |
+| Where it lives | `worker/shares/`, `worker/handlers/shares.ts`, `src/data/shared-mode.ts`               |
 
 ---
 
@@ -33,19 +33,11 @@ grant, and that choice decides everything else:
 - **The data never moves.** A shared note is still the owner's rows, in the
   owner's partition, replicated to the owner's devices as before. The grantee
   reads and writes those rows through a second door.
-- **The share names a view, and the view names the root.** `shares.view_id`
-  is the id of the owner's row in `views` (migrations/0017): the root is what
-  is shared, the filter and sort are how the grantee opens it. The create
-  endpoint makes the owner an empty view where they have none — unfiltered,
-  unsorted, under the root's own id, which is the id the client mints
-  (src/data/views.ts), so a filter the owner saves later lands on that very
-  row and changes the share without a write to it. A view is only ever
-  tombstoned, never removed, and a tombstone still names its root; so the
-  reference cannot dangle, and a cleared view serves the whole subtree in
-  document order until the owner saves one again. The filter is
-  **presentation, not permission**: the slice is the whole subtree either
-  way, and the grantee may clear the filter or save a view of their own,
-  which wins over the share's on their side.
+- **The share names the root.** `shares.view_id` holds the root's id
+  (migrations/0017 named the owner's view, and a view's id was its root's;
+  migrations/0030 dropped the views). The wire still carries a `view`
+  object, `{ id, rootId, filter: null, sort: null }`, for the clients that
+  read it.
 - **The slice is computed, never stored.** What is visible beneath the root
   is derived from the owner's rows on every request:
 
@@ -205,16 +197,16 @@ someone else's rows does not belong in it. So shared notes live in memory
 - **How the UI sees it**: `graphSnapshotAtom` merges the own graph with the
   union of every slice, so the editor, search, hover cards and the sidebar
   read a shared note exactly as they read an own one. `sharedOriginAtom`
-  (node id → share id) is what tells them apart: the sidebar lists own notes
-  under **Views** and the notes shared with them under **Shared** (who shared
+  (node id → share id) is what tells them apart: the sidebar lists own pins
+  under **Pinned** and the notes shared with them under **Shared** (who shared
   each is the row's tooltip, and the page header's first crumb), and the note
   page shows a notice with the owner and the verbs, renders read-only without
-  `write`, and hides Rename, Delete and the basket as the verbs dictate (Add
-  to Views on a block stays: the view is the grantee's own, docs/metadata.md).
+  `write`, and hides Rename, Delete and the basket as the verbs dictate. A
+  shared block has no Pin: its props are the owner's.
 - **A shared block is a note here.** A root may be a block, and a block has
   no page of its own to open; so on the way into the snapshot a root that is
   not a note is given the note type. It lists in the sidebar, opens at
-  `/views/<id>` with its text as the title and its children as the outline,
+  `/notes/<id>` with its text as the title and its children as the outline,
   and searches like any note. A push puts the row's own type back while it
   still carries the note type it is shown with, so the owner's block never
   becomes a note by being shared; a type the grantee gave it lands as given.

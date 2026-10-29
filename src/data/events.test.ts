@@ -17,8 +17,6 @@ import {
   projectRows,
   stateAt,
   toGraphSnapshot,
-  toViewRows,
-  viewChangeToEvent,
   type CurrentRows,
   type EventContext,
   type RuminateEvent,
@@ -26,9 +24,8 @@ import {
 import { buildGraphSnapshot, childIdsOf, type GraphSnapshot } from "./graph"
 import { decodeHlc, encodeHlc, tickHlc, type Hlc } from "./hlc"
 import type { Op } from "./ops"
-import { sampleGraph, sampleViews } from "./sample-graph"
-import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
-import type { ViewRow } from "./views"
+import { sampleGraph } from "./sample-graph"
+import type { LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
 
 function context(device = "tab", at = 1_000): EventContext {
   let n = 0
@@ -208,60 +205,6 @@ describe("rolling up", () => {
   })
 })
 
-describe("viewChangeToEvent", () => {
-  const view: ViewRow = {
-    id: "v",
-    root_id: "note",
-    filter: null,
-    sort: null,
-    pinned: false,
-    sort_key: null,
-    updated_at: 1,
-    seq: 4,
-  }
-  it("names the four things that can happen to a view", () => {
-    const ctx = context()
-    expect(viewChangeToEvent(undefined, view, ctx)?.action).toBe("create")
-    expect(viewChangeToEvent(view, { ...view, pinned: true }, ctx)).toMatchObject({
-      action: "update",
-      patch: { pinned: true },
-      base_seq: 4,
-    })
-    expect(viewChangeToEvent(view, { ...view, deleted_at: 9 }, ctx)?.action).toBe("delete")
-    expect(viewChangeToEvent({ ...view, deleted_at: 9 }, view, ctx)?.action).toBe("restore")
-    expect(viewChangeToEvent(view, { ...view }, ctx)).toBeNull()
-  })
-
-  it("carries the stack: a create names one it has, and a change to it is an update of it alone", () => {
-    const ctx = context()
-    expect(viewChangeToEvent(undefined, view, ctx)?.patch).not.toHaveProperty("stack")
-    const stacked = { ...view, stack: "corpus_root:tasks" }
-    expect(viewChangeToEvent(undefined, stacked, ctx)?.patch).toMatchObject({
-      stack: "corpus_root:tasks",
-    })
-    expect(viewChangeToEvent(view, stacked, ctx)?.patch).toEqual({ stack: "corpus_root:tasks" })
-    expect(viewChangeToEvent(stacked, view, ctx)?.patch).toEqual({ stack: null })
-    expect(viewChangeToEvent(stacked, { ...stacked, pinned: true }, ctx)?.patch).toEqual({
-      pinned: true,
-    })
-  })
-
-  it("stamps the event with the row's own clock, so the projection lands the row as it was", () => {
-    const ctx = context("tab", 99_999)
-    const later = { ...view, pinned: true, updated_at: 42 }
-    expect(viewChangeToEvent(view, later, ctx)?.at).toBe(42)
-    expect(viewChangeToEvent(undefined, later, ctx)?.at).toBe(42)
-    // A tombstone stamped at its own moment says nothing more; one stamped
-    // earlier than the row carries the stamp.
-    expect(viewChangeToEvent(view, { ...view, updated_at: 9, deleted_at: 9 }, ctx)?.patch).toEqual(
-      {},
-    )
-    expect(viewChangeToEvent(view, { ...view, updated_at: 9, deleted_at: 7 }, ctx)?.patch).toEqual({
-      deleted_at: 7,
-    })
-  })
-})
-
 describe("the envelope", () => {
   it("carries the writer's zone when the context names one, and nothing when it does not", () => {
     const [withZone] = opsToEvents(snapshot, [{ op: "setText", id: "a", text: "A!" }], context())
@@ -314,19 +257,7 @@ describe("the stamp", () => {
     expect([...stamps].sort()).toEqual(stamps)
   })
 
-  it("stamps a view's event, and leaves an event unstamped when the context mints none", () => {
-    const view: ViewRow = {
-      id: "v",
-      root_id: "note",
-      filter: null,
-      sort: null,
-      pinned: false,
-      sort_key: null,
-      updated_at: 5,
-    }
-    expect(viewChangeToEvent(undefined, view, stamping())?.hlc).toBe(
-      encodeHlc({ ms: 1_000, counter: 0, device: "dev.tab" }),
-    )
+  it("leaves an event unstamped when the context mints none", () => {
     const [bare] = opsToEvents(snapshot, [{ op: "setText", id: "a", text: "A!" }], context())
     expect("hlc" in bare).toBe(false)
   })
@@ -627,7 +558,7 @@ describe("the fold by stamp", () => {
     const graph = sampleGraph()
     const nodes = [...graph.nodes.values()].map((node) => ({ ...node, updated_at: 1 }))
     const links = [...graph.childLinks.values()].flat().map((link) => ({ ...link, updated_at: 1 }))
-    const views = sampleViews()
+    const views: never[] = []
     const empty: CurrentRows = { nodes: new Map(), links: new Map(), views: new Map() }
     let log = sequenced(
       rowsToEvents(empty, { nodes, links, views }, { batch: "seed", device: "replica", now: 1 }),
@@ -651,19 +582,13 @@ describe("the fold by stamp", () => {
       const events = opsToEvents(graphOfRows(log), ops, context("tab", 100 + i * 10))
       log = [...log, ...sequenced(events, log.length + 1)]
     })
-    const [view, other] = views
-    const viewEvents = [
-      viewChangeToEvent(view, { ...view, pinned: false, updated_at: 200 }, context("tab", 200)),
-      viewChangeToEvent(other, { ...other, deleted_at: 210, updated_at: 210 }, context("tab", 210)),
-    ] as RuminateEvent[]
-    return [...log, ...sequenced(viewEvents, log.length + 1)]
+    return log
   }
 
-  it("gives the fold by seq's graph and views for an in-order log", () => {
+  it("gives the fold by seq's graph for an in-order log", () => {
     const log = sampleLog()
     const byStamp = foldByStamp(log)
     expect(toGraphSnapshot(byStamp)).toEqual(graphOfRows(log))
-    expect(toViewRows(byStamp)).toEqual(projectRows(fold(log)).views)
   })
 
   it("gives one state whatever the order, and when every event comes twice", () => {

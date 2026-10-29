@@ -13,8 +13,8 @@ import { useNoteShare } from "../hooks/share"
 import { useMakeBoard, useMakeNote } from "../hooks/board"
 import { useMakeTracker } from "../hooks/tracker"
 import { useRenameNote } from "../hooks/note"
-import { UNLIST_VIEW, useWriteView } from "../hooks/views"
-import { LISTED_VIEW, viewByRootAtom } from "../data/views"
+import { useSetPinned } from "../hooks/pins"
+import { pinnedAtOf } from "../data/pins"
 import { deleteNoteDialogAtom } from "./delete-note-dialog"
 import { shareDialogAtom } from "./share-note-dialog"
 import type { Width } from "../schema"
@@ -32,45 +32,13 @@ import {
   ListIcon16,
   MoreIcon16,
   NoteIcon16,
-  PlusIcon16,
+  PinIcon16,
   PrinterIcon16,
   ShareIcon16,
   TrashIcon16,
   WidthFixedIcon16,
   WidthFullIcon16,
 } from "./icons"
-
-/**
- * The row's place in the manual order, when the list it sits in has one
- * (`src/data/views.ts`). Reordering by drag alone would be reachable by
- * pointer alone, so the sidebar hands the menu the same two moves — which is
- * also the only way to reorder on a touch screen.
- */
-export interface ReorderActions {
-  onMoveUp?: () => void
-  onMoveDown?: () => void
-}
-
-/** Move up and Move down as menu entries, greyed where there is nowhere to
- * go: what every sidebar row's menu leads with in the manual sort. */
-export function reorderEntries(reorder: ReorderActions): MenuEntry[] {
-  return [
-    {
-      kind: "item",
-      label: "Move up",
-      icon: <ArrowUpIcon16 />,
-      disabled: !reorder.onMoveUp,
-      onSelect: () => reorder.onMoveUp?.(),
-    },
-    {
-      kind: "item",
-      label: "Move down",
-      icon: <ArrowDownIcon16 />,
-      disabled: !reorder.onMoveDown,
-      onSelect: () => reorder.onMoveDown?.(),
-    },
-  ]
-}
 
 /** What the open note's header adds to the menu. */
 interface EditorActions {
@@ -102,19 +70,13 @@ interface EditorActions {
    * way to switch. Absent where the view keeps no frame.
    */
   rootPivot?: { upstream: boolean; onToggle: () => void }
-  /**
-   * **Save as view** (docs/graph-walk.md, section 7): save the pane's stack
-   * above Root, up to the frame on screen, as the View of this frame's root.
-   * Absent where there is nothing of the reader's own to save.
-   */
-  onSaveView?: () => void
 }
 
 /**
  * **The note's menu, as entries** (`MenuEntry`, one list for every surface):
  * Copy markdown, Copy ID, Share, Rename, the board entries, then Print,
  * then Delete. The sidebar's ⋯ on a note row draws it (`NoteActionsMenu`), the open note's
- * header draws it with its own extras around it, a right-click on a View's
+ * header draws it with its own extras around it, a right-click on a Pinned
  * row in the sidebar draws it, and so does a right-click on a note's row in
  * the palette (`results-editor.tsx`) — so a note has one menu wherever it is
  * met.
@@ -140,10 +102,10 @@ interface EditorActions {
  * so neither is offered one. The board page itself adds **Features**,
  * which opens its Features editor (`openFeatures`).
  *
- * **Remove from Views** and **Add to Views** are the note's place in the
- * Views list (docs/metadata.md): its view row's `pinned`, read as the menu
- * opens. Own notes only — a shared note is listed under Shared, by the
- * share, and has no place in the list to give up.
+ * **Pin** and **Unpin** are the note's place in the sidebar's Pinned list
+ * (`src/data/pins.ts`): its root's `pinned_at` prop. Own notes only — a
+ * shared note is listed under Shared, by the share, and its props are the
+ * owner's.
  */
 export function useNoteMenuEntries() {
   const isSignedOut = useAtomValue(isSignedOutAtom)
@@ -155,10 +117,10 @@ export function useNoteMenuEntries() {
   const makeBoard = useMakeBoard()
   const makeTracker = useMakeTracker()
   const makeNote = useMakeNote()
-  const writeView = useWriteView()
+  const setPinned = useSetPinned()
   // Subscribed, not read as the menu opens: a sidebar row draws its menu
-  // when it renders, so the entries follow the row's listing as it changes.
-  const viewByRoot = useAtomValue(viewByRootAtom)
+  // when it renders, so the entries follow the note's pin as it changes.
+  const graph = useAtomValue(graphSnapshotAtom)
   return React.useCallback(
     (
       noteId: string,
@@ -330,26 +292,20 @@ export function useNoteMenuEntries() {
                 ]
               : []
 
-      // The note's place in the list: its own row's `pinned`.
-      const listed = viewByRoot.get(noteId)?.pinned === true
-      const viewEntries: MenuEntry[] =
-        verbs !== null
+      // The note's pin: its root's `pinned_at`.
+      const root = graph.nodes.get(noteId)
+      const pinned = root !== undefined && pinnedAtOf(root) !== null
+      const pinEntries: MenuEntry[] =
+        verbs !== null || root === undefined
           ? []
           : [
               { kind: "separator" },
-              listed
-                ? {
-                    kind: "item",
-                    label: "Remove from Views",
-                    icon: <TrashIcon16 />,
-                    onSelect: () => writeView(noteId, UNLIST_VIEW),
-                  }
-                : {
-                    kind: "item",
-                    label: "Add to Views",
-                    icon: <PlusIcon16 />,
-                    onSelect: () => writeView(noteId, LISTED_VIEW),
-                  },
+              {
+                kind: "item",
+                label: pinned ? "Unpin" : "Pin",
+                icon: <PinIcon16 />,
+                onSelect: () => setPinned([noteId], !pinned),
+              },
             ]
 
       return [
@@ -370,7 +326,7 @@ export function useNoteMenuEntries() {
           onSelect: rename,
         },
         ...boardEntries,
-        ...viewEntries,
+        ...pinEntries,
         { kind: "separator" },
         { kind: "item", label: "Print", icon: <PrinterIcon16 />, onSelect: () => window.print() },
         { kind: "separator" },
@@ -393,8 +349,8 @@ export function useNoteMenuEntries() {
       makeBoard,
       makeTracker,
       makeNote,
-      writeView,
-      viewByRoot,
+      setPinned,
+      graph,
     ],
   )
 }
@@ -403,14 +359,13 @@ export function useNoteMenuEntries() {
  * The one note-actions menu, used both by the open note's header and by each
  * sidebar row — so the actions and styling stay identical. Its entries are
  * `useNoteMenuEntries`'; the header's extras (width, the developer toggles)
- * sit around them, and the sidebar's moves before them.
+ * sit around them.
  */
 export function NoteActionsMenu({
   noteId,
   className,
   align = "start",
   editor,
-  reorder,
   surface = "outline",
   onFeatures,
   onSeries,
@@ -419,7 +374,6 @@ export function NoteActionsMenu({
   className?: string
   align?: "start" | "end"
   editor?: EditorActions
-  reorder?: ReorderActions
   /** Where the menu is drawn: the board page says so, and gets the way to
    * the outline where every other surface gets the way to the board. */
   surface?: "outline" | "board" | "tracker"
@@ -435,9 +389,9 @@ export function NoteActionsMenu({
   // sidebar menu falls back to the path check so deleting the note you're
   // viewing from the list also takes you home. Compare the decoded path
   // segment, not the raw pathname: a note id with a space or other special
-  // character is percent-encoded in the URL, so a raw `=== /views/${noteId}`
+  // character is percent-encoded in the URL, so a raw `=== /notes/${noteId}`
   // check would miss it and skip the redirect. A board's or a tracker's page counts too.
-  const openMatch = location.pathname.match(/^\/(?:views|boards|trackers)\/(.+)$/)
+  const openMatch = location.pathname.match(/^\/(?:notes|boards|trackers)\/(.+)$/)
   const openNoteId = openMatch ? decodeURIComponent(openMatch[1]) : ""
   const onDeleted =
     editor?.onDeleted ??
@@ -496,14 +450,6 @@ export function NoteActionsMenu({
             <DropdownMenu.Separator />
           </>
         ) : null}
-        {editor?.onSaveView ? (
-          <>
-            <DropdownMenu.Item icon={<PlusIcon16 />} onClick={editor.onSaveView}>
-              Save as view
-            </DropdownMenu.Item>
-            <DropdownMenu.Separator />
-          </>
-        ) : null}
         {editor?.rootPivot ? (
           <>
             <DropdownMenu.Item
@@ -517,7 +463,6 @@ export function NoteActionsMenu({
         ) : null}
         <MenuItems
           entries={[
-            ...(reorder ? reorderEntries(reorder) : []),
             // The Root frame's menu has the page's items only: the corpus root
             // is no note to rename, share, list or delete.
             ...(noteId === CORPUS_ROOT_ID
@@ -530,7 +475,7 @@ export function NoteActionsMenu({
                     ? {
                         openOutline: () =>
                           navigate({
-                            to: "/views/$",
+                            to: "/notes/$",
                             params: { _splat: noteId },
                             search: { query: undefined },
                           }),
@@ -540,7 +485,7 @@ export function NoteActionsMenu({
                       ? {
                           openOutline: () =>
                             navigate({
-                              to: "/views/$",
+                              to: "/notes/$",
                               params: { _splat: noteId },
                               search: { query: undefined },
                             }),

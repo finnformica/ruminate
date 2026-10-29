@@ -483,10 +483,7 @@ export function defaultFeatureOps(snapshot: GraphSnapshot, boardId: NoteId): Op[
  * (docs/boards.md, "A board in a note"): its root node, typed `board` and
  * named by `title` (its id when the title is blank, as an untitled note
  * is), stamped as edited now, and the default features written onto it
- * (`defaultFeatureOps`), as one batch. No view row is written here: whether
- * the board is listed is the caller's to say (`LISTED_VIEW`,
- * src/data/views.ts) — **New board** lists it, a board made inside a note
- * is not listed. Nothing when the id is taken.
+ * (`defaultFeatureOps`), as one batch. Nothing when the id is taken.
  */
 export function newBoardOps(snapshot: GraphSnapshot, boardId: NoteId, title: string): Op[] {
   if (snapshot.nodes.has(boardId)) return []

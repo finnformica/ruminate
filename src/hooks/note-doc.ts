@@ -12,7 +12,6 @@ import { notePropsOps } from "../data/note-meta"
 import { docToOps } from "../data/ops"
 import { sharedOriginAtom } from "../data/shared-mode"
 import { useApplyOps } from "../data/store"
-import { LISTED_VIEW } from "../data/views"
 import { blockIndexAtom, graphSnapshotAtom } from "../global-state"
 import { viewNarrowing } from "../utils/view-narrowing"
 import type { NoteId } from "../schema"
@@ -46,8 +45,7 @@ const NO_PIVOTS: LinkPivots = new Map()
  * that survived, in the view's order, and the edit is read as exactly
  * that: the rows the filter hid, and the note's own order, are left as they
  * are, and everything else edits as it does in the note. The note's
- * `updated_at` is stamped on every change — what orders the Views list and
- * drives the replica's incremental pulls (docs/graph-storage.md); in focus,
+ * `updated_at` is stamped on every change — what drives the replica's incremental pulls (docs/graph-storage.md); in focus,
  * where the doc says nothing about the note node, as its own `setProps`.
  *
  * A note that is not in the graph yet (a new one) starts from `defaultDoc`
@@ -192,13 +190,8 @@ export function useNoteDoc({
         props: { ...(next.props ?? {}), updated_at: new Date().toISOString() },
       }
       // A first edit to a note that is not in the graph yet — a fresh
-      // `/views/<id>` typed into — is what creates it, so the row
-      // that lists it (`LISTED_VIEW`, src/data/views.ts) is written beside
-      // the `create`, as `useCreateNote` writes it.
-      apply(
-        docToOps(noteId, stamped, current, hint?.discard, noteId, shown),
-        note === null ? { views: [{ rootId: noteId, patch: LISTED_VIEW }] } : {},
-      )
+      // `/notes/<id>` typed into — is what creates it.
+      apply(docToOps(noteId, stamped, current, hint?.discard, noteId, shown))
     },
     [noteId, rootId, store, apply, narrowing],
   )

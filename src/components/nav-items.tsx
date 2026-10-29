@@ -5,23 +5,16 @@ import { requestDatabasePull } from "../data/database-mode"
 import { CORPUS_ROOT_ID } from "../data/graph"
 import { layoutToSearch, type FocusFrame, type PaneSearch } from "../data/panes"
 import { ROOT_FAVICON, ROOT_LABEL, rootFrame } from "../data/root-frame"
-import { restoreViewFrames, viewPathHint } from "../data/view-stack"
-import { viewByRootAtom } from "../data/views"
 import {
-  graphSnapshotAtom,
   isBootingAtom,
   isHelpPanelOpenAtom,
-  noteSortAtom,
+  pinnedEntriesAtom,
   sharedNotesAtom,
-  viewEntriesAtom,
-  type BlockView,
-  type NoteSort,
-  type ViewEntry,
+  type PinnedBlock,
+  type PinnedEntry,
 } from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
 import { usePending } from "../hooks/pending"
-import { useReorderViews } from "../hooks/views"
-import { useDragReorder } from "../hooks/drag-reorder"
 import { useOpenFramesInPane } from "../hooks/open-note"
 import { shareOwnerName } from "../data/shares"
 import type { Note } from "../schema"
@@ -42,22 +35,14 @@ import {
   CircleQuestionMarkIcon16,
   HistoryFillIcon16,
   HistoryIcon16,
-  ListIcon16,
   LoadingIcon16,
   MoreIcon16,
   SettingsFillIcon16,
   SettingsIcon16,
-  SortAlphabetAscIcon16,
-  SortNumberDescIcon16,
 } from "./icons"
 import { Keys } from "./ui/keys"
 import { NavListSkeleton } from "./ui/skeleton"
-import {
-  NoteActionsMenu,
-  reorderEntries,
-  useNoteMenuEntries,
-  type ReorderActions,
-} from "./note-actions-menu"
+import { NoteActionsMenu, useNoteMenuEntries } from "./note-actions-menu"
 import { useBlockViewMenuEntries } from "./block-view-menu"
 import { MenuItems, RowContextMenu } from "./block-editor/block-context-menu"
 import { NoteFavicon } from "./note-favicon"
@@ -75,7 +60,7 @@ export function NavItems({
   size?: "medium" | "large"
   onNavigate?: () => void
 }) {
-  const views = useAtomValue(viewEntriesAtom)
+  const pinned = useAtomValue(pinnedEntriesAtom)
   const sharedNotes = useAtomValue(sharedNotesAtom)
   const booting = useAtomValue(isBootingAtom)
   const syncText = useSyncStatusText()
@@ -87,7 +72,7 @@ export function NavItems({
 
   // The Calendar link is current on any of the calendar's pages.
   const isCalendarActive = pathname === "/calendar" || pathname.startsWith("/calendar/")
-  // While Settings is open its pages take the Views list's place, and only
+  // While Settings is open its pages take the Pinned list's place, and only
   // that: the links above and the rows below stay where they are, so the
   // sidebar reads as one thing whose middle changed rather than a different
   // sidebar (src/components/settings/settings-nav.tsx).
@@ -106,9 +91,10 @@ export function NavItems({
           <ul className="flex flex-col gap-1">
             <li>
               {/* Root first: the list of every note, the base of every pane
-                  (src/data/root-frame.ts). The Views below are bookmarks. */}
+                  (src/data/root-frame.ts), and the one place notes are
+                  listed. The pins below are shortcuts into it. */}
               <NavLink
-                to="/views/$"
+                to="/notes/$"
                 params={{ _splat: CORPUS_ROOT_ID }}
                 search={{ query: undefined }}
                 activeIcon={<NoteFavicon note={ROOT_FAVICON} filled />}
@@ -133,23 +119,21 @@ export function NavItems({
               </NavLink>
             </li>
           </ul>
-          {/* The lists, each under its own heading — Views, Shared — with one
+          {/* The lists, each under its own heading — Pinned, Shared — with one
               rule above them, setting them off from the links above.
 
-              Views is the one list of the user's own: every note, and every
-              block made a view of its own (docs/metadata.md), in the order
-              the sort menu says — and in the manual sort, the order it was
-              dragged into, a block able to sit between two notes. A block's
-              row opens its note focused on it. */}
+              Pinned is the user's own notes and blocks kept to hand
+              (src/data/pins.ts, docs/removing-views.md), oldest pin first.
+              A block's row opens its note focused on it. */}
           {inSettings ? (
             <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
               <SectionHeading>Settings</SectionHeading>
               <SettingsNavList size={size} />
             </div>
-          ) : views.length > 0 ? (
+          ) : pinned.length > 0 ? (
             <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
-              <SectionHeading action={<ViewSortMenu />}>Views</SectionHeading>
-              <ViewRows entries={views} size={size} onNavigate={onNavigate} />
+              <SectionHeading>Pinned</SectionHeading>
+              <PinnedRows entries={pinned} size={size} onNavigate={onNavigate} />
             </div>
           ) : booting ? (
             <NavListSkeleton />
@@ -279,7 +263,7 @@ export function NavItems({
 }
 
 /** A sidebar list's heading: quiet, in the row's inset, with room at its end
- * for a control belonging to the list beneath it (the Views sort). */
+ * for a control belonging to the list beneath it. */
 function SectionHeading({
   title,
   action,
@@ -298,51 +282,6 @@ function SectionHeading({
       <span className="truncate">{children}</span>
       {action ? <span className="ml-auto shrink-0">{action}</span> : null}
     </div>
-  )
-}
-
-/** What each sort is called, and the icon that stands for it. */
-const NOTE_SORTS: { value: NoteSort; label: string; icon: React.ReactNode }[] = [
-  { value: "title", label: "Name", icon: <SortAlphabetAscIcon16 /> },
-  { value: "updated", label: "Recently updated", icon: <SortNumberDescIcon16 /> },
-  { value: "manual", label: "Manual", icon: <ListIcon16 /> },
-]
-
-/**
- * The Views list's sort, over the heading: one preference for the sidebar
- * and the palette (`noteSortAtom`), so no two surfaces
- * disagree about where a view is. **Manual** is what turns dragging on — a
- * drag in an automatic sort would be undone by the next render, so the rows
- * are only draggable once the order is the user's to set.
- */
-function ViewSortMenu() {
-  const [sort, setSort] = useAtom(noteSortAtom)
-  const current = NOTE_SORTS.find((entry) => entry.value === sort) ?? NOTE_SORTS[0]
-  return (
-    <DropdownMenu modal={false}>
-      <DropdownMenu.Trigger
-        render={
-          <IconButton aria-label={`Sort views by ${current.label.toLowerCase()}`} size="small">
-            {current.icon}
-          </IconButton>
-        }
-      />
-      <DropdownMenu.Content align="end">
-        <DropdownMenu.Group>
-          <DropdownMenu.GroupLabel>Sort views</DropdownMenu.GroupLabel>
-          {NOTE_SORTS.map((entry) => (
-            <DropdownMenu.Item
-              key={entry.value}
-              icon={entry.icon}
-              selected={sort === entry.value}
-              onClick={() => setSort(entry.value)}
-            >
-              {entry.label}
-            </DropdownMenu.Item>
-          ))}
-        </DropdownMenu.Group>
-      </DropdownMenu.Content>
-    </DropdownMenu>
   )
 }
 
@@ -458,143 +397,76 @@ function RowActions({ size, children }: { size: "medium" | "large"; children: Re
   )
 }
 
-/** What a block view's row calls it: its text as one plain line (a row
+/** What a pinned block's row calls it: its text as one plain line (a row
  * renders no inline markdown), or a stand-in for none. */
-const blockViewLabel = (block: BlockView): string => inlineText(block.text) || "Untitled block"
+const pinnedBlockLabel = (block: PinnedBlock): string => inlineText(block.text) || "Untitled block"
 
-/**
- * **The Views list**: the notes and the block views as one list of rows
- * (`viewEntriesAtom`). Dragging is live only in the manual sort — in an
- * automatic one the next render would undo it — and the first drag is what
- * keys the list (docs/metadata.md); the row's menu moves it up and down for
- * the keyboard and for a touch screen, through the same write. There is no
- * band within the list to be stopped at: any row may be dropped anywhere,
- * a block above a note included.
- */
-function ViewRows({
+/** **The Pinned list**: the pinned notes and blocks as one list of rows
+ * (`pinnedEntriesAtom`), in pin order. */
+function PinnedRows({
   entries,
   size,
   onNavigate,
 }: {
-  entries: ViewEntry[]
+  entries: PinnedEntry[]
   size: "medium" | "large"
   onNavigate?: () => void
 }) {
-  const sort = useAtomValue(noteSortAtom)
-  const manual = sort === "manual"
-  const reorderViews = useReorderViews()
-  const ids = React.useMemo(() => entries.map((entry) => entry.id), [entries])
-  const onMove = React.useCallback(
-    (_id: string, next: string[]) => reorderViews(next),
-    [reorderViews],
-  )
-  const reorder = useDragReorder({ ids, onMove, enabled: manual })
-
-  const swap = (index: number, delta: number) => {
-    const target = index + delta
-    if (target < 0 || target >= entries.length) return undefined
-    return () => {
-      const next = [...ids]
-      const [moved] = next.splice(index, 1)
-      next.splice(target, 0, moved)
-      reorderViews(next)
-    }
-  }
-
   return (
-    <ul
-      className="flex flex-col gap-1"
-      data-testid="view-rows"
-      {...(manual ? reorder.listProps : {})}
-    >
-      {entries.map((entry, index) => {
-        const moves = manual ? { onMoveUp: swap(index, -1), onMoveDown: swap(index, 1) } : undefined
-        return (
-          <li
-            key={entry.id}
-            className={cx(
-              "note-row group/note relative",
-              manual && "data-[dragging]:opacity-40",
-              reorder.dropBefore === entry.id &&
-                "before:absolute before:-top-0.5 before:inset-x-0 before:h-0.5 before:rounded-full before:bg-border-focus",
-              reorder.dropBefore === "end" &&
-                index === entries.length - 1 &&
-                "after:absolute after:-bottom-0.5 after:inset-x-0 after:h-0.5 after:rounded-full after:bg-border-focus",
-            )}
-            {...(manual ? reorder.rowProps(entry.id) : {})}
-          >
-            <ViewRowBody entry={entry} moves={moves} size={size} onNavigate={onNavigate} />
-          </li>
-        )
-      })}
+    <ul className="flex flex-col gap-1" data-testid="pinned-rows">
+      {entries.map((entry) => (
+        <li key={entry.id} className="note-row group/note relative">
+          <PinnedRowBody entry={entry} size={size} onNavigate={onNavigate} />
+        </li>
+      ))}
     </ul>
   )
 }
 
-/** Where a View row leads (docs/graph-walk.md, section 7): its stack restored
- * — Root, the saved frames, the top on screen — as a link, and the roots of
- * the frames beneath the top as the row's hint. */
-interface ViewTarget {
+/** Where a pinned block's row leads: Root, then its note focused on the
+ * block, as a link. */
+interface BlockTarget {
   frames: FocusFrame[]
   params: { _splat: string }
   search: PaneSearch & { query: undefined }
-  /** "Root › Tasks": empty for a one-frame View. */
-  hint: string
 }
 
-function useViewTarget(entry: ViewEntry): ViewTarget {
-  const graph = useAtomValue(graphSnapshotAtom)
-  const row = useAtomValue(viewByRootAtom).get(entry.id)
-  return React.useMemo(() => {
-    const rootId = entry.id
-    const noteId = entry.noteId
-    const frames = restoreViewFrames({ rootId, noteId, stack: row?.stack }, graph) ?? [
-      rootFrame(),
-      { noteId, root: rootId === noteId ? null : rootId, selected: null },
-    ]
-    const { noteId: path, search } = layoutToSearch({ panes: [{ frames }], active: 0 })
-    // Only what the link says: a key left undefined would keep the row from
-    // matching the address it leads to.
-    const said = Object.fromEntries(
-      Object.entries(search).filter(([, value]) => value !== undefined),
-    ) as PaneSearch
-    return {
-      frames,
-      params: { _splat: path },
-      search: { ...said, query: undefined },
-      hint: viewPathHint(frames, graph),
-    }
-  }, [entry.id, entry.noteId, row?.stack, graph])
+function blockTarget(block: PinnedBlock): BlockTarget {
+  const frames = [rootFrame(), { noteId: block.noteId, root: block.id, selected: null }]
+  const { noteId: path, search } = layoutToSearch({ panes: [{ frames }], active: 0 })
+  // Only what the link says: a key left undefined would keep the row from
+  // matching the address it leads to.
+  const said = Object.fromEntries(
+    Object.entries(search).filter(([, value]) => value !== undefined),
+  ) as PaneSearch
+  return { frames, params: { _splat: path }, search: { ...said, query: undefined } }
 }
 
 /**
- * One View row: its link, its ⋯ button, and a right-click (or a
- * press-and-hold) on it that opens the same menu — rename, the moves, Remove
- * from Views and the rest — so the list is managed where it is drawn.
+ * One Pinned row: its link, its ⋯ button, and a right-click (or a
+ * press-and-hold) on it that opens the same menu — Unpin and the rest — so
+ * the list is managed where it is drawn.
  */
-function ViewRowBody({
+function PinnedRowBody({
   entry,
-  moves,
   size,
   onNavigate,
 }: {
-  entry: ViewEntry
-  moves?: ReorderActions
+  entry: PinnedEntry
   size: "medium" | "large"
   onNavigate?: () => void
 }) {
-  const target = useViewTarget(entry)
   const noteEntriesFor = useNoteMenuEntries()
   const blockEntriesFor = useBlockViewMenuEntries()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   // Deleting the note on screen leads to Root, as the ⋯ menu does.
-  const open = pathname.match(/^\/(?:views|boards|trackers)\/(.+)$/)
+  const open = pathname.match(/^\/(?:notes|boards|trackers)\/(.+)$/)
   const onDeleted =
     open && decodeURIComponent(open[1]) === entry.noteId
       ? () =>
           void navigate({
-            to: "/views/$",
+            to: "/notes/$",
             params: { _splat: CORPUS_ROOT_ID },
             search: { query: undefined },
             replace: true,
@@ -602,22 +474,15 @@ function ViewRowBody({
       : undefined
   const menu =
     entry.kind === "note"
-      ? [...(moves ? reorderEntries(moves) : []), ...noteEntriesFor(entry.id, { onDeleted })]
-      : blockEntriesFor(entry.block.id, entry.block.noteId, { reorder: moves })
+      ? noteEntriesFor(entry.id, { onDeleted })
+      : blockEntriesFor(entry.block.id, entry.block.noteId)
   return (
     <RowContextMenu entries={menu}>
       {entry.kind === "note" ? (
-        <NoteNavItem
-          note={entry.note}
-          target={target}
-          size={size}
-          onNavigate={onNavigate}
-          className="w-full"
-        />
+        <NoteNavItem note={entry.note} size={size} onNavigate={onNavigate} className="w-full" />
       ) : (
-        <BlockViewNavItem
+        <PinnedBlockNavItem
           block={entry.block}
-          target={target}
           size={size}
           onNavigate={onNavigate}
           className="w-full"
@@ -625,34 +490,26 @@ function ViewRowBody({
       )}
       <RowActions size={size}>
         {entry.kind === "note" ? (
-          <NoteActionsMenu noteId={entry.id} reorder={moves} />
+          <NoteActionsMenu noteId={entry.id} />
         ) : (
-          <BlockViewActionsMenu block={entry.block} reorder={moves} />
+          <PinnedBlockActionsMenu block={entry.block} />
         )}
       </RowActions>
     </RowContextMenu>
   )
 }
 
-/** A View row's name, then its path hint in the secondary colour, clipped
- * to fit: "Todos  Root › Tasks" (docs/graph-walk.md, section 7). The name
- * takes at most two thirds of the row, so a long name still leaves the
- * hint some room. */
-function RowName({ name, hint }: { name: string; hint?: string }) {
+/** A row's name, clipped to fit. */
+function RowName({ name }: { name: string }) {
   return (
     <span className="flex min-w-0 items-baseline gap-2">
-      <span className={cx("min-w-0 truncate", hint && "shrink-0 max-w-[65%]")}>{name}</span>
-      {hint ? (
-        <span data-testid="view-hint" className="min-w-0 truncate text-text-secondary">
-          {hint}
-        </span>
-      ) : null}
+      <span className="min-w-0 truncate">{name}</span>
     </span>
   )
 }
 
 /**
- * The glyph a block view's row leads with: the block's KEY — the very glyph
+ * The glyph a pinned block's row leads with: the block's KEY — the very glyph
  * the block editor sets in the block's key slot (`BlockKey`: a bullet's
  * dot, a to-do's box, a heading's `#`, a paragraph's `¶`) — in the slot a
  * note's favicon takes, so the row says what kind of block it opens on the
@@ -691,30 +548,26 @@ function BlockGlyph({ type }: { type: BlockType }) {
   )
 }
 
-/** A block view's row: the block's marker glyph (`BlockGlyph`) and its text,
- * with the note it opens in as the row's tooltip. Current while its note is
- * open focused into it — the row's own link, exactly. */
-function BlockViewNavItem({
+/** A pinned block's row: the block's marker glyph (`BlockGlyph`) and its
+ * text, with the note it opens in as the row's tooltip. Current while its
+ * note is open focused into it — the row's own link, exactly. */
+function PinnedBlockNavItem({
   block,
-  target,
   size,
   onNavigate,
   className,
 }: {
-  block: BlockView
-  /** Where the View leads: its restored stack (`useViewTarget`). */
-  target: ViewTarget
+  block: PinnedBlock
   size: "medium" | "large"
   onNavigate?: () => void
   className?: string
 }) {
-  const label = blockViewLabel(block)
+  const label = pinnedBlockLabel(block)
+  const target = React.useMemo(() => blockTarget(block), [block])
   const openFramesInPane = useOpenFramesInPane()
   return (
     <Link
-      to="/views/$"
-      // The block's own saved view (docs/metadata.md) is applied by the note
-      // page from the block's view row; the link carries the stack.
+      to="/notes/$"
       params={target.params}
       search={target.search}
       activeOptions={{ exact: true, includeSearch: true }}
@@ -734,27 +587,26 @@ function BlockViewNavItem({
       />
       {/* The same wrapper a note row's name sits in, so the two line up to
           the pixel down the list. */}
-      <RowName name={label} hint={target.hint} />
+      <RowName name={label} />
     </Link>
   )
 }
 
-/** A block view's row menu: the block's menu away from its note
- * (`useBlockViewMenuEntries` — Copy, Copy link, Share, Remove from Views),
- * the list's moves ahead of it in the manual sort, as a note row has. */
-function BlockViewActionsMenu({ block, reorder }: { block: BlockView; reorder?: ReorderActions }) {
+/** A pinned block's row menu: the block's menu away from its note
+ * (`useBlockViewMenuEntries` — Copy, Copy link, Share, Unpin). */
+function PinnedBlockActionsMenu({ block }: { block: PinnedBlock }) {
   const entriesFor = useBlockViewMenuEntries()
   return (
     <DropdownMenu modal={false}>
       <DropdownMenu.Trigger
         render={
-          <IconButton aria-label="Block view actions" size="small" disableTooltip>
+          <IconButton aria-label="Pinned block actions" size="small" disableTooltip>
             <MoreIcon16 />
           </IconButton>
         }
       />
       <DropdownMenu.Content align="start">
-        <MenuItems entries={entriesFor(block.id, block.noteId, { reorder })} />
+        <MenuItems entries={entriesFor(block.id, block.noteId)} />
       </DropdownMenu.Content>
     </DropdownMenu>
   )
@@ -847,16 +699,12 @@ const isPlainClick = (event: React.MouseEvent) =>
 function NoteNavItem({
   note,
   title,
-  target,
   size,
   onNavigate,
   className,
 }: {
   note: Note
   title?: string
-  /** Where a View row leads (`useViewTarget`); absent on a shared note's
-   * row, which opens the note. */
-  target?: ViewTarget
   size: "medium" | "large"
   onNavigate?: () => void
   className?: string
@@ -890,15 +738,15 @@ function NoteNavItem({
   }
   return (
     <Link
-      to="/views/$"
-      params={target?.params ?? { _splat: note.id }}
-      search={target?.search ?? { query: undefined }}
+      to="/notes/$"
+      params={{ _splat: note.id }}
+      search={{ query: undefined }}
       // Current only at the note's ROOT. Focus is a place of its own — the
       // route calls `?block=` "the block the editor is focused on; absent =
       // outside focus" — and focused in, you are reading that block, not the
       // note whole. Matching the search is what draws that line: with no
       // block the searches are equal and the row is current; with one they
-      // differ and it is not, so a block view's row is the only thing lit
+      // differ and it is not, so a pinned block's row is the only thing lit
       // rather than the block and its note at once.
       activeOptions={{ exact: true, includeSearch: true }}
       data-size={size}
@@ -906,13 +754,9 @@ function NoteNavItem({
       title={title}
       onClick={(event) => {
         if (event.defaultPrevented) return
-        // A split page opens it in the pane with the keyboard instead.
-        // A View restores its stack there; a shared note restarts it, as
-        // Root › the note.
-        const frames = target?.frames ?? [
-          rootFrame(),
-          { noteId: note.id, root: null, selected: null },
-        ]
+        // A split page opens it in the pane with the keyboard instead,
+        // restarting its stack as Root › the note.
+        const frames = [rootFrame(), { noteId: note.id, root: null, selected: null }]
         if (isPlainClick(event) && openFramesInPane(frames)) event.preventDefault()
         onNavigate?.()
       }}
@@ -921,7 +765,7 @@ function NoteNavItem({
       {/* Show the note's name, matching the page header. Ids are minted and
           opaque now (docs/graph-storage.md), so the name is the title —
           which is what `displayName` resolves. */}
-      <RowName name={note.displayName} hint={target?.hint} />
+      <RowName name={note.displayName} />
     </Link>
   )
 }

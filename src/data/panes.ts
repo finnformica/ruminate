@@ -18,7 +18,7 @@ import { isRootFrame, rootFrame } from "./root-frame"
  *
  * Every frame carries its folds itself, as what the reader changed over the
  * standing rule (docs/graph-walk.md, section 5), so they travel in the URL
- * with it: the frame at the bottom, which comes from a View or opens a note,
+ * with it: the frame at the bottom, which opens a note,
  * as much as every frame pushed above it.
  *
  * A **layout** is a list of panes and which one has the keyboard. Two panes
@@ -79,7 +79,7 @@ export interface FocusFrame {
  */
 export type SelectionPath = readonly string[]
 
-/** A frame's pivots as the URL and a View hold them (`LinkPivots` as a
+/** A frame's pivots as the URL holds them (`LinkPivots` as a
  * record). Keyed by block id, as Pensive keys them (docs/graph-walk.md, Q1). */
 export type FramePivots = Readonly<Record<string, Direction>>
 
@@ -378,14 +378,14 @@ export function closePane(layout: PaneLayout, index: number): PaneLayout {
 // ── The URL ─────────────────────────────────────────────────────────────────
 //
 // The first pane is the page's own address, as it has always been:
-// `/views/<note>?block=<root>&filter=…&sort=…`, so every link made before
+// `/notes/<note>?block=<root>&filter=…&sort=…`, so every link made before
 // panes still opens the same view. Its frame on screen also writes `pivots`,
 // `folds`, `nfolds` and `depth`;
 // its stack beneath that frame is `stack`; each other pane is one `pane<i>`
 // parameter holding its whole stack; `active` names the pane with the
 // keyboard when it is not the first.
 //
-//   /views/A?block=b2&stack=A::x1,A:b1:@&pane1=B,B:c1;f=type%3Atodo&active=1
+//   /notes/A?block=b2&stack=A::x1,A:b1:@&pane1=B,B:c1;f=type%3Atodo&active=1
 //
 // A frame is `note[:root[:selected]]`, then any of `;f=<filter>`,
 // `;s=<sort>`, `;p=<pivots>`, `;z=<folds>`, `;n=<narrowed folds>` and
@@ -629,7 +629,7 @@ export function layoutFromSearch(noteId: string, search: Record<string, unknown>
 
 /** Where a layout is written: the first pane's note (the path) and the
  * search parameters for everything else. Parameters with nothing to say are
- * left out, so a page with one unfocused pane is just `/views/<note>`. */
+ * left out, so a page with one unfocused pane is just `/notes/<note>`. */
 export function layoutToSearch(layout: PaneLayout): { noteId: string; search: PaneSearch } {
   const [first, ...rest] = layout.panes
   const top = currentFrame(first)

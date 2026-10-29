@@ -1,7 +1,8 @@
-import type { LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
+import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import { generateNKeysBetween } from "fractional-indexing"
 import type { BlockType } from "../blocks/types"
 import { CHILD_KIND, NOTE_TYPE, buildGraphSnapshot, propsJson, type GraphSnapshot } from "./graph"
+import { PINNED_PROP } from "./pins"
 
 /**
  * The signed-out corpus: a handful of typed blocks, hard-coded — the graph
@@ -78,6 +79,10 @@ const NOTES: SampleNote[] = [
   },
 ]
 
+/** The block of the welcome note that is pinned (`src/data/pins.ts`), so
+ * the sidebar's **Pinned** shows a row before anyone signs in. */
+const SAMPLE_PIN = "blk_welcome003"
+
 /** The sample corpus as rows (fresh, evenly spaced sort keys). */
 function sampleRows(now = 0): { nodes: NodeRow[]; links: LinkRow[] } {
   const nodes: NodeRow[] = []
@@ -89,7 +94,7 @@ function sampleRows(now = 0): { nodes: NodeRow[]; links: LinkRow[] } {
         id: block.id,
         type: block.type,
         text: block.text,
-        props: null,
+        props: block.id === SAMPLE_PIN ? propsJson({ [PINNED_PROP]: 1 }) : null,
         updated_at: now,
         notes_id: noteId,
       })
@@ -120,24 +125,4 @@ function sampleRows(now = 0): { nodes: NodeRow[]; links: LinkRow[] } {
 export function sampleGraph(): GraphSnapshot {
   const { nodes, links } = sampleRows()
   return buildGraphSnapshot(nodes, links)
-}
-
-/**
- * The signed-out views (`src/data/views.ts`): the row that lists each
- * sample note — a row is what lists a node, signed out as signed in — and
- * one block of the welcome note made a view of its own, so the sidebar's
- * **Views** shows a block row beside the notes before anyone signs in.
- * Edits to these are as fleeting as edits to the sample graph.
- */
-export function sampleViews(): ViewRow[] {
-  const listed = (rootId: string): ViewRow => ({
-    id: rootId,
-    root_id: rootId,
-    filter: null,
-    sort: null,
-    pinned: true,
-    sort_key: null,
-    updated_at: 0,
-  })
-  return [...NOTES.map((note) => listed(note.id)), listed("blk_welcome003")]
 }

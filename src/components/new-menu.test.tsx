@@ -42,7 +42,7 @@ describe("NewMenu", () => {
     await openMenu()
     fireEvent.click(screen.getByRole("menuitem", { name: /New note/ }))
     expect(mocks.navigate).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "/views/$", params: { _splat: expect.any(String) } }),
+      expect.objectContaining({ to: "/notes/$", params: { _splat: expect.any(String) } }),
     )
   })
 

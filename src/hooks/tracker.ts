@@ -17,7 +17,6 @@ import {
   type SeriesPatch,
   type SeriesState,
 } from "../data/tracker"
-import { LISTED_VIEW } from "../data/views"
 import { graphSnapshotAtom } from "../global-state"
 import type { NoteId } from "../schema"
 
@@ -42,13 +41,7 @@ export function useMakeTracker(): (noteId: NoteId, create?: { title: string }) =
       } else if (create) {
         ops.push(...newTrackerOps(snapshot, noteId, create.title))
       } else return
-      // A tracker made from nothing is listed as a note is, by a view row
-      // written beside it (`LISTED_VIEW`); a note made a tracker keeps the
-      // row it has.
-      apply(
-        ops,
-        snapshot.nodes.has(noteId) ? {} : { views: [{ rootId: noteId, patch: LISTED_VIEW }] },
-      )
+      apply(ops)
     },
     [store, apply],
   )

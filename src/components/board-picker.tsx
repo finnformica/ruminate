@@ -35,7 +35,7 @@ export const boardPickerAtom = atom<BoardPickerRequest | null>(null)
 export const RECENT_BOARDS = 8
 
 /** What the picker lists, in order: the reader's own boards, most recently
- * updated first (the Views list's "Recently updated", `byUpdatedAt`),
+ * updated first (`byUpdatedAt`),
  * narrowed by `query` — a substring of the name, whatever its case — and
  * without `noteId` (the note being edited: a board linked into its own
  * outline would be a loop for nothing) or any board already under
@@ -73,7 +73,7 @@ function pickableBoards(
  * <kbd>Esc</kbd> or a press outside closes the picker with nothing done.
  * A pick writes one batch — the one `link` for a board that exists
  * (`linkBoardOps`), or the board with its default features and the link
- * for a new one (`newBoardOps` + `linkBoardOps`), with no view row and no
+ * for a new one (`newBoardOps` + `linkBoardOps`), with no
  * navigation: the card appears in place, selected — and hands the editor
  * the row to put in the doc (`place`).
  *

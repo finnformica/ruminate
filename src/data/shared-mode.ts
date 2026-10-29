@@ -49,7 +49,7 @@ import {
  * right-click menu), and a block has no page of its own to open. The slice
  * arrives as the owner's rows; on the way into the snapshot a root that is
  * not a note is given the note type (`asNotes`), so it lists in the sidebar,
- * opens at `/views/<id>` with its text as the title and its children as the
+ * opens at `/notes/<id>` with its text as the title and its children as the
  * outline, and searches like any note. A push puts the row's own type back
  * (`Slice.rootTypes`), so the owner's block never becomes a note.
  *
@@ -79,22 +79,6 @@ export const sharedOriginAtom = atom<ReadonlyMap<string, string>>(EMPTY_ORIGIN)
 
 /** The shares addressed to me, as the server describes them. */
 export const receivedSharesAtom = atom<ReceivedShareSummary[]>([])
-
-/**
- * The view each share opens its root with (docs/metadata.md, "Views"): the
- * OWNER's filter and sort, by root, for the note page to fall back on when
- * the reader has saved no view of their own. Presentation only — the slice
- * is the whole subtree either way.
- */
-export const sharedViewByRootAtom = atom((get) => {
-  const byRoot = new Map<string, ShareView>()
-  for (const share of get(receivedSharesAtom)) {
-    if (share.view.rootId !== "" && !byRoot.has(share.view.rootId)) {
-      byRoot.set(share.view.rootId, share.view)
-    }
-  }
-  return byRoot
-})
 
 /**
  * The address shares reach me at, as the server has it recorded
@@ -229,14 +213,7 @@ export function mergeDiffs(pending: GraphDiff, next: GraphDiff): GraphDiff {
   for (const row of next.nodes) nodes.set(row.id, row)
   const links = new Map(pending.links.map((row) => [linkKeyOf(row).join("\x1f"), row]))
   for (const row of next.links) links.set(linkKeyOf(row).join("\x1f"), row)
-  const views = new Map(pending.views.map((row) => [row.id, row]))
-  for (const row of next.views) views.set(row.id, row)
-  return {
-    ...emptyGraphDiff(),
-    nodes: [...nodes.values()],
-    links: [...links.values()],
-    views: [...views.values()],
-  }
+  return { ...emptyGraphDiff(), nodes: [...nodes.values()], links: [...links.values()] }
 }
 
 /** The slice's rows with every root that is a block presented as a note. A

@@ -85,7 +85,7 @@ describe("denial plumbing through the real fetch paths", () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ error: "blocked" }, 403))
     const handle = startReplicaSync({
       getNoteCount: () => 0,
-      getAllRows: async () => ({ nodes: [], links: [], views: [] }),
+      getAllRows: async () => ({ nodes: [], links: [] }),
       getUnpushedEvents: async () => [
         {
           id: "evt_1",
@@ -107,7 +107,7 @@ describe("denial plumbing through the real fetch paths", () => {
       backoffStartMs: 60_000,
     })
     try {
-      handle.notifyChange(["a"], [])
+      handle.notifyChange(["a"])
       await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalled())
       await handle.flush()
       expect(store.get(replicaAccessDeniedAtom)).toBe("blocked")

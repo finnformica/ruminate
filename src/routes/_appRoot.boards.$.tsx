@@ -17,8 +17,7 @@ import { imageFilesOf } from "../data/images"
 import { graphSnapshotAtom } from "../global-state"
 import { useBoard, useBoardMatches, useBoardNarrowing, useBoardWrites } from "../hooks/board"
 import { useNoteById } from "../hooks/note"
-import { useSavedView, useWriteView } from "../hooks/views"
-import { filterText, narrowingParam, resolveNarrowing } from "../utils/view-filter"
+import { filterText } from "../utils/view-filter"
 
 /**
  * A board (docs/boards.md): a note whose root node is of type `board`,
@@ -26,15 +25,14 @@ import { filterText, narrowingParam, resolveNarrowing } from "../utils/view-filt
  * you pick. Its header is the note's own — Sort, Filter and the ⋯ menu —
  * and the Filter leads with the board's features and takes the words to
  * match captions by, so narrowing the wall is narrowing the note, by the
- * same filter string, resolved the same way.
+ * same filter string, read from the address the same way.
  * Everything on screen is the note's own graph — the same rows its outline
  * shows — read and written through the same seams. A note without the
  * property is refused: it is opened as a note.
  */
 
 type RouteSearch = {
-  /** The view's filter and sort, as on the note page: absent means the
-   * saved default, empty means explicitly none (`resolveNarrowing`). */
+  /** The board's filter and sort, as on the note page: absent means none. */
   filter?: string
   sort?: string
 }
@@ -60,43 +58,23 @@ function BoardPage({ boardId }: { boardId: string }) {
   const { exists, features, outlineIds, basketIds, imageIds } = useBoard(boardId)
   const writes = useBoardWrites(boardId, exists)
 
-  // The view's narrowing, exactly as the note page resolves it: the URL
-  // where it speaks, else what the note saved as its default view — the
-  // same row the outline opens with. Every narrowing is a link.
-  const savedView = useSavedView(null, boardId)
-  const filter = resolveNarrowing(filterParam, savedView.filter)
-  const sort = resolveNarrowing(sortParam, savedView.sort)
+  // The board's narrowing, as the note page reads it: the URL. Every
+  // narrowing is a link.
+  const filter = filterParam ?? ""
+  const sort = sortParam ?? ""
   const setNarrowing = React.useCallback(
     (patch: { filter?: string; sort?: string }) => {
       void navigate({
         search: (prev) => ({
           ...prev,
-          ...("filter" in patch
-            ? { filter: narrowingParam(patch.filter ?? "", savedView.filter) }
-            : {}),
-          ...("sort" in patch ? { sort: narrowingParam(patch.sort ?? "", savedView.sort) } : {}),
+          ...("filter" in patch ? { filter: patch.filter || undefined } : {}),
+          ...("sort" in patch ? { sort: patch.sort || undefined } : {}),
         }),
         replace: true,
       })
     },
-    [navigate, savedView],
+    [navigate],
   )
-  // Saving the view is the note's own: one row on the note, both halves.
-  const writeView = useWriteView()
-  const saveDefaultView = React.useCallback(() => {
-    writeView(boardId, { filter, sort })
-    navigate({ search: (prev) => ({ ...prev, filter: undefined, sort: undefined }), replace: true })
-  }, [boardId, filter, sort, writeView, navigate])
-  const resetToDefaultView = React.useCallback(() => {
-    navigate({ search: (prev) => ({ ...prev, filter: undefined, sort: undefined }), replace: true })
-  }, [navigate])
-  const savedViewActions = React.useMemo(
-    () => ({ onUpdateDefault: saveDefaultView, onResetDefault: resetToDefaultView }),
-    [saveDefaultView, resetToDefaultView],
-  )
-  const filterDirty = savedView.writable && savedView.filter !== filter
-  const sortDirty = savedView.writable && savedView.sort !== sort
-
   // The board's features as the Filter menu's first branches: each value a
   // parent to tick, with how many of the board's pictures carry it.
   const branches = React.useMemo<FilterBranch[]>(() => {
@@ -193,17 +171,12 @@ function BoardPage({ boardId }: { boardId: string }) {
       }
       actions={
         <div className="flex items-center">
-          <SortMenu
-            sort={sort}
-            onSortChange={(next) => setNarrowing({ sort: next })}
-            saved={savedView.writable ? { ...savedViewActions, dirty: sortDirty } : undefined}
-          />
+          <SortMenu sort={sort} onSortChange={(next) => setNarrowing({ sort: next })} />
           <FilterMenu
             filter={filter}
             onFilterChange={(next) => setNarrowing({ filter: next })}
             scope={boardId}
             branches={branches}
-            saved={savedView.writable ? { ...savedViewActions, dirty: filterDirty } : undefined}
           />
           <NoteActionsMenu
             noteId={boardId}
@@ -236,7 +209,7 @@ function BoardPage({ boardId }: { boardId: string }) {
               <>
                 This note is not a board.{" "}
                 <Link
-                  to="/views/$"
+                  to="/notes/$"
                   params={{ _splat: boardId }}
                   search={{ query: undefined }}
                   className="link"

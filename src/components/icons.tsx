@@ -840,6 +840,19 @@ export function FlagIcon16(props: IconProps) {
   )
 }
 
+/** A push pin: what Pin and Unpin lead with (`src/data/pins.ts`). */
+export function PinIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M4.5 1.75C4.5 1.33579 4.83579 1 5.25 1H10.75C11.1642 1 11.5 1.33579 11.5 1.75C11.5 2.16421 11.1642 2.5 10.75 2.5H10.5V6.18934L12.5303 8.21967C12.7448 8.43417 12.809 8.75676 12.6929 9.03701C12.5768 9.31727 12.3033 9.5 12 9.5H8.75V14.25C8.75 14.6642 8.41421 15 8 15C7.58579 15 7.25 14.6642 7.25 14.25V9.5H4C3.69665 9.5 3.42318 9.31727 3.30709 9.03701C3.19101 8.75676 3.25517 8.43417 3.46967 8.21967L5.5 6.18934V2.5H5.25C4.83579 2.5 4.5 2.16421 4.5 1.75ZM7 2.5V6.5C7 6.69891 6.92098 6.88968 6.78033 7.03033L5.81066 8H10.1893L9.21967 7.03033C9.07902 6.88968 9 6.69891 9 6.5V2.5H7Z"
+      />
+    </Icon>
+  )
+}
+
 export function FlagFillIcon16(props: IconProps) {
   return (
     <Icon size={16} {...props}>

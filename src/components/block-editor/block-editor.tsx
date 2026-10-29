@@ -48,9 +48,9 @@ import type { BlockActions } from "./block-actions"
 import { rootKeys } from "../../blocks/view"
 import { NoteTitle } from "./note-title"
 import { useCoarsePointer } from "../../hooks/coarse-pointer"
-import { REMOVE_VIEW, useWriteView } from "../../hooks/views"
+import { useSetPinned } from "../../hooks/pins"
 import { rekeyFolds, type Folds } from "../../data/view-state"
-import { viewRootIdsAtom } from "../../data/views"
+import { pinnedAtOfProps } from "../../data/pins"
 import { isHeading, leadingMarker, titlesFocus, typeOfMarker } from "../../blocks/markers"
 import {
   movesOf,
@@ -480,7 +480,6 @@ export function BlockEditor({
   movableRoots = false,
   emptyable = false,
   context,
-  rootHints,
   diff,
   onEditingChange,
 }: {
@@ -623,8 +622,6 @@ export function BlockEditor({
    * navigates exactly as the note does.
    */
   context?: ReadonlySet<string>
-  /** Quiet text after a listed root's content, by id (`BlockEditorApi.rootHints`). */
-  rootHints?: ReadonlyMap<string, string>
   /** The outline is a diff (`BlockEditorApi.diff`): the calendar's day. */
   diff?: BlockDiff
   /**
@@ -1715,7 +1712,7 @@ export function BlockEditor({
       hasChildren: row.hasChildren,
       keys: rowsFor(row.key),
       places: parentCountOf ? Math.max(1, parentCountOf(row.id)) : 1,
-      inViews: viewRoots.has(block.id),
+      pinned: pinnedAtOfProps(block.props) !== null,
       figure: isFigureType(block.type)
         ? { align: figureAlignOf(block), sized: figureLayoutOf(block).size !== undefined }
         : undefined,
@@ -2262,17 +2259,18 @@ export function BlockEditor({
   const sharedOrigin = useAtomValue(sharedOriginAtom)
   const openShareDialog = useSetAtom(shareDialogAtom)
   const canShare = noteId !== undefined && isDatabaseMode && !sharedOrigin.has(noteId)
-  // A block can be made a view wherever the editor has a note behind it —
-  // signed out too, where the sample notes are there to play with, and in a
-  // note someone shared: the view is this user's own row
-  // (`src/data/views.ts`), not a prop on the owner's. It is not a change to
-  // the doc, so it is not an undo step either. Removing clears the whole
-  // row — its saved filter and sort with it — so the block is no view at all.
-  const canView = noteId !== undefined
-  const viewRoots = useAtomValue(viewRootIdsAtom)
-  const writeView = useWriteView()
-  const toggleView = (id: string) =>
-    writeView(id, viewRoots.has(id) ? REMOVE_VIEW : { pinned: true })
+  // A block can be pinned wherever the editor has a note of the user's own
+  // behind it — signed out too, where the sample notes are there to play
+  // with — but not in a note someone shared: the pin is a prop, and the
+  // owner's (`src/data/pins.ts`). The rows take the clicked row's state
+  // flipped, so a range pins or unpins as one.
+  const canPin = noteId !== undefined && !sharedOrigin.has(noteId)
+  const setPinned = useSetPinned()
+  const togglePins = (keys: string[]) => {
+    const ids = [...new Set(keys.map(idOfKey))]
+    const first = doc.blocks[ids[0]]
+    setPinned(ids, !(first && pinnedAtOfProps(first.props) !== null))
+  }
 
   // ── Links ─────────────────────────────────────────────────────────────────
   // Leaving a row's edit mode writes out any bare address in it as a link
@@ -2440,9 +2438,9 @@ export function BlockEditor({
     math: (keys) => runOnRows("wrapMath", keys),
     moves: (keys) => movesOf(commandInput("select", keys)),
     copyLink: noteId
-      ? (keys) => copy(`${window.location.origin}/views/${noteId}?block=${firstId(keys)}`)
+      ? (keys) => copy(`${window.location.origin}/notes/${noteId}?block=${firstId(keys)}`)
       : undefined,
-    view: canView ? (keys) => new Set(keys.map(idOfKey)).forEach(toggleView) : undefined,
+    pin: canPin ? togglePins : undefined,
     share: canShare ? (keys) => openShareDialog(firstId(keys)) : undefined,
     linkDownstream:
       onRequestLink && !readOnly ? (keys) => requestLink(keys[0], "downstream") : undefined,
@@ -2524,7 +2522,6 @@ export function BlockEditor({
     coarsePointer: coarse,
     fixedRoots,
     context,
-    rootHints,
     diff,
     // Browsing: a click opens the row (BlockItem routes a read-only row's
     // click here).

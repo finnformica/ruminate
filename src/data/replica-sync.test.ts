@@ -5,7 +5,6 @@ import {
   parseReplicaPayload,
   type LinkRow,
   type NodeRow,
-  type ViewRow,
 } from "../../worker/handlers/replica-payload"
 import { linkEntityId } from "./events"
 import {
@@ -87,7 +86,6 @@ function createTestServer() {
   const requests: RecordedRequest[] = []
   const remoteNodes = new Map<string, NodeRow>()
   const remoteLinks = new Map<string, LinkRow>()
-  const remoteViews = new Map<string, ViewRow>()
   /** The log: every event id the fake has taken, with its seq. */
   const log = new Map<string, number>()
   let remoteCursor: string | null = null
@@ -159,7 +157,6 @@ function createTestServer() {
       for (const row of payload.links) {
         remoteLinks.set(linkEntityId(row.source_id, row.destination_id, row.kind), row)
       }
-      for (const row of payload.views ?? []) remoteViews.set(row.id, row)
       if (payload.cursor !== undefined) remoteCursor = payload.cursor
       // The real Worker echoes the cursor the batch committed — that is how
       // the client confirms it without a second request.
@@ -196,7 +193,6 @@ function createTestServer() {
     requests,
     remoteNodes,
     remoteLinks,
-    remoteViews,
     log,
     failNext,
     puts: () => requests.filter((r) => r.url === "/api/replica/events"),
@@ -254,11 +250,7 @@ const DEBOUNCE = 2_000
 
 function createTestSync(
   initialFiles: Record<string, string>,
-  allRows: { nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] } = {
-    nodes: [],
-    links: [],
-    views: [],
-  },
+  allRows: { nodes: NodeRow[]; links: LinkRow[] } = { nodes: [], links: [] },
   overrides: Partial<Parameters<typeof startReplicaSync>[0]> = {},
 ) {
   const server = createTestServer()
@@ -275,10 +267,10 @@ function createTestSync(
     ...overrides,
   })
   handles.push(handle)
-  /** A flush landed: these events are in the log, and these notes/views touched. */
-  const save = (noteIds: string[], events: KeyEvent[], viewIds: string[] = []) => {
+  /** A flush landed: these events are in the log, and these notes touched. */
+  const save = (noteIds: string[], events: KeyEvent[]) => {
     store.add(...events)
-    handle.notifyChange(noteIds, viewIds)
+    handle.notifyChange(noteIds)
   }
   return {
     handle,
@@ -407,7 +399,7 @@ describe("replica sync queue", () => {
     }) as typeof fetch
     const { handle, save } = createTestSync(
       { "a.md": "A\n" },
-      { nodes: [], links: [], views: [] },
+      { nodes: [], links: [] },
       { fetchImpl },
     )
 
@@ -421,7 +413,7 @@ describe("replica sync queue", () => {
   it("a long queue goes out in runs, in order, with the cursor on the last", async () => {
     const { handle, server, store, save } = createTestSync(
       { "a.md": "A\n" },
-      { nodes: [], links: [], views: [] },
+      { nodes: [], links: [] },
       { chunkRows: 2 },
     )
     const events = Array.from({ length: 5 }, (_, i) => create(`note-${i}`))
@@ -440,7 +432,6 @@ describe("replica sync queue", () => {
     const rows = {
       nodes: Array.from({ length: 5 }, (_, i) => node(`note-${i}`)),
       links: [link("note-0", "note-1")], // shape only — content irrelevant
-      views: [],
     }
     const { handle, server } = createTestSync({ "a.md": "A\n" }, rows, { chunkRows: 2 })
     handle.requestFullPush()
@@ -473,7 +464,7 @@ describe("replica sync queue", () => {
   it("keeps failed pushes queued and retries with exponential backoff", async () => {
     const { handle, server, store, save } = createTestSync(
       { "a.md": "A\n" },
-      { nodes: [], links: [], views: [] },
+      { nodes: [], links: [] },
       { backoffStartMs: 1_000, backoffMaxMs: 4_000 },
     )
     server.failNext.push("network", 500, "network", "network", "network")
@@ -556,11 +547,7 @@ describe("replica sync queue", () => {
       if ((init?.method ?? "GET") === "PUT") seen.push(handle!.inFlightEventIds!())
       return inner.fetchImpl(input, init)
     }) as typeof fetch
-    const sync = createTestSync(
-      { "a.md": "A\n" },
-      { nodes: [], links: [], views: [] },
-      { fetchImpl },
-    )
+    const sync = createTestSync({ "a.md": "A\n" }, { nodes: [], links: [] }, { fetchImpl })
     handle = sync.handle
     const a = create("a")
     sync.save(["a"], [a])
@@ -580,7 +567,6 @@ describe("replica sync queue", () => {
     const rows = {
       nodes: Array.from({ length: 20 }, (_, i) => node(`note-${i}`)),
       links: [],
-      views: [],
     }
     const { handle, server, save } = createTestSync(files, rows)
 
@@ -630,83 +616,5 @@ describe("isReplicaDrasticallyBehind", () => {
     expect(isReplicaDrasticallyBehind(1000, 900)).toBe(false)
     expect(isReplicaDrasticallyBehind(1000, 899)).toBe(true)
     expect(isReplicaDrasticallyBehind(10, 15)).toBe(false) // ahead ≠ behind
-  })
-})
-
-describe("views ride the push", () => {
-  const view: ViewRow = {
-    id: "view_1",
-    root_id: "blk_a",
-    filter: "type:todo",
-    sort: null,
-    pinned: true,
-    sort_key: "a0",
-    updated_at: 100,
-  }
-  const viewEvent = (action: "create" | "update", patch: object, at = 100): KeyEvent => {
-    const [key, value] = action === "create" ? ["", null] : Object.entries(patch)[0]
-    return {
-      id: `evt_${(minted += 1)}`,
-      entity: "view",
-      entity_id: view.id,
-      action: action === "create" ? "create" : "set",
-      key,
-      value,
-      batch: `bat_${minted}`,
-      device: "dev.tab",
-      at,
-      v: KEY_EVENT_VERSION,
-    }
-  }
-
-  it("pushes a queued view's event like any other", async () => {
-    const { handle, server, save } = createTestSync({})
-    const made = viewEvent("create", {
-      root_id: view.root_id,
-      filter: view.filter,
-      sort: view.sort,
-      pinned: view.pinned,
-      sort_key: view.sort_key,
-    })
-    save([], [made], [view.id])
-    await advance(handle, DEBOUNCE)
-    expect(sent(server.puts().at(-1)!)).toEqual([made.id])
-  })
-
-  it("a full push carries every view the store holds", async () => {
-    const { handle, server } = createTestSync({}, { nodes: [], links: [], views: [view] })
-    handle.requestFullPush()
-    await advance(handle, DEBOUNCE)
-    expect(server.rowPuts().at(-1)?.rows?.views).toEqual([view])
-  })
-
-  it("two changes to one view are two events, in the order made", async () => {
-    const { handle, server, save } = createTestSync({})
-    const first = viewEvent("update", { pinned: true }, 1)
-    const second = viewEvent("update", { pinned: false }, 2)
-    save([], [first], [view.id])
-    save([], [second], [view.id])
-    await advance(handle, DEBOUNCE)
-    expect(sent(server.puts().at(-1)!)).toEqual([first.id, second.id])
-  })
-})
-
-describe("pendingViewIds", () => {
-  it("names a queued view until its push is confirmed, then forgets it", async () => {
-    const { handle, save } = createTestSync({})
-    expect(handle.pendingViewIds!()).toEqual(new Set())
-    save([], [create("view_1")], ["view_1"])
-    // Queued: the pull side must leave it alone.
-    expect(handle.pendingViewIds!()).toEqual(new Set(["view_1"]))
-    await advance(handle, DEBOUNCE)
-    expect(handle.pendingViewIds!()).toEqual(new Set())
-  })
-
-  it("keeps naming a view whose push failed — it is still on its way out", async () => {
-    const { handle, server, save } = createTestSync({})
-    server.failNext.push(500)
-    save([], [create("view_1")], ["view_1"])
-    await advance(handle, DEBOUNCE)
-    expect(handle.pendingViewIds!()).toEqual(new Set(["view_1"]))
   })
 })

@@ -30,9 +30,9 @@ the account (src/data/account-preferences.ts).
 
 ## The sidebar
 
-While Settings is open the sidebar keeps its shape. The Views and Calendar
+While Settings is open the sidebar keeps its shape. The Notes and Calendar
 links above, and the update, sync, Settings, Changelog and Help rows below,
-are exactly where they are on every other page; only the Views list gives
+are exactly where they are on every other page; only the Pinned list gives
 its place to the pages, under a **Settings** heading, in the same rows. The
 **Settings** row below is marked on every settings page, not only at
 `/settings`, and marked exactly as Help is while its panel is open — the

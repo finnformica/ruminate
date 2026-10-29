@@ -12,7 +12,7 @@ import { AsyncButton } from "./ui/async-button"
  * **Update** beside it.
  *
  * On a wide screen the sidebar's "Update Ruminate" row is always in view. On
- * a phone that row is at the foot of the navigation drawer, below the Views
+ * a phone that row is at the foot of the navigation drawer, below the Pinned
  * list, and the only sign of it outside the drawer is a dot on the menu
  * button — a dot that sync trouble takes over. So the phone says it here,
  * where nothing has to be opened or scrolled to. The strip is phone-only: the

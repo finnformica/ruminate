@@ -4,7 +4,6 @@ import {
   type LinkRow,
   type NodeRow,
   type ReplicaChangesBody,
-  type ViewRow,
 } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import { SessionExpiredError } from "../utils/github-token"
@@ -21,7 +20,6 @@ import {
   coalesceTypingKeys,
   keyEventStamp,
   opsToKeyEvents,
-  viewChangeToKeyEvents,
   type DeltaMatValueRow,
   type KeyEvent,
   type LoggedKeyEvent,
@@ -35,17 +33,6 @@ import type { ReplicaSyncHandle } from "./replica-sync"
 import type { CorpusRows } from "./deleted-notes"
 import type { NoteStore } from "./note-store"
 import { isBrowserOffline } from "../utils/network"
-import { sampleViews } from "./sample-graph"
-import {
-  applyViewRows,
-  deletedIdsOf,
-  orphanedViews,
-  patchedViews,
-  viewByRootAtom,
-  viewMapOf,
-  viewsAtom,
-  type ViewWrite,
-} from "./views"
 import {
   OFF_STORAGE_DIAGNOSTICS,
   storageDiagnosticsAtom,
@@ -313,15 +300,12 @@ interface DatabaseModeRuntime {
   generation: number
   /** Ops applied to the graph atom and not yet written to the store. */
   pendingOps: Op[]
-  /** The same ops (and view writes) as the per-key events they amount to —
+  /** The same ops as the per-key events they amount to —
    * what the flush writes. A typing run coalesces to one event before it lands. */
   pendingEvents: KeyEvent[]
   /** Notes those ops touched — whose rollups the flush refreshes. */
   pendingNoteIds: Set<NoteId>
   opsFlushTimer: ReturnType<typeof setTimeout> | null
-  /** View rows on the atom and not yet written to the store: a refresh from
-   * the store re-applies them, as it re-applies `pendingOps`. */
-  pendingViews: ViewRow[]
   /** The highest stamp this device has made or pulled: the next event's is
    * after it (`tickHlc`). Held here, saved under `HLC_KEY`. */
   lastStamp: Hlc | null
@@ -330,10 +314,10 @@ interface DatabaseModeRuntime {
   logBehind: boolean
   foldCheckTimer: ReturnType<typeof setTimeout> | null
   /** The entities batches and pulls touched since the last fold check. */
-  foldCheckKeys: { blocks: Set<string>; links: Set<string>; views: Set<string> }
+  foldCheckKeys: { blocks: Set<string>; links: Set<string> }
   /** The replica's rows the pulls brought since the last fold check, by key
    * (`foldCheckKey`): the check compares each with its cache row. */
-  replicaRows: { nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }
+  replicaRows: { nodes: NodeRow[]; links: LinkRow[] }
   /** The replica's `delta_mat_values` rows the pulls brought since the last
    * fold check: compared with the cache's. */
   replicaValues: DeltaMatValueRow[]
@@ -431,7 +415,6 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     pendingEvents: [],
     pendingNoteIds: new Set(),
     opsFlushTimer: null,
-    pendingViews: [],
     lastStamp: null,
     logBehind: false,
     foldCheckTimer: null,
@@ -440,9 +423,6 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     replicaRows: noRows(),
   }
   runtime = activation
-  // The sample corpus's views are the signed-out screen's; signed in, the
-  // store's arrive with the graph below.
-  jotai().set(viewsAtom, new Map())
   // Backgrounding the tab must not strand a coalescing run of ops.
   if (typeof window !== "undefined") {
     window.addEventListener("pagehide", onPageHidden)
@@ -510,8 +490,7 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
           () => noteCount(jotai().get(databaseGraphAtom)),
           {
             getAllRows: () =>
-              activation.store?.getAllRows() ??
-              Promise.resolve({ nodes: [], links: [], views: [] }),
+              activation.store?.getAllRows() ?? Promise.resolve({ nodes: [], links: [] }),
             unpushedEvents: () => activation.store?.unpushedEvents() ?? Promise.resolve([]),
             markEventsPushed: (seqs) =>
               activation.store?.markEventsPushed(seqs) ?? Promise.resolve(),
@@ -560,7 +539,6 @@ export function stopDatabaseMode() {
     const events = coalesceTypingKeys(stopped.pendingEvents)
     stopped.pendingOps = []
     stopped.pendingEvents = []
-    stopped.pendingViews = []
     const closing = stopped.store
     if (events.length > 0 && closing) {
       await closing
@@ -573,7 +551,6 @@ export function stopDatabaseMode() {
   const store = jotai()
   store.set(databaseModeStatusAtom, OFF_STATUS)
   store.set(databaseGraphAtom, EMPTY_GRAPH)
-  store.set(viewsAtom, viewMapOf(sampleViews()))
   store.set(storageDiagnosticsAtom, OFF_STORAGE_DIAGNOSTICS)
   // A denial belongs to the account that was refused; the signed-out screen
   // (and any next sign-in) starts clean.
@@ -614,7 +591,7 @@ async function saveStamp(activation: DatabaseModeRuntime, store: NoteStore) {
   }
 }
 
-/** Arm the coalescing flush: a run of ops (or view rows) is one store write. */
+/** Arm the coalescing flush: a run of ops is one store write. */
 function scheduleFlush(activation: DatabaseModeRuntime) {
   if (activation.opsFlushTimer !== null) clearTimeout(activation.opsFlushTimer)
   activation.opsFlushTimer = setTimeout(() => {
@@ -629,24 +606,14 @@ function scheduleFlush(activation: DatabaseModeRuntime) {
  * ops become the events they amount to against the graph they were planned
  * on (`opsToEvents`), which coalesce for `OPS_FLUSH_MS` and then land in the
  * store — the device's log and its rows, in one write — for the push loop to
- * carry. Nothing here parses or reconciles: the ops are the events. The view
- * writes a batch carries (`ViewWrite`: the row a new note is listed by) land
- * with it, in the same batch, after the tombstones its deletes leave.
+ * carry. Nothing here parses or reconciles: the ops are the events.
  * `cause` names the command, when the caller has one, for the history.
  */
-export function databaseApplyOps(
-  ops: readonly Op[],
-  views: readonly ViewWrite[] = [],
-  cause?: string,
-) {
+export function databaseApplyOps(ops: readonly Op[], cause?: string) {
   const activation = runtime
-  if (!activation) return
+  if (!activation || ops.length === 0) return
   const now = Date.now()
   const ctx = eventContext(activation, now, cause)
-  if (ops.length === 0) {
-    queueViewRows(activation, patchedViews(jotai().get(viewByRootAtom), views, now), ctx)
-    return
-  }
 
   const store = jotai()
   const before = store.get(databaseGraphAtom)
@@ -658,16 +625,6 @@ export function databaseApplyOps(
   activation.pendingOps.push(...ops)
   activation.pendingEvents.push(...opsToKeyEvents(before, ops, ctx))
   patchStatus({ emptyOffline: false })
-  // A deleted node takes its view with it: the one place the graph reaches
-  // into the views table (`src/data/views.ts`). Then the batch's own rows.
-  queueViewRows(
-    activation,
-    [
-      ...orphanedViews(store.get(viewsAtom), deletedIdsOf(ops), now),
-      ...patchedViews(store.get(viewByRootAtom), views, now),
-    ],
-    ctx,
-  )
   scheduleFlush(activation)
 }
 
@@ -677,44 +634,9 @@ export function databaseApplyOps(
  * Resolves once the write has landed, so a caller that is about to throw the
  * page away (⌘⇧U) can wait for it; fire-and-forget callers ignore it.
  */
-/**
- * Land view rows (`src/data/views.ts`) — a pin, a saved filter, a tombstone
- * — the way ops land: the atom at once, the store and the replica behind it.
- * Views are written as rows, so each row becomes the one event it amounts
- * to against the row the atom held (`viewChangeToEvent`): a create, an
- * update of what changed, a delete, a revival — or nothing, when the row
- * says what the atom already said.
- */
-export function databaseApplyViews(views: readonly ViewRow[], cause?: string) {
-  const activation = runtime
-  if (!activation || views.length === 0) return
-  queueViewRows(activation, views, eventContext(activation, Date.now(), cause))
-}
-
-function queueViewRows(
-  activation: DatabaseModeRuntime,
-  views: readonly ViewRow[],
-  ctx: EventContext,
-) {
-  if (views.length === 0) return
-  const store = jotai()
-  const held = store.get(viewsAtom)
-  for (const row of views) {
-    activation.pendingEvents.push(...viewChangeToKeyEvents(held.get(row.id), row, ctx))
-  }
-  store.set(viewsAtom, applyViewRows(held, views))
-  activation.pendingViews.push(...views)
-  scheduleFlush(activation)
-}
-
 export function requestDatabaseFlush(): Promise<void> {
   const activation = runtime
-  if (
-    !activation ||
-    (activation.pendingEvents.length === 0 && activation.pendingViews.length === 0)
-  ) {
-    return Promise.resolve()
-  }
+  if (!activation || activation.pendingEvents.length === 0) return Promise.resolve()
   if (activation.opsFlushTimer !== null) {
     clearTimeout(activation.opsFlushTimer)
     activation.opsFlushTimer = null
@@ -776,9 +698,8 @@ async function flushOps(activation: DatabaseModeRuntime) {
   // the whole run is in hand, and again in the store against the unpushed
   // tail of the log (`NoteStore.applyEvents`).
   const events = coalesceTypingKeys(activation.pendingEvents)
-  const views = activation.pendingViews
   const notes = [...activation.pendingNoteIds]
-  if (events.length === 0 && views.length === 0) return
+  if (events.length === 0) return
   activation.pendingOps = []
   activation.pendingEvents = []
   activation.pendingNoteIds = new Set()
@@ -790,12 +711,8 @@ async function flushOps(activation: DatabaseModeRuntime) {
       })
       await saveStamp(activation, activation.store)
     }
-    activation.pendingViews = activation.pendingViews.filter((row) => !views.includes(row))
     if (events.length > 0) {
-      activation.replica?.notifyChange(
-        notes,
-        views.map((row) => row.id),
-      )
+      activation.replica?.notifyChange(notes)
       bumpEventLog()
     }
     scheduleFoldCheck(activation)
@@ -805,33 +722,27 @@ async function flushOps(activation: DatabaseModeRuntime) {
   }
 }
 
-/** Re-read the graph and views atoms from the cache (at boot, after a pull or
+/** Re-read the graph atom from the cache (at boot, after a pull or
  * a repair), with any ops that arrived meanwhile re-applied on top — they are
  * applied on screen already and will land in the cache on their own flush. */
 async function refreshGraph(activation: DatabaseModeRuntime) {
   if (runtime !== activation || !activation.store) return
   const graph = await activation.store.getGraph()
-  const views = await activation.store.getViews()
   if (runtime !== activation) return
   jotai().set(databaseGraphAtom, applyOps(graph, activation.pendingOps, Date.now()))
-  jotai().set(viewsAtom, applyViewRows(viewMapOf(views), activation.pendingViews))
 }
 
-const noRows = () => ({ nodes: [] as NodeRow[], links: [] as LinkRow[], views: [] as ViewRow[] })
+const noRows = () => ({ nodes: [] as NodeRow[], links: [] as LinkRow[] })
 
-const noKeys = () => ({
-  blocks: new Set<string>(),
-  links: new Set<string>(),
-  views: new Set<string>(),
-})
+const noKeys = () => ({ blocks: new Set<string>(), links: new Set<string>() })
 
-/** Note the entities a batch of events names, for the next fold check. */
+/** Note the entities a batch of events names, for the next fold check. A
+ * view event is history only (docs/removing-views.md) and is not checked. */
 function touchEvents(activation: DatabaseModeRuntime, events: readonly KeyEvent[]) {
   const keys = activation.foldCheckKeys
   for (const event of events) {
-    const table =
-      event.entity === "block" ? keys.blocks : event.entity === "link" ? keys.links : keys.views
-    table.add(event.entity_id)
+    if (event.entity === "block") keys.blocks.add(event.entity_id)
+    else if (event.entity === "link") keys.links.add(event.entity_id)
   }
 }
 
@@ -840,7 +751,6 @@ function holdReplicaRows(activation: DatabaseModeRuntime, body: ReplicaChangesBo
   const held = activation.replicaRows
   held.nodes.push(...body.nodes)
   held.links.push(...body.links)
-  held.views.push(...body.views)
   activation.replicaValues.push(...(body.delta_mat_values ?? []))
 }
 
@@ -882,9 +792,8 @@ async function checkFold(activation: DatabaseModeRuntime) {
   activation.foldCheckKeys = noKeys()
   activation.replicaRows = noRows()
   activation.replicaValues = []
-  const touched = keys.blocks.size + keys.links.size + keys.views.size
-  const brought =
-    pulled.nodes.length + pulled.links.length + pulled.views.length + pulledValues.length
+  const touched = keys.blocks.size + keys.links.size
+  const brought = pulled.nodes.length + pulled.links.length + pulledValues.length
   if (touched + brought === 0) return
   try {
     const found: string[] = []
@@ -910,7 +819,6 @@ async function checkFold(activation: DatabaseModeRuntime) {
         links: new Set(
           pulled.links.map((row) => linkEntityId(row.source_id, row.destination_id, row.kind)),
         ),
-        views: new Set(pulled.views.map((row) => row.id)),
       }
       const [cached, cachedValues, unpushed, cursor] = await Promise.all([
         store.getRowsOf(replicaKeys),
@@ -922,7 +830,6 @@ async function checkFold(activation: DatabaseModeRuntime) {
       const pulledTo = cursor !== null && /^\d+$/.test(cursor) ? Number(cursor) : Infinity
       const seqOf = new Map<string, number>()
       for (const row of cached.nodes) seqOf.set(foldCheckKey("block", row.id), row.seq ?? 0)
-      for (const row of cached.views) seqOf.set(foldCheckKey("view", row.id), row.seq ?? 0)
       for (const row of cached.links) {
         const id = linkEntityId(row.source_id, row.destination_id, row.kind)
         seqOf.set(foldCheckKey("link", id), row.seq ?? 0)
@@ -971,15 +878,12 @@ function scheduleRepair(activation: DatabaseModeRuntime) {
     activation.pendingOps = []
     activation.pendingEvents = []
     activation.pendingNoteIds = new Set()
-    activation.pendingViews = []
     const graph = jotai().get(databaseGraphAtom)
     await activation.store.clear()
     await activation.store.applyPull({
       nodes: [...graph.nodes.values()],
       links: [...graph.childLinks.values()].flat(),
-      // The views the atom holds — live rows only; a tombstone not yet pushed
-      // is lost here exactly as a node's is, and for the same reason.
-      views: [...jotai().get(viewsAtom).values()],
+      views: [],
       deleteNodes: [],
       deleteLinks: [],
     })
@@ -1187,7 +1091,7 @@ async function seedCache(
     {
       nodes: body.nodes,
       links: body.links,
-      views: body.views,
+      views: [],
       deleteNodes: [],
       deleteLinks: [],
     },

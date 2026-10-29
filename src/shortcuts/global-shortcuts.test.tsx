@@ -96,7 +96,7 @@ describe("g chords", () => {
     fireEvent.keyDown(document.body, { key: "g" })
     fireEvent.keyDown(document.body, { key: "v" })
     expect(mocks.navigate).toHaveBeenLastCalledWith(
-      expect.objectContaining({ to: "/views/$", params: { _splat: "corpus_root" } }),
+      expect.objectContaining({ to: "/notes/$", params: { _splat: "corpus_root" } }),
     )
     fireEvent.keyDown(document.body, { key: "g" })
     fireEvent.keyDown(document.body, { key: "s" })

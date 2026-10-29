@@ -1,4 +1,4 @@
-import type { GraphDiff, LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
+import type { GraphDiff, LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import type { EntityKeys, StampedState } from "./events"
 import type { GraphSnapshot } from "./graph"
 import type { DeltaMatValueRow, KeyEvent, LoggedKeyEvent } from "./key-events"
@@ -29,7 +29,7 @@ export interface NoteStore {
   /**
    * Record a batch of events this device made and apply them to the cache
    * rows they name, field by field by stamp, in one transaction — for
-   * blocks, links and views alike (`src/data/events.ts`). The batch is
+   * blocks and links alike (`src/data/events.ts`). The batch is
    * applied verbatim — the client decided what cascades (`docToOps`), so the
    * store and the snapshot the ops were applied to agree row for row.
    *
@@ -68,7 +68,7 @@ export interface NoteStore {
   foldOfLog(keys?: EntityKeys): Promise<StampedState>
   /** The cache rows of the named entities, tombstones too: what the replica's
    * pulled rows are compared with. */
-  getRowsOf(keys: EntityKeys): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }>
+  getRowsOf(keys: EntityKeys): Promise<{ nodes: NodeRow[]; links: LinkRow[] }>
   /** The `delta_mat_values` rows of the named blocks: what the replica's pulled
    * key rows are compared with. */
   getDeltaMatValuesOf(ids: readonly string[]): Promise<DeltaMatValueRow[]>
@@ -82,18 +82,11 @@ export interface NoteStore {
   nodesOf(ids: readonly string[]): Promise<NodeRow[]>
   /** Every row of every corpus table, **tombstones included** — the replica
    * full-push source, and a delete only reaches other devices if it travels. */
-  getAllRows(): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }>
-  /**
-   * The live view rows (migrations/0015): the entrypoints into the graph —
-   * where a view starts, what it keeps, how it lays that out, and whether it
-   * is pinned. Not part of the graph, and not derivable from it: a view may
-   * name a node somebody else owns, which is the whole reason it is a table.
-   */
-  getViews(): Promise<ViewRow[]>
-  /** The live rows of the named entities, by the rules `getGraph` and
-   * `getViews` read the whole tables with. The fold check after a batch
-   * reads only what the batch touched (`src/data/fold-check.ts`). */
-  getLiveRows(keys: EntityKeys): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }>
+  getAllRows(): Promise<{ nodes: NodeRow[]; links: LinkRow[] }>
+  /** The live rows of the named entities, by the rules `getGraph` reads the
+   * whole tables with. The fold check after a batch reads only what the
+   * batch touched (`src/data/fold-check.ts`). */
+  getLiveRows(keys: EntityKeys): Promise<{ nodes: NodeRow[]; links: LinkRow[] }>
   /** Apply a planned pull (row upserts + deletes) in one transaction. Rows
    * land verbatim — remote `updated_at` and `deleted_at` are preserved — and
    * take the stamps their last event derives (`derivedStamps`). The pull of
@@ -102,7 +95,7 @@ export interface NoteStore {
    * replica's key rows (`values`, its `delta_mat_values`) written after the
    * rows' own, each at the stamp the replica holds for it. */
   applyPull(plan: GraphDiff, values?: readonly DeltaMatValueRow[]): Promise<void>
-  /** Wipe every corpus row — nodes, links, views and the device's log (meta
+  /** Wipe every corpus row — nodes, links and the device's log (meta
    * is kept). A cache reset, not a delete: nothing is tombstoned, so nothing
    * replicates — and an event not yet pushed goes with it, as an unpushed
    * row always did. */

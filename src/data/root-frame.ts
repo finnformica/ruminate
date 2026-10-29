@@ -9,8 +9,8 @@ import type { FocusFrame } from "./panes"
  * every live note, so a note with no View is still one step from anywhere,
  * and Back and Shift+F come down to it.
  *
- * It is implicit: the URL does not write it (`layoutToSearch`) and a View
- * does not save it (`view-stack.ts`). Every reader puts it back at the base.
+ * It is implicit: the URL does not write it (`layoutToSearch`). Every reader
+ * puts it back at the base.
  *
  * It is drawn as any note is, by the note page's own editor: its doc is the
  * walk of the corpus root (`rootView`), whose rows are notes, and an edit

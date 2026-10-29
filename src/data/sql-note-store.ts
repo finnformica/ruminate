@@ -3,22 +3,16 @@ import migration0002 from "../../migrations/0002_nodes.sql?raw"
 import {
   toLinkRow,
   toNodeRow,
-  toViewRow,
   type LinkRow,
   type NodeRow,
-  type ViewRow,
 } from "../../worker/handlers/replica-payload"
 import { ensureCorpusSchema } from "./corpus-schema"
-import {
-  eventStamp,
-  type Entity,
-  type EntityKeys,
-  type RuminateEvent,
-  type StampedState,
-} from "./events"
+import { eventStamp, type EntityKeys, type RuminateEvent, type StampedState } from "./events"
 import {
   CACHE_TABLES,
   cacheRowStatements,
+  isCachedEntity,
+  type CachedEntity,
   derivedStamps,
   entityIdOfRow,
   entityOfRow,
@@ -45,8 +39,8 @@ export const CACHE_STAMPS_KEY = "cache_stamps"
 
 /**
  * The SQL implementation of `NoteStore` — the store the app runs on, over the
- * schema v3 graph (docs/graph-schema-v2.md): `nodes` + `link` + `views` +
- * `meta`, and since v9 the device's own `events` (docs/event-sourcing.md).
+ * schema v3 graph (docs/graph-schema-v2.md): `nodes` + `link` + `meta`, and
+ * since v9 the device's own `events` (docs/event-sourcing.md).
  *
  * Backed by any `SqlDriver` (sqlite-wasm/OPFS in the browser, `node:sqlite` in
  * tests) and the exact migration files that initialize the D1 replica — in the
@@ -152,7 +146,7 @@ export async function openSqlNoteStore(
       // rows these events changed, and the keys of the blocks, never
       // backwards.
       for (const [id, seq] of seqs) {
-        for (const table of ["nodes", "link", "views"] as const) {
+        for (const table of ["nodes", "link"] as const) {
           statements.push({
             sql:
               `UPDATE ${table} SET seq = ?1 WHERE (seq IS NULL OR seq < ?1) AND ` +
@@ -233,15 +227,12 @@ export async function openSqlNoteStore(
         valuesOf.delete(node.id)
       }
       for (const link of plan.links) statements.push(upsertLinkStatement(link))
-      for (const view of plan.views) statements.push(upsertViewStatement(view))
       // A key row of a block the plan does not carry: the row alone.
       for (const rows of valuesOf.values()) {
         for (const row of rows) statements.push(upsertDeltaMatValueStatement(row))
       }
       if (statements.length > 0) await driver.batch(statements)
     },
-
-    getViews: () => loadViews(driver),
 
     getLiveRows: (keys) => loadLiveRows(driver, keys),
 
@@ -253,8 +244,6 @@ export async function openSqlNoteStore(
         { sql: "DELETE FROM link" },
         // tenant-exempt: as above.
         { sql: "DELETE FROM nodes" },
-        // tenant-exempt: as above.
-        { sql: "DELETE FROM views" },
         // tenant-exempt: as above — the device's log of a corpus it no longer
         // holds, unpushed events included (see `NoteStore.clear`).
         { sql: "DELETE FROM events" },
@@ -311,9 +300,6 @@ const LIVE_LINKS =
   "WHERE deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM nodes " +
   "WHERE nodes.id IN (link.source_id, link.destination_id) " +
   "AND nodes.deleted_at IS NOT NULL)"
-const LIVE_VIEWS =
-  "SELECT id, root_id, filter, sort, pinned, sort_key, stack, updated_at, seq FROM views " +
-  "WHERE deleted_at IS NULL"
 
 /** Keys in one statement: well under SQLite's bound on parameters. */
 const KEYS_PER_READ = 300
@@ -323,12 +309,12 @@ const inChunks = <T>(items: readonly T[]) =>
     items.slice(i * KEYS_PER_READ, (i + 1) * KEYS_PER_READ),
   )
 
-/** The live rows of the named entities, by the rules `loadMemGraph` and
- * `loadViews` read the whole tables with (`NoteStore.getLiveRows`). */
+/** The live rows of the named entities, by the rules `loadMemGraph` reads
+ * the whole tables with (`NoteStore.getLiveRows`). */
 async function loadLiveRows(
   driver: SqlDriver,
   keys: EntityKeys,
-): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }> {
+): Promise<{ nodes: NodeRow[]; links: LinkRow[] }> {
   const marks = (n: number) => Array(n).fill("?").join(", ")
   const nodes: NodeRow[] = []
   for (const ids of inChunks([...keys.blocks])) {
@@ -347,19 +333,12 @@ async function loadLiveRows(
     // The graph holds child links only (`buildGraphSnapshot`).
     links.push(...rows.map(toLinkRow).filter((link) => link.kind === CHILD_KIND))
   }
-  const views: ViewRow[] = []
-  for (const ids of inChunks([...keys.views])) {
-    const rows = await driver.exec(`${LIVE_VIEWS} AND id IN (${marks(ids.length)})`, ids)
-    views.push(...rows.map(toViewRow))
-  }
-  return { nodes, links, views }
+  return { nodes, links }
 }
 
 /** Every row, tombstones included — what replication has to carry. */
-async function loadAllRows(
-  driver: SqlDriver,
-): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }> {
-  const [nodeRows, linkRows, viewRows] = await Promise.all([
+async function loadAllRows(driver: SqlDriver): Promise<{ nodes: NodeRow[]; links: LinkRow[] }> {
+  const [nodeRows, linkRows] = await Promise.all([
     driver.exec(
       `SELECT id, type, text, ${NODE_PROPS} AS props, updated_at, deleted_at, notes_id, seq ` +
         `FROM nodes WHERE ${CREATED} ` +
@@ -370,31 +349,15 @@ async function loadAllRows(
       "SELECT source_id, destination_id, kind, sort_key, updated_at, deleted_at, seq FROM link " +
         `WHERE ${CREATED} /* includes-deleted: as above */`,
     ),
-    driver.exec(
-      "SELECT id, root_id, filter, sort, pinned, sort_key, stack, updated_at, deleted_at, seq " +
-        "FROM views " +
-        `WHERE ${CREATED} /* includes-deleted: as above */`,
-    ),
   ])
-  return {
-    nodes: nodeRows.map(toNodeRow),
-    links: linkRows.map(toLinkRow),
-    views: viewRows.map(toViewRow),
-  }
-}
-
-/** Every LIVE view row — the entrypoints the sidebar and the note page read
- * (migrations/0015). Tombstones are for replication, not for reading. */
-async function loadViews(driver: SqlDriver): Promise<ViewRow[]> {
-  const rows = await driver.exec(LIVE_VIEWS)
-  return rows.map(toViewRow)
+  return { nodes: nodeRows.map(toNodeRow), links: linkRows.map(toLinkRow) }
 }
 
 // -----------------------------------------------------------------------------
 // The device's log
 // -----------------------------------------------------------------------------
 
-const ENTITY_OF = { nodes: "block", link: "link", views: "view" } as const
+const ENTITY_OF = { nodes: "block", link: "link" } as const
 
 /** The queue: events the replica has not acknowledged, in the order made. */
 async function loadUnpushed(driver: SqlDriver): Promise<KeyEvent[]> {
@@ -449,22 +412,28 @@ const EVENT_COLUMNS =
 const toEvent = (row: Record<string, SqlValue>): LoggedKeyEvent | null =>
   parseStoredKeyEvent(row as Record<string, unknown>)
 
-/** The entities a batch of events names, by kind. */
+/** The cached entities a batch of events names, by kind. A view event is
+ * history only (docs/removing-views.md): no cache row is kept for it. */
 function keysOfEvents(events: readonly KeyEvent[]) {
-  const keys = { block: new Set<string>(), link: new Set<string>(), view: new Set<string>() }
-  for (const event of events) keys[event.entity].add(event.entity_id)
+  const keys = { block: new Set<string>(), link: new Set<string>() }
+  for (const event of events) {
+    if (isCachedEntity(event.entity)) keys[event.entity].add(event.entity_id)
+  }
   return keys
 }
 
 /** `(k1 = ? AND k2 = ?) OR …` for a chunk of entity ids, with its params. */
 /** Every column of an entity's cache row, a block's `props` derived from
  * its keys (`NODE_PROPS`) rather than read from the mirror column. */
-const columnsOf = (entity: Entity) =>
+const columnsOf = (entity: CachedEntity) =>
   entity === "block"
     ? `id, type, text, ${NODE_PROPS} AS props, updated_at, deleted_at, notes_id, seq, stamps`
     : "*"
 
-function whereKeys(entity: Entity, ids: readonly string[]): { sql: string; params: string[] } {
+function whereKeys(
+  entity: CachedEntity,
+  ids: readonly string[],
+): { sql: string; params: string[] } {
   const { key } = CACHE_TABLES[entity]
   if (key.length === 1) {
     return { sql: `${key[0]} IN (${ids.map(() => "?").join(", ")})`, params: [...ids] }
@@ -478,14 +447,14 @@ function whereKeys(entity: Entity, ids: readonly string[]): { sql: string; param
 /** The cache rows of the named entities, as the fold's entities. */
 async function loadCacheState(
   driver: SqlDriver,
-  keys: Record<Entity, ReadonlySet<string>>,
+  keys: Record<CachedEntity, ReadonlySet<string>>,
 ): Promise<StampedState> {
   const state: StampedState = { blocks: new Map(), links: new Map(), views: new Map() }
-  const tables = { block: state.blocks, link: state.links, view: state.views } as unknown as Record<
-    Entity,
+  const tables = { block: state.blocks, link: state.links } as unknown as Record<
+    CachedEntity,
     Map<string, ReturnType<typeof entityOfRow>>
   >
-  for (const entity of Object.keys(keys) as Entity[]) {
+  for (const entity of Object.keys(keys) as CachedEntity[]) {
     for (const ids of inChunks([...keys[entity]])) {
       const where = whereKeys(entity, ids)
       const rows = await driver.exec(
@@ -513,9 +482,9 @@ async function cacheStatements(
   if (events.length === 0) return []
   const keys = keysOfEvents(events)
   const state = foldKeysByStamp(events, await loadCacheState(driver, keys))
-  const tables = { block: state.blocks, link: state.links, view: state.views }
+  const tables = { block: state.blocks, link: state.links }
   const statements: SqlStatement[] = []
-  for (const entity of Object.keys(keys) as Entity[]) {
+  for (const entity of Object.keys(keys) as CachedEntity[]) {
     const table = tables[entity] as Map<string, Parameters<typeof cacheRowStatements>[1][0][1]>
     const entries = [...keys[entity]].flatMap((id) => {
       const value = table.get(id)
@@ -542,10 +511,9 @@ async function loadFoldOfLog(driver: SqlDriver, keys?: EntityKeys): Promise<Stam
     take(await driver.exec(`SELECT ${EVENT_COLUMNS} FROM events_log`))
     return assembleStamped(foldKeysByStamp(events))
   }
-  const named: [Entity, ReadonlySet<string>][] = [
+  const named: [CachedEntity, ReadonlySet<string>][] = [
     ["block", keys.blocks],
     ["link", keys.links],
-    ["view", keys.views],
   ]
   for (const [entity, ids] of named) {
     for (const chunk of inChunks([...ids])) {
@@ -592,9 +560,9 @@ async function loadDeltaMatValuesOf(
 async function loadRowsOf(
   driver: SqlDriver,
   keys: EntityKeys,
-): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }> {
+): Promise<{ nodes: NodeRow[]; links: LinkRow[] }> {
   const read = async <R>(
-    entity: Entity,
+    entity: CachedEntity,
     ids: ReadonlySet<string>,
     map: (row: Record<string, SqlValue>) => R,
   ) => {
@@ -614,7 +582,6 @@ async function loadRowsOf(
   return {
     nodes: await read("block", keys.blocks, toNodeRow),
     links: await read("link", keys.links, toLinkRow),
-    views: await read("view", keys.views, toViewRow),
   }
 }
 
@@ -716,36 +683,6 @@ const insertEventStatement = (event: KeyEvent): SqlStatement => ({
 // -----------------------------------------------------------------------------
 // The pull: the replica's rows, verbatim
 // -----------------------------------------------------------------------------
-
-/** Upsert one view row, last-writer-wins, as the replica does. A delete is a
- * row carrying `deleted_at`, so it goes through here too. */
-function upsertViewStatement(view: ViewRow): SqlStatement {
-  return {
-    // tenant-exempt: the local store is one user per browser profile; there is
-    // no second tenant in an OPFS database (src/data/corpus-schema.ts).
-    sql:
-      "INSERT INTO views (id, root_id, filter, sort, pinned, sort_key, stack, updated_at, " +
-      "deleted_at, seq, stamps) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
-      "ON CONFLICT (id) DO UPDATE SET root_id = excluded.root_id, filter = excluded.filter, " +
-      "sort = excluded.sort, pinned = excluded.pinned, sort_key = excluded.sort_key, " +
-      "stack = excluded.stack, updated_at = excluded.updated_at, " +
-      "deleted_at = excluded.deleted_at, seq = excluded.seq, " +
-      "stamps = excluded.stamps WHERE excluded.updated_at >= views.updated_at",
-    params: [
-      view.id,
-      view.root_id,
-      view.filter,
-      view.sort,
-      view.pinned ? 1 : 0,
-      view.sort_key,
-      view.stack ?? null,
-      view.updated_at,
-      view.deleted_at ?? null,
-      view.seq ?? null,
-      derivedStamps("view", view),
-    ],
-  }
-}
 
 /** A node row as the replica's rows look, verbatim — its props in the
  * mirror column and as one key row each, at the stamp the row derives

@@ -327,7 +327,9 @@ a View restores the whole stack; a path that no longer holds drops the
 frames below the break and keeps the top. See
 [graph-walk.md](./graph-walk.md), "Views save stacks".
 
-The entrypoints into the graph (docs/metadata.md, "Views"; `migrations/0015`):
+**Removed 2026-10-28** ([removing-views.md](./removing-views.md)): `migrations/0030` drops the table, and view events in the log are history only. The record of the old design follows.
+
+The entrypoints into the graph (`migrations/0015`):
 a node to start at, what of its subgraph to keep, how to lay it out, whether
 it is in the Views list (`pinned` — the list IS the rows that say so, for a
 note, a board and a block alike; every note and board is created with one,
@@ -511,13 +513,12 @@ are all of its call sites:
   from it, reach every note, and conclude that nothing may be deleted.
 - `walkGraph`'s upstream pass: the root would show above a note as its parent.
 
-The sort itself is a preference, not data: **Name** (the default), **Recently
-updated** and **Manual**, one preference for the sidebar's Views list and
-the palette, so no two surfaces disagree about where a view
-is. Manual is two bands — the notes the root holds, then the ones it does
-not, in the name order beneath them.
+**The root's links order every list of notes** ([removing-views.md](./removing-views.md)):
+the notes the root holds, in its order, then the ones it does not, by name.
+A drag on the notes page writes them (`moveNoteOps`). There is no sort
+preference any more.
 
-**The root's links are read, never written, now.** The Views list is one
+The record of the Views era follows. The Views list was one
 list of notes and block views (docs/metadata.md, "Views"), and one order
 cannot live on links from the root — a block view's place among the notes
 is not a link the graph should hold. So the order moved onto the view rows

@@ -24,7 +24,7 @@ async function renderAt(path: string) {
   const rootRoute = createRootRoute()
   const viewRoute = createRoute({
     getParentRoute: () => rootRoute,
-    path: "/views/$",
+    path: "/notes/$",
     component: () => (
       <RootLink>
         <NoteFavicon note={{ id: "note", type: "note" }} />
@@ -54,17 +54,17 @@ function tap(element: Element) {
 
 describe("RootLink", () => {
   it("goes to Notes on one tap of the icon", async () => {
-    const router = await renderAt("/views/note")
+    const router = await renderAt("/notes/note")
     await act(async () => {
       tap(screen.getByTestId("favicon-default"))
     })
     await vi.waitFor(() => {
-      expect(router.state.location.pathname).toBe(`/views/${CORPUS_ROOT_ID}`)
+      expect(router.state.location.pathname).toBe(`/notes/${CORPUS_ROOT_ID}`)
     })
   })
 
   it("has a hit area for a finger, around the 16px icon", async () => {
-    await renderAt("/views/note")
+    await renderAt("/notes/note")
     const link = screen.getByRole("link", { name: "Notes" })
     expect(link.className).toContain("coarse:before:-inset-3")
     expect(link.className).toContain("touch-manipulation")

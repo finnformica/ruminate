@@ -96,12 +96,6 @@ export interface BlockEditorApi {
    */
   context?: ReadonlySet<string>
   /**
-   * A line of quiet text after a listed root's content, by block id: a
-   * View's path in the palette ("Root › Tasks", `viewPathHint`). Only roots
-   * of a `fixedRoots` editor show one.
-   */
-  rootHints?: ReadonlyMap<string, string>
-  /**
    * The outline is a DIFF (`src/data/day-changes.ts`, the calendar): what a
    * period did to each row, drawn as a coloured sign in a gutter of the
    * editor's own at its left edge — the one column that never indents — a
@@ -356,7 +350,6 @@ export function BlockItem({
   const slot = slotOf(kind, listed)
   // Kept as context by a filter, not found by it (`BlockEditorApi.context`).
   const dimmed = api.context?.has(block.id) ?? false
-  const hint = listed && depth === 0 ? api.rootHints?.get(block.id) : undefined
   // What a period did to this row, when the outline is a diff (`BlockDiff`).
   const mark = api.diff?.marks.get(block.id)
 
@@ -1185,11 +1178,6 @@ export function BlockItem({
         ) : (
           <BlockContent content={body} />
         )}
-        {hint ? (
-          <span data-testid="row-hint" className="ml-2 text-text-secondary">
-            {hint}
-          </span>
-        ) : null}
       </LinkActionsContext.Provider>
     </div>
   )

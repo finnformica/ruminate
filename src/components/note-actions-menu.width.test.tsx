@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => vi.fn(),
-  useLocation: () => ({ pathname: "/views/n1" }),
+  useLocation: () => ({ pathname: "/notes/n1" }),
 }))
 
 const { NoteActionsMenu } = await import("./note-actions-menu")

@@ -310,8 +310,7 @@ function entryKey(
  * A tracker made from nothing — **New tracker**: its root node, typed
  * `tracker` and named by `title` (its id when the title is blank, as an
  * untitled note is), stamped as edited now. No series yet: the page's
- * **Series** editor adds them. No view row is written here: whether the
- * tracker is listed is the caller's to say (`LISTED_VIEW`, src/data/views.ts).
+ * **Series** editor adds them.
  * Nothing when the id is taken.
  */
 export function newTrackerOps(snapshot: GraphSnapshot, trackerId: NoteId, title: string): Op[] {
