@@ -2,7 +2,13 @@ import { useAtom } from "jotai"
 import React from "react"
 import { DEFAULT_NEW_BLOCK_MARKER } from "../../blocks/markers"
 import { MAX_EXPANDED_LEVELS, MIN_EXPANDED_LEVELS } from "../../blocks/default-collapsed"
-import { expandedLevelsAtom, newBlockMarkerAtom, pageWidthAtom } from "../../global-state"
+import type { RootTap } from "../../data/root-frame"
+import {
+  expandedLevelsAtom,
+  newBlockMarkerAtom,
+  pageWidthAtom,
+  rootTapAtom,
+} from "../../global-state"
 import type { Width } from "../../schema"
 import { WidthFixedIcon16, WidthFullIcon16 } from "../icons"
 import { Button } from "../ui/button"
@@ -12,6 +18,13 @@ import { SettingsSection } from "../settings-section"
 const WIDTH_OPTIONS: Array<{ value: Width; label: string; icon: React.ReactNode }> = [
   { value: "fixed", label: "Fixed", icon: <WidthFixedIcon16 /> },
   { value: "full", label: "Full width", icon: <WidthFullIcon16 /> },
+]
+
+/** What a tap on a note of the notes page does (`RootTap`). */
+const ROOT_TAP_OPTIONS: Array<{ value: RootTap; label: string }> = [
+  { value: "phone", label: "Phone only" },
+  { value: "always", label: "Every device" },
+  { value: "never", label: "Never" },
 ]
 
 /** Quick picks for the new-block marker; anything else can be typed in. */
@@ -26,6 +39,7 @@ export function EditorSection() {
   const [newBlockMarker, setNewBlockMarker] = useAtom(newBlockMarkerAtom)
   const [expandedLevels, setExpandedLevels] = useAtom(expandedLevelsAtom)
   const [pageWidth, setPageWidth] = useAtom(pageWidthAtom)
+  const [rootTap, setRootTap] = useAtom(rootTapAtom)
 
   return (
     <SettingsSection title="Editor">
@@ -43,6 +57,24 @@ export function EditorSection() {
               selected={pageWidth === option.value}
             >
               {option.icon}
+              {option.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-col gap-2">
+        <span id="root-tap-label" className="text-sm leading-4 text-text-secondary">
+          Tap a note on the notes page to open it
+        </span>
+        <div role="group" aria-labelledby="root-tap-label" className="flex flex-wrap gap-1">
+          {ROOT_TAP_OPTIONS.map((option) => (
+            <Button
+              key={option.value}
+              size="small"
+              aria-pressed={rootTap === option.value}
+              onClick={() => setRootTap(option.value)}
+              selected={rootTap === option.value}
+            >
               {option.label}
             </Button>
           ))}

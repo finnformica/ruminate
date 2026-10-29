@@ -852,3 +852,109 @@ describe("Backspace from a keyboard that does not say so", () => {
     }
   })
 })
+
+describe("a tap on a root row that opens (the notes page, `openRoots`)", () => {
+  function OpeningHarness({
+    initial,
+    onFocusNavigate,
+  }: {
+    initial: string
+    onFocusNavigate: (id: string | null, selected: string | null) => void
+  }) {
+    const [doc, setDoc] = useState<BlockDoc>(() => parse(initial))
+    return (
+      <>
+        <BlockEditor
+          doc={doc}
+          onChange={setDoc}
+          openRoots
+          focusRootId={null}
+          onFocusNavigate={onFocusNavigate}
+        />
+        <pre data-testid="serialized">{serialize(doc)}</pre>
+      </>
+    )
+  }
+  const idOfRow = (row: HTMLElement) => bodyOf(row).dataset.blockId
+
+  it("opens a root row by the focus path, and edits nothing", () => {
+    const open = vi.fn()
+    const { container } = render(
+      <OpeningHarness initial={"- Alpha\n  - Child\n- Beta"} onFocusNavigate={open} />,
+    )
+    const beta = rows(container)[2]
+    fireEvent.click(bodyOf(beta))
+    expect(open).toHaveBeenCalledTimes(1)
+    expect(open.mock.calls[0][0]).toBe(idOfRow(beta))
+    expect(container.querySelector("textarea")).toBeNull()
+  })
+
+  it("edits a row below the roots, as a tap does anywhere", () => {
+    const open = vi.fn()
+    const { container } = render(
+      <OpeningHarness initial={"- Alpha\n  - Child"} onFocusNavigate={open} />,
+    )
+    fireEvent.click(bodyOf(rows(container)[1]))
+    expect(open).not.toHaveBeenCalled()
+    expect(container.querySelector("textarea")!.value).toBe("Child")
+  })
+
+  it("leaves the chevron to fold the row", () => {
+    const open = vi.fn()
+    const { container } = render(
+      <OpeningHarness initial={"- Alpha\n  - Child"} onFocusNavigate={open} />,
+    )
+    fireEvent.click(rows(container)[0].querySelector("button")!)
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it("opens on a mouse's click too, where Shift+click still selects", () => {
+    coarse = false
+    const open = vi.fn()
+    const { container } = render(
+      <OpeningHarness initial={"- Alpha\n- Beta"} onFocusNavigate={open} />,
+    )
+    fireEvent.click(bodyOf(rows(container)[0]))
+    expect(open).toHaveBeenCalledTimes(1)
+    fireEvent.click(bodyOf(rows(container)[1]), { shiftKey: true })
+    expect(open).toHaveBeenCalledTimes(1)
+    fireEvent.doubleClick(bodyOf(rows(container)[1]))
+    expect(container.querySelector("textarea")).toBeNull()
+  })
+
+  it("offers Rename in the root row's sheet, which edits its text in place", () => {
+    vi.useFakeTimers()
+    try {
+      const open = vi.fn()
+      const { container } = render(
+        <OpeningHarness initial={"- Alpha\n  - Child"} onFocusNavigate={open} />,
+      )
+      fireEvent.pointerDown(rows(container)[0], { pointerType: "touch", clientX: 20, clientY: 20 })
+      act(() => {
+        vi.advanceTimersByTime(500)
+      })
+      liftFinger()
+      fireEvent.click(screen.getByText("Rename"))
+      expect(open).not.toHaveBeenCalled()
+      expect(container.querySelector("textarea")!.value).toBe("Alpha")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("offers no Rename below the roots, where a tap edits", () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(
+        <OpeningHarness initial={"- Alpha\n  - Child"} onFocusNavigate={vi.fn()} />,
+      )
+      fireEvent.pointerDown(rows(container)[1], { pointerType: "touch", clientX: 20, clientY: 20 })
+      act(() => {
+        vi.advanceTimersByTime(500)
+      })
+      expect(screen.getByTestId("block-menu-sheet").textContent).not.toContain("Rename")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

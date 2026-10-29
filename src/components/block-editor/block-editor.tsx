@@ -478,6 +478,7 @@ export function BlockEditor({
   onActivate,
   fixedRoots = false,
   movableRoots = false,
+  openRoots = false,
   emptyable = false,
   context,
   diff,
@@ -615,6 +616,14 @@ export function BlockEditor({
    * refused.
    */
   movableRoots?: boolean
+  /**
+   * A tap (or a click) on a root row opens it, by the focus path
+   * (`focusBlock`, what F runs), in place of an edit or a selection: the
+   * Root frame's notes, as Settings → Editor asks (`rootTapOpens`). Rows
+   * below the roots keep their own tap. The block menu offers **Rename**
+   * on a root row, to edit its text in place.
+   */
+  openRoots?: boolean
   /**
    * Rows the view keeps only as context — the unmatched ancestors of a
    * filtered view's matches (`src/data/filter-view.ts`), drawn dimmed. The
@@ -1713,6 +1722,7 @@ export function BlockEditor({
       keys: rowsFor(row.key),
       places: parentCountOf ? Math.max(1, parentCountOf(row.id)) : 1,
       pinned: pinnedAtOfProps(block.props) !== null,
+      opens: openRoots && row.depth === 0,
       figure: isFigureType(block.type)
         ? { align: figureAlignOf(block), sized: figureLayoutOf(block).size !== undefined }
         : undefined,
@@ -2441,6 +2451,7 @@ export function BlockEditor({
       ? (keys) => copy(`${window.location.origin}/notes/${noteId}?block=${firstId(keys)}`)
       : undefined,
     pin: canPin ? togglePins : undefined,
+    rename: openRoots && !readOnly ? (keys) => edit(keys[0]) : undefined,
     share: canShare ? (keys) => openShareDialog(firstId(keys)) : undefined,
     linkDownstream:
       onRequestLink && !readOnly ? (keys) => requestLink(keys[0], "downstream") : undefined,
@@ -2521,6 +2532,7 @@ export function BlockEditor({
     keyboardActive: !navigable || (keyboardActive && !pointerIdle && !coarse),
     coarsePointer: coarse,
     fixedRoots,
+    openRoot: openRoots && !readOnly ? (key) => navigateFocus(idOfKey(key)) : undefined,
     context,
     diff,
     // Browsing: a click opens the row (BlockItem routes a read-only row's

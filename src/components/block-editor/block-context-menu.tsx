@@ -61,6 +61,9 @@ export interface BlockMenuTarget {
   places: number
   /** Pinned (`src/data/pins.ts`): listed in the sidebar's Pinned. */
   pinned: boolean
+  /** A tap opens the row (`BlockEditor.openRoots`), so the menu offers
+   * Rename to edit its text in place. */
+  opens?: boolean
   /** A figure row's layout (`src/blocks/figure.ts`): the side its picture
    * or card keeps to, and whether it has been dragged to a size of its own. */
   figure?: { align: FigureAlign; sized: boolean }
@@ -204,6 +207,13 @@ function menuEntries(target: BlockMenuTarget, actions: BlockActions): MenuEntry[
   }
   const item = (e: Omit<Extract<MenuEntry, { kind: "item" }>, "kind">) =>
     push({ kind: "item", ...e })
+
+  // A row a tap opens has no tap left to edit it: Rename does, first, as
+  // a note's menu has it in the sidebar.
+  if (target.opens && keys.length === 1 && actions.rename) {
+    item({ label: "Rename", onSelect: () => actions.rename?.(keys) })
+    section()
+  }
 
   // Copying, first: what a hold is most often for.
   item({ label: `Copy${many}`, shortcut: ["⌘", "C"], onSelect: () => actions.copy(keys) })
@@ -440,6 +450,13 @@ export function BlockMenuSheet({
       <Sheet.Content
         data-testid="block-menu-sheet"
         className="select-none [-webkit-touch-callout:none]"
+        // A pick that starts an edit (Rename) has put the caret in a row's
+        // text by the time the sheet goes: the sheet leaves focus there,
+        // as a desktop's popup does, rather than hand it back and end the
+        // edit.
+        onCloseAutoFocus={(event) => {
+          if (document.activeElement instanceof HTMLTextAreaElement) event.preventDefault()
+        }}
         size="fit"
         handle
         titleVisible
