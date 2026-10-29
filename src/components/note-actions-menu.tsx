@@ -369,6 +369,7 @@ export function NoteActionsMenu({
   surface = "outline",
   onFeatures,
   onSeries,
+  groups,
 }: {
   noteId: string
   className?: string
@@ -381,6 +382,12 @@ export function NoteActionsMenu({
   onFeatures?: () => void
   /** Opens the tracker's Series editor: the tracker page passes it. */
   onSeries?: () => void
+  /**
+   * The page's own groups (`DropdownMenu.Group`s), drawn first and set off
+   * from the note's entries by a rule: the tracker page's Range and Layout.
+   * The same menu at every width, so a phone and a desktop get one pattern.
+   */
+  groups?: React.ReactNode
 }) {
   const entriesFor = useNoteMenuEntries()
   const navigate = useNavigate()
@@ -421,6 +428,12 @@ export function NoteActionsMenu({
         }
       />
       <DropdownMenu.Content align={align}>
+        {groups ? (
+          <>
+            {groups}
+            <DropdownMenu.Separator />
+          </>
+        ) : null}
         {editor?.showWidth && editor.onWidth && share === null ? (
           <>
             <DropdownMenu.Group>
