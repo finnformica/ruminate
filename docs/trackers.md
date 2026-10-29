@@ -155,9 +155,12 @@ has no keys to validate.
   column per series, as a bullet journal's habit page is drawn. A column is
   headed by its series's colour alone: the Today strip's chips are the
   legend, and the name is the column's `aria-label`. A tap on a grid cell
-  logs as a tap on a card's cell does. The grid scrolls in its own box
-  under the row of colours and beside the day column, both of which stay
-  put, and opens scrolled to today's row. A phone (390 px) shows six series
+  logs as a tap on a card's cell does. The grid's card fills the space left
+  under the Today strip and date row, down to the bottom of the screen, and
+  scrolls in its own box under the row of colours and beside the day
+  column, both of which stay put; the page itself does not scroll in this
+  layout (Finn, 2026-10-29). It opens scrolled to today's row. A phone
+  (390 px) shows six series
   with no sideways scroll; more scroll sideways. A pick leaves the menu
   open, so both can be set at once. The range and the layout are page
   state: a reload shows this month as cards.
