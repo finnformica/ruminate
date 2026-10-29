@@ -11,16 +11,15 @@ import { Notice } from "../components/notice"
 import { PageLayout } from "../components/page-layout"
 import { RootLink } from "../components/root-link"
 import { ActivityCard, ActivitySummary } from "../components/trackers/activity"
+import { DisplayGroups, type TrackerLayout } from "../components/trackers/display-groups"
 import { JournalGrid } from "../components/trackers/journal-grid"
 import { MonthGrid } from "../components/trackers/month-grid"
 import { SeriesDialog } from "../components/trackers/series-dialog"
 import { TodayStrip } from "../components/trackers/today-strip"
 import { Button } from "../components/ui/button"
-import { DropdownMenu } from "../components/ui/dropdown-menu"
 import { IconButton } from "../components/ui/icon-button"
 import { PillButton } from "../components/ui/pill-button"
 import {
-  TRACKER_RANGES,
   localDay,
   rangeLabel,
   rangeStart,
@@ -52,12 +51,6 @@ import { cx } from "../utils/cx"
  * 2026-10-29). A wide window shows both, and the menu has no Heatmap row.
  */
 
-const RANGE_LABELS: Record<TrackerRange, string> = { week: "Week", month: "Month", year: "Year" }
-
-const LAYOUTS = ["cards", "grid"] as const
-type TrackerLayout = (typeof LAYOUTS)[number]
-const LAYOUT_LABELS: Record<TrackerLayout, string> = { cards: "Cards", grid: "Grid" }
-
 /** What a narrow window shows under the Today strip: the activity card or
  * the range. A wide window shows both, side by side. */
 type NarrowView = "activity" | "range"
@@ -81,67 +74,10 @@ function subscribeWide(onChange: () => void): () => void {
 /** Whether the window is wide enough for both views (`WIDE_QUERY`): the
  * menu's Heatmap row is only there when it is not. */
 function useWide(): boolean {
-  return useSyncExternalStore(subscribeWide, () => wideQuery()?.matches ?? false, () => false)
-}
-
-/**
- * The display options, in the note's ⋯ menu on a phone and a desktop alike
- * (Finn, 2026-10-29): the range and the layout, as two groups of which one
- * row each is ticked. A pick leaves the menu open, so both can be set at
- * once.
- */
-function DisplayGroups({
-  range,
-  layout,
-  heatmap,
-  onHeatmap,
-  onRangeChange,
-  onLayoutChange,
-}: {
-  range: TrackerRange
-  layout: TrackerLayout
-  /** On a narrow window, whether the activity card is shown (the Heatmap
-   * row is ticked); undefined on a wide one, which has no Heatmap row. */
-  heatmap: boolean | undefined
-  onHeatmap: () => void
-  onRangeChange: (range: TrackerRange) => void
-  onLayoutChange: (layout: TrackerLayout) => void
-}) {
-  return (
-    <>
-      <DropdownMenu.Group>
-        <DropdownMenu.GroupLabel>Range</DropdownMenu.GroupLabel>
-        {heatmap !== undefined ? (
-          <DropdownMenu.Item closeOnClick={false} selected={heatmap} onClick={onHeatmap}>
-            Heatmap
-          </DropdownMenu.Item>
-        ) : null}
-        {TRACKER_RANGES.map((option) => (
-          <DropdownMenu.Item
-            key={option}
-            closeOnClick={false}
-            selected={option === range && heatmap !== true}
-            onClick={() => onRangeChange(option)}
-          >
-            {RANGE_LABELS[option]}
-          </DropdownMenu.Item>
-        ))}
-      </DropdownMenu.Group>
-      <DropdownMenu.Separator />
-      <DropdownMenu.Group>
-        <DropdownMenu.GroupLabel>Layout</DropdownMenu.GroupLabel>
-        {LAYOUTS.map((option) => (
-          <DropdownMenu.Item
-            key={option}
-            closeOnClick={false}
-            selected={option === layout}
-            onClick={() => onLayoutChange(option)}
-          >
-            {LAYOUT_LABELS[option]}
-          </DropdownMenu.Item>
-        ))}
-      </DropdownMenu.Group>
-    </>
+  return useSyncExternalStore(
+    subscribeWide,
+    () => wideQuery()?.matches ?? false,
+    () => false,
   )
 }
 

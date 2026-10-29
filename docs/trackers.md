@@ -182,12 +182,11 @@ has no keys to validate.
   and the entry's text after the day (`Entry.detail`, read only), five at
   first and ten more for each **Show more**. The heatmap is for reading; the
   strip and the range log. On a phone, or a window narrower than `lg`, the
-  activity card is what the page opens to; a pick in the display menu shows
-  the range instead, and **Heatmap** beside the range's name comes back. A
-  wider window shows the card as a column beside the range. The heatmap
-  has no entry in the display menu yet: the menu is moving into the note's
-  ⋯ menu (workstream `display-options-in-note-menu`), and a **Heatmap**
-  entry there is the follow-up.
+  activity card is what the page opens to. The ⋯ menu's **Range** group
+  then starts with **Heatmap**, ticked while the card is shown; a pick of
+  a range or a layout shows the range instead (that range ticked), and
+  **Heatmap** comes back (`display-groups.tsx`). A wider window shows the
+  card as a column beside the range, so its menu has no **Heatmap** row.
 - The range shown moves with the arrows beside its name, by a week, a
   month or a year; **This week**, **This month** or **This year** comes
   back. The page refreshes its idea of today every minute, so a tab
@@ -211,4 +210,6 @@ entry, midnight and daylight-saving edges), the heatmap's weeks, the Recent
 order, the entry text in both shapes and the ops; `src/components/trackers/month-grid.test.tsx` renders
 the grid and the strip; `src/data/key-events.test.ts` pins the key
 validation. `month-grid.stories.tsx` shows the page at desktop and phone
-widths; `activity.stories.tsx` the summary line and the activity card.
+widths; `activity.stories.tsx` the summary line and the activity card;
+`display-groups.test.tsx` the ⋯ menu's Heatmap row on a narrow and a wide
+window.
