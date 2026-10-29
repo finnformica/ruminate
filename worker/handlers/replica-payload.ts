@@ -73,10 +73,10 @@ export interface LinkRow {
 
 /** The `link` table's primary key (within one tenant): [source, dest, kind]. */
 /**
- * One row of the `views` table (migrations/0015) — an entrypoint into the
- * graph, and the viewer's own: `user_id` is the key's first column, so a view
- * may name a `root_id` belonging to somebody else (a share) without touching
- * their node.
+ * One row of the old `views` table (migrations/0015, dropped by 0030,
+ * docs/removing-views.md). Kept on the wire only: a build from before still
+ * pushes these and reads `views` off a pull. The replica writes nothing for
+ * a pushed row and answers every pull with none.
  */
 export interface ViewRow {
   /** Minted per view; several per root are allowed. */
@@ -190,9 +190,8 @@ export function toLinkRow(row: Record<string, unknown>): LinkRow {
 export interface GraphDiff {
   nodes: NodeRow[]
   links: LinkRow[]
-  /** View rows (migrations/0015). A delete is a tombstoned row here, as it is
-   * for nodes and links — there is no purge channel for views, because none
-   * was ever needed. */
+  /** Always empty now (docs/removing-views.md): kept for the builds that
+   * read it. */
   views: ViewRow[]
   deleteNodes: string[]
   deleteLinks: LinkKey[]

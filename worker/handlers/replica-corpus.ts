@@ -31,7 +31,6 @@ import type {
 import {
   toLinkRow,
   toNodeRow,
-  toViewRow,
   type LinkRow,
   type NodeRow,
   type ReplicaChangesBody,
@@ -39,7 +38,6 @@ import {
   type ReplicaPutPayload,
   type ReplicaPutResult,
   type ReplicaStatusBody,
-  type ViewRow,
 } from "./replica-payload"
 
 /**
@@ -55,15 +53,16 @@ import {
  * Null means "nothing new": the client keeps the cursor it already had, which
  * is exactly right, and the next `seq > ?` stays a single index seek.
  */
-function cursorOf(nodes: NodeRow[], links: LinkRow[], views: ViewRow[]): string | null {
+function cursorOf(nodes: NodeRow[], links: LinkRow[]): string | null {
   let max = 0
   for (const node of nodes) if ((node.seq ?? 0) > max) max = node.seq ?? 0
   for (const link of links) if ((link.seq ?? 0) > max) max = link.seq ?? 0
-  for (const view of views) if ((view.seq ?? 0) > max) max = view.seq ?? 0
   return max === 0 ? null : String(max)
 }
 
-/** Full pull: every row of all three tables, plus the sequence they reach. */
+/** Full pull: every row of both tables, plus the sequence they reach.
+ * `views` is always empty: the table is gone (docs/removing-views.md), and
+ * the field stays for a client from before that reads it. */
 export async function corpusPullFull(tenant: TenantDb): Promise<ReplicaCorpusBody> {
   const all = tenant.includingDeleted()
   const nodes = (
@@ -80,13 +79,6 @@ export async function corpusPullFull(tenant: TenantDb): Promise<ReplicaCorpusBod
         "WHERE user_id = :tenant /* includes-deleted: replication carries tombstones */",
     )
   ).map(toLinkRow)
-  const views = (
-    await all.exec(
-      "SELECT id, root_id, filter, sort, pinned, sort_key, stack, updated_at, deleted_at, seq " +
-        "FROM views " +
-        "WHERE user_id = :tenant /* includes-deleted: replication carries tombstones */",
-    )
-  ).map(toViewRow)
   const deltaMatValues = (
     await all.exec(
       "SELECT block_id, key, value, hlc, seq, updated_at FROM delta_mat_values WHERE user_id = :tenant",
@@ -95,9 +87,9 @@ export async function corpusPullFull(tenant: TenantDb): Promise<ReplicaCorpusBod
   return {
     nodes,
     links,
-    views,
+    views: [],
     delta_mat_values: deltaMatValues,
-    cursor: cursorOf(nodes, links, views),
+    cursor: cursorOf(nodes, links),
   }
 }
 
@@ -114,9 +106,9 @@ const toDeltaMatValueRow = (row: Record<string, unknown>): DeltaMatValueRow => (
 /**
  * Incremental pull: rows with `seq > since` (tombstones included — a delete
  * takes a sequence value like any other write, so it arrives as an ordinary
- * change), and nothing else. Two index seeks on `nodes_tenant_seq` /
- * `link_tenant_seq` / `views_tenant_seq`, so a quiet pull reads one row per
- * table.
+ * change), and nothing else. Index seeks on `nodes_tenant_seq` and
+ * `link_tenant_seq`, so a quiet pull reads one row per table. `views` is
+ * always empty, as in the full pull.
  *
  * `seq` is assigned by the replica (`planEventAppend`), so `>` is EXACT: no
  * device clock is involved, nothing can land with a stamp behind the cursor,
@@ -154,15 +146,6 @@ export async function corpusPullSince(
       [since],
     )
   ).map(toLinkRow)
-  const views = (
-    await all.exec(
-      "SELECT id, root_id, filter, sort, pinned, sort_key, stack, updated_at, deleted_at, seq " +
-        "FROM views " +
-        "WHERE user_id = :tenant AND seq > ?1 " +
-        "/* includes-deleted: a tombstoned row IS the change being pulled */",
-      [since],
-    )
-  ).map(toViewRow)
   // The key rows of the blocks pulled: a block's `seq` is its last event's,
   // and so is each of its keys' at most, so the same cursor bounds both.
   const deltaMatValues = (
@@ -175,9 +158,9 @@ export async function corpusPullSince(
   return {
     nodes,
     links,
-    views,
+    views: [],
     delta_mat_values: deltaMatValues,
-    cursor: cursorOf(nodes, links, views),
+    cursor: cursorOf(nodes, links),
   }
 }
 

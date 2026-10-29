@@ -1,11 +1,11 @@
 // Sharing — `/api/shares` (docs/sharing.md).
 //
-// A share is a view shared with someone: an owner names a note or block and
+// A share is a root shared with someone: an owner names a note or block and
 // an email, and the person GitHub reports that email for reads — and, with
 // the verbs the owner ticked, edits or deletes — the slice of the owner's
-// corpus beneath that root. The share row holds the grant; the root, and the
-// filter and sort the grantee opens it with, are the owner's VIEW of the node
-// (migrations/0017, docs/metadata.md), read at request time. The slice is
+// corpus beneath that root. The share row holds the grant and names the root
+// by `view_id` (migrations/0017; a view's id was its root's, and views are
+// gone, docs/removing-views.md). The slice is
 // computed here on every request from the owner's rows
 // (`worker/shares/slice.ts`), so it is live and least-privilege by
 // construction.
@@ -32,14 +32,14 @@
 //   PUT    /api/shares/:id/notes  — write into the slice (grantee only)
 
 import { controlPlaneDriver, corpusDriver, forTenant } from "../tenancy-db"
-import { writeRows, writerOf } from "./event-log"
+import { writerOf } from "./event-log"
 import type { Env } from "../types"
 import { PERMISSIONS, normalizeEmail, type Permission, type ShareGrant } from "../shares/grant"
 import {
   applySliceWrite,
   closureIds,
   planSliceWrite,
-  resolveShareViews,
+  shareViewOf,
   sliceRows,
   takenIds,
 } from "../shares/slice"
@@ -94,29 +94,11 @@ const asReceived = ({ grant, owner }: ReceivedShare, view: ShareView): ReceivedS
 const ownerHandle = (env: Env, ownerId: number) =>
   forTenant(corpusDriver(env), { id: ownerId, login: String(ownerId), name: null })
 
-/** The view behind each received share, resolved under its owner's handle —
- * one query per owner, since shares from one person come from one partition. */
-async function receivedViews(env: Env, received: ReceivedShare[]): Promise<Map<string, ShareView>> {
-  const byOwner = new Map<number, string[]>()
-  for (const { grant } of received) {
-    const ids = byOwner.get(grant.ownerId) ?? []
-    ids.push(grant.viewId)
-    byOwner.set(grant.ownerId, ids)
-  }
-  const views = new Map<string, ShareView>()
-  for (const [ownerId, ids] of byOwner) {
-    const resolved = await resolveShareViews(ownerHandle(env, ownerId), ids)
-    for (const { grant } of received) {
-      if (grant.ownerId !== ownerId) continue
-      const view = resolved.get(grant.viewId)
-      if (view) views.set(grant.id, view)
-    }
-  }
-  return views
-}
-
-/** A view nothing resolved — a grant naming no view at all. */
+/** What a grant naming no root resolves to. */
 const NO_VIEW: ShareView = { id: "", rootId: "", filter: null, sort: null }
+
+/** What a grant is of, on the wire (`shareViewOf`). */
+const viewOf = (grant: ShareGrant): ShareView => shareViewOf(grant) ?? NO_VIEW
 
 /** Route `/api/shares[/<id>[/notes]]`. Every route is session-guarded. */
 export async function shares(
@@ -153,24 +135,13 @@ export async function shares(
           503,
         )
       }
-      // Each share's view, read where it lives: the caller's own partition
-      // for what they gave, each owner's for what they received.
-      const givenViews = await resolveShareViews(
-        forTenant(corpusDriver(env), session),
-        listing.given.map((grant) => grant.viewId),
-      )
-      const views = await receivedViews(env, listing.received)
       const body: SharesListBody = {
         // The caller's OWN address, so Settings can say which address others
         // may share with — read back from the row, which is what shares are
         // resolved against, rather than from whatever the client remembers.
         me: { email: listing.email },
-        given: listing.given.map((grant) =>
-          asGiven(grant, givenViews.get(grant.viewId) ?? NO_VIEW),
-        ),
-        received: listing.received.map((entry) =>
-          asReceived(entry, views.get(entry.grant.id) ?? NO_VIEW),
-        ),
+        given: listing.given.map((grant) => asGiven(grant, viewOf(grant))),
+        received: listing.received.map((entry) => asReceived(entry, viewOf(entry.grant))),
       }
       return json(body)
     }
@@ -261,40 +232,6 @@ async function ownsNode(tenant: ReturnType<typeof forTenant>, id: string): Promi
   return rows.length > 0
 }
 
-/**
- * The owner's view of the node being shared, made where they have none: an
- * empty one — unpinned, unfiltered — under the root's own id, which is the
- * id the client mints too (src/data/views.ts), so the owner saving a filter
- * later lands on this very row. It goes in through the log like any write
- * (`writeRows`), so it carries a `seq` and the owner's devices pull it, and
- * it never overwrites a view the owner has — live or tombstoned: the view IS
- * the share, and what they saved is what is shared.
- */
-async function ensureView(
-  tenant: ReturnType<typeof forTenant>,
-  rootId: string,
-  now: number,
-): Promise<void> {
-  const held = await tenant.exec("SELECT id FROM views WHERE user_id = :tenant AND id = ?1", [
-    rootId,
-  ])
-  if (held.length > 0) return
-  const view = {
-    id: rootId,
-    root_id: rootId,
-    filter: null,
-    sort: null,
-    pinned: false,
-    sort_key: null,
-    updated_at: now,
-  }
-  await writeRows(
-    tenant,
-    { nodes: [], links: [], views: [view] },
-    { actor: tenant.userId, origin: "system", device: "share", cause: "share:ensure-view", now },
-  )
-}
-
 async function create(request: Request, env: Env, session: VerifiedIdentity): Promise<Response> {
   let raw: unknown
   try {
@@ -334,10 +271,8 @@ async function create(request: Request, env: Env, session: VerifiedIdentity): Pr
     )
   }
 
-  // The view is the share: make sure the owner has one of this node, then
-  // record the grant against it.
+  // The grant names the root by its id (`view_id`, migrations/0017).
   const now = Date.now()
-  await ensureView(tenant, parsed.rootId, now)
   const grant = await createShare(control, {
     ownerId: session.id,
     granteeEmail: parsed.email,
@@ -345,10 +280,9 @@ async function create(request: Request, env: Env, session: VerifiedIdentity): Pr
     permissions: parsed.permissions,
     now,
   })
-  const view = (await resolveShareViews(tenant, [grant.viewId])).get(grant.viewId) ?? NO_VIEW
   // The response says what was stored and nothing about the address: whether
   // it belongs to a Ruminate user is not this endpoint's to reveal.
-  return json({ share: asGiven(grant, view) }, 201)
+  return json({ share: asGiven(grant, viewOf(grant)) }, 201)
 }
 
 async function write(
