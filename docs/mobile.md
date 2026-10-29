@@ -22,6 +22,14 @@ keyboard that appears and disappears. The block editor
   marker gap and the row's padding, not only the words — so a short line is as
   easy to hit as a long one. The chevron, the checkbox, the focus dot and links
   keep their own taps.
+- **A tap opens a note on the notes page.** On the Root frame (the notes
+  page), a tap on a note row opens the note by the focus path (`focusBlock`,
+  what F runs), so a board or a tracker opens its own page; a tap on a row
+  below a note still edits it. Settings → Editor sets this (`rootTapAtom`,
+  `rootTapOpens` in `src/data/root-frame.ts`): **Phone only** (the default),
+  **Every device** (a mouse's plain click opens too; Shift+click still
+  selects) or **Never**. Where a tap opens, the row's block menu leads with
+  **Rename**, which edits the note's title in place.
 - **The block menu is a sheet, on a long press.** A press-and-hold (a finger
   down on a row that stays put for 450ms, timed by the editor itself) opens
   `BlockMenuSheet`, a sheet from the bottom of the screen with the row's text

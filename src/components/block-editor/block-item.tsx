@@ -88,6 +88,12 @@ export interface BlockEditorApi {
    */
   fixedRoots?: boolean
   /**
+   * Open a root row (`BlockEditor.openRoots`): set when a tap or a click on
+   * a root row opens it, by the focus path, in place of an edit or a
+   * selection. Rows below the roots never call it.
+   */
+  openRoot?: (key: string) => void
+  /**
    * Rows kept only to say where a match lives — the unmatched ancestors of
    * a filtered view's matches (`src/data/filter-view.ts`). Drawn dimmed, so
    * the rows the filter actually found are the ones that read as found;
@@ -1182,6 +1188,12 @@ export function BlockItem({
     </div>
   )
 
+  // A root row the editor opens on a tap (`BlockEditor.openRoots`: the
+  // notes page's notes): the tap, or a mouse's plain click, opens the note
+  // by the focus path rather than editing or selecting it. The block menu's
+  // Rename edits its text in place.
+  const opensOnTap = depth === 0 && api.openRoot !== undefined
+
   // A finger's tap on the row — anywhere in it that is not a control (the
   // chevron, the checkbox, a link, the focus dot) — edits it, with the caret
   // where the tap landed when the body's text is the stored text as is
@@ -1199,6 +1211,11 @@ export function BlockItem({
     if (editing) return
     const target = event.target instanceof Element ? event.target : null
     if (target?.closest("button, input, a, textarea, [role='menu']")) return
+    if (opensOnTap) {
+      touchDown.current = null
+      api.openRoot?.(occurrence.key)
+      return
+    }
     const bodyEl = event.currentTarget.querySelector<HTMLElement>("[data-block-id]")
     const point = touchDown.current ?? { x: event.clientX, y: event.clientY }
     touchDown.current = null
@@ -1255,10 +1272,12 @@ export function BlockItem({
       ? {}
       : {
           onClick: (event) => {
-            if (!isControl(event.target)) api.select(occurrence.key, event.shiftKey)
+            if (isControl(event.target)) return
+            if (opensOnTap && !event.shiftKey) api.openRoot?.(occurrence.key)
+            else api.select(occurrence.key, event.shiftKey)
           },
           onDoubleClick: (event) => {
-            if (isControl(event.target)) return
+            if (isControl(event.target) || opensOnTap) return
             const bodyEl = event.currentTarget.querySelector<HTMLElement>("[data-block-id]")
             const left = bodyEl?.getBoundingClientRect().left
             api.edit(occurrence.key, left !== undefined && event.clientX < left)

@@ -10,7 +10,7 @@ import {
   type FocusFrame,
   type PaneLayout,
 } from "./panes"
-import { ROOT_DEPTH, ROOT_LABEL, isRootFrame, rootFrame } from "./root-frame"
+import { ROOT_DEPTH, ROOT_LABEL, isRootFrame, rootFrame, rootTapOpens } from "./root-frame"
 import { foldRule, withFold, type Folds } from "./view-state"
 
 describe("the Root frame (docs/graph-walk.md, decision 5)", () => {
@@ -90,5 +90,16 @@ describe("folds in the Root frame, as in a note's (docs/graph-walk.md, section 5
     expect(collapsedIn(currentFrame(layout.panes[1])).has(NOTE)).toBe(false)
     layout = toggle(layout, 1, NOTE)
     expect(collapsedIn(currentFrame(layout.panes[1])).has(NOTE)).toBe(true)
+  })
+})
+
+describe("a tap on a note of the Root frame (Settings → Editor)", () => {
+  it("opens the note on a phone only, everywhere, or never", () => {
+    expect(rootTapOpens("phone", true)).toBe(true)
+    expect(rootTapOpens("phone", false)).toBe(false)
+    expect(rootTapOpens("always", true)).toBe(true)
+    expect(rootTapOpens("always", false)).toBe(true)
+    expect(rootTapOpens("never", true)).toBe(false)
+    expect(rootTapOpens("never", false)).toBe(false)
   })
 })

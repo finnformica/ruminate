@@ -49,3 +49,21 @@ export function rootHomeOf(doc: BlockDoc, id: string): string | null {
   })
   return home
 }
+
+/**
+ * What a tap on a note row of the Root frame does (Settings → Editor):
+ * `phone` opens the note on a touch screen and edits it in place with a
+ * mouse, `always` opens it everywhere (a mouse's click too), `never` edits
+ * it in place everywhere, as any other row. Opening is the focus path
+ * (`focusBlock`, what F runs), so a board or a tracker opens its own page.
+ * Rows below a note always edit in place.
+ */
+export type RootTap = "phone" | "always" | "never"
+
+export const ROOT_TAPS: readonly RootTap[] = ["phone", "always", "never"]
+
+export const DEFAULT_ROOT_TAP: RootTap = "phone"
+
+/** Does a tap (or a click) on a note row of the Root frame open the note? */
+export const rootTapOpens = (setting: RootTap, coarsePointer: boolean): boolean =>
+  setting === "always" || (setting === "phone" && coarsePointer)

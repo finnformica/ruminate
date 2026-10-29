@@ -25,6 +25,7 @@ import type { ReceivedShareSummary } from "./data/shares"
 import { createNotesBuilder } from "./data/note-meta"
 import { sampleGraph } from "./data/sample-graph"
 import { pinnedIdsOf } from "./data/pins"
+import { DEFAULT_ROOT_TAP, ROOT_TAPS, type RootTap } from "./data/root-frame"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
 import { createBlockIndexer, searchBlocks, type BlockHit } from "./utils/block-search"
 import { parseQuery, type Query } from "./utils/search"
@@ -642,3 +643,18 @@ export const expandedLevelsAtom = atom(
  * while that pane lives. Stored on this device.
  */
 export const pageWidthAtom = atomWithStorage<Width>("page-width", "fixed")
+
+/**
+ * What a tap on a note of the notes page does (`RootTap`,
+ * `src/data/root-frame.ts`): open it on a phone, everywhere, or never.
+ * Settings → Editor. Stored on this device; a value this build does not
+ * know reads as the default.
+ */
+const storedRootTapAtom = atomWithStorage<RootTap>("root-tap", DEFAULT_ROOT_TAP)
+export const rootTapAtom = atom(
+  (get) => {
+    const stored = get(storedRootTapAtom)
+    return ROOT_TAPS.includes(stored) ? stored : DEFAULT_ROOT_TAP
+  },
+  (_get, set, value: RootTap) => set(storedRootTapAtom, value),
+)
