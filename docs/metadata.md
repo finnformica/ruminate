@@ -19,7 +19,7 @@ A pin is a property: `pinned_at`, the time the note or block was pinned (below).
 
 Views are removed (see [removing-views.md](./removing-views.md)). The notes page, the outline from the root, is the one list of notes, in the order you drag them into.
 
-**Pin** in the menu of a note or a block sets its `pinned_at` prop. **Unpin** takes the prop out. The sidebar's **Pinned** list, and the palette's Pinned group with nothing typed, show your pinned notes and blocks, oldest pin first. A pinned block's row opens its note focused on the block. A pin is an edit like any other, so it travels in the event log. A note someone shared with you has no **Pin**: its props are the owner's.
+**Pin** in the menu of a note or a block sets its `pinned_at` prop. **Unpin** takes the prop out. The sidebar's **Pinned** list, and the palette's Pinned group with nothing typed, show your pinned notes and blocks, oldest pin first. Beneath it, the sidebar's **Notes** list shows every note in the notes page's order: the same rows as the notes page, so the two never disagree. A pinned block's row opens its note focused on the block. A pin is an edit like any other, so it travels in the event log. A note someone shared with you has no **Pin**: its props are the owner's.
 
 A filter and a sort are not saved on a note. They live in the address with the frames, so a link or a bookmark keeps them.
 

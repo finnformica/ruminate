@@ -17,15 +17,15 @@ A view was a row of its own beside the graph (`views`, migrations/0015): a root,
 
 ## What replaces each use
 
-| Use of a view                          | Replacement                                                                                                                                      |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| A list of every note in the sidebar    | **Notes** in the sidebar opens the notes page: the outline from the root. It is the one list of notes, with one order (the root's child links).  |
-| Keep a deep place to hand (block view) | **Pin** in a block's menu. A pin is the `pinned_at` prop on the node. **Pinned** in the sidebar lists the pinned notes and blocks, oldest first. |
-| Go back to a place fast                | The palette's **Recent** (⌘K with nothing typed), ranked by use. It already holds blocks as well as notes.                                       |
-| Open a note in a saved stack           | The address holds the stack. A bookmark or a copied link opens the same stack.                                                                   |
-| A saved filter on a note               | The address holds the filter. Copy the link to keep it.                                                                                          |
-| Order the notes                        | Drag them on the notes page, as before.                                                                                                          |
-| A share names a view                   | A share names its root. `shares.view_id` always held the root's id, so the share reads it as the root.                                           |
+| Use of a view                          | Replacement                                                                                                                                           |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A list of every note in the sidebar    | The sidebar's **Notes** list is the notes page's rows (the outline from the root), in the same order (the root's child links). One list, drawn twice. |
+| Keep a deep place to hand (block view) | **Pin** in a block's menu. A pin is the `pinned_at` prop on the node. **Pinned** in the sidebar lists the pinned notes and blocks, oldest first.      |
+| Go back to a place fast                | The palette's **Recent** (⌘K with nothing typed), ranked by use. It already holds blocks as well as notes.                                            |
+| Open a note in a saved stack           | The address holds the stack. A bookmark or a copied link opens the same stack.                                                                        |
+| A saved filter on a note               | The address holds the filter. Copy the link to keep it.                                                                                               |
+| Order the notes                        | Drag them on the notes page, as before.                                                                                                               |
+| A share names a view                   | A share names its root. `shares.view_id` always held the root's id, so the share reads it as the root.                                                |
 
 A pin is a prop on the node, so it travels in the key events with no table and no new event entity. A pin on a block in a note someone shared with you is not offered: the node is the owner's.
 

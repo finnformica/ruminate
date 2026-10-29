@@ -9,6 +9,7 @@ import {
   isBootingAtom,
   isHelpPanelOpenAtom,
   pinnedEntriesAtom,
+  rootNotesAtom,
   sharedNotesAtom,
   type PinnedBlock,
   type PinnedEntry,
@@ -61,6 +62,7 @@ export function NavItems({
   onNavigate?: () => void
 }) {
   const pinned = useAtomValue(pinnedEntriesAtom)
+  const notes = useAtomValue(rootNotesAtom)
   const sharedNotes = useAtomValue(sharedNotesAtom)
   const booting = useAtomValue(isBootingAtom)
   const syncText = useSyncStatusText()
@@ -119,25 +121,42 @@ export function NavItems({
               </NavLink>
             </li>
           </ul>
-          {/* The lists, each under its own heading — Pinned, Shared — with one
-              rule above them, setting them off from the links above.
+          {/* The lists, each under its own heading — Pinned, Notes, Shared —
+              with one rule above them, setting them off from the links above.
 
               Pinned is the user's own notes and blocks kept to hand
               (src/data/pins.ts, docs/removing-views.md), oldest pin first.
-              A block's row opens its note focused on it. */}
+              A block's row opens its note focused on it. Notes is the notes
+              page's own rows, in its order (`rootNotesAtom`): the one list
+              of notes, drawn twice, never two lists. */}
           {inSettings ? (
             <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
               <SectionHeading>Settings</SectionHeading>
               <SettingsNavList size={size} />
             </div>
-          ) : pinned.length > 0 ? (
-            <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
-              <SectionHeading>Pinned</SectionHeading>
-              <PinnedRows entries={pinned} size={size} onNavigate={onNavigate} />
-            </div>
-          ) : booting ? (
-            <NavListSkeleton />
-          ) : null}
+          ) : (
+            <>
+              {pinned.length > 0 ? (
+                <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
+                  <SectionHeading>Pinned</SectionHeading>
+                  <PinnedRows entries={pinned} size={size} onNavigate={onNavigate} />
+                </div>
+              ) : null}
+              {notes.length > 0 ? (
+                <div
+                  className={cx(
+                    "flex flex-col gap-1",
+                    pinned.length > 0 ? "pt-2" : "border-t border-border-secondary pt-3",
+                  )}
+                >
+                  <SectionHeading>Notes</SectionHeading>
+                  <NoteRows notes={notes} size={size} onNavigate={onNavigate} testId="note-rows" />
+                </div>
+              ) : booting ? (
+                <NavListSkeleton />
+              ) : null}
+            </>
+          )}
           {/* Notes other people shared with this account (docs/sharing.md):
               one list, whoever shared them, with who did in each row's
               tooltip and in the note page's header. They are listed apart
@@ -327,21 +346,24 @@ function NavRowIcon({
   )
 }
 
-/** The note rows of a list with no order of its own: the shared notes. */
+/** The note rows of a list whose order is given: the notes page's rows, and
+ * the shared notes. */
 function NoteRows({
   notes,
   titleOf,
   size,
   onNavigate,
+  testId,
 }: {
   notes: Note[]
+  testId?: string
   /** A row's tooltip, where a list has one (who shared the note). */
   titleOf?: (note: Note) => string | undefined
   size: "medium" | "large"
   onNavigate?: () => void
 }) {
   return (
-    <ul className="flex flex-col gap-1">
+    <ul className="flex flex-col gap-1" data-testid={testId}>
       {notes.map((note) => (
         <li key={note.id} className="note-row group/note relative">
           {/* The note fills the row. Its actions button is not there

@@ -12,7 +12,7 @@ import {
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { DEFAULT_EXPANDED_LEVELS, clampExpandedLevels } from "./blocks/default-collapsed"
 import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
-import { isNoteType, type GraphSnapshot } from "./data/graph"
+import { isNoteType, rootChildIds, type GraphSnapshot } from "./data/graph"
 import { asBlockType, type BlockType } from "./blocks/types"
 import { orderedNoteIds } from "./data/note-order"
 import {
@@ -305,6 +305,25 @@ export const ownSortedNotesAtom = atom((get) => {
   const notes = get(sortedNotesAtom)
   return origin.size === 0 ? notes : notes.filter((note) => !origin.has(note.id))
 })
+
+/**
+ * The sidebar's **Notes** list (docs/removing-views.md): the rows of the
+ * notes page, the Root frame (`rootChildIds`), as notes — the same notes in
+ * the same order, so the two never disagree. Shared notes are left out, as
+ * the notes page leaves them out: they are listed under Shared.
+ */
+export const rootNotesAtom = atom((get): Note[] => {
+  const notes = get(notesAtom)
+  if (notes.size === 0) return NO_NOTES
+  const origin = get(sharedOriginAtom)
+  const exclude = origin.size === 0 ? undefined : new Set(origin.keys())
+  return rootChildIds(get(graphSnapshotAtom), exclude).flatMap((id) => {
+    const note = notes.get(id)
+    return note ? [note] : []
+  })
+})
+
+const NO_NOTES: Note[] = []
 
 /** The notes shared with the user, each with the share it came through, in
  * `sortedNotesAtom` order — one list, whoever shared them (the sidebar's

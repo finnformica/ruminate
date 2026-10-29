@@ -4,7 +4,7 @@
 
 ### Changed
 
-- **Notes** is now the one place your notes are listed, in the order you drag them into. The sidebar, search and the calendar all follow that order.
+- **Notes** is now the one list of your notes, in the order you drag them into. The sidebar shows the same list under **Notes**, below **Pinned**. Search and the calendar follow that order too.
 - A note's address starts with `/notes/`. Old links that start with `/views/` still open the same note or block.
 
 ### Removed

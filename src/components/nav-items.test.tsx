@@ -62,11 +62,17 @@ vi.mock("../global-state", async (importOriginal) => {
     // Derived from the graph in the real module; a plain writable atom
     // here, so a test can state the rows and be about the list.
     pinnedEntriesAtom: atom([]),
+    rootNotesAtom: atom([]),
     sharedNotesAtom: atom([]),
   }
 })
 
-import { graphSnapshotAtom, pinnedEntriesAtom, sharedNotesAtom } from "../global-state"
+import {
+  graphSnapshotAtom,
+  pinnedEntriesAtom,
+  rootNotesAtom,
+  sharedNotesAtom,
+} from "../global-state"
 import { buildGraphSnapshot } from "../data/graph"
 import { layoutFromSearch, layoutToSearch, type PaneLayout } from "../data/panes"
 import { isRootFrame, rootFrame } from "../data/root-frame"
@@ -99,8 +105,11 @@ function renderSidebar({
   notes,
   blocks = [],
   shared = [],
+  all = [],
 }: {
   notes: Note[]
+  /** Every note, as the notes page lists them (`rootNotesAtom`). */
+  all?: Note[]
   /** The pinned blocks, listed after the notes. */
   blocks?: PinnedBlockRow[]
   shared?: Note[]
@@ -128,6 +137,7 @@ function renderSidebar({
       ...blocks.map((block) => ({ kind: "block", id: block.id, noteId: block.noteId, block })),
     ] as never,
   )
+  store.set(rootNotesAtom as never, all as never)
   store.set(
     sharedNotesAtom as never,
     shared.map((note) => ({
@@ -174,6 +184,19 @@ describe("the sidebar's Pinned list", () => {
     renderSidebar({ notes: [] })
     expect(screen.queryByTestId("pinned-rows")).toBeNull()
     expect(screen.queryAllByTestId("section-heading")).toEqual([])
+  })
+
+  it("lists every note under Notes with nothing pinned, in the order given", () => {
+    // Finn's report of 2026-10-29: with no pins the sidebar showed no notes.
+    renderSidebar({ notes: [], all: THREE })
+    expect(headings()).toEqual(["Notes"])
+    const rows = within(screen.getByTestId("note-rows")).getAllByRole("listitem")
+    expect(rows.map((row) => row.textContent?.trim())).toEqual(["Alpha", "Bravo", "Charlie"])
+  })
+
+  it("keeps Pinned above Notes when something is pinned", () => {
+    renderSidebar({ notes: [THREE[0]], blocks: [BLOCK], all: THREE })
+    expect(headings()).toEqual(["Pinned", "Notes"])
   })
 
   it("lists what other people shared apart, beneath it", () => {

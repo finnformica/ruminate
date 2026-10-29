@@ -20,6 +20,7 @@ import {
   ownSortedNotesAtom,
   pinnedEntriesAtom,
   pinnedRootsAtom,
+  rootNotesAtom,
   recentVisitsAtom,
   sampleGraphAtom,
   searchBlocksAtom,
@@ -211,6 +212,33 @@ describe("pinnedEntriesAtom", () => {
       ]),
     )
     expect(store.get(pinnedEntriesAtom)).toEqual([])
+    unsubscribe()
+  })
+})
+
+describe("rootNotesAtom", () => {
+  it("is the notes page's rows as notes, with nothing pinned — the sidebar's Notes list", async () => {
+    const { store, unsubscribe } = await signedInStore(FILES)
+    // Nothing pinned: the sidebar must still list every note (Finn's report
+    // of 2026-10-29, "the sidebar with the notes doesn't load").
+    expect(store.get(pinnedEntriesAtom)).toEqual([])
+    expect(store.get(rootNotesAtom).map((note) => note.id)).toEqual(["misc", "tasks"])
+    // The root's own order leads, as on the notes page (`rootChildIds`).
+    store.set(
+      databaseGraphAtom,
+      applyOps(
+        store.get(databaseGraphAtom),
+        [
+          { op: "create", id: "corpus_root", type: "corpus_root", text: "", props: null },
+          { op: "link", source: "corpus_root", destination: "tasks", sortKey: "a0" },
+        ],
+        2,
+      ),
+    )
+    expect(store.get(rootNotesAtom).map((note) => note.id)).toEqual(["tasks", "misc"])
+    // A note someone shared is listed under Shared, not here.
+    store.set(sharedOriginAtom, new Map([["misc", "share-1"]]))
+    expect(store.get(rootNotesAtom).map((note) => note.id)).toEqual(["tasks"])
     unsubscribe()
   })
 })
