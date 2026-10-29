@@ -110,6 +110,9 @@ export interface Entry {
   date: DayString
   /** Done or not for a check series; the logged number for a number series. */
   value: boolean | number
+  /** The entry's text after the day (`5 km`, `5 km · felt good`), when it
+   * has any: what the Recent list shows. Read only; nothing writes it. */
+  detail?: string
 }
 
 /** The block types a check series's entries are: an open and a ticked
@@ -187,6 +190,8 @@ export interface EntryBlock {
 
 const ENTRY_TEXT_RE = /^(\d{4}-\d{2}-\d{2})(?:\b(.*))?$/s
 const FIRST_NUMBER_RE = /-?\d+(?:[.,]\d+)?/
+/** What can stand between the day and the rest of an entry's text. */
+const DETAIL_LEAD_RE = /^[\s·:;,\-–—]+/
 
 /**
  * The entry a block's text declares under a series of `kind`, or null when
@@ -201,14 +206,16 @@ export function entryOf(block: EntryBlock, kind: SeriesKind): Entry | null {
   const match = ENTRY_TEXT_RE.exec(block.text.trim())
   if (match) {
     const [, date, rest = ""] = match
+    const detail = rest.replace(DETAIL_LEAD_RE, "").trim()
+    const withDetail = (entry: Entry): Entry => (detail ? { ...entry, detail } : entry)
     if (kind === "check") {
-      if (block.type === DONE_TYPE) return { id: block.id, date, value: true }
-      if (block.type === TODO_TYPE) return { id: block.id, date, value: false }
+      if (block.type === DONE_TYPE) return withDetail({ id: block.id, date, value: true })
+      if (block.type === TODO_TYPE) return withDetail({ id: block.id, date, value: false })
     } else {
       const number = FIRST_NUMBER_RE.exec(rest)
       if (number) {
         const value = Number(number[0].replace(",", "."))
-        if (Number.isFinite(value)) return { id: block.id, date, value }
+        if (Number.isFinite(value)) return withDetail({ id: block.id, date, value })
       }
     }
   }
@@ -651,13 +658,16 @@ export function rangeLabel(
   if (range === "month") return monthLabel(monthOf(start), locale)
   if (range === "year") return start.slice(0, 4)
   const end = addDays(start, 6)
-  const short = (d: DayString) =>
-    new Date(utcOf(d)).toLocaleDateString(locale, {
-      day: "numeric",
-      month: "short",
-      timeZone: "UTC",
-    })
-  return `${short(start)} – ${short(end)} ${end.slice(0, 4)}`
+  return `${shortDayLabel(start, locale)} – ${shortDayLabel(end, locale)} ${end.slice(0, 4)}`
+}
+
+/** A day in a list: "29 Oct". */
+export function shortDayLabel(day: DayString, locale: string = LABEL_LOCALE): string {
+  return new Date(utcOf(day)).toLocaleDateString(locale, {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  })
 }
 
 /** A month's short name: "Oct". */
@@ -792,6 +802,113 @@ export function cellLevel(state: SeriesState, day: DayString, days: readonly Day
       ? state.series.max
       : Math.max(...days.map((d) => amountOn(state, d)), amount)
   return Math.max(1, Math.min(CELL_LEVELS, Math.ceil((amount / scale) * CELL_LEVELS)))
+}
+
+// -----------------------------------------------------------------------------
+// The tracker as a whole
+// -----------------------------------------------------------------------------
+
+/**
+ * Whether a series has something on a day: a ticked check, or a number
+ * above zero. An open to-do is not, nor a zero. No target is asked: this is
+ * what the heatmap fills and the active days count, not a goal.
+ */
+export function isLogged(state: SeriesState, day: DayString): boolean {
+  return amountOn(state, day) > 0
+}
+
+/** The days any series has something on (`isLogged`). */
+function activeDays(series: readonly SeriesState[]): Set<DayString> {
+  const days = new Set<DayString>()
+  for (const state of series) {
+    for (const day of state.entries.keys()) if (isLogged(state, day)) days.add(day)
+  }
+  return days
+}
+
+export interface ActiveSummary {
+  /** Active days in a row up to today, counted from yesterday while today
+   * is still open, as a series's `streak` is. */
+  streak: number
+  /** Active days among the last 7, today one of them. */
+  lastWeek: number
+  /** Active days among the last 28, today one of them. */
+  lastFourWeeks: number
+  /** Active days up to today. A day after today does not count. */
+  allTime: number
+}
+
+/**
+ * The summary line over the heatmap (Finn, 2026-10-29): a day is active
+ * when any series has something on it. The windows end on today and step
+ * in whole days (`addDays`), so a daylight-saving change moves nothing.
+ */
+export function activeSummary(series: readonly SeriesState[], today: DayString): ActiveSummary {
+  const days = activeDays(series)
+  let day = days.has(today) ? today : addDays(today, -1)
+  let run = 0
+  while (days.has(day)) {
+    run += 1
+    day = addDays(day, -1)
+  }
+  let lastWeek = 0
+  let lastFourWeeks = 0
+  let allTime = 0
+  for (const active of days) {
+    const ago = daysBetween(active, today)
+    if (ago < 0) continue
+    allTime += 1
+    if (ago < 28) lastFourWeeks += 1
+    if (ago < 7) lastWeek += 1
+  }
+  return { streak: run, lastWeek, lastFourWeeks, allTime }
+}
+
+/** How many weeks the heatmap shows: about three months, which fits a phone
+ * (390 px) with cells big enough to read and no sideways scroll. */
+export const HEATMAP_WEEKS = 12
+
+/**
+ * The heatmap's columns: `weeks` weeks from Monday, oldest first, the last
+ * one the week today is in. Each column holds its seven days; the days of
+ * this week after today are in it too, drawn as still to come.
+ */
+export function heatmapWeeks(today: DayString, weeks: number = HEATMAP_WEEKS): DayString[][] {
+  const first = addDays(weekStart(today), -7 * (weeks - 1))
+  return Array.from({ length: weeks }, (_, w) =>
+    Array.from({ length: 7 }, (_, d) => addDays(first, 7 * w + d)),
+  )
+}
+
+/** The series that have something on a day, in the page's order: a heatmap
+ * cell is filled in their colours, split when there is more than one. */
+export function seriesOnDay(series: readonly SeriesState[], day: DayString): Series[] {
+  return series.filter((state) => isLogged(state, day)).map((state) => state.series)
+}
+
+export interface RecentEntry {
+  series: Series
+  entry: Entry
+}
+
+/**
+ * Every entry with something on it (`isLogged`) up to today, newest first;
+ * on one day, in the page's order of series. The Recent list shows the
+ * first few of these.
+ */
+export function recentEntries(series: readonly SeriesState[], today: DayString): RecentEntry[] {
+  const out: (RecentEntry & { order: number })[] = []
+  series.forEach((state, order) => {
+    for (const entry of state.entries.values()) {
+      if (entry.date <= today && isLogged(state, entry.date)) {
+        out.push({ series: state.series, entry, order })
+      }
+    }
+  })
+  out.sort((a, b) =>
+    a.entry.date === b.entry.date ? a.order - b.order : a.entry.date < b.entry.date ? 1 : -1,
+  )
+  return out.map(({ series: s, entry }) => ({ series: s, entry }))
 }
 
 /** A number as the strip and the cards show it: whole when it is, else to
