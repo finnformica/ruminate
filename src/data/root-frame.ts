@@ -51,12 +51,13 @@ export function rootHomeOf(doc: BlockDoc, id: string): string | null {
 }
 
 /**
- * What a tap on a note row of the Root frame does (Settings → Editor):
- * `phone` opens the note on a touch screen and edits it in place with a
- * mouse, `always` opens it everywhere (a mouse's click too), `never` edits
- * it in place everywhere, as any other row. Opening is the focus path
- * (`focusBlock`, what F runs), so a board or a tracker opens its own page.
- * Rows below a note always edit in place.
+ * What a tap on a row does where the frame decides it (Settings → Editor):
+ * on the Root frame (the notes page) `phone` opens the row on a touch
+ * screen and edits it with a mouse, `always` opens it everywhere (a mouse's
+ * click too), `never` edits it everywhere. Any row opens, a note or a
+ * block at any depth below one. Opening is the focus path (`focusBlock`,
+ * what F runs), so a board or a tracker opens its own page. In any other
+ * frame (a note, or a block focused) a tap edits.
  */
 export type RootTap = "phone" | "always" | "never"
 
@@ -64,6 +65,16 @@ export const ROOT_TAPS: readonly RootTap[] = ["phone", "always", "never"]
 
 export const DEFAULT_ROOT_TAP: RootTap = "phone"
 
-/** Does a tap (or a click) on a note row of the Root frame open the note? */
-export const rootTapOpens = (setting: RootTap, coarsePointer: boolean): boolean =>
-  setting === "always" || (setting === "phone" && coarsePointer)
+/** What a tap (or a click) on a row does: open it, or edit it in place. */
+export type TapAction = "open" | "edit"
+
+/**
+ * The tap rule by the row's place in the graph: the frame decides, not the
+ * row. A later setting can add more places than the Root frame here.
+ */
+export const tapAction = (
+  frameIsRoot: boolean,
+  coarsePointer: boolean,
+  setting: RootTap,
+): TapAction =>
+  frameIsRoot && (setting === "always" || (setting === "phone" && coarsePointer)) ? "open" : "edit"

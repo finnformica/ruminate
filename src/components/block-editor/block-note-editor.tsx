@@ -113,7 +113,7 @@ export function BlockNoteEditor({
   onPivot,
   fixedRoots,
   movableRoots,
-  openRoots,
+  tapOpens,
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc, hint?: ChangeHint) => void
@@ -196,9 +196,9 @@ export function BlockNoteEditor({
    * Root frame's note rows (`BlockEditor.fixedRoots`, `movableRoots`). */
   fixedRoots?: boolean
   movableRoots?: boolean
-  /** A tap on a root row opens it (`BlockEditor.openRoots`): the Root
-   * frame's notes, as Settings → Editor asks. */
-  openRoots?: boolean
+  /** A tap on a row opens it (`BlockEditor.tapOpens`): every row of the
+   * Root frame, as Settings → Editor asks. */
+  tapOpens?: boolean
 }) {
   // A view that may legitimately hold nothing gets no starter: a filter that
   // matched nothing, and the basket, would otherwise show one empty row that
@@ -449,7 +449,7 @@ export function BlockNoteEditor({
       onEditingChange={onEditingChange}
       fixedRoots={fixedRoots}
       movableRoots={movableRoots}
-      openRoots={openRoots}
+      tapOpens={tapOpens}
     />
   )
 }

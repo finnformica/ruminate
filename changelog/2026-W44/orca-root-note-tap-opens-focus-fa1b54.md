@@ -1,5 +1,5 @@
 ### Added
 
-- On a phone, a tap on a note on the **Notes** page opens the note. A board or a tracker opens its own page. A tap on a row inside a note still edits it.
-- **Settings → Editor → Tap a note on the notes page to open it**: **Phone only** (the default), **Every device** or **Never**. With **Every device**, a click opens the note too.
-- **Rename** in the menu of a note on the **Notes** page edits its title in place, when a tap opens the note. On a phone, open the menu with a long press.
+- On a phone, a tap on any block on the **Notes** page opens it: a note, or a block at any depth inside one. A board or a tracker opens its own page. Inside a note you opened, a tap still edits.
+- **Settings → Editor → Tap a block on the notes page to open it**: **Phone only** (the default), **Every device** or **Never**. With **Every device**, a click opens the block too.
+- Where a tap opens, a block's menu edits its text in place: **Rename** on a note, **Edit** on a block inside one. On a phone, open the menu with a long press.

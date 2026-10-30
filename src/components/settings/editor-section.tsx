@@ -20,7 +20,7 @@ const WIDTH_OPTIONS: Array<{ value: Width; label: string; icon: React.ReactNode 
   { value: "full", label: "Full width", icon: <WidthFullIcon16 /> },
 ]
 
-/** What a tap on a note of the notes page does (`RootTap`). */
+/** What a tap on any block of the notes page does (`RootTap`). */
 const ROOT_TAP_OPTIONS: Array<{ value: RootTap; label: string }> = [
   { value: "phone", label: "Phone only" },
   { value: "always", label: "Every device" },
@@ -64,7 +64,7 @@ export function EditorSection() {
       </div>
       <div className="flex flex-col gap-2">
         <span id="root-tap-label" className="text-sm leading-4 text-text-secondary">
-          Tap a note on the notes page to open it
+          Tap a block on the notes page to open it
         </span>
         <div role="group" aria-labelledby="root-tap-label" className="flex flex-wrap gap-1">
           {ROOT_TAP_OPTIONS.map((option) => (
