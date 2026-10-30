@@ -1,32 +1,27 @@
-// Replica API — schema v3 rows, one corpus per user (docs/graph-schema-v2.md,
-// docs/graph-storage.md, docs/multi-tenant-design.md).
+// Replica API — one corpus per user (docs/events-log-cache.md,
+// docs/event-sourcing.md, docs/multi-tenant-design.md).
 //
-// The client pushes row-level diffs of its node/link graph (produced by the
-// local store's ingest in `src/data/sql-note-store.ts`, batched by
-// `src/data/replica-sync.ts`) and pulls rows back out (full or since-cursor),
-// with per-row last-writer-wins on `updated_at`. Every user's corpus lives in
-// one D1 database, in the rows whose `user_id` is theirs.
-//
-// What a push writes is EVENTS (docs/event-sourcing.md): the rows are diffed
-// against what the replica holds, the difference is appended to the tenant's
-// log, and the tables follow from the log in the same transaction. The wire
-// is unchanged — a client pushes and pulls rows as it always has — so every
-// cached bundle of the app still in the wild writes events too.
+// The client pushes the EVENTS its edits amount to and pulls the tenant's
+// log; a device whose cache is empty takes a snapshot of the replica's cache
+// first. Nothing pushes or pulls rows any more: the row routes went with the
+// cache (docs/events-log-cache.md, "Migration order and rollback"), and the
+// row door (`writeRows`, event-log.ts) stays for MCP and shares only. Every
+// user's corpus lives in one D1 database, in the rows whose `user_id` is
+// theirs.
 //
 // Routes (wired in worker/index.ts under /api/replica/*):
-//   PUT /api/replica/notes  — batch row upserts + deletes, one atomic batch
 //   PUT /api/replica/events — a client's own events, appended (docs/event-sourcing.md)
-//   GET /api/replica/notes  — row pull (full, or ?since=<cursor> incremental)
-//   GET /api/replica/status — row counts + schema_version + replica_cursor
+//   GET /api/replica/status — live counts + schema_version + replica_cursor
 //   GET /api/replica/events — the event log, or one entity's history
 //   GET /api/replica/events-log — the per-key log (docs/event-sourcing.md)
+//   GET /api/replica/cache  — one page of the cache of the log (docs/events-log-cache.md)
 //   GET /api/replica/at     — the corpus as it stood at a seq or a time
-//   GET /api/replica/verify — does folding the log still yield the tables?
+//   GET /api/replica/verify — does folding the log still yield the cache?
 //   POST /api/replica/restore — put a block back the way it was, by appending
 //
-// The wire format, validation, and SQL planning live in `replica-payload.ts`
-// (shared with the client); the queries run through `replica-corpus.ts`
-// against a `TenantDb`.
+// The wire format and validation live in `replica-payload.ts` (shared with
+// the client); the queries run through `replica-corpus.ts` against a
+// `TenantDb`.
 //
 // AUTH & TENANCY: `requireSession` verifies identity exactly as it always has
 // — the `gh_refresh` HttpOnly cookie set by /github-auth (SameSite=Lax blocks
@@ -53,13 +48,6 @@ import {
   forTenant,
   type TenantDb,
 } from "../tenancy-db"
-import {
-  BOARD_TYPE,
-  LEGACY_BOARD_PROP,
-  isLegacyBoard,
-  parseProps,
-  propsJson,
-} from "../../src/data/graph"
 import type { Env } from "../types"
 import {
   corpusAt,
@@ -73,20 +61,13 @@ import {
 import { parseEventsPayload } from "../../src/data/events"
 import { isKeyEventsBody, parseKeyEventsPayload } from "../../src/data/key-events"
 import {
-  corpusPullFull,
-  corpusPullSince,
-  corpusPut,
+  corpusCachePage,
   corpusPutEvents,
   corpusPutKeyEvents,
   corpusStatus,
+  MAX_CACHE_PAGE,
 } from "./replica-corpus"
-import {
-  LEGACY_TIMESTAMP_CURSOR_FLOOR,
-  REPLICA_PROTOCOL_HEADER,
-  parseReplicaPayload,
-  parseSinceCursor,
-  type ReplicaPutPayload,
-} from "./replica-payload"
+import { type CachePageCursor, REPLICA_PROTOCOL_HEADER } from "./replica-payload"
 import { resolveTenancy, type VerifiedIdentity } from "./tenancy"
 
 /** Reject bodies larger than this (the whole row corpus is a few MB today). */
@@ -179,8 +160,14 @@ async function readyTenant(tenant: TenantDb): Promise<void> {
  * raised in the dashboard BEFORE the migration runs: `npm run deploy` applies
  * migrations first, so between the rewrite and the upload the old Worker —
  * this default's old value — is the one answering.
+ *
+ * `3` is the client of the cache of the log (docs/events-log-cache.md): it
+ * pulls `GET /api/replica/cache` and the log, never rows. A client below 3
+ * would push and pull rows through routes this Worker no longer serves, so
+ * it is refused instead, and told to update (decided 2026-10-30: no
+ * compatibility window).
  */
-const MIN_REPLICA_PROTOCOL = 2
+const MIN_REPLICA_PROTOCOL = 3
 
 function minProtocol(env: Env): number {
   const raw = env.MIN_REPLICA_PROTOCOL
@@ -213,10 +200,10 @@ export async function replica(
   const { pathname } = new URL(request.url)
   const method = request.method
   const known =
-    (pathname === "/api/replica/notes" && (method === "PUT" || method === "GET")) ||
     (pathname === "/api/replica/status" && method === "GET") ||
     (pathname === "/api/replica/events" && (method === "GET" || method === "PUT")) ||
     (pathname === "/api/replica/events-log" && method === "GET") ||
+    (pathname === "/api/replica/cache" && method === "GET") ||
     (pathname === "/api/replica/at" && method === "GET") ||
     (pathname === "/api/replica/verify" && method === "GET") ||
     (pathname === "/api/replica/restore" && method === "POST")
@@ -227,13 +214,12 @@ export async function replica(
   const tenant = forTenant(corpusDriver(env), session)
   await readyTenant(tenant)
 
-  if (pathname === "/api/replica/notes" && method === "PUT") return replicaPut(request, tenant)
-  if (pathname === "/api/replica/notes") return replicaPull(request, tenant, env)
   if (pathname === "/api/replica/events" && method === "PUT") {
     return replicaPutEvents(request, tenant)
   }
   if (pathname === "/api/replica/events") return replicaEvents(request, tenant)
-  if (pathname === "/api/replica/events-log") return replicaKeyEvents(request, tenant)
+  if (pathname === "/api/replica/events-log") return replicaKeyEvents(request, tenant, env)
+  if (pathname === "/api/replica/cache") return replicaCache(request, tenant, env)
   if (pathname === "/api/replica/at") return replicaAt(request, tenant)
   if (pathname === "/api/replica/verify") return jsonResponse(await verifyLog(tenant))
   if (pathname === "/api/replica/restore") return replicaRestore(request, tenant)
@@ -281,7 +267,7 @@ async function replicaEvents(request: Request, tenant: TenantDb): Promise<Respon
  * migration 0030, so neither a page nor the pull of rows that precedes it
  * reconciles the log (docs/event-sourcing.md, "Genesis").
  */
-async function replicaKeyEvents(request: Request, tenant: TenantDb): Promise<Response> {
+async function replicaKeyEvents(request: Request, tenant: TenantDb, env: Env): Promise<Response> {
   const query = new URL(request.url).searchParams
   const entity = query.get("entity")
   const entityId = query.get("entity_id")
@@ -293,7 +279,40 @@ async function replicaKeyEvents(request: Request, tenant: TenantDb): Promise<Res
     limit: Math.min(count(query.get("limit")) ?? 1000, MAX_EVENTS),
     ...(entity !== null && entityId !== null ? { entity, entityId } : {}),
   })
-  return jsonResponse({ events, cursor: events.at(-1)?.seq ?? null })
+  return jsonResponse({ events, cursor: events.at(-1)?.seq ?? null, replica_id: replicaId(env) })
+}
+
+/**
+ * `GET /api/replica/cache?after=<json key>&limit=<n>` — one page of the
+ * cache of the log, in primary-key order (docs/events-log-cache.md, "Sync
+ * is the log, and nothing else"): what a new device takes before it pulls
+ * the log. `after` is the `cursor` the page before answered with, a JSON
+ * array of the last row's `[entity, entity_id, key]`; absent for the first
+ * page.
+ */
+async function replicaCache(request: Request, tenant: TenantDb, env: Env): Promise<Response> {
+  const query = new URL(request.url).searchParams
+  const raw = query.get("after")
+  let after: CachePageCursor | null = null
+  if (raw !== null) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return jsonResponse({ error: "invalid_after" }, 400)
+    }
+    if (
+      !Array.isArray(parsed) ||
+      parsed.length !== 3 ||
+      !parsed.every((part) => typeof part === "string")
+    ) {
+      return jsonResponse({ error: "invalid_after" }, 400)
+    }
+    after = parsed as CachePageCursor
+  }
+  const limit = Math.min(Math.max(count(query.get("limit")) ?? MAX_CACHE_PAGE, 1), MAX_CACHE_PAGE)
+  const page = await corpusCachePage(tenant, after, limit)
+  return jsonResponse({ ...page, replica_id: replicaId(env) })
 }
 
 /**
@@ -346,73 +365,6 @@ async function replicaRestore(request: Request, tenant: TenantDb): Promise<Respo
  * is behind any device that had pushed to the previous clone.
  */
 const replicaId = (env: Env): string => env.REPLICA_ID || "production"
-
-/**
- * Row pull — the read half of the replica API (database-authoritative mode's
- * boot + sync source).
- *
- * - `GET /api/replica/notes` → `{ nodes, links, cursor }`, every row of both
- *   tables, tombstones included.
- * - `GET /api/replica/notes?since=<cursor>` → the same shape with only the
- *   rows whose `seq > since` — exact, because `seq` is assigned by the
- *   database (migrations/0005), so no clock is compared and no overlap window
- *   is needed. A delete travels as an ordinary changed row carrying
- *   `deleted_at` — which is why this response carries nothing but rows (see
- *   `replica-corpus.ts`).
- */
-async function replicaPull(request: Request, tenant: TenantDb, env: Env): Promise<Response> {
-  const sinceRaw = new URL(request.url).searchParams.get("since")
-  const parsed = sinceRaw === null ? null : parseSinceCursor(sinceRaw)
-  if (sinceRaw !== null && parsed === null) return jsonResponse({ error: "invalid_since" }, 400)
-  // A pre-0005 timestamp cursor, from a client on a cached bundle that
-  // predates the guard in database-mode.ts. `seq > 1.7e12` would match
-  // nothing, forever, and that client has no way to learn why: serve the
-  // corpus, and it leaves with a sequence cursor.
-  const since = parsed !== null && parsed >= LEGACY_TIMESTAMP_CURSOR_FLOOR ? null : parsed
-
-  const body = since === null ? await corpusPullFull(tenant) : await corpusPullSince(tenant, since)
-  return jsonResponse({ ...body, replica_id: replicaId(env) })
-}
-
-async function replicaPut(request: Request, tenant: TenantDb): Promise<Response> {
-  const contentLength = Number(request.headers.get("Content-Length") ?? "0")
-  if (contentLength > MAX_BODY_BYTES) {
-    return jsonResponse({ error: "payload_too_large" }, 413)
-  }
-
-  let body: unknown
-  try {
-    body = await request.json()
-  } catch {
-    return jsonResponse({ error: "invalid_json" }, 400)
-  }
-
-  const payload = parseReplicaPayload(body)
-  if (!payload) return jsonResponse({ error: "invalid_payload" }, 400)
-
-  return jsonResponse(
-    await corpusPut(tenant, retypeLegacyBoards(payload), Date.now(), writerOf(request)),
-  )
-}
-
-/**
- * TRANSITION (migrations/0020): a board pushed in its old shape — a `note`
- * row whose props carry `board: true`, from a client still on the build
- * before the type — lands in the new one, so a stale client cannot write
- * the old shape back over a migrated row (the upsert is last-writer-wins on
- * `updated_at`, and an edit made after the migration is the newer one).
- * Removed with `isLegacyBoard` once 0020 has run in production.
- */
-export function retypeLegacyBoards(payload: ReplicaPutPayload): ReplicaPutPayload {
-  if (!payload.nodes.some(isLegacyBoard)) return payload
-  const nodes = payload.nodes.map((node) => {
-    if (!isLegacyBoard(node)) return node
-    const props = { ...(parseProps(node.props) ?? {}) }
-    delete props[LEGACY_BOARD_PROP]
-    return { ...node, type: BOARD_TYPE, props: propsJson(props) }
-  })
-  return { ...payload, nodes }
-}
 
 /**
  * The events door: `PUT /api/replica/events`, a client's own events in the

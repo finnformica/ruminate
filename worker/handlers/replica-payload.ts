@@ -13,10 +13,10 @@
 // (worker/tenancy-db.ts) binds to the verified GitHub id. No caller can supply
 // a tenant; the planner cannot even express one.
 
+import type { CacheRow } from "../../src/data/cache-rows"
 import type { NoteId } from "../../src/schema"
 
 /** One row of the `nodes` table. */
-import type { DeltaMatValueRow } from "../../src/data/key-events"
 
 export interface NodeRow {
   id: string
@@ -121,41 +121,6 @@ export const linkKeyOf = (link: LinkRow): LinkKey => [
 export const isTombstoned = (row: { deleted_at?: number }): boolean =>
   row.deleted_at !== undefined && row.deleted_at !== null
 
-/** Read one node row out of a driver result, keeping `deleted_at` present only
- * when the row is actually tombstoned (see `NodeRow.deleted_at`). Both engines
- * hand back the same loose row shape, so both parse it here. */
-export function toNodeRow(row: Record<string, unknown>): NodeRow {
-  const node: NodeRow = {
-    id: String(row.id),
-    type: String(row.type),
-    text: String(row.text),
-    props: row.props === null || row.props === undefined ? null : String(row.props),
-    updated_at: Number(row.updated_at),
-  }
-  if (row.deleted_at !== null && row.deleted_at !== undefined) {
-    node.deleted_at = Number(row.deleted_at)
-  }
-  if (row.seq !== null && row.seq !== undefined) node.seq = Number(row.seq)
-  if (row.notes_id !== null && row.notes_id !== undefined) node.notes_id = String(row.notes_id)
-  return node
-}
-
-/** Read one link row out of a driver result (see `toNodeRow`). */
-export function toLinkRow(row: Record<string, unknown>): LinkRow {
-  const link: LinkRow = {
-    source_id: String(row.source_id),
-    destination_id: String(row.destination_id),
-    kind: String(row.kind),
-    sort_key: String(row.sort_key),
-    updated_at: Number(row.updated_at),
-  }
-  if (row.deleted_at !== null && row.deleted_at !== undefined) {
-    link.deleted_at = Number(row.deleted_at)
-  }
-  if (row.seq !== null && row.seq !== undefined) link.seq = Number(row.seq)
-  return link
-}
-
 /**
  * A batch of row-level changes — what one save boils down to, and the unit the
  * push queue accumulates. Since soft deletes, a delete is an ordinary row
@@ -228,10 +193,6 @@ export interface ReplicaCorpusBody {
   nodes: NodeRow[]
   links: LinkRow[]
   views: ViewRow[]
-  /** The per-key read model of the blocks' props (migrations/0028): every
-   * row on a full pull, the rows past the cursor on an incremental one.
-   * Optional on the wire for the sake of older Workers. */
-  delta_mat_values?: DeltaMatValueRow[]
   /** The replica cursor at pull time (meta `replica_cursor`); the client
    * stores it and sends it back as `?since=` on the next incremental pull. */
   cursor: string | null
@@ -245,18 +206,21 @@ export interface ReplicaCorpusBody {
   replica_id?: string
 }
 
-/**
- * Body of an incremental pull: `GET /api/replica/notes?since=<cursor>` — rows
- * whose `updated_at` is newer than the `since` timestamp, tombstoned rows
- * included, which is how a deletion travels.
- *
- * Structurally identical to a full pull: it carries fewer rows, not different
- * fields. It used to carry the full key list of both tables as well, so the
- * client could delete local rows absent from them; tombstones replaced that
- * channel, and the lists were O(corpus) reads on every pull
- * (docs/graph-storage.md).
- */
-export type ReplicaChangesBody = ReplicaCorpusBody
+/** The key of a cache row on the wire: where a page of the cache ended, and
+ * where the next begins (`GET /api/replica/cache`, docs/events-log-cache.md). */
+export type CachePageCursor = [entity: string, entityId: string, key: string]
+
+/** The body of `GET /api/replica/cache`: one page of the cache of the log. */
+export interface CachePageBody {
+  rows: CacheRow[]
+  /** The watermark the page was read behind (`meta.cache_seq`), for
+   * information: a device pulls the log from 0 whatever it says. */
+  seq: number
+  /** The last row's key, to ask for the next page with; null on the last. */
+  cursor: CachePageCursor | null
+  /** As on the pull bodies: which database answered. */
+  replica_id?: string
+}
 
 /** The body of `GET /api/replica/status`. */
 export interface ReplicaStatusBody {
@@ -443,34 +407,13 @@ export function parseReplicaPayload(body: unknown): ReplicaPutPayload | null {
  * client asks the graph for `page` roots, finds none, and shows an empty
  * corpus with every block still sitting in its store — the exact silent drift
  * this header exists to prevent, so the minimum goes to 2 with it.
+ *
+ * `3` is the client of the cache of the log (docs/events-log-cache.md): it
+ * pulls `GET /api/replica/cache` and the log, never rows. The minimum stays
+ * at 2 for a week: a protocol-2 client is served its rows from the cache
+ * until the row endpoints retire (the doc, "Migration order and rollback").
  */
-const REPLICA_PROTOCOL = 2
+const REPLICA_PROTOCOL = 3
 export const REPLICA_PROTOCOL_HEADER = "X-Replica-Protocol"
 /** Spread into every replica request's headers. */
 export const REPLICA_PROTOCOL_HEADERS = { [REPLICA_PROTOCOL_HEADER]: String(REPLICA_PROTOCOL) }
-
-/**
- * Cursors at or above this are pre-0005 millisecond timestamps, not row
- * sequences, and mean nothing to a server that compares `seq > ?`.
- *
- * A client that stored one before the cutover would otherwise ask for
- * `seq > 1788891492616`, match nothing, and never pull again — silently, and
- * forever. Both sides treat such a cursor as "no cursor": the client
- * (database-mode.ts) so it never sends one, and the Worker (replica.ts) for
- * the client on a cached bundle that predates that guard and has no way to
- * be told. One full pull, then a sequence cursor from there on.
- *
- * The two spaces cannot collide: sequences count writes from 1 and this floor
- * is a trillion, which the corpus would reach roughly never.
- */
-export const LEGACY_TIMESTAMP_CURSOR_FLOOR = 1e12
-
-/**
- * Parse the `since` query param: a row sequence (migrations/0005), as the
- * digits the last pull answered with. Returns the number, or null when
- * malformed — the caller answers 400. Whether it is a *legacy* cursor is the
- * caller's question (`LEGACY_TIMESTAMP_CURSOR_FLOOR`), not a parse failure.
- */
-export function parseSinceCursor(raw: string): number | null {
-  return /^\d{1,15}$/.test(raw) ? Number(raw) : null
-}

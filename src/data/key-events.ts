@@ -89,9 +89,9 @@ const COLUMN_REGISTERS: Record<Entity, readonly string[]> = {
   view: ["root_id", "filter", "sort", "pinned", "sort_key", "stack"],
 }
 
-export const isPropsRegister = (key: string): boolean => key.startsWith(PROPS_PREFIX)
-export const propsRegister = (name: string): string => PROPS_PREFIX + name
-export const propNameOf = (register: string): string => register.slice(PROPS_PREFIX.length)
+const isPropsRegister = (key: string): boolean => key.startsWith(PROPS_PREFIX)
+const propsRegister = (name: string): string => PROPS_PREFIX + name
+const propNameOf = (register: string): string => register.slice(PROPS_PREFIX.length)
 
 /** What every key event carries besides its change: the old envelope, plus
  * the old-shaped event it mirrors while both logs are written. */
@@ -512,9 +512,7 @@ export function foldKeysByStamp(
 
 /** The highest stamp among an entity's `props.*` registers, or undefined
  * when it has none: what the `props` register's stamp reads as. */
-export function propsStampOf(
-  stamps: Readonly<Record<string, string | undefined>>,
-): string | undefined {
+function propsStampOf(stamps: Readonly<Record<string, string | undefined>>): string | undefined {
   let top: string | undefined
   for (const [key, stamp] of Object.entries(stamps)) {
     if (isPropsRegister(key) && stamp !== undefined && (top === undefined || stamp > top))
@@ -1092,14 +1090,3 @@ export function parseStoredKeyEvent(
 // -----------------------------------------------------------------------------
 // Rows the per-key fold projects to
 // -----------------------------------------------------------------------------
-
-/** One row of `delta_mat_values`: a block's key, its value (null = unset, the
- * tombstone of a key), and the stamp and place of the event that set it. */
-export interface DeltaMatValueRow {
-  block_id: string
-  key: string
-  value: string | null
-  hlc: string
-  seq?: number
-  updated_at: number
-}

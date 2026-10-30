@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useDebounce } from "use-debounce"
 import { pinnedRootsAtom } from "../global-state"
+import { databaseEnsureAll } from "../data/database-mode"
 import { useRecentRoots } from "../hooks/recent-roots"
 import { useCreateNote } from "../hooks/note"
 import { keepResults, useSearchResults } from "../hooks/search-results"
@@ -78,6 +79,11 @@ export function CommandMenu() {
   const recentRoots = useRecentRoots()
   const pinnedRoots = useAtomValue(pinnedRootsAtom)
   const [isOpen, setIsOpen] = useAtom(isCommandMenuOpenAtom)
+  // Search asks a question of every block: the whole corpus is read when
+  // the palette opens (docs/events-log-cache.md, "The client"), once.
+  useEffect(() => {
+    if (isOpen) void databaseEnsureAll()
+  }, [isOpen])
 
   // The open note, if any: it leads the `in:` suggestions, and ⌘P searches
   // its headings — or, focused on a block, the headings under that block.

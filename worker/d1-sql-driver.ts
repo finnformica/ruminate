@@ -26,6 +26,8 @@ import type { SqlDriver, SqlValue } from "../src/data/sql-driver"
  * wrong, which is why the log carries the SQL.
  */
 const ROWS_READ_WARN = 5_000
+/** The annotation a deliberately corpus-sized read carries. */
+const READS_CORPUS = /\/\*\s*reads-corpus:/
 
 /** The slice of `D1Meta` this module reads. Structural, so the worker test
  * suites (which drive `SqlDriver` over `node:sqlite`) need not supply one. */
@@ -43,6 +45,10 @@ interface QueryMeta {
 function auditRowsRead(sql: string, meta: QueryMeta | undefined): void {
   const rowsRead = meta?.rows_read ?? 0
   if (rowsRead < ROWS_READ_WARN) return
+  // A read that is the whole corpus by design says so: the cache snapshot a
+  // new device takes, and verify (docs/events-log-cache.md). The alarm is
+  // for a statement that should not have been.
+  if (READS_CORPUS.test(sql)) return
   console.warn(
     JSON.stringify({
       event: "d1_expensive_query",

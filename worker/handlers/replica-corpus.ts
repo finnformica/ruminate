@@ -8,159 +8,56 @@
 // shared with the client; this module only *runs* those plans and the pull /
 // status reads.
 //
-// **Tombstones and replication.** Since soft deletes, a deleted row is still a
-// row: it carries `deleted_at` and replicates like any other change, which is
-// how a delete reaches another device. So every replica READ here is an
-// `includingDeleted()` read — replication is exactly the audit-shaped case
-// that opt-out exists for, and each statement says so in a `/* includes-deleted
-// */` comment the CI guard reads too. Only `corpusStatus`, which answers "how
-// big is my corpus", counts live rows.
+// **Tombstones and replication.** Since soft deletes, a deleted entity is
+// still an entity: it carries `deleted_at` and replicates like any other
+// change, which is how a delete reaches another device. So every replica
+// READ here carries tombstones (`cache-reads.ts`, each statement saying so
+// in a `/* includes-deleted */` comment the CI guard reads too). Only
+// `corpusStatus`, which answers "how big is my corpus", counts live rows.
+//
+// The rows are the cache of the log (docs/events-log-cache.md). A device
+// pulls the cache itself (`corpusCachePage`) and the log; the row door
+// (`corpusPut`) stays for the writers that cannot speak events — MCP, a
+// share's grantee — and no route serves rows to a browser any more.
 //
 // Every statement is written out in full rather than assembled from fragments:
 // the guard checks the string that actually runs, so the string that actually
 // runs is the one a reader sees.
 
 import type { TenantDb } from "../tenancy-db"
-import { appendClientEvents, appendClientKeyEvents, NODE_PROPS, writeRows } from "./event-log"
+import { NOTE_TYPES } from "../../src/data/graph"
+import { appendClientEvents, appendClientKeyEvents, writeRows } from "./event-log"
+import { cacheSeqOf, readCachePage } from "./cache-reads"
 import type { EventsPutPayload, EventsPutResult } from "../../src/data/events"
+import type { KeyEventsPutPayload, KeyEventsPutResult } from "../../src/data/key-events"
 import type {
-  DeltaMatValueRow,
-  KeyEventsPutPayload,
-  KeyEventsPutResult,
-} from "../../src/data/key-events"
-import {
-  toLinkRow,
-  toNodeRow,
-  type LinkRow,
-  type NodeRow,
-  type ReplicaChangesBody,
-  type ReplicaCorpusBody,
-  type ReplicaPutPayload,
-  type ReplicaPutResult,
-  type ReplicaStatusBody,
+  CachePageBody,
+  CachePageCursor,
+  ReplicaPutPayload,
+  ReplicaPutResult,
+  ReplicaStatusBody,
 } from "./replica-payload"
 
-/**
- * The cursor a pull answers with: the highest `seq` among the rows it is
- * returning, or null when it returns none.
- *
- * Derived from the rows THEMSELVES rather than read separately, and that is
- * the whole safety argument. A separate `SELECT MAX(seq)` could observe a
- * write that landed after the row queries ran, and the client would store a
- * cursor for rows it never received — skipping them permanently. A maximum
- * taken over the delivered rows can only ever name something the client has.
- *
- * Null means "nothing new": the client keeps the cursor it already had, which
- * is exactly right, and the next `seq > ?` stays a single index seek.
- */
-function cursorOf(nodes: NodeRow[], links: LinkRow[]): string | null {
-  let max = 0
-  for (const node of nodes) if ((node.seq ?? 0) > max) max = node.seq ?? 0
-  for (const link of links) if ((link.seq ?? 0) > max) max = link.seq ?? 0
-  return max === 0 ? null : String(max)
-}
-
-/** Full pull: every row of both tables, plus the sequence they reach.
- * `views` is always empty: the table is gone (docs/removing-views.md), and
- * the field stays for a client from before that reads it. */
-export async function corpusPullFull(tenant: TenantDb): Promise<ReplicaCorpusBody> {
-  const all = tenant.includingDeleted()
-  const nodes = (
-    await all.exec(
-      `SELECT id, type, text, ${NODE_PROPS("nodes.id")} AS props, updated_at, deleted_at, ` +
-        "notes_id, seq FROM nodes " +
-        "WHERE user_id = :tenant /* includes-deleted: replication carries tombstones */",
-    )
-  ).map(toNodeRow)
-  const links = (
-    await all.exec(
-      "SELECT source_id, destination_id, kind, sort_key, updated_at, deleted_at, seq " +
-        "FROM link " +
-        "WHERE user_id = :tenant /* includes-deleted: replication carries tombstones */",
-    )
-  ).map(toLinkRow)
-  const deltaMatValues = (
-    await all.exec(
-      "SELECT block_id, key, value, hlc, seq, updated_at FROM delta_mat_values WHERE user_id = :tenant",
-    )
-  ).map(toDeltaMatValueRow)
-  return {
-    nodes,
-    links,
-    views: [],
-    delta_mat_values: deltaMatValues,
-    cursor: cursorOf(nodes, links),
-  }
-}
-
-/** One `delta_mat_values` row as the wire carries it. */
-const toDeltaMatValueRow = (row: Record<string, unknown>): DeltaMatValueRow => ({
-  block_id: String(row.block_id),
-  key: String(row.key),
-  value: row.value === null ? null : String(row.value),
-  hlc: String(row.hlc),
-  seq: Number(row.seq),
-  updated_at: Number(row.updated_at),
-})
+/** The most rows one page of the cache carries. */
+export const MAX_CACHE_PAGE = 20_000
 
 /**
- * Incremental pull: rows with `seq > since` (tombstones included — a delete
- * takes a sequence value like any other write, so it arrives as an ordinary
- * change), and nothing else. Index seeks on `nodes_tenant_seq` and
- * `link_tenant_seq`, so a quiet pull reads one row per table. `views` is
- * always empty, as in the full pull.
- *
- * `seq` is assigned by the replica (`planEventAppend`), so `>` is EXACT: no
- * device clock is involved, nothing can land with a stamp behind the cursor,
- * and the client no longer asks for a ten-minute overlap to cover the
- * possibility. That window was costing a full re-read of every row the device
- * had written in the preceding ten minutes, on every pull.
- *
- * This used to answer with the full key list of both tables as well, so the
- * client could delete local rows absent from them. That predates tombstones,
- * and it cost O(corpus) rows read on **every** pull — every focus, every
- * visibility change, every `online` event, per device. A tombstoned row is an
- * ordinary changed row, so the deletion already travels here; the lists said
- * nothing a client could act on except "purged", and nothing purges
- * (docs/graph-storage.md).
+ * One page of the cache of the log, in primary-key order after `after`:
+ * what a new device takes, page by page, before it pulls the log
+ * (docs/events-log-cache.md, "Sync is the log, and nothing else").
  */
-export async function corpusPullSince(
+export async function corpusCachePage(
   tenant: TenantDb,
-  since: number,
-): Promise<ReplicaChangesBody> {
-  const all = tenant.includingDeleted()
-  const nodes = (
-    await all.exec(
-      `SELECT id, type, text, ${NODE_PROPS("nodes.id")} AS props, updated_at, deleted_at, ` +
-        "notes_id, seq FROM nodes WHERE user_id = :tenant AND seq > ?1 " +
-        "/* includes-deleted: a tombstoned row IS the change being pulled */",
-      [since],
-    )
-  ).map(toNodeRow)
-  const links = (
-    await all.exec(
-      "SELECT source_id, destination_id, kind, sort_key, updated_at, deleted_at, seq " +
-        "FROM link " +
-        "WHERE user_id = :tenant AND seq > ?1 " +
-        "/* includes-deleted: a tombstoned row IS the change being pulled */",
-      [since],
-    )
-  ).map(toLinkRow)
-  // The key rows of the blocks pulled: a block's `seq` is its last event's,
-  // and so is each of its keys' at most, so the same cursor bounds both.
-  const deltaMatValues = (
-    await all.exec(
-      "SELECT block_id, key, value, hlc, seq, updated_at FROM delta_mat_values " +
-        "WHERE user_id = :tenant AND seq > ?1",
-      [since],
-    )
-  ).map(toDeltaMatValueRow)
+  after: CachePageCursor | null,
+  limit: number = MAX_CACHE_PAGE,
+): Promise<Omit<CachePageBody, "replica_id">> {
+  const seq = await cacheSeqOf(tenant)
+  const rows = await readCachePage(tenant, after, limit)
+  const last = rows.length === limit ? rows[rows.length - 1] : undefined
   return {
-    nodes,
-    links,
-    views: [],
-    delta_mat_values: deltaMatValues,
-    cursor: cursorOf(nodes, links),
+    rows,
+    seq,
+    cursor: last === undefined ? null : [last.entity, last.entity_id, last.key],
   }
 }
 
@@ -251,34 +148,42 @@ export async function corpusPutKeyEvents(
 /**
  * LIVE row counts + schema version + cursor, for diagnostics and sync repair.
  *
- * The link count is **joined**, not filtered with `IN (SELECT …)`. The
- * subquery form re-scanned `nodes` per link row — O(links × nodes), measured
- * at 188k rows read on a 442-node corpus, which is what put a barely-used app
- * at 82% of the D1 free-tier daily read limit. Each join is a primary-key
- * lookup on `(user_id, id)`, so the same answer now costs ~1.8k rows: one pass
- * over the tenant's rows plus two seeks per link.
+ * Over the cache of the log: a live block is one whose `deleted` row says
+ * `null`; a live link is one whose own `deleted` row and both ends' say so
+ * (read-time discard applies to counts too: a retained link into a
+ * tombstoned node is not part of the graph anyone can see), four
+ * primary-key seeks per link; a page is a live block whose `type` row names
+ * a note type, on the `type` index.
  */
 export async function corpusStatus(
   tenant: TenantDb,
 ): Promise<Omit<ReplicaStatusBody, "replica_id">> {
   const rows = await tenant.exec(
     "SELECT " +
-      "(SELECT COUNT(*) FROM nodes WHERE user_id = :tenant AND deleted_at IS NULL) AS nodes, " +
-      // Read-time discard applies to counts too: a retained link into a
-      // tombstoned node is not part of the graph anyone can see, and counting
-      // it would make these figures disagree with the client's.
-      "(SELECT COUNT(*) FROM link " +
-      "JOIN nodes AS src ON src.user_id = link.user_id AND src.id = link.source_id " +
-      "AND src.deleted_at IS NULL " +
-      "JOIN nodes AS dst ON dst.user_id = link.user_id AND dst.id = link.destination_id " +
-      "AND dst.deleted_at IS NULL " +
-      "WHERE link.user_id = :tenant AND link.deleted_at IS NULL) AS links, " +
-      "(SELECT COUNT(*) FROM nodes WHERE user_id = :tenant AND deleted_at IS NULL " +
-      "AND type IN ('note', 'board')) AS pages, " +
+      "(SELECT COUNT(*) FROM events_log_cache WHERE user_id = :tenant AND entity = 'block' " +
+      "AND key = 'deleted' AND value = 'null') AS nodes, " +
+      "(SELECT COUNT(*) FROM events_log_cache ld " +
+      "CROSS JOIN events_log_cache s ON s.user_id = :tenant AND s.entity = 'link' " +
+      "AND s.entity_id = ld.entity_id AND s.key = 'source_id' " +
+      "CROSS JOIN events_log_cache sl ON sl.user_id = :tenant AND sl.entity = 'block' " +
+      "AND sl.entity_id = json_extract(s.value, '$') AND sl.key = 'deleted' AND sl.value = 'null' " +
+      "CROSS JOIN events_log_cache d ON d.user_id = :tenant AND d.entity = 'link' " +
+      "AND d.entity_id = ld.entity_id AND d.key = 'destination_id' " +
+      "CROSS JOIN events_log_cache dl ON dl.user_id = :tenant AND dl.entity = 'block' " +
+      "AND dl.entity_id = json_extract(d.value, '$') AND dl.key = 'deleted' AND dl.value = 'null' " +
+      "WHERE ld.user_id = :tenant AND ld.entity = 'link' AND ld.key = 'deleted' " +
+      "AND ld.value = 'null') AS links, " +
+      "(SELECT COUNT(*) FROM json_each(?1) AS j " +
+      "CROSS JOIN events_log_cache t ON t.user_id = :tenant AND t.key = 'type' " +
+      "AND t.value = json_quote(j.value) " +
+      "CROSS JOIN events_log_cache l ON l.user_id = :tenant AND l.entity = 'block' " +
+      "AND l.entity_id = t.entity_id AND l.key = 'deleted' AND l.value = 'null') AS pages, " +
       "(SELECT value FROM meta WHERE user_id = :tenant AND key = 'schema_version') " +
       "AS schema_version, " +
       "(SELECT value FROM meta WHERE user_id = :tenant AND key = 'replica_cursor') " +
-      "AS replica_cursor",
+      "AS replica_cursor " +
+      "/* reads-corpus: live counts over the whole cache, read once per session */",
+    [JSON.stringify([...NOTE_TYPES])],
   )
   const row = rows[0] as
     | {

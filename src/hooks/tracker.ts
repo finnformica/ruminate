@@ -17,6 +17,7 @@ import {
   type SeriesPatch,
   type SeriesState,
 } from "../data/tracker"
+import { databaseEnsureNote } from "../data/database-mode"
 import { graphSnapshotAtom } from "../global-state"
 import type { NoteId } from "../schema"
 
@@ -51,6 +52,10 @@ export function useMakeTracker(): (noteId: NoteId, create?: { title: string }) =
  * with their entries, derived from the live graph so a change on another
  * device is on the grid at once. */
 export function useTracker(trackerId: NoteId): { exists: boolean; series: SeriesState[] } {
+  // The tracker is read whole when its page opens (docs/events-log-cache.md).
+  React.useEffect(() => {
+    void databaseEnsureNote(trackerId)
+  }, [trackerId])
   const snapshot = useAtomValue(graphSnapshotAtom)
   return React.useMemo(
     () => ({ exists: isTracker(snapshot, trackerId), series: trackerSeries(snapshot, trackerId) }),

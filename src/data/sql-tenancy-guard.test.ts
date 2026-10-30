@@ -115,6 +115,77 @@ describe("checkStatement — soft deletes", () => {
   })
 })
 
+describe("checkStatement — the cache of the log", () => {
+  // `events_log_cache` (docs/events-log-cache.md) is a corpus table whose
+  // liveness is the `deleted` key, not a `deleted_at` column.
+  const tenant = { mode: "tenant" as const }
+  const single = { mode: "single" as const }
+
+  it("asks a read of the cache to name the deleted key, as a key or a path", () => {
+    expect(
+      checkStatement(
+        "SELECT entity_id FROM events_log_cache WHERE user_id = :tenant AND key = 'deleted' " +
+          "AND value = 'null'",
+        tenant,
+      ),
+    ).toEqual([])
+    expect(
+      checkStatement(
+        "SELECT * FROM (SELECT entity, json_group_object(key, json(value)) AS fields " +
+          "FROM events_log_cache WHERE user_id = :tenant GROUP BY entity, entity_id) " +
+          "WHERE json_type(fields, '$.deleted') = 'null'",
+        tenant,
+      ),
+    ).toEqual([])
+    expect(
+      checkStatement("SELECT entity_id FROM events_log_cache WHERE user_id = :tenant", tenant),
+    ).toEqual(["missing-deleted-at-predicate"])
+    expect(
+      checkStatement(
+        "SELECT entity_id FROM events_log_cache WHERE user_id = :tenant " +
+          "/* includes-deleted: every row */",
+        tenant,
+      ),
+    ).toEqual([])
+    expect(checkStatement("SELECT entity_id FROM events_log_cache", single)).toEqual([
+      "missing-deleted-at-predicate",
+    ])
+  })
+
+  it("still asks the cache to name its tenant", () => {
+    expect(
+      checkStatement("SELECT entity_id FROM events_log_cache WHERE key = 'deleted'", tenant),
+    ).toEqual(["missing-tenant-predicate"])
+  })
+
+  it("asks nothing of an INSERT's columns: a row names its register", () => {
+    expect(
+      checkStatement(
+        "INSERT INTO events_log_cache (user_id, entity, entity_id, key, value, hlc, seq, " +
+          "updated_at) VALUES (:tenant, ?, ?, ?, ?, ?, ?, ?)",
+        tenant,
+      ),
+    ).toEqual([])
+  })
+
+  it("refuses a hard DELETE from the cache, unless exempted", () => {
+    expect(checkStatement("DELETE FROM events_log_cache WHERE user_id = :tenant", tenant)).toEqual([
+      "hard-delete",
+    ])
+    expect(
+      checkStatement("DELETE FROM events_log_cache", single, "-- tenant-exempt: a cache wipe"),
+    ).toEqual([])
+  })
+
+  it("names the cache among the corpus tables", () => {
+    expect(
+      corpusTablesIn(
+        "SELECT 1 FROM json_each(?) AS j CROSS JOIN events_log_cache c ON c.entity_id = j.value",
+      ),
+    ).toEqual(["events_log_cache"])
+  })
+})
+
 describe("checkStatement — the escape hatch", () => {
   it("waives both rules, in the SQL or in a comment above it", () => {
     expect(checkStatement("DELETE FROM nodes -- tenant-exempt: local store wipe", tenant)).toEqual(

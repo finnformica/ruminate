@@ -1,37 +1,40 @@
-import type { GraphDiff, LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
-import type { EntityKeys, StampedState } from "./events"
+import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
+import type { CacheRow } from "./cache-rows"
+import type { EntityKeys } from "./events"
 import type { GraphSnapshot } from "./graph"
-import type { DeltaMatValueRow, KeyEvent, LoggedKeyEvent } from "./key-events"
+import type { KeyEvent, LoggedKeyEvent } from "./key-events"
+import type { LazyReads } from "./sql-lazy-reads"
 
 /**
- * The storage contract behind the `src/data` seam: a row store for the
- * schema v2 graph (docs/graph-schema-v2.md) — `nodes` + `link` + `meta`.
+ * The storage contract behind the `src/data` seam: the device's log and the
+ * cache of its fold (docs/events-log-cache.md) — `events_log`,
+ * `events_log_cache` and `meta`.
  *
  * The app holds the live graph in memory (`databaseGraphAtom`) and edits it
- * with ops (`src/data/ops.ts`); the runtime turns each batch into the per-key
- * EVENTS it amounts to (`opsToKeyEvents`, docs/event-sourcing.md). The store keeps
- * those events and the replica's — the log, the truth — and the rows as a
- * cache of the log's fold (docs/event-only-sync.md, "The cache"), updated in
- * the same transaction as each batch and each pulled page, and read by
- * index. Everything markdown-shaped — parse, serialize, the rollup — lives above
- * this seam (`src/blocks`, `src/data/graph.ts`), so the store never sees
- * markdown. `openSqlNoteStore` (sql-note-store.ts) is the implementation the
- * app runs on.
+ * with ops (`src/data/ops.ts`); the runtime turns each batch into the
+ * per-key EVENTS it amounts to (`opsToKeyEvents`, docs/event-sourcing.md).
+ * The store keeps those events and the replica's — the log, the truth — and
+ * the cache, one row per key of every block and link, updated in the same
+ * transaction as each batch and each pulled page. Everything
+ * markdown-shaped — parse, serialize, the rollup — lives above this seam
+ * (`src/blocks`, `src/data/graph.ts`), so the store never sees markdown.
+ * `openSqlNoteStore` (sql-note-store.ts) is the implementation the app runs
+ * on.
  *
  * All methods are async so implementations backed by real databases fit
  * without changing callers.
  */
 export interface NoteStore {
-  /** The live graph of the cache — every non-tombstoned node, and every
-   * child link whose ends are live — indexed for walking (`docFromGraph`,
-   * `noteDoc`). What the app renders from. */
+  /** The WHOLE live graph of the cache — every non-tombstoned node, and
+   * every child link whose ends are live — indexed for walking
+   * (`docFromGraph`, `noteDoc`), in one grouped read. What search and the
+   * calendar ask for; the first screen and a note come lazily (`lazy`). */
   getGraph(): Promise<GraphSnapshot>
   /**
    * Record a batch of events this device made and apply them to the cache
-   * rows they name, field by field by stamp, in one transaction — for
-   * blocks and links alike (`src/data/events.ts`). The batch is
-   * applied verbatim — the client decided what cascades (`docToOps`), so the
-   * store and the snapshot the ops were applied to agree row for row.
+   * rows they name, by stamp, in one transaction. The batch is applied
+   * verbatim — the client decided what cascades (`docToOps`), so the store
+   * and the snapshot the ops were applied to agree row for row.
    *
    * The events join the unpushed tail of the log, where a typing run
    * coalesces to its last event (`coalesceTyping`) — except events in
@@ -45,9 +48,8 @@ export interface NoteStore {
   /** The events not yet acknowledged by the replica, oldest first — the push
    * queue, durable across reloads. */
   unpushedEvents(): Promise<KeyEvent[]>
-  /** Stamp events with the `seq` the replica gave them, and the rows they
-   * changed with it (the cursors' order; a row's `seq` is its last
-   * event's). */
+  /** Stamp events with the `seq` the replica gave them, and the cache rows
+   * they set with it (a row's `seq` is its event's). */
   markEventsPushed(seqs: readonly (readonly [id: string, seq: number])[]): Promise<void>
   /**
    * Take in events pulled from the replica — everything the tenant's log
@@ -61,46 +63,47 @@ export interface NoteStore {
    * then this device's unpushed ones, provisionally sequenced after them
    * (`LoggedKeyEvent.pending`). What a day on the calendar is folded from. */
   eventLog(): Promise<LoggedKeyEvent[]>
-  /** The fold by stamp (`foldKeysByStamp`, assembled) of the named entities'
-   * events, read by the `events_log_entity` index — or of the whole log,
-   * with no keys. The fold check compares it with the cache
-   * (`src/data/fold-check.ts`). */
-  foldOfLog(keys?: EntityKeys): Promise<StampedState>
-  /** The cache rows of the named entities, tombstones too: what the replica's
-   * pulled rows are compared with. */
-  getRowsOf(keys: EntityKeys): Promise<{ nodes: NodeRow[]; links: LinkRow[] }>
-  /** The `delta_mat_values` rows of the named blocks: what the replica's pulled
-   * key rows are compared with. */
-  getDeltaMatValuesOf(ids: readonly string[]): Promise<DeltaMatValueRow[]>
-  /** The lazy reads of the walk (docs/event-only-sync.md, "Lazy reads"):
-   * the live child links of the named nodes, by `link_source`, in sibling
-   * order; the live child links into them, by `link_destination` (an up
-   * pivot); and the live nodes by id. A link with a tombstoned end is left
-   * out, as `getGraph` leaves it out. */
-  childLinksOf(sourceIds: readonly string[]): Promise<LinkRow[]>
-  parentLinksOf(destinationIds: readonly string[]): Promise<LinkRow[]>
-  nodesOf(ids: readonly string[]): Promise<NodeRow[]>
-  /** Every row of every corpus table, **tombstones included** — the replica
-   * full-push source, and a delete only reaches other devices if it travels. */
+  /** The fold by stamp of the named entities' events (`foldEventsToCache`),
+   * read by the `events_log_entity` index — or of the whole log, with no
+   * keys — as cache rows by `cacheRowKey`. The fold check compares it with
+   * the cache (`src/data/fold-check.ts`). */
+  foldOfLog(keys?: EntityKeys): Promise<Map<string, CacheRow>>
+  /** The cache rows of the named entities, every key, tombstones too. */
+  cacheRowsOf(keys: EntityKeys): Promise<CacheRow[]>
+  /**
+   * What a patch of the graph after a batch needs (`patchSnapshot`): the
+   * live rows of the named blocks, and every live link among the named
+   * links or adjacent to a named block — live by its own `deleted` row; the
+   * patch judges its ends against the graph.
+   */
+  liveEntitiesOf(keys: EntityKeys): Promise<{ nodes: NodeRow[]; links: LinkRow[] }>
+  /** Every block and link, **tombstones included** — what Settings' Recently
+   * deleted reads, and the replica full-push source. */
   getAllRows(): Promise<{ nodes: NodeRow[]; links: LinkRow[] }>
-  /** The live rows of the named entities, by the rules `getGraph` reads the
-   * whole tables with. The fold check after a batch reads only what the
-   * batch touched (`src/data/fold-check.ts`). */
-  getLiveRows(keys: EntityKeys): Promise<{ nodes: NodeRow[]; links: LinkRow[] }>
-  /** Apply a planned pull (row upserts + deletes) in one transaction. Rows
-   * land verbatim — remote `updated_at` and `deleted_at` are preserved — and
-   * take the stamps their last event derives (`derivedStamps`). The pull of
-   * rows no longer writes the cache; a repair from the screen does, and so
-   * does the first screen of a device whose log has not begun, with the
-   * replica's key rows (`values`, its `delta_mat_values`) written after the
-   * rows' own, each at the stamp the replica holds for it. */
-  applyPull(plan: GraphDiff, values?: readonly DeltaMatValueRow[]): Promise<void>
-  /** Wipe every corpus row — nodes, links and the device's log (meta
-   * is kept). A cache reset, not a delete: nothing is tombstoned, so nothing
+  /** Take in one page of the replica's cache (docs/events-log-cache.md,
+   * "Sync"): the rows land by stamp, as a batch's do. */
+  importCacheRows(rows: readonly CacheRow[]): Promise<void>
+  /** Apply the unpushed tail of the log to the cache by stamp, once more:
+   * after a snapshot, so a local edit not yet pushed still wins where its
+   * stamp is higher. */
+  applyUnpushedToCache(): Promise<void>
+  /** Rebuild the cache from the device's own log: the repair after a
+   * failed write. */
+  rebuildCacheFromLog(): Promise<void>
+  /** Wipe the cache and keep the log: a device re-snapshots the replica's
+   * (a new cache generation), its unpushed events still queued. */
+  clearCache(): Promise<void>
+  /** Wipe every corpus row — the cache and the device's log (meta is
+   * kept). A cache reset, not a delete: nothing is tombstoned, so nothing
    * replicates — and an event not yet pushed goes with it, as an unpushed
    * row always did. */
   clear(): Promise<void>
-  /** Read a `meta` key (e.g. the D1 pull cursor), or null when unset. */
+  /** The lazy reads of the graph (`src/data/sql-lazy-reads.ts`): the first
+   * screen at boot, a note when it is opened, a subtree when a row is
+   * expanded, nodes by id. `getGraph` is the whole corpus, for what asks
+   * for all of it. */
+  lazy: LazyReads
+  /** Read a `meta` key (e.g. the events cursor), or null when unset. */
   getMeta(key: string): Promise<string | null>
   /** Write a `meta` key. Kept in the same database as the rows it describes,
    * so wiping the store can never leave a stale cursor behind. */

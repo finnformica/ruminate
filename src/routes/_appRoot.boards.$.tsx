@@ -14,6 +14,7 @@ import { listHeading } from "../components/ui/list"
 import { FilterMenu, SortMenu, type FilterBranch } from "../components/view-controls"
 import { parentIdsOf, parseProps } from "../data/graph"
 import { imageFilesOf } from "../data/images"
+import { databaseEnsureNote } from "../data/database-mode"
 import { graphSnapshotAtom } from "../global-state"
 import { useBoard, useBoardMatches, useBoardNarrowing, useBoardWrites } from "../hooks/board"
 import { useNoteById } from "../hooks/note"
@@ -53,6 +54,10 @@ function RouteComponent() {
 function BoardPage({ boardId }: { boardId: string }) {
   const { filter: filterParam, sort: sortParam } = Route.useSearch()
   const navigate = Route.useNavigate()
+  // The board is read whole when its page opens (docs/events-log-cache.md).
+  React.useEffect(() => {
+    void databaseEnsureNote(boardId)
+  }, [boardId])
   const note = useNoteById(boardId)
   const snapshot = useAtomValue(graphSnapshotAtom)
   const { exists, features, outlineIds, basketIds, imageIds } = useBoard(boardId)

@@ -154,6 +154,9 @@ export function mergeSnapshots(a: GraphSnapshot, b: GraphSnapshot): GraphSnapsho
     nodes: new Map([...a.nodes, ...b.nodes]),
     childLinks,
     parentLinks: indexParents(childLinks),
+    // A slice is whole: every node of it has its children. The own graph's
+    // loaded set, when it has one, grows by them.
+    ...(a.loaded === undefined ? {} : { loaded: new Set([...a.loaded, ...b.nodes.keys()]) }),
   }
 }
 

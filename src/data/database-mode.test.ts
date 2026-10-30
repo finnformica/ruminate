@@ -1,14 +1,17 @@
 import { getDefaultStore } from "jotai"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type {
+  CachePageBody,
+  CachePageCursor,
   LinkRow,
   NodeRow,
-  ReplicaChangesBody,
   ReplicaCorpusBody,
+  ViewRow,
 } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
+import { cacheRowOf, foldEventsToCache, type CacheRow } from "./cache-rows"
 import { deleteBlockOps, deleteNoteOps, docToOps } from "./ops"
 import {
   CACHE_GENERATION,
@@ -16,6 +19,7 @@ import {
   databaseGraphAtom,
   databaseModeStatusAtom,
   databaseApplyOps,
+  databaseEnsureAll,
   databaseEventLog,
   eventLogVersionAtom,
   flushDatabaseMode,
@@ -32,7 +36,6 @@ import { createNodeSqlDriver } from "./sql-node-test-driver"
 import type { NoteStore } from "./note-store"
 import { openSqlNoteStore } from "./sql-note-store"
 import { applyOpsToStore } from "./store-test-support"
-import type { ViewRow } from "../../worker/handlers/replica-payload"
 import { linkEntityId, rowsToEvents, type LoggedEvent } from "./events"
 import type { KeyEvent, LoggedKeyEvent } from "./key-events"
 import { keyed } from "./store-test-support"
@@ -42,14 +45,14 @@ import { writerTimezone } from "./writer-identity"
 /**
  * Boot-flow tests for database-authoritative mode, at the highest level the
  * node harness allows: a REAL NoteStore (node:sqlite, same migrations as
- * production), with only the network (D1 source) and the push loop stubbed.
+ * production), with only the network (the replica's cache and log) and the
+ * push loop stubbed.
  */
 
 function stubReplica(pending: NoteId[] = []) {
   const calls = { changes: [] as { noteIds: NoteId[] }[], stopped: false }
   const handle: ReplicaSyncHandle = {
     notifyChange: (noteIds) => calls.changes.push({ noteIds }),
-    requestFullPush: () => {},
     pendingNoteIds: () => new Set(pending),
     inFlightEventIds: () => new Set(),
     stop: () => {
@@ -60,25 +63,38 @@ function stubReplica(pending: NoteId[] = []) {
   return { handle, calls }
 }
 
+/** The key of a cache row, for the snapshot's order and its cursor. */
+const keyOf = (row: CacheRow): CachePageCursor => [row.entity, row.entity_id, row.key]
+const compareKeys = (a: CachePageCursor, b: CachePageCursor) => {
+  for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1
+  return 0
+}
+
+/**
+ * The replica, as a device sees it: a log of old-shaped events, and the
+ * cache of its fold (docs/events-log-cache.md) served page by page. Rows
+ * given later (`add`) append the events they amount to, as the Worker's row
+ * door does (`rowsToEvents`), so the log and the cache stay one thing.
+ */
 function stubSource(responses: {
-  full?: ReplicaCorpusBody | (() => ReplicaCorpusBody)
-  since?: (cursor: string) => ReplicaChangesBody
-  /** The tenant's log the replica serves: everything past `since`, paged. */
+  /** Rows the replica holds at the start, as a full pull once carried them. */
+  rows?: ReplicaCorpusBody
+  /** The tenant's log, given outright: everything past `since`, paged. */
   events?: LoggedEvent[]
   fail?: boolean
+  replicaId?: string
 }) {
-  const calls = { full: 0, since: [] as string[], events: [] as [number, number][] }
-  // Without a log of its own, the replica's log is the one its rows project
-  // from: each body served appends the events its rows amount to, as the
-  // Worker's row door does (`rowsToEvents`).
+  const calls = {
+    cache: [] as [CachePageCursor | null, number][],
+    events: [] as [number, number][],
+  }
   const log: LoggedEvent[] = responses.events ?? []
   const held = {
     nodes: new Map<string, NodeRow>(),
     links: new Map<string, LinkRow>(),
     views: new Map<string, ViewRow>(),
   }
-  const logged = <B extends ReplicaChangesBody>(body: B): B => {
-    if (responses.events) return body
+  const add = (body: { nodes: NodeRow[]; links: LinkRow[] }) => {
     const events = rowsToEvents(held, body, {
       batch: `bat_rows_${log.length}`,
       device: "other.tab",
@@ -89,24 +105,29 @@ function stubSource(responses: {
       log.push({ ...event, seq, origin: "replica", actor: 111, received_at: event.at })
     }
     for (const node of body.nodes) held.nodes.set(node.id, node)
-    for (const view of body.views) held.views.set(view.id, view)
     for (const link of body.links) {
       held.links.set(linkEntityId(link.source_id, link.destination_id, link.kind), link)
     }
-    return body
   }
+  if (responses.rows) add(responses.rows)
+  const id = responses.replicaId === undefined ? {} : { replica_id: responses.replicaId }
+  /** The cache: the fold by stamp of the log, in primary-key order. */
+  const cacheRows = () =>
+    [...foldEventsToCache(keyed(log)).values()].sort((a, b) => compareKeys(keyOf(a), keyOf(b)))
   const source: D1NoteSource = {
-    pullFull: async () => {
-      calls.full += 1
+    pullCache: async (after, limit) => {
+      calls.cache.push([after, limit])
       if (responses.fail) throw new Error("offline")
-      const full = responses.full ?? { nodes: [], links: [], views: [], cursor: null }
-      return logged(typeof full === "function" ? full() : full)
-    },
-    pullSince: async (cursor) => {
-      calls.since.push(cursor)
-      if (responses.fail) throw new Error("offline")
-      if (!responses.since) throw new Error("unexpected since-pull")
-      return logged(responses.since(cursor))
+      const rows = cacheRows()
+        .filter((row) => after === null || compareKeys(keyOf(row), after) > 0)
+        .slice(0, limit)
+      const page: CachePageBody = {
+        rows,
+        seq: log.length,
+        cursor: rows.length === limit ? keyOf(rows[rows.length - 1]) : null,
+        ...id,
+      }
+      return page
     },
     pullEvents: async (since, limit) => {
       calls.events.push([since, limit])
@@ -115,10 +136,10 @@ function stubSource(responses: {
       const events = keyed(log)
         .filter((e) => e.seq > since)
         .slice(0, limit)
-      return { events, cursor: events.at(-1)?.seq ?? null }
+      return { events, cursor: events.at(-1)?.seq ?? null, ...id }
     },
   }
-  return { source, calls }
+  return { source, calls, add }
 }
 
 /** A placed event of the replica's log, as the events pull serves it. */
@@ -150,32 +171,16 @@ function remoteCorpus(notes: Record<string, string>, updatedAt = 1, cursor: stri
   return body
 }
 
-/** The since-pull shape: only the rows that changed, plus the new cursor. */
-function remoteChanges(
-  changed: Record<string, string>,
-  updatedAt: number,
-  cursor: string,
-): ReplicaChangesBody {
-  return { ...remoteCorpus(changed, updatedAt), cursor }
-}
-
 /** Every row of these notes, tombstoned — how a remote delete travels. */
-function remoteDeletion(
-  deleted: Record<string, string>,
-  updatedAt: number,
-  cursor: string,
-): ReplicaChangesBody {
+function remoteDeletion(deleted: Record<string, string>, updatedAt: number) {
   const body = remoteCorpus(deleted, updatedAt)
   return {
     nodes: body.nodes.map((node) => ({ ...node, deleted_at: updatedAt })),
     links: body.links.map((link) => ({ ...link, deleted_at: updatedAt })),
-    views: [],
-    cursor,
   }
 }
 
-/** Seed a store that a CURRENT client would have left behind: notes, a pull
- * cursor, and this release's cache generation (see CACHE_GENERATION). */
+/** Boot the runtime on a store, with the network and the push loop stubbed. */
 async function boot(options: {
   store?: NoteStore
   source: D1NoteSource
@@ -267,8 +272,8 @@ async function notesOf(store: NoteStore): Promise<Record<string, string>> {
   return notes
 }
 
-/** A local store as the current app leaves it: rows, a cursor, and the cache
- * generation those rows belong to. */
+/** A local store as the current app leaves it: a cache it took a snapshot
+ * for, an events cursor, and the cache generation those rows belong to. */
 async function seededStore(
   notes: Record<string, string>,
   cursor = "500",
@@ -277,43 +282,69 @@ async function seededStore(
 ) {
   const store = await openSqlNoteStore(createNodeSqlDriver())
   await seedNotes(store, notes)
-  await store.setMeta("d1_pull_cursor", cursor)
+  await store.setMeta("cache_seeded", "1")
+  await store.setMeta("events_pull_cursor", cursor)
   await store.setMeta("cache_generation", generation)
   if (owner !== undefined) await store.setMeta("store_owner", owner)
   return store
 }
 
+/** A cache row planted straight into the store, as the replica would hold
+ * it: a register of a block at a stamp of the planter's choosing. */
+const planted = (
+  id: string,
+  key: string,
+  value: unknown,
+  ms: number,
+  action: "set" | "create" = "set",
+): CacheRow =>
+  cacheRowOf({
+    id: `evt_plant_${id}_${key}`,
+    entity: "block",
+    entity_id: id,
+    action,
+    key: action === "set" ? key : "",
+    value,
+    batch: "plant",
+    device: "planter",
+    at: ms,
+    v: 2,
+    hlc: `${String(ms).padStart(15, "0")}-0000-planter`,
+  }) as CacheRow
+
 describe("database mode boot", () => {
-  it("first boot: full pull populates the store, the files atom, and the cursor", async () => {
+  it("first boot: the snapshot populates the store and the atom, then the log follows", async () => {
     const { source, calls } = stubSource({
-      full: remoteCorpus({ "note-a": NOTE_A, "note-b": NOTE_B }, 1, "1000"),
+      rows: remoteCorpus({ "note-a": NOTE_A, "note-b": NOTE_B }),
     })
     const store = await boot({ source })
 
-    expect(calls.full).toBe(1)
+    // One page of the cache, then the log from the start.
+    expect(calls.cache).toEqual([[null, 20_000]])
+    expect(calls.events[0]).toEqual([0, 2_000])
     expect(await notesOf(store)).toEqual({ "note-a": NOTE_A, "note-b": NOTE_B })
-    expect(await store.getMeta("d1_pull_cursor")).toBe("1000")
+    expect(await store.getMeta("cache_seeded")).not.toBeNull()
+    expect(Number(await store.getMeta("events_pull_cursor"))).toBeGreaterThan(0)
     // The files atom carries the repo-file-shaped map every consumer reads.
     expect(files()).toEqual({ "note-a.md": NOTE_A, "note-b.md": NOTE_B })
     expect(status()).toMatchObject({ status: "ready", pull: "idle", emptyOffline: false })
     expect(isDatabaseModeActive()).toBe(true)
   })
 
-  it("later boots serve local contents and pull with the stored cursor", async () => {
+  it("later boots serve local contents and pull only the log past the stored cursor", async () => {
     const seeded = await seededStore({ "note-a": "- local A\n  id:: blk_a000000000\n" }, "500")
 
-    const { source, calls } = stubSource({
-      since: () => remoteChanges({ "note-b": NOTE_B }, 600, "600"),
-    })
+    const { source, calls } = stubSource({ events: [placed(6, "note-b", "B")] })
     const store = await boot({ store: seeded, source })
 
-    expect(calls.full).toBe(0)
-    expect(calls.since).toEqual(["500"])
+    expect(calls.cache).toEqual([])
+    expect(calls.events).toEqual([[500, 2_000]])
     expect(await notesOf(store)).toEqual({
       "note-a": "- local A\n  id:: blk_a000000000\n",
-      "note-b": NOTE_B,
+      // A note with a title and no blocks serializes to its one empty line.
+      "note-b": "\n",
     })
-    expect(await store.getMeta("d1_pull_cursor")).toBe("600")
+    expect(await store.getMeta("events_pull_cursor")).toBe("603")
   })
 
   it("while the browser says offline, no pull is attempted — it waits for the network", async () => {
@@ -323,11 +354,9 @@ describe("database mode boot", () => {
     // notice — and the `online` event's pull runs once the network is back.
     Object.defineProperty(navigator, "onLine", { configurable: true, get: () => false })
     try {
-      const { source, calls } = stubSource({
-        full: remoteCorpus({ "note-a": NOTE_A }, 1, "1000"),
-      })
+      const { source, calls } = stubSource({ rows: remoteCorpus({ "note-a": NOTE_A }) })
       const store = await boot({ source })
-      expect(calls.full).toBe(0)
+      expect(calls.cache).toHaveLength(0)
       expect(status()).toMatchObject({
         status: "ready",
         pull: "idle",
@@ -338,7 +367,7 @@ describe("database mode boot", () => {
       Object.defineProperty(navigator, "onLine", { configurable: true, get: () => true })
       requestDatabasePull()
       await flushDatabaseMode()
-      expect(calls.full).toBe(1)
+      expect(calls.cache).toHaveLength(1)
       expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
       expect(status()).toMatchObject({ pull: "idle", emptyOffline: false })
     } finally {
@@ -389,7 +418,7 @@ describe("database mode saves", () => {
   })
 
   it("a delete tombstones the note's rows and pushes the tombstones", async () => {
-    const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }) })
+    const { source } = stubSource({ rows: remoteCorpus({ "note-a": NOTE_A }) })
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
 
@@ -411,7 +440,7 @@ describe("database mode saves", () => {
   })
 
   it("ops apply to the graph atom at once and land as rows after the coalescing window", async () => {
-    const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }) })
+    const { source } = stubSource({ rows: remoteCorpus({ "note-a": NOTE_A }) })
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
     expect(walked("note-a")).toBe(NOTE_A)
@@ -444,7 +473,7 @@ describe("database mode saves", () => {
   })
 
   it("a run of ops is one store write, and a later batch never lands ahead of it", async () => {
-    const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }) })
+    const { source } = stubSource({ rows: remoteCorpus({ "note-a": NOTE_A }) })
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
 
@@ -468,10 +497,7 @@ describe("database mode saves", () => {
   })
 
   it("a pull never clobbers ops still coalescing", async () => {
-    const { source } = stubSource({
-      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
-      since: () => remoteChanges({ "note-b": NOTE_B }, 200, "200"),
-    })
+    const { source, add } = stubSource({ rows: remoteCorpus({ "note-a": NOTE_A }) })
     // The push queue reports note-a pending only once the edit is made.
     const pending: NoteId[] = []
     const { handle } = stubReplica(pending)
@@ -479,6 +505,7 @@ describe("database mode saves", () => {
 
     databaseApplyOps([{ op: "setText", id: "blk_a000000000", text: "typed" }])
     pending.push("note-a")
+    add(remoteCorpus({ "note-b": NOTE_B }, 200))
     requestDatabasePull()
     await flushDatabaseMode()
 
@@ -488,7 +515,7 @@ describe("database mode saves", () => {
   })
 
   it("deleting a note's last block through ops tombstones the rows", async () => {
-    const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }) })
+    const { source } = stubSource({ rows: remoteCorpus({ "note-a": NOTE_A }) })
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
 
@@ -505,10 +532,7 @@ describe("database mode saves", () => {
   })
 
   it("the graph atom follows pulls too", async () => {
-    const { source } = stubSource({
-      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
-      since: () => remoteChanges({ "note-b": NOTE_B }, 200, "200"),
-    })
+    const { source, add } = stubSource({ rows: remoteCorpus({ "note-a": NOTE_A }) })
     await boot({ source, replica: null })
     expect(walked("note-a")).toBe(NOTE_A)
     expect(walked("note-b")).toBeNull()
@@ -517,75 +541,74 @@ describe("database mode saves", () => {
     await flushDatabaseMode()
     expect(walked("note-c")).toBe("- C\n  id:: blk_c000000000\n")
 
+    add(remoteCorpus({ "note-b": NOTE_B }, 200))
     requestDatabasePull()
     await flushDatabaseMode()
     expect(walked("note-b")).toBe(NOTE_B)
   })
 })
 
-describe("database mode since-pulls", () => {
-  it("applies remote row changes", async () => {
+/**
+ * Sync is the log and nothing else (docs/events-log-cache.md): a pull is
+ * the log past the device's cursor, and each page lands in the cache and
+ * patches the graph with the entities it touched.
+ */
+describe("database mode pulls the log", () => {
+  it("applies remote changes", async () => {
     const KEEP_V2 = "- keep v2\n  id:: blk_keep000000\n"
-    const { source } = stubSource({
-      full: remoteCorpus({ keep: "- keep\n  id:: blk_keep000000\n" }, 1, "100"),
-      since: () => remoteChanges({ keep: KEEP_V2 }, 200, "200"),
+    const { source, add } = stubSource({
+      rows: remoteCorpus({ keep: "- keep\n  id:: blk_keep000000\n" }),
     })
     const store = await boot({ source })
+    const before = Number(await store.getMeta("events_pull_cursor"))
 
+    add(remoteCorpus({ keep: KEEP_V2 }, 200))
     requestDatabasePull()
     await flushDatabaseMode()
 
     expect(await notesOf(store)).toEqual({ keep: KEEP_V2 })
     expect(files()).toEqual({ "keep.md": KEEP_V2 })
-    expect(await store.getMeta("d1_pull_cursor")).toBe("200")
+    expect(Number(await store.getMeta("events_pull_cursor"))).toBeGreaterThan(before)
   })
 
-  it("a remote deletion arrives as tombstoned rows — no key list needed", async () => {
-    // The property that makes dropping the key lists safe: the since-pull
-    // says nothing at all about `keep` (unchanged, so not a change), and
-    // `gone` disappears purely because its rows came back carrying
-    // `deleted_at`.
+  it("a remote deletion arrives as events of the rows, and nothing else is said", async () => {
+    // The pull says nothing at all about `keep` (unchanged, so no event), and
+    // `gone` disappears purely because its delete events came.
     const KEEP = "- keep\n  id:: blk_keep000000\n"
     const GONE = "- gone\n  id:: blk_gone000000\n"
-    const { source } = stubSource({
-      full: remoteCorpus({ keep: KEEP, gone: GONE }, 1, "100"),
-      since: () => remoteDeletion({ gone: GONE }, 200, "200"),
-    })
+    const { source, add } = stubSource({ rows: remoteCorpus({ keep: KEEP, gone: GONE }) })
     const store = await boot({ source })
     expect(await notesOf(store)).toEqual({ keep: KEEP, gone: GONE })
 
+    add(remoteDeletion({ gone: GONE }, 200))
     requestDatabasePull()
     await flushDatabaseMode()
 
     expect(await notesOf(store)).toEqual({ keep: KEEP })
     expect(files()).toEqual({ "keep.md": KEEP })
-    expect(await store.getMeta("d1_pull_cursor")).toBe("200")
   })
 
-  it("a since-pull that mentions nothing changes nothing (silence is not deletion)", async () => {
+  it("a pull that brings nothing changes nothing (silence is not deletion)", async () => {
     const KEEP = "- keep\n  id:: blk_keep000000\n"
-    const { source } = stubSource({
-      full: remoteCorpus({ keep: KEEP }, 1, "100"),
-      since: () => remoteChanges({}, 200, "200"),
-    })
+    const { source, calls } = stubSource({ rows: remoteCorpus({ keep: KEEP }) })
     const store = await boot({ source })
+    const cursor = await store.getMeta("events_pull_cursor")
 
     requestDatabasePull()
     await flushDatabaseMode()
 
+    expect(calls.events.at(-1)).toEqual([Number(cursor), 2_000])
     expect(await notesOf(store)).toEqual({ keep: KEEP })
+    expect(await store.getMeta("events_pull_cursor")).toBe(cursor)
   })
 
-  it("never clobbers notes with queued local pushes (last-writer-wins by push)", async () => {
+  it("never clobbers notes with queued local pushes (the local edit's stamp is higher)", async () => {
     const LOCAL_EDIT = "- local edit\n  id:: blk_a000000000\n"
     const CREATED = "- brand new\n  id:: blk_new0000000\n"
     const REMOTE_EDIT = "- remote edit\n  id:: blk_a000000000\n"
-    const { source } = stubSource({
-      full: remoteCorpus({ "note-a": "- original\n  id:: blk_a000000000\n" }, 1, "100"),
-      // The locally created note is unknown remotely.
-      since: () => remoteChanges({ "note-a": REMOTE_EDIT }, 9999, "200"),
+    const { source, add } = stubSource({
+      rows: remoteCorpus({ "note-a": "- original\n  id:: blk_a000000000\n" }),
     })
-    // The two notes are pending once they are written, not before.
     const pending: NoteId[] = []
     const { handle } = stubReplica(pending)
     const store = await boot({ source, replica: handle })
@@ -594,6 +617,9 @@ describe("database mode since-pulls", () => {
     writeNote("created", CREATED)
     pending.push("note-a", "created")
     await flushDatabaseMode()
+    // The remote edit is older than the local one, by stamp; the locally
+    // created note is unknown remotely.
+    add(remoteCorpus({ "note-a": REMOTE_EDIT }, 9999))
     requestDatabasePull()
     await flushDatabaseMode()
 
@@ -604,14 +630,46 @@ describe("database mode since-pulls", () => {
     expect(walked("note-a")).toBe(LOCAL_EDIT)
     expect(walked("created")).toBe(CREATED)
   })
+
+  it("each page of the log patches the graph as it lands, not only after the run", async () => {
+    // A device that took its snapshot long ago and is far behind the log:
+    // the second page is slow, and the first page's notes are on screen
+    // while it waits.
+    const events = Array.from({ length: 2_001 }, (_, i) => placed(i + 1, `note-${i}`, `N${i}`))
+    const { source } = stubSource({ events })
+    let asked = 0
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const pullEvents = source.pullEvents
+    source.pullEvents = async (since, limit) => {
+      asked += 1
+      if (since > 0) await gate
+      return pullEvents(since, limit)
+    }
+    const store = await seededStore({}, "0")
+    startDatabaseMode({
+      openStore: async () => ({ store, persistence: "memory" }),
+      openReplicaSync: async () => null,
+      source,
+      pullRetryMs: 10 * 60_000,
+    })
+    try {
+      // Folding a page of 2,000 rows — 500 of these creates — takes a moment.
+      await vi.waitFor(() => expect(asked).toBe(2), { timeout: 30_000 })
+      await vi.waitFor(() => expect(graph().nodes.size).toBe(500), { timeout: 5_000 })
+    } finally {
+      release()
+    }
+    await flushDatabaseMode()
+    expect(graph().nodes.size).toBe(2_001)
+  }, 60_000)
 })
 
 /**
- * The store's tables are a cache of the fold of its log (docs/event-only-
- * sync.md, "The cache"): boot reads it, each batch of edits and each page of
- * pulled events updates it, and the fold check compares it in the background
- * with the log and with the replica's rows, reporting a difference with
- * `console.error`.
+ * The store's cache is the fold of its log, key by key (docs/events-log-
+ * cache.md): boot reads it, each batch of edits and each page of pulled
+ * events updates it, and the fold check compares it in the background with
+ * the log, reporting a difference with `console.error`.
  */
 describe("database mode reads the fold", () => {
   let errors: { mock: { calls: unknown[][] } }
@@ -628,31 +686,24 @@ describe("database mode reads the fold", () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     await flushDatabaseMode()
   }
-  const nothingSince = (cursor: string) => () => ({
-    nodes: [],
-    links: [],
-    views: [],
-    cursor,
-  })
 
   it("boots from the cache with nothing to fold, and checks nothing no batch touched", async () => {
-    const store = await openSqlNoteStore(createNodeSqlDriver())
-    await seedNotes(store, { "note-a": NOTE_A, "note-b": NOTE_B })
+    const store = await seededStore({ "note-a": NOTE_A, "note-b": NOTE_B })
     // A row only the cache holds: no event made it.
-    await store.applyPull({
-      nodes: [{ id: "blk_x", type: "paragraph", text: "x", props: null, updated_at: 1 }],
-      links: [],
-      views: [],
-      deleteNodes: [],
-      deleteLinks: [],
-    })
-    await store.setMeta("d1_pull_cursor", "500")
-    await store.setMeta("cache_generation", CACHE_GENERATION)
+    await store.importCacheRows([
+      planted("blk_x", "", null, 1, "create"),
+      planted("blk_x", "type", "paragraph", 1),
+      planted("blk_x", "text", "x", 1),
+    ])
     const folds = vi.spyOn(store, "foldOfLog")
 
-    const { source } = stubSource({ since: nothingSince("500") })
+    const { source } = stubSource({})
     await boot({ store, source, foldCheckMs: 0 })
     expect(files()).toEqual({ "note-a.md": NOTE_A, "note-b.md": NOTE_B })
+    // A block no note reaches is not on the first screen: it is in the
+    // graph once the whole corpus is asked for.
+    expect(graph().nodes.has("blk_x")).toBe(false)
+    await databaseEnsureAll()
     expect(graph().nodes.has("blk_x")).toBe(true)
 
     // Nothing was touched, so no check ran, and nothing is reported.
@@ -661,25 +712,27 @@ describe("database mode reads the fold", () => {
     expect(reported()).toEqual([])
   })
 
-  it("a check after a batch reads only what it touched, and reports a difference by its id", async () => {
-    const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }, 1, "100") })
+  it("a check after a batch reads only what it touched, and reports a difference by its key", async () => {
+    const { source } = stubSource({ rows: remoteCorpus({ "note-a": NOTE_A }) })
     const store = await boot({ source, foldCheckMs: 0 })
     await checked()
-    // The pull's events and rows match the cache.
+    // The snapshot and the log's events match the cache.
     expect(reported()).toEqual([])
 
     // A row only the cache holds: no batch touches it, so it is not read.
-    const plant = (nodes: NodeRow[]) =>
-      store.applyPull({ nodes, links: [], views: [], deleteNodes: [], deleteLinks: [] })
-    await plant([{ id: "blk_x", type: "paragraph", text: "x", props: null, updated_at: 1 }])
+    await store.importCacheRows([
+      planted("blk_x", "", null, 1, "create"),
+      planted("blk_x", "type", "paragraph", 1),
+      planted("blk_x", "text", "x", 1),
+    ])
     const folds = vi.spyOn(store, "foldOfLog")
     writeNote("note-b", NOTE_B)
     await flushDatabaseMode()
-    // A row a batch touched, changed under the log.
-    const block = graph().nodes.get("blk_b000000000")!
-    await plant([{ ...block, text: "planted" }])
+    // A register a batch touched, changed under the log: a later stamp the
+    // log never saw.
+    await store.importCacheRows([planted("blk_b000000000", "text", "planted", 9e12)])
     await checked()
-    expect(reported()).toEqual(["block blk_b000000000: text"])
+    expect(reported()).toEqual(["block blk_b000000000 text: value, hlc"])
     const [keys] = folds.mock.calls[0]
     expect(keys?.blocks.has("blk_b000000000")).toBe(true)
     expect(keys?.blocks.has("blk_x")).toBe(false)
@@ -688,17 +741,15 @@ describe("database mode reads the fold", () => {
   it("an edit and a pulled event both reach the fold, and the check finds no difference", async () => {
     const EDIT = "- edited\n  id:: blk_a000000000\n"
     const REMOTE = "- from elsewhere\n  id:: blk_b000000000\n"
-    const { source } = stubSource({
-      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
-      since: () => remoteChanges({ "note-b": REMOTE }, 5, "200"),
-    })
+    const { source, add } = stubSource({ rows: remoteCorpus({ "note-a": NOTE_A }) })
     await boot({ source, foldCheckMs: 0 })
     await checked()
     expect(reported()).toEqual([])
 
     writeNote("note-a", EDIT)
     await flushDatabaseMode()
-    // The pull's events refresh the screen from the fold: the edit is in it.
+    add(remoteCorpus({ "note-b": REMOTE }, 5))
+    // The pull's events patch the screen from the cache: the edit is in it.
     requestDatabasePull()
     await flushDatabaseMode()
     expect(files()).toEqual({ "note-a.md": EDIT, "note-b.md": REMOTE })
@@ -707,100 +758,15 @@ describe("database mode reads the fold", () => {
     expect(reported()).toEqual([])
   })
 
-  it("a pulled row that differs from the cache is a replica difference", async () => {
-    const { source } = stubSource({
-      full: {
-        nodes: [{ id: "note-d", type: "note", text: "other", props: null, updated_at: 1, seq: 1 }],
-        links: [],
-        views: [],
-        cursor: "1",
-      },
-      events: [placed(1, "note-d", "D")],
-    })
-    await boot({ source, foldCheckMs: 0 })
-    expect(graph().nodes.get("note-d")?.text).toBe("D")
-    await checked()
-    expect(reported()).toContain("replica block note-d: text, updated_at")
-  })
-
-  it("an event past the rows the pull brought is not a difference", async () => {
-    // Another device wrote between the pull of rows and the pull of events.
-    const { source } = stubSource({
-      full: {
-        nodes: [{ id: "note-c", type: "note", text: "C", props: null, updated_at: 1_000, seq: 1 }],
-        links: [],
-        views: [],
-        cursor: "1",
-      },
-      events: [
-        placed(1, "note-c", "C"),
-        { ...placed(2, "note-c", "C2"), action: "update", patch: { text: "C2" } } as LoggedEvent,
-      ],
-    })
-    await boot({ source, foldCheckMs: 0 })
-    expect(graph().nodes.get("note-c")?.text).toBe("C2")
-    await checked()
-    expect(reported()).toEqual([])
-  })
-
-  it("a fresh device shows each page of the log as it lands, not only after the run", async () => {
-    // Finn's bug: on a fresh profile nothing showed until a whole run of
-    // pages was in, and each reload showed a little more. Here the second
-    // page is slow: the first page's notes are on screen while it waits.
-    const events = Array.from({ length: 2_001 }, (_, i) => placed(i + 1, `note-${i}`, `N${i}`))
-    const { source } = stubSource({
-      full: { nodes: [], links: [], views: [], cursor: "0" },
-      events,
-    })
-    let asked = 0
-    let release = () => {}
-    const gate = new Promise<void>((resolve) => (release = resolve))
-    const pullEvents = source.pullEvents
-    source.pullEvents = async (since, limit) => {
-      asked += 1
-      if (since > 0) await gate
-      return pullEvents(since, limit)
-    }
-    startDatabaseMode({
-      openStore: async () => ({
-        store: await openSqlNoteStore(createNodeSqlDriver()),
-        persistence: "memory",
-      }),
-      openReplicaSync: async () => null,
-      source,
-      pullRetryMs: 10 * 60_000,
-    })
-    try {
-      // Folding a page of 2,000 rows — 500 of these creates — takes a moment.
-      await vi.waitFor(() => expect(asked).toBe(2), { timeout: 30_000 })
-      await vi.waitFor(() => expect(graph().nodes.size).toBe(500), { timeout: 5_000 })
-    } finally {
-      release()
-    }
-    await flushDatabaseMode()
-    expect(graph().nodes.size).toBe(2_001)
-  }, 60_000)
-
-  it("a fresh device draws the pulled rows at once, before any page of the log", async () => {
+  it("a fresh device draws the snapshot at once, before any page of the log", async () => {
     // Finn's report of 2026-10-28: a fresh profile pulled 27 pages of the log
-    // and showed nothing until the last had folded, though the first request
-    // had brought every row. Here the log never answers until released: the
-    // notes are on screen from the rows alone, and the fold check, once the
-    // log has caught up, finds the cache and the log agree.
-    const full = remoteCorpus({ "note-a": NOTE_A, "note-b": NOTE_B }, 1, "100")
-    // A key of block A, as the replica's own key row (migrations/0029) and
-    // in the row's mirror: the first screen holds the replica's stamp for it.
-    const blockA = full.nodes.find((node) => node.id === "blk_a000000000") as NodeRow
-    blockA.props = '{"colour":"red"}'
-    const colour = {
-      block_id: "blk_a000000000",
-      key: "colour",
-      value: '"red"',
-      hlc: "000000000009000-0000-other.tab",
-      seq: 1,
-      updated_at: 9_000,
-    }
-    const { source, calls } = stubSource({ full: { ...full, delta_mat_values: [colour] } })
+    // and showed nothing until the last had folded. Here the log never
+    // answers until released: the notes are on screen from the snapshot
+    // alone, and the fold check, once the log has caught up, finds the
+    // cache and the log agree.
+    const { source, calls } = stubSource({
+      rows: remoteCorpus({ "note-a": NOTE_A, "note-b": NOTE_B }),
+    })
     let release = () => {}
     const gate = new Promise<void>((resolve) => (release = resolve))
     const pullEvents = source.pullEvents
@@ -819,14 +785,8 @@ describe("database mode reads the fold", () => {
     try {
       await vi.waitFor(() => expect(graph().nodes.get("blk_a000000000")?.text).toBe("A"))
       expect(graph().nodes.get("blk_b000000000")?.text).toBe("B")
-      expect(calls.full).toBe(1)
-      expect(JSON.parse(graph().nodes.get("blk_a000000000")?.props ?? "null")).toEqual({
-        colour: "red",
-      })
-      expect(await store.getDeltaMatValuesOf(["blk_a000000000"])).toEqual([
-        expect.objectContaining({ key: "colour", hlc: colour.hlc }),
-      ])
-      // Nothing of the log has landed: the rows alone drew the screen.
+      expect(calls.cache).toHaveLength(1)
+      // Nothing of the log has landed: the snapshot alone drew the screen.
       expect(await store.eventLog()).toEqual([])
       expect((await store.getMeta("events_pull_cursor")) ?? "").toBe("")
     } finally {
@@ -842,10 +802,7 @@ describe("database mode reads the fold", () => {
   it("pulls a long log to its end before the check, and shows all of it", async () => {
     // Four rows per create: just past ten pages of 2,000 rows.
     const events = Array.from({ length: 5_001 }, (_, i) => placed(i + 1, `note-${i}`, `N${i}`))
-    const { source, calls } = stubSource({
-      full: { nodes: [], links: [], views: [], cursor: "0" },
-      events,
-    })
+    const { source, calls } = stubSource({ events })
     await boot({ source, foldCheckMs: 0 })
     await flushDatabaseMode()
     // Ten pages in the pull, then the next run of pages queued at once.
@@ -858,17 +815,16 @@ describe("database mode reads the fold", () => {
 
 /**
  * The device's copy of the tenant's log (docs/event-sourcing.md): brought
- * down by the pull, page by page, beside the rows — and read back whole, with
- * this device's own unpushed events placed after everything else.
+ * down by the pull, page by page, after the snapshot — and read back whole,
+ * with this device's own unpushed events placed after everything else.
  */
 describe("database mode event log", () => {
-  it("a pull brings the log down after the rows, stores its cursor, and pulls only past it next time", async () => {
+  it("a pull brings the log down after the snapshot, stores its cursor, and pulls only past it next time", async () => {
     const { source, calls } = stubSource({
-      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
-      since: () => remoteChanges({}, 200, "200"),
       events: [placed(1, "note-a", "A"), placed(2, "note-b", "B")],
     })
     const store = await boot({ source, replica: stubReplica().handle })
+    expect(calls.cache).toHaveLength(1)
     expect(calls.events).toEqual([[0, 2_000]])
     // The cursor is the per-key log's own seq: the last row of the second event.
     expect(await store.getMeta("events_pull_cursor")).toBe("203")
@@ -879,8 +835,6 @@ describe("database mode event log", () => {
         111,
       ]),
     )
-    // The pulled events are the cache: note-b is there, though no row of
-    // it was pulled.
     expect(await noteOf(store, "note-b")).not.toBeNull()
 
     requestDatabasePull()
@@ -890,10 +844,7 @@ describe("database mode event log", () => {
   })
 
   it("places this device's own event when the pull brings it back, and reads the log whole", async () => {
-    const { source } = stubSource({
-      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
-      events: [placed(1, "note-a", "A")],
-    })
+    const { source } = stubSource({ events: [placed(1, "note-a", "A")] })
     const store = await boot({ source, replica: stubReplica().handle })
     writeNote("note-c", "- C\n  id:: blk_c000000000\n")
     await flushDatabaseMode()
@@ -907,41 +858,33 @@ describe("database mode event log", () => {
     expect(log.slice(4).map((event) => event.seq)).toEqual(own.map((_, i) => 104 + i))
   })
 
-  it("a device whose log has begun does not seed its cache from a full pull", async () => {
-    // A pre-0005 cursor degrades to a full pull on a device that has its
-    // log: the rows are held for the fold check, and the log alone writes.
-    const { source, calls } = stubSource({
-      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
-      events: [placed(1, "note-a", "A")],
-    })
-    const store = await seededStore({}, "1788891492616", CACHE_GENERATION)
-    await store.setMeta("events_pull_cursor", "999")
+  it("a device that has taken its snapshot takes none again", async () => {
+    const { source, calls } = stubSource({ events: [placed(1, "note-a", "A")] })
+    const store = await seededStore({}, "999")
     await boot({ store, source, replica: stubReplica().handle })
-    expect(calls.full).toBe(1)
+    expect(calls.cache).toEqual([])
     expect(calls.events).toEqual([[999, 2_000]])
     expect(await noteOf(store, "note-a")).toBeNull()
   })
 
-  it("a wiped cache pulls the log again from the start", async () => {
-    const { source, calls } = stubSource({
-      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
-      events: [placed(1, "note-a", "A")],
-    })
-    const store = await seededStore({ "note-a": NOTE_A }, "500", "0")
-    await store.setMeta("events_pull_cursor", "9")
+  it("a wiped cache takes a snapshot again and pulls the log again from the start", async () => {
+    const { source, calls } = stubSource({ events: [placed(1, "note-a", "A")] })
+    const store = await seededStore({ "note-a": NOTE_A }, "9", "0")
     await boot({ store, source, replica: stubReplica().handle })
-    // The stale generation wiped the cache, cursors included, so the log
-    // was pulled from zero and holds what the replica serves.
+    // The stale generation wiped the cache, cursors included, so the
+    // snapshot was taken and the log was pulled from zero.
+    expect(calls.cache).toHaveLength(1)
     expect(calls.events[0]).toEqual([0, 2_000])
-    expect(new Set((await store.eventLog()).map((event) => event.event))).toEqual(
-      new Set(["evt_remote_1"]),
-    )
+    // The log kept the device's own unpushed events, and took the remote one.
+    const log = await store.eventLog()
+    expect(log.some((event) => event.event === "evt_remote_1")).toBe(true)
+    expect((await store.unpushedEvents()).length).toBeGreaterThan(0)
   })
 })
 
 describe("database mode lifecycle", () => {
   it("stop closes the store, stops the push loop, and resets the atoms", async () => {
-    const { source } = stubSource({ full: remoteCorpus({ a: NOTE_A }) })
+    const { source } = stubSource({ rows: remoteCorpus({ a: NOTE_A }) })
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
     const close = vi.spyOn(store, "close")
@@ -962,26 +905,25 @@ describe("database mode lifecycle", () => {
  * A different database behind the same URL — a preview clone rebuilt from
  * production (docs/preview-databases.md). The cursor the device holds was
  * issued by the old database and means nothing against the new one, so the
- * local copy is wiped and pulled again in full, as for a stale generation.
+ * cache is wiped and a snapshot taken again, as for a stale generation.
  */
 describe("replica identity", () => {
-  it("a changed replica_id wipes the local copy and re-pulls in full", async () => {
+  it("a changed replica_id wipes the cache and takes a snapshot of the new database", async () => {
     const seeded = await seededStore({ "note-a": NOTE_A }, "500")
     await seeded.setMeta("replica_id", "clone-one")
 
+    // The log answers with the NEW database's id: its sequence is behind the
+    // stored cursor, so the page is empty, and the id says why.
     const { source, calls } = stubSource({
-      // The since-pull answers with the NEW database's id and nothing else
-      // (the new clone's sequence is behind the stored cursor).
-      since: (cursor) => ({ ...remoteChanges({}, 2, cursor), replica_id: "clone-two" }),
-      full: { ...remoteCorpus({ "note-b": NOTE_B }, 1, "900"), replica_id: "clone-two" },
+      rows: remoteCorpus({ "note-b": NOTE_B }),
+      replicaId: "clone-two",
     })
     const store = await boot({ store: seeded, source })
 
-    expect(calls.since).toEqual(["500"])
-    expect(calls.full).toBe(1)
+    expect(calls.events[0]).toEqual([500, 2_000])
+    expect(calls.cache).toHaveLength(1)
     expect(await notesOf(store)).toEqual({ "note-b": NOTE_B })
     expect(files()).toEqual({ "note-b.md": NOTE_B })
-    expect(await store.getMeta("d1_pull_cursor")).toBe("900")
     expect(await store.getMeta("replica_id")).toBe("clone-two")
   })
 
@@ -989,11 +931,9 @@ describe("replica identity", () => {
     const seeded = await seededStore({ "note-a": NOTE_A })
     await seeded.setMeta("replica_id", "production")
 
-    const { source, calls } = stubSource({
-      since: (cursor) => ({ ...remoteChanges({}, 2, cursor), replica_id: "production" }),
-    })
+    const { source, calls } = stubSource({ replicaId: "production" })
     const store = await boot({ store: seeded, source })
-    expect(calls.full).toBe(0)
+    expect(calls.cache).toHaveLength(0)
     expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
     stopDatabaseMode()
     await flushDatabaseMode()
@@ -1001,9 +941,9 @@ describe("replica identity", () => {
     // An older Worker sends no id: not evidence of a swap.
     const labelled = await seededStore({ "note-a": NOTE_A })
     await labelled.setMeta("replica_id", "production")
-    const silent = stubSource({ since: (cursor) => remoteChanges({}, 3, cursor) })
+    const silent = stubSource({})
     const kept = await boot({ store: labelled, source: silent.source })
-    expect(silent.calls.full).toBe(0)
+    expect(silent.calls.cache).toHaveLength(0)
     expect(await notesOf(kept)).toEqual({ "note-a": NOTE_A })
     expect(await kept.getMeta("replica_id")).toBe("production")
   })
@@ -1012,79 +952,79 @@ describe("replica identity", () => {
     const seeded = await seededStore({ "note-a": NOTE_A })
     expect(await seeded.getMeta("replica_id")).toBeNull()
 
-    const { source, calls } = stubSource({
-      since: (cursor) => ({ ...remoteChanges({}, 2, cursor), replica_id: "production" }),
-    })
+    const { source, calls } = stubSource({ replicaId: "production" })
     const store = await boot({ store: seeded, source })
-    expect(calls.full).toBe(0)
+    expect(calls.cache).toHaveLength(0)
     expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
     expect(await store.getMeta("replica_id")).toBe("production")
   })
 
-  it("a full pull from a changed replica applies once, on a cleared store", async () => {
-    // No usable cursor (a fresh boot after an owner wipe) but rows from the
-    // old clone still local: the full pull is already the right pull, and
+  it("a snapshot from a changed replica lands on a cleared cache", async () => {
+    // No snapshot taken yet (a fresh boot after an owner wipe) but rows from
+    // the old clone still local: the snapshot is already the right pull, and
     // the clear must still happen so nothing of the old clone survives it.
-    const seeded = await seededStore({ "note-a": NOTE_A }, "")
+    const seeded = await openSqlNoteStore(createNodeSqlDriver())
+    await seedNotes(seeded, { "note-a": NOTE_A })
+    await seeded.setMeta("cache_generation", CACHE_GENERATION)
     await seeded.setMeta("replica_id", "clone-one")
 
     const { source, calls } = stubSource({
-      full: { ...remoteCorpus({ "note-b": NOTE_B }, 1, "900"), replica_id: "clone-two" },
+      rows: remoteCorpus({ "note-b": NOTE_B }),
+      replicaId: "clone-two",
     })
     const store = await boot({ store: seeded, source })
-    expect(calls.full).toBe(1)
+    // The first page said "clone-two": the cache was wiped and the snapshot
+    // started over.
+    expect(calls.cache).toHaveLength(2)
     expect(await notesOf(store)).toEqual({ "note-b": NOTE_B })
   })
 })
 
 /**
  * The local store is a CACHE of D1, never a source of truth, so it is never
- * data-migrated: a copy from an older generation is discarded and rebuilt by a
- * full pull. This is what stops a device that predates a server-side migration
- * merging its stale rows with the pulled, migrated ones.
+ * data-migrated: a copy from an older generation is discarded and rebuilt
+ * from a snapshot. This is what stops a device that predates a server-side
+ * migration merging its stale rows with the pulled, migrated ones. The log
+ * stays: what this device made and has not pushed is still its own to push.
  */
 describe("cache generation", () => {
-  it("a stale generation wipes the local copy and re-pulls in full", async () => {
+  it("a stale generation wipes the cache and takes a snapshot", async () => {
     const seeded = await seededStore({ "note-a": NOTE_A }, "500", "1")
 
-    const { source, calls } = stubSource({
-      full: remoteCorpus({ "note-b": NOTE_B }, 1, "900"),
-    })
+    const { source, calls } = stubSource({ rows: remoteCorpus({ "note-b": NOTE_B }) })
     const store = await boot({ store: seeded, source })
 
-    // The stale cursor went with the rows, so the pull was a FULL one — the
-    // whole point: a since-pull would have merged two generations.
-    expect(calls.full).toBe(1)
-    expect(calls.since).toEqual([])
-    expect(await notesOf(store)).toEqual({ "note-b": NOTE_B })
-    expect(files()).toEqual({ "note-b.md": NOTE_B })
+    // The cursors went with the cache, so the pull took the snapshot and the
+    // log from zero — the whole point: a pull past the old cursor would have
+    // merged two generations.
+    expect(calls.cache).toHaveLength(1)
+    expect(calls.events[0]).toEqual([0, 2_000])
+    // The snapshot's note, and the device's own unpushed note replayed on
+    // top of it: the log stays across a generation wipe.
+    expect(await notesOf(store)).toEqual({ "note-a": NOTE_A, "note-b": NOTE_B })
+    expect(files()).toEqual({ "note-a.md": NOTE_A, "note-b.md": NOTE_B })
     expect(await store.getMeta("cache_generation")).toBe(CACHE_GENERATION)
-    expect(await store.getMeta("d1_pull_cursor")).toBe("900")
+    expect(await store.getMeta("cache_seeded")).not.toBe("")
   })
 
   it("a matching generation leaves the local copy and its cursor alone", async () => {
     const seeded = await seededStore({ "note-a": NOTE_A })
 
-    const { source, calls } = stubSource({
-      since: (cursor) => remoteChanges({}, 2, cursor),
-    })
+    const { source, calls } = stubSource({})
     const store = await boot({ store: seeded, source })
 
-    expect(calls.full).toBe(0)
-    expect(calls.since).toEqual(["500"])
+    expect(calls.cache).toHaveLength(0)
+    expect(calls.events).toEqual([[500, 2_000]])
     expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
   })
 
   it("a fresh store boots normally and records the generation", async () => {
-    const { source, calls } = stubSource({
-      full: remoteCorpus({ "note-a": NOTE_A }, 1, "1000"),
-    })
+    const { source, calls } = stubSource({ rows: remoteCorpus({ "note-a": NOTE_A }) })
     const store = await boot({ source })
 
-    expect(calls.full).toBe(1)
+    expect(calls.cache).toHaveLength(1)
     expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
     expect(await store.getMeta("cache_generation")).toBe(CACHE_GENERATION)
-    expect(await store.getMeta("d1_pull_cursor")).toBe("1000")
   })
 
   it("keeps the owner binding intact across a generation wipe", async () => {
@@ -1093,29 +1033,65 @@ describe("cache generation", () => {
     const seeded = await seededStore({ "note-a": NOTE_A }, "500", "1")
     await seeded.setMeta("store_owner", "42")
 
-    const { source } = stubSource({ full: { nodes: [], links: [], views: [], cursor: null } })
+    const { source } = stubSource({})
     const store = await boot({ store: seeded, source, owner: "42" })
 
     expect(await store.getMeta("store_owner")).toBe("42")
-    expect(await notesOf(store)).toEqual({})
+    // The owner's own unpushed note is still theirs, replayed on the snapshot.
+    expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
+  })
+
+  it("keeps the log across a generation wipe: unpushed events are replayed on top of the snapshot", async () => {
+    const seeded = await seededStore({ "note-a": NOTE_A }, "500", "1")
+    const unpushed = (await seeded.unpushedEvents()).length
+    expect(unpushed).toBeGreaterThan(0)
+
+    const { source } = stubSource({ rows: remoteCorpus({ "note-b": NOTE_B }) })
+    const store = await boot({ store: seeded, source })
+
+    // The snapshot brought note-b; the device's own unpushed note-a is
+    // still queued, and back in the cache on top of the snapshot.
+    expect((await store.unpushedEvents()).length).toBe(unpushed)
+    expect(await notesOf(store)).toEqual({ "note-a": NOTE_A, "note-b": NOTE_B })
+  })
+
+  it("a cache from a client before generations is discarded and snapshotted again", async () => {
+    // A store left by a client that predates this release: no generation
+    // stamp at all.
+    const stale = await openSqlNoteStore(createNodeSqlDriver())
+    await seedNotes(stale, { purged: "- purged\n  id:: blk_purged000\n" })
+    await stale.setMeta("cache_seeded", "1")
+    await stale.setMeta("events_pull_cursor", "500")
+
+    const { source, calls } = stubSource({ rows: remoteCorpus({ "note-a": NOTE_A }) })
+    const store = await boot({ store: stale, source })
+
+    expect(calls.cache).toHaveLength(1) // the cursors went with the cache
+    expect(calls.events[0]).toEqual([0, 2_000])
+    expect(await store.getMeta("cache_generation")).toBe(CACHE_GENERATION)
+    // The snapshot, plus what the device had not pushed (its own log).
+    expect(await notesOf(store)).toEqual({
+      "note-a": NOTE_A,
+      purged: "- purged\n  id:: blk_purged000\n",
+    })
   })
 })
 
 describe("owner binding", () => {
   it("records the owner on first boot", async () => {
-    const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }, 1, "1000") })
+    const { source } = stubSource({ rows: remoteCorpus({ "note-a": NOTE_A }) })
     const store = await boot({ source, owner: "42" })
     expect(await store.getMeta("store_owner")).toBe("42")
     expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
   })
 
-  it("the same owner keeps the local cache and cursor (since-pull, no wipe)", async () => {
+  it("the same owner keeps the local cache and cursor (no snapshot, no wipe)", async () => {
     const seeded = await seededStore({ "note-a": NOTE_A }, "500", CACHE_GENERATION, "42")
 
-    const { source, calls } = stubSource({ since: (cursor) => remoteChanges({}, 2, cursor) })
+    const { source, calls } = stubSource({})
     const store = await boot({ store: seeded, source, owner: "42" })
-    expect(calls.since).toEqual(["500"])
-    expect(calls.full).toBe(0)
+    expect(calls.events).toEqual([[500, 2_000]])
+    expect(calls.cache).toHaveLength(0)
     expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
   })
 
@@ -1123,74 +1099,34 @@ describe("owner binding", () => {
     const seeded = await seededStore({ "note-a": NOTE_A }, "500", CACHE_GENERATION, "42")
 
     // A different account signs in on this browser: the previous owner's
-    // rows and cursor are gone, the pull starts from scratch (and for a
+    // rows, log and cursor are gone, the pull starts from scratch (and for a
     // non-owner the replica would 403 — an empty corpus, never leaked notes).
-    const { source, calls } = stubSource({
-      full: { nodes: [], links: [], views: [], cursor: null },
-    })
+    const { source, calls } = stubSource({})
     const store = await boot({ store: seeded, source, owner: "7" })
     expect(await store.getMeta("store_owner")).toBe("7")
-    expect(calls.full).toBe(1)
-    expect(calls.since).toEqual([])
+    expect(calls.cache).toHaveLength(1)
+    expect(calls.events[0]).toEqual([0, 2_000])
     expect(await notesOf(store)).toEqual({})
+    expect(await store.eventLog()).toEqual([])
     expect(files()).toEqual({})
   })
 
   it("an ownerless boot leaves an owned store untouched", async () => {
     const seeded = await seededStore({ "note-a": NOTE_A }, "500", CACHE_GENERATION, "42")
 
-    const { source } = stubSource({ since: (cursor) => remoteChanges({}, 2, cursor) })
+    const { source } = stubSource({})
     const store = await boot({ store: seeded, source })
     expect(await store.getMeta("store_owner")).toBe("42")
     expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
   })
 })
 
-describe("cache generation", () => {
-  it("a cache from an older generation is discarded and re-pulled in full", async () => {
-    // A store left by a client that predates this release: no generation
-    // stamp, and possibly rows the replica hard-deleted before tombstones
-    // existed — which nothing would ever tell this client about again.
-    const stale = await openSqlNoteStore(createNodeSqlDriver())
-    await seedNotes(stale, { "note-a": NOTE_A, purged: "- purged\n  id:: blk_purged000\n" })
-    await stale.setMeta("d1_pull_cursor", "500")
-
-    const { source, calls } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }, 1, "900") })
-    const store = await boot({ store: stale, source })
-
-    expect(calls.since).toEqual([]) // the cursor went with the cache
-    expect(calls.full).toBe(1)
-    expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
-    expect(files()).toEqual({ "note-a.md": NOTE_A })
-    expect(await store.getMeta("cache_generation")).toBe(CACHE_GENERATION)
-    expect(await store.getMeta("d1_pull_cursor")).toBe("900")
-  })
-
-  it("a cache of the current generation is kept (the wipe happens once)", async () => {
-    const seeded = await seededStore({ "note-a": NOTE_A }, "500")
-
-    const { source, calls } = stubSource({ since: (cursor) => remoteChanges({}, 2, cursor) })
-    const store = await boot({ store: seeded, source })
-
-    expect(calls.full).toBe(0)
-    expect(calls.since).toEqual(["500"])
-    expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
-  })
-})
-
-/**
- * Ambient pull coalescing. `focus`, `visibilitychange` and `online` fire on
- * every alt-tab, in pairs, for every open tab — wired straight to a pull they
- * spent 61% of a day's D1 read budget learning nothing. The gap is the fix;
- * these tests are what stop it being quietly removed.
- */
 describe("database mode stamps", () => {
   /** A stamp from a clock far ahead of this one. */
   const AHEAD = "009999999999999-0003-other.tab"
 
   it("stamps each event after every stamp it has pulled, in the order made, and saves the last", async () => {
     const { source } = stubSource({
-      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
       // One from a fast clock, and one from before stamps.
       events: [{ ...placed(1, "note-a", "A"), hlc: AHEAD }, placed(2, "note-b", "B")],
     })
@@ -1208,7 +1144,7 @@ describe("database mode stamps", () => {
   it("a new session stamps after the stamp the last one saved", async () => {
     const store = await seededStore({ "note-a": NOTE_A })
     await store.setMeta("hlc_last", AHEAD)
-    const { source } = stubSource({ since: () => remoteChanges({}, 200, "600") })
+    const { source } = stubSource({})
     await boot({ store, source, replica: stubReplica().handle })
     // The seeded events are the test's own; only the session's are judged.
     const seeded = (await store.unpushedEvents()).length
@@ -1223,11 +1159,16 @@ describe("database mode stamps", () => {
   })
 })
 
+/**
+ * Ambient pull coalescing. `focus`, `visibilitychange` and `online` fire on
+ * every alt-tab, in pairs, for every open tab — wired straight to a pull they
+ * spent 61% of a day's D1 read budget learning nothing. The gap is the fix;
+ * these tests are what stop it being quietly removed.
+ */
 describe("ambient pull coalescing", () => {
-  const seeded = () => ({
-    full: remoteCorpus({ keep: "- keep\n  id:: blk_keep000000\n" }, 1, "100"),
-    since: () => remoteChanges({}, 200, "200"),
-  })
+  const seeded = () => ({ rows: remoteCorpus({ keep: "- keep\n  id:: blk_keep000000\n" }) })
+  /** The pulls after the boot's own. */
+  const pulls = (calls: { events: unknown[] }) => calls.events.length - 1
 
   afterEach(() => {
     vi.useRealTimers()
@@ -1237,17 +1178,17 @@ describe("ambient pull coalescing", () => {
     vi.useFakeTimers()
     const { source, calls } = stubSource(seeded())
     await boot({ source })
-    expect(calls.since).toHaveLength(0)
+    expect(pulls(calls)).toBe(0)
 
     // Four alt-tabs in quick succession — eight events in the real browser,
     // since a tab switch raises focus AND visibilitychange.
     for (let i = 0; i < 8; i += 1) requestAmbientDatabasePull()
     await flushDatabaseMode()
-    expect(calls.since).toHaveLength(0)
+    expect(pulls(calls)).toBe(0)
 
     await vi.advanceTimersByTimeAsync(30_000)
     await flushDatabaseMode()
-    expect(calls.since).toHaveLength(1)
+    expect(pulls(calls)).toBe(1)
   })
 
   it("pulls immediately once the gap has passed", async () => {
@@ -1258,7 +1199,7 @@ describe("ambient pull coalescing", () => {
     await vi.advanceTimersByTimeAsync(30_000)
     requestAmbientDatabasePull()
     await flushDatabaseMode()
-    expect(calls.since).toHaveLength(1)
+    expect(pulls(calls)).toBe(1)
   })
 
   it("nothing is dropped — a later burst still gets its own pull", async () => {
@@ -1269,12 +1210,12 @@ describe("ambient pull coalescing", () => {
     requestAmbientDatabasePull()
     await vi.advanceTimersByTimeAsync(30_000)
     await flushDatabaseMode()
-    expect(calls.since).toHaveLength(1)
+    expect(pulls(calls)).toBe(1)
 
     requestAmbientDatabasePull()
     await vi.advanceTimersByTimeAsync(30_000)
     await flushDatabaseMode()
-    expect(calls.since).toHaveLength(2)
+    expect(pulls(calls)).toBe(2)
   })
 
   it("a deliberate pull is never coalesced — the sync button answers now", async () => {
@@ -1285,29 +1226,34 @@ describe("ambient pull coalescing", () => {
     // Inside the gap, where an ambient trigger would only schedule one.
     requestDatabasePull()
     await flushDatabaseMode()
-    expect(calls.since).toHaveLength(1)
+    expect(pulls(calls)).toBe(1)
   })
 })
 
 /**
- * Views are gone (docs/removing-views.md): a pull that still carries view
- * rows lands nothing for them, and no edit writes a view event.
+ * Views are gone (docs/removing-views.md): the log may still carry view
+ * events as history, the cache holds no row for them, and no edit writes a
+ * view event.
  */
 describe("database mode, no views", () => {
-  const viewRow: ViewRow = {
-    id: "note-a",
-    root_id: "note-a",
-    filter: null,
-    sort: null,
-    pinned: true,
-    sort_key: null,
-    updated_at: 50,
-  }
-
-  it("boots past the views a pull still carries, and deleting a note writes no view event", async () => {
-    const { source } = stubSource({
-      full: { ...remoteCorpus({ "note-a": NOTE_A }), views: [viewRow] },
-    })
+  it("boots past the view events a log still carries, and deleting a note writes no view event", async () => {
+    const viewEvent: LoggedEvent = {
+      id: "evt_remote_view",
+      seq: 2,
+      entity: "view",
+      entity_id: "note-a",
+      action: "create",
+      patch: { root_id: "note-a", filter: null, sort: null, pinned: true, sort_key: null },
+      batch: "bat_remote_view",
+      device: "other.tab",
+      at: 2_000,
+      tz: 0,
+      v: 1,
+      origin: "replica",
+      actor: 111,
+      received_at: 2_000,
+    }
+    const { source } = stubSource({ events: [placed(1, "note-a", "A"), viewEvent] })
     const store = await boot({ source, replica: stubReplica().handle })
     expect(jotai.get(databaseGraphAtom).nodes.has("note-a")).toBe(true)
     databaseApplyOps(deleteNoteOps("note-a", jotai.get(databaseGraphAtom)))

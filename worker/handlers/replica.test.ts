@@ -7,18 +7,17 @@ import { expandLog } from "../../src/data/key-events"
 import type { SqlDriver } from "../../src/data/sql-driver"
 import { ensureTenantMeta, forTenant, type TenantDb } from "../tenancy-db"
 import type { Env } from "../types"
+import { rowsOfEntities } from "../../src/data/cache-rows"
+import { readAllEntities } from "./cache-reads"
 import { planKeyAppend } from "./event-log"
-import { corpusPullFull, corpusPullSince, corpusPut, corpusStatus } from "./replica-corpus"
+import { corpusPut, corpusStatus } from "./replica-corpus"
 import {
   REPLICA_PROTOCOL_HEADERS,
   parseReplicaPayload,
-  parseSinceCursor,
   type LinkRow,
   type NodeRow,
-  type ReplicaChangesBody,
-  type ReplicaCorpusBody,
 } from "./replica-payload"
-import { replica, requireSession, retypeLegacyBoards } from "./replica"
+import { replica, requireSession } from "./replica"
 import {
   applyControlPlane,
   asFakeD1,
@@ -132,8 +131,9 @@ describe("the planned write", () => {
   const keys = expandLog(events)
 
   it("every statement names its tenant with the :tenant token, never a parameter", () => {
+    // The log insert, the cache upsert, the watermark.
     const statements = planKeyAppend(keys, write)
-    expect(statements).toHaveLength(6)
+    expect(statements).toHaveLength(3)
     for (const statement of statements) {
       expect(statement.sql).toContain("user_id")
       expect(statement.sql).toContain(":tenant")
@@ -142,11 +142,13 @@ describe("the planned write", () => {
     // beside the event — and never which tenant's rows are written.
     const [append, ...projections] = planKeyAppend(keys, write)
     expect(append.params).toContain(111)
-    for (const statement of projections) expect(statement.params).not.toContain(111)
+    for (const statement of projections) expect(statement.params ?? []).not.toContain(111)
   })
 
-  it("plans nothing to append for a write that changes nothing", () => {
-    expect(planKeyAppend([], write)).toEqual([])
+  it("plans only the watermark for a write that changes nothing", () => {
+    const statements = planKeyAppend([], write)
+    expect(statements).toHaveLength(1)
+    expect(statements[0].sql).toContain("'cache_seq'")
   })
 })
 
@@ -174,6 +176,10 @@ async function openTenant(id: number, existing?: SqlDriver): Promise<TenantDb> {
  */
 const withSeq = <T>(row: T, seq: number): T & { seq: number } => ({ ...row, seq })
 
+/** Every block and link of a tenant as the cache holds them, tombstones too
+ * (docs/events-log-cache.md): what the row pull used to answer. */
+const corpusOf = async (tenant: TenantDb) => rowsOfEntities(await readAllEntities(tenant))
+
 describe("corpus operations over the real D1 schema", () => {
   const nodes: NodeRow[] = [
     { id: "blk_noteaaaaaa", type: "note", text: "blk_noteaaaaaa", props: null, updated_at: 100 },
@@ -189,71 +195,42 @@ describe("corpus operations over the real D1 schema", () => {
     },
   ]
 
-  it("full pull returns every row of both tables, and the sequence they reach", async () => {
+  it("a write lands every entity in the cache, with the sequence each reached", async () => {
     const tenant = await openTenant(1)
     await corpusPut(tenant, { nodes, links, cursor: "42" }, NOW)
-    // The cursor is the row sequence now, NOT the client's push cursor ("42"):
-    // the two were conflated, and only one of them can order a pull.
-    expect(await corpusPullFull(tenant)).toEqual({
-      nodes: [withSeq(nodes[0], 4), withSeq(nodes[1], 8)],
+    // An entity's seq is its last event's, NOT the client's push cursor
+    // ("42"): the two were conflated once, and only one orders the log.
+    // The cache answers by id, not by the order of the push.
+    expect(await corpusOf(tenant)).toEqual({
+      nodes: [withSeq(nodes[1], 8), withSeq(nodes[0], 4)],
       links: [withSeq(links[0], 13)],
-      views: [],
-      delta_mat_values: [],
-      cursor: "13",
     })
   })
 
-  it("since pull returns ONLY rows above the cursor", async () => {
+  it("an edit at a LOWER updated_at than the rows stored still lands, at its event's seq", async () => {
     const tenant = await openTenant(1)
     await corpusPut(tenant, { nodes, links }, NOW)
-    const { cursor } = await corpusPullFull(tenant)
-    // A later edit to one node, at a LOWER updated_at than the rows already
-    // stored — proof the pull orders by sequence and not by any clock.
+    // The order is the log's sequence, never a clock.
     await corpusPut(
       tenant,
       { nodes: [{ ...nodes[1], text: "A2", updated_at: 301 }], links: [] },
       NOW,
     )
-
-    const body = await corpusPullSince(tenant, Number(cursor))
-    // Exhaustive: the unchanged note and link must not ride along in any shape.
-    expect(body).toEqual({
-      nodes: [withSeq({ ...nodes[1], text: "A2", updated_at: 301 }, 14)],
-      links: [],
-      views: [],
-      delta_mat_values: [],
-      cursor: "14",
+    expect(await corpusOf(tenant)).toEqual({
+      nodes: [withSeq({ ...nodes[1], text: "A2", updated_at: 301 }, 14), withSeq(nodes[0], 4)],
+      links: [withSeq(links[0], 13)],
     })
   })
 
-  it("a write from a device with a BEHIND clock is still pulled", async () => {
+  it("a write from a device with a BEHIND clock still lands", async () => {
     const tenant = await openTenant(1)
     await corpusPut(tenant, { nodes, links }, NOW)
-    const { cursor } = await corpusPullFull(tenant)
-
     // Device B's clock is four minutes slow, so this row lands with an
-    // `updated_at` well BEHIND rows already stored. Under the old scheme the
-    // since-pull compared timestamps and this row was invisible — which is the
-    // entire reason the client asked for a ten-minute overlap window on every
-    // pull, re-reading its own recent writes to compensate.
+    // `updated_at` well BEHIND rows already stored. A device pulls the log
+    // by sequence, so nothing compares clocks on the way.
     const skewed = { ...nodes[1], id: "blk_skewed0001", text: "late", updated_at: 60 }
     await corpusPut(tenant, { nodes: [skewed], links: [] }, NOW)
-
-    const body = await corpusPullSince(tenant, Number(cursor))
-    expect(body.nodes).toEqual([withSeq(skewed, 17)])
-  })
-
-  it("since equal to the newest seq returns no changes (strict >), and no cursor", async () => {
-    const tenant = await openTenant(1)
-    await corpusPut(tenant, { nodes, links }, NOW)
-    // Nothing newer means nothing to say: the client keeps the cursor it has.
-    expect(await corpusPullSince(tenant, 13)).toEqual({
-      nodes: [],
-      links: [],
-      views: [],
-      delta_mat_values: [],
-      cursor: null,
-    })
+    expect((await corpusOf(tenant)).nodes).toContainEqual(withSeq(skewed, 17))
   })
 
   it("a push echoes the cursor it committed, so no status call is needed", async () => {
@@ -270,15 +247,9 @@ describe("corpus operations over the real D1 schema", () => {
     expect((await corpusStatus(tenant)).replica_cursor).toBe("42")
   })
 
-  it("a fresh corpus pulls empty, with no cursor to report", async () => {
+  it("a fresh corpus holds nothing", async () => {
     const tenant = await openTenant(1)
-    expect(await corpusPullFull(tenant)).toEqual({
-      nodes: [],
-      links: [],
-      views: [],
-      delta_mat_values: [],
-      cursor: null,
-    })
+    expect(await corpusOf(tenant)).toEqual({ nodes: [], links: [] })
   })
 
   it("status reports LIVE counts, schema version, and cursor", async () => {
@@ -303,7 +274,7 @@ describe("corpus operations over the real D1 schema", () => {
       { nodes: [{ ...node, updated_at: 100, text: "from-b" }], links: [] },
       NOW,
     )
-    expect((await corpusPullFull(first)).nodes[0].text).toBe("from-b")
+    expect((await corpusOf(first)).nodes[0].text).toBe("from-b")
 
     const reversed = await openTenant(1)
     await corpusPut(
@@ -316,7 +287,7 @@ describe("corpus operations over the real D1 schema", () => {
       { nodes: [{ ...node, updated_at: 100, text: "from-a" }], links: [] },
       NOW,
     )
-    expect((await corpusPullFull(reversed)).nodes[0].text).toBe("from-a")
+    expect((await corpusOf(reversed)).nodes[0].text).toBe("from-a")
   })
 
   it("per-row LWW: a stale push is rejected per row, not per batch", async () => {
@@ -343,7 +314,7 @@ describe("corpus operations over the real D1 schema", () => {
       },
       NOW,
     )
-    const pulled = await corpusPullFull(tenant)
+    const pulled = await corpusOf(tenant)
     expect(pulled.nodes.find((row) => row.id === node.id)?.text).toBe("newer")
     expect(pulled.nodes.find((row) => row.id === "blk_bbbbbbbbbb")?.text).toBe("fresh — must win")
     expect(pulled.links[0].sort_key).toBe("a5")
@@ -375,7 +346,7 @@ describe("soft deletes at the replica", () => {
     ],
   }
 
-  it("a tombstone round-trips through push and pull, and stops counting", async () => {
+  it("a tombstone is an entity like any other, and stops counting", async () => {
     const tenant = await openTenant(1)
     await corpusPut(tenant, rows, NOW)
     await corpusPut(
@@ -384,15 +355,12 @@ describe("soft deletes at the replica", () => {
       NOW,
     )
 
-    const pulled = await corpusPullFull(tenant)
-    expect(pulled.nodes.find((row) => row.id === "blk_a000000000")?.deleted_at).toBe(200)
-    // THE property that makes dropping the key lists safe: the tombstone is
-    // itself the change a since-pull returns, carrying its stamp — the client
-    // needs nothing else to learn about the deletion.
-    const since = await corpusPullSince(tenant, 13)
-    expect(since.nodes).toEqual([
+    const pulled = await corpusOf(tenant)
+    // The tombstone is itself the change, carrying its stamp and a fresh
+    // seq: a device learns of the deletion from the log like any edit.
+    expect(pulled.nodes.find((row) => row.id === "blk_a000000000")).toEqual(
       withSeq({ ...rows.nodes[1], updated_at: 200, deleted_at: 200 }, 14),
-    ])
+    )
     // …and the link to it is retained, untouched — though a link into a
     // tombstoned node is not part of the graph anyone can see, so it stops
     // counting alongside the node.
@@ -413,7 +381,7 @@ describe("soft deletes at the replica", () => {
       { nodes: [{ ...rows.nodes[1], text: "back", updated_at: 300 }], links: [] },
       NOW,
     )
-    const pulled = await corpusPullFull(tenant)
+    const pulled = await corpusOf(tenant)
     const revived = pulled.nodes.find((row) => row.id === "blk_a000000000")
     expect(revived).toEqual(withSeq({ ...rows.nodes[1], text: "back", updated_at: 300 }, 16))
     expect((await corpusStatus(tenant)).counts.nodes).toBe(2)
@@ -423,24 +391,9 @@ describe("soft deletes at the replica", () => {
     const tenant = await openTenant(1)
     await corpusPut(tenant, rows, NOW)
     await corpusPut(tenant, { nodes: [], links: [], deleteNodes: ["blk_a000000000"] }, NOW)
-    const pulled = await corpusPullFull(tenant)
+    const pulled = await corpusOf(tenant)
     expect(pulled.nodes).toHaveLength(2)
     expect(pulled.nodes.find((row) => row.id === "blk_a000000000")?.deleted_at).toBe(NOW)
-  })
-})
-
-describe("parseSinceCursor", () => {
-  it("accepts a ms-timestamp cursor string", () => {
-    expect(parseSinceCursor("1756400000000")).toBe(1756400000000)
-    expect(parseSinceCursor("0")).toBe(0)
-  })
-
-  it("rejects anything that is not a plain number string", () => {
-    expect(parseSinceCursor("")).toBeNull()
-    expect(parseSinceCursor("-5")).toBeNull()
-    expect(parseSinceCursor("12.5")).toBeNull()
-    expect(parseSinceCursor("abc")).toBeNull()
-    expect(parseSinceCursor("1".repeat(16))).toBeNull()
   })
 })
 
@@ -563,12 +516,49 @@ describe("tenant scoping — the adversarial suite", () => {
   }
 
   // Every request here is a CURRENT client: the protocol gate's code default
-  // is 2 (migrations/0008), so a request without the header is refused before
-  // any of the scoping these tests are about is reached.
+  // is 3 (the cache of the log), so a request without the header is refused
+  // before any of the scoping these tests are about is reached.
   const clientHeaders = (token: string) => ({ ...authHeaders(token), ...REPLICA_PROTOCOL_HEADERS })
+  /** Rows as the key events a client pushes (`opsToKeyEvents` would make
+   * them): the events the rows amount to, read per key. */
+  const keyEventsOf = (
+    rows: { nodes: NodeRow[]; links: LinkRow[] },
+    device = "dev12345.tab001",
+    now = NOW,
+  ) =>
+    expandLog(
+      rowsToEvents({ nodes: new Map(), links: new Map(), views: new Map() }, rows, {
+        batch: `bat_${now}`,
+        device,
+        now,
+      }),
+    )
+  let minted = 0
+  /** One key event of a client's own: a set, or a liveness row. */
+  const keyEvent = (
+    entityId: string,
+    action: "set" | "delete",
+    key: string,
+    value: unknown,
+    at: number,
+    device = "dev12345.tab001",
+  ) => ({
+    id: `key_own_${(minted += 1)}`,
+    entity: "block",
+    entity_id: entityId,
+    action,
+    key,
+    value,
+    batch: "bat_own",
+    device,
+    at,
+    hlc: `${String(at).padStart(15, "0")}-0000-${device}`,
+    v: 2,
+  })
+  /** A push of key events: the door a client of this build uses. */
   const push = (env: Env, token: string, body: unknown, query = "") =>
     replica(
-      new Request(`https://example.com/api/replica/notes${query}`, {
+      new Request(`https://example.com/api/replica/events${query}`, {
         method: "PUT",
         headers: clientHeaders(token),
         body: JSON.stringify(body),
@@ -585,7 +575,10 @@ describe("tenant scoping — the adversarial suite", () => {
 
   async function seededEnv(): Promise<{ env: Env; driver: SqlDriver }> {
     const made = await testEnv()
-    expect((await push(made.env, "alice-token", { ...aliceRows, cursor: "c1" })).status).toBe(200)
+    expect(
+      (await push(made.env, "alice-token", { events: keyEventsOf(aliceRows), cursor: "c1" }))
+        .status,
+    ).toBe(200)
     return made
   }
 
@@ -593,47 +586,46 @@ describe("tenant scoping — the adversarial suite", () => {
     const { env, driver } = await testEnv()
     // The request claims tenant 222 everywhere a client could put it.
     const response = await replica(
-      new Request("https://example.com/api/replica/notes?github_id=222&tenant=222&user_id=222", {
+      new Request("https://example.com/api/replica/events?github_id=222&tenant=222&user_id=222", {
         method: "PUT",
         headers: { ...clientHeaders("alice-token"), "X-GitHub-Id": "222", "X-Tenant": "222" },
-        body: JSON.stringify({ ...aliceRows, user_id: 222, tenant: 222, cursor: "c1" }),
+        body: JSON.stringify({
+          events: keyEventsOf(aliceRows),
+          user_id: 222,
+          tenant: 222,
+          cursor: "c1",
+        }),
       }),
       env,
       github,
     )
     expect(response.status).toBe(200)
-    const owners = await driver.exec("SELECT DISTINCT user_id FROM nodes ORDER BY user_id")
+    const owners = await driver.exec(
+      "SELECT DISTINCT user_id FROM events_log_cache ORDER BY user_id",
+    )
     expect(owners).toEqual([{ user_id: 111 }])
-  })
-
-  it("a pre-0005 timestamp cursor is served as a full pull, not an empty one", async () => {
-    const { env } = await seededEnv()
-    // What a client on a cached pre-0005 bundle still sends: the ms-timestamp
-    // cursor it stored, which it has no guard against. `seq > 1.7e12` matches
-    // nothing, and that client would never pull again, silently.
-    const body = (await (
-      await get(env, "alice-token", "/api/replica/notes?since=1788891492616")
-    ).json()) as ReplicaCorpusBody
-    expect(body.nodes).toHaveLength(aliceRows.nodes.length)
-    // …and it leaves with a sequence cursor, so the next pull is exact.
-    expect(Number(body.cursor)).toBeLessThan(1e12)
   })
 
   it("a client below the minimum protocol is refused with 409", async () => {
     const { env } = await seededEnv()
-    // No header at all: a pre-header client, against the CODE default — which
-    // is 2 since the note-type rewrite (migrations/0008).
-    const old = await replica(
-      new Request("https://example.com/api/replica/notes", {
-        headers: authHeaders("alice-token"),
-      }),
-      env,
-      github,
-    )
-    expect(old.status).toBe(409)
-    expect(await old.json()).toEqual({ error: "client_too_old", minimum: 2 })
+    // A protocol-2 client — the build before the cache of the log, which
+    // pushed and pulled rows through routes this Worker no longer serves —
+    // and a client with no header at all: both refused, against the CODE
+    // default, which is 3 (docs/events-log-cache.md).
+    for (const headers of [
+      { ...authHeaders("alice-token"), "X-Replica-Protocol": "2" },
+      authHeaders("alice-token"),
+    ]) {
+      const old = await replica(
+        new Request("https://example.com/api/replica/status", { headers }),
+        env,
+        github,
+      )
+      expect(old.status).toBe(409)
+      expect(await old.json()).toEqual({ error: "client_too_old", minimum: 3 })
+    }
     // The current build.
-    expect((await get(env, "alice-token", "/api/replica/notes")).status).toBe(200)
+    expect((await get(env, "alice-token", "/api/replica/status")).status).toBe(200)
   })
 
   it("the MIN_REPLICA_PROTOCOL var overrides the code default, either way", async () => {
@@ -641,7 +633,7 @@ describe("tenant scoping — the adversarial suite", () => {
     // Lowered: a pre-header client is let back in without a deploy.
     const lax = { ...env, MIN_REPLICA_PROTOCOL: "0" }
     const old = await replica(
-      new Request("https://example.com/api/replica/notes", {
+      new Request("https://example.com/api/replica/status", {
         headers: authHeaders("alice-token"),
       }),
       lax,
@@ -649,51 +641,47 @@ describe("tenant scoping — the adversarial suite", () => {
     )
     expect(old.status).toBe(200)
     // Raised above what this build speaks: even the current client is shut out
-    // — the dashboard lever the note-type rollout pulls BEFORE the migration.
-    const strict = { ...env, MIN_REPLICA_PROTOCOL: "3" }
-    const current = await get(strict, "alice-token", "/api/replica/notes")
+    // — the dashboard lever a rollout pulls BEFORE a migration.
+    const strict = { ...env, MIN_REPLICA_PROTOCOL: "4" }
+    const current = await get(strict, "alice-token", "/api/replica/status")
     expect(current.status).toBe(409)
-    expect(await current.json()).toEqual({ error: "client_too_old", minimum: 3 })
+    expect(await current.json()).toEqual({ error: "client_too_old", minimum: 4 })
   })
 
   it("the protocol gate sits behind auth: no session, no verdict", async () => {
     const { env } = await seededEnv()
-    const strict = { ...env, MIN_REPLICA_PROTOCOL: "3" }
-    const res = await replica(new Request("https://example.com/api/replica/notes"), strict, github)
+    const strict = { ...env, MIN_REPLICA_PROTOCOL: "4" }
+    const res = await replica(new Request("https://example.com/api/replica/status"), strict, github)
     expect(res.status).toBe(401)
   })
 
-  it("B's full pull contains none of A's rows", async () => {
+  it("the row routes are gone: a push or a pull of rows is not found", async () => {
     const { env } = await seededEnv()
-    const body = (await (
-      await get(env, "bob-token", "/api/replica/notes")
-    ).json()) as ReplicaCorpusBody
-    expect(body).toEqual({
-      nodes: [],
-      links: [],
-      views: [],
-      delta_mat_values: [],
-      cursor: null,
-      replica_id: "production",
-    })
+    expect((await get(env, "alice-token", "/api/replica/notes")).status).toBe(404)
+    expect((await get(env, "alice-token", "/api/replica/notes?since=0")).status).toBe(404)
+    const put = await replica(
+      new Request("https://example.com/api/replica/notes", {
+        method: "PUT",
+        headers: clientHeaders("alice-token"),
+        body: JSON.stringify(aliceRows),
+      }),
+      env,
+      github,
+    )
+    expect(put.status).toBe(404)
   })
 
-  it("B's since-pull contains none of A's rows", async () => {
+  it("B's snapshot of the cache holds none of A's rows", async () => {
     const { env } = await seededEnv()
-    const body = (await (
-      await get(env, "bob-token", "/api/replica/notes?since=0")
-    ).json()) as ReplicaChangesBody
-    // Exhaustive, because a since-pull now carries nothing BUT rows: any of
-    // A's ids appearing here would be a cross-tenant disclosure — her views
-    // included, which is where a pin on a note she shared would live.
-    expect(body).toEqual({
-      nodes: [],
-      links: [],
-      views: [],
-      delta_mat_values: [],
-      cursor: null,
-      replica_id: "production",
-    })
+    const body = await (await get(env, "bob-token", "/api/replica/cache")).json()
+    // Exhaustive: any of A's rows here would be a cross-tenant disclosure.
+    expect(body).toEqual({ rows: [], seq: 0, cursor: null, replica_id: "production" })
+  })
+
+  it("B's log holds none of A's events", async () => {
+    const { env } = await seededEnv()
+    const body = await (await get(env, "bob-token", "/api/replica/events-log?since=0")).json()
+    expect(body).toEqual({ events: [], cursor: null, replica_id: "production" })
   })
 
   it("B's status counts none of A's rows", async () => {
@@ -702,28 +690,29 @@ describe("tenant scoping — the adversarial suite", () => {
     expect(status).toMatchObject({ counts: { nodes: 0, links: 0, pages: 0 } })
   })
 
-  it("B writing rows with A's ids does not touch A's data", async () => {
+  it("B writing A's ids does not touch A's data", async () => {
     const { env, driver } = await seededEnv()
     await push(env, "bob-token", {
-      nodes: [
-        {
-          id: "blk_noteaaaaaa",
-          type: "note",
-          text: "bob's overwrite",
-          props: null,
-          updated_at: 999999,
-        },
-        { id: "blk_secret0001", type: "text", text: "bob's", props: null, updated_at: 999999 },
-      ],
-      links: [],
+      events: keyEventsOf({
+        nodes: [
+          {
+            id: "blk_noteaaaaaa",
+            type: "note",
+            text: "bob's overwrite",
+            props: null,
+            updated_at: 999999,
+          },
+          { id: "blk_secret0001", type: "text", text: "bob's", props: null, updated_at: 999999 },
+        ],
+        links: [],
+      }),
     })
-    const alice = (await (
-      await get(env, "alice-token", "/api/replica/notes")
-    ).json()) as ReplicaCorpusBody
+    const alice = await corpusOf(forTenant(driver, identityOf(111)))
     expect(alice.nodes).toEqual(aliceRows.nodes.map((row, i) => withSeq(row, 4 * (i + 1))))
     // Both tenants now hold the same id — proof the composite key is per-tenant.
     const rows = await driver.exec(
-      "SELECT user_id, text FROM nodes WHERE id = 'blk_noteaaaaaa' ORDER BY user_id",
+      "SELECT user_id, json_extract(value, '$') AS text FROM events_log_cache " +
+        "WHERE entity = 'block' AND entity_id = 'blk_noteaaaaaa' AND key = 'text' ORDER BY user_id",
     )
     expect(rows).toEqual([
       { user_id: 111, text: "alice's note" },
@@ -734,16 +723,20 @@ describe("tenant scoping — the adversarial suite", () => {
   it("B deleting A's ids tombstones only B's copies", async () => {
     const { env, driver } = await seededEnv()
     await push(env, "bob-token", {
-      nodes: aliceRows.nodes.map((row) => ({ ...row, text: "bob's" })),
-      links: [],
+      events: keyEventsOf({
+        nodes: aliceRows.nodes.map((row) => ({ ...row, text: "bob's" })),
+        links: [],
+      }),
     })
     await push(env, "bob-token", {
-      nodes: [],
-      links: [],
-      deleteNodes: ["blk_noteaaaaaa", "blk_secret0001"],
+      events: [
+        keyEvent("blk_noteaaaaaa", "delete", "", null, 900),
+        keyEvent("blk_secret0001", "delete", "", null, 900),
+      ],
     })
     const alive = await driver.exec(
-      "SELECT user_id, COUNT(*) AS n FROM nodes WHERE deleted_at IS NULL GROUP BY user_id",
+      "SELECT user_id, COUNT(*) AS n FROM events_log_cache WHERE entity = 'block' " +
+        "AND key = 'deleted' AND value = 'null' GROUP BY user_id",
     )
     expect(alive).toEqual([{ user_id: 111, n: 2 }])
   })
@@ -751,7 +744,7 @@ describe("tenant scoping — the adversarial suite", () => {
   it("rejects with 401 before any tenant work happens", async () => {
     const { env, driver } = await testEnv()
     const response = await replica(
-      new Request("https://example.com/api/replica/notes"),
+      new Request("https://example.com/api/replica/status"),
       env,
       github,
     )
@@ -764,21 +757,14 @@ describe("tenant scoping — the adversarial suite", () => {
     await driver.exec("UPDATE users SET status = 'blocked' WHERE github_id = ?1", [222])
     const response = await get(env, "bob-token", "/api/replica/status")
     expect(response.status).toBe(403)
-    expect(await driver.exec("SELECT COUNT(*) AS n FROM nodes")).toEqual([{ n: 0 }])
-  })
-
-  it("rejects a malformed since cursor with 400", async () => {
-    const { env } = await testEnv()
-    const response = await get(env, "alice-token", "/api/replica/notes?since=abc")
-    expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({ error: "invalid_since" })
+    expect(await driver.exec("SELECT COUNT(*) AS n FROM events_log_cache")).toEqual([{ n: 0 }])
   })
 
   it("rejects an invalid payload with 400 before writing", async () => {
     const { env, driver } = await testEnv()
     const response = await push(env, "alice-token", { nodes: [{ nope: true }], links: [] })
     expect(response.status).toBe(400)
-    expect(await driver.exec("SELECT COUNT(*) AS n FROM nodes")).toEqual([{ n: 0 }])
+    expect(await driver.exec("SELECT COUNT(*) AS n FROM events_log_cache")).toEqual([{ n: 0 }])
   })
 
   it("answers 404 for an unknown replica route", async () => {
@@ -804,14 +790,14 @@ describe("tenant scoping — the adversarial suite", () => {
     it("a push is events, carrying the device and build the writer named", async () => {
       const { env } = await testEnv()
       const response = await replica(
-        new Request("https://example.com/api/replica/notes", {
+        new Request("https://example.com/api/replica/events", {
           method: "PUT",
           headers: {
             ...clientHeaders("alice-token"),
             "X-Ruminate-Device": "dev12345.tab001",
             "X-Ruminate-Build": "2026-W39.abc",
           },
-          body: JSON.stringify(aliceRows),
+          body: JSON.stringify({ events: keyEventsOf(aliceRows) }),
         }),
         env,
         github,
@@ -838,10 +824,10 @@ describe("tenant scoping — the adversarial suite", () => {
     it("drops a device a writer could not plausibly have sent, rather than store it", async () => {
       const { env } = await testEnv()
       await replica(
-        new Request("https://example.com/api/replica/notes", {
+        new Request("https://example.com/api/replica/events", {
           method: "PUT",
           headers: { ...clientHeaders("alice-token"), "X-Ruminate-Device": "<script>" },
-          body: JSON.stringify(aliceRows),
+          body: JSON.stringify({ events: keyEventsOf(aliceRows, "<script>") }),
         }),
         env,
         github,
@@ -905,18 +891,25 @@ describe("tenant scoping — the adversarial suite", () => {
       ])
       expect(served.events[4]).toMatchObject({ value: "left", event: "key_1", actor: 111 })
       expect(served.events[4].event_seq).toBeUndefined()
-      // The pull carries the block's keys.
-      const pulled = (await (await get(env, "alice-token", "/api/replica/notes")).json()) as {
-        delta_mat_values: Record<string, unknown>[]
+      // The cache holds the block's key, at its event's seq.
+      const snapshot = (await (await get(env, "alice-token", "/api/replica/cache")).json()) as {
+        rows: Record<string, unknown>[]
       }
-      expect(pulled.delta_mat_values).toEqual([
-        expect.objectContaining({ block_id: "blk_a", key: "align", value: '"left"', seq: 5 }),
-      ])
-      // The verify reads the log, the tables and the keys.
+      expect(snapshot.rows).toContainEqual(
+        expect.objectContaining({
+          entity_id: "blk_a",
+          key: "props.align",
+          value: '"left"',
+          seq: 5,
+        }),
+      )
+      // The verify folds the log and reads the cache.
       expect(await (await get(env, "alice-token", "/api/replica/verify")).json()).toMatchObject({
         ok: true,
         keyEvents: 5,
-        deltaMatValues: [],
+        rows: 5,
+        drift: [],
+        behind: 0,
       })
     })
 
@@ -954,11 +947,10 @@ describe("tenant scoping — the adversarial suite", () => {
       expect(log.events).toEqual([])
     })
 
-    it("neither the pull of rows nor a page of the log reconciles: a row around the log stays out", async () => {
-      // A row written around the log (the console) holds a seq the log has no
-      // event at. Until migration 0030 the pull of rows recorded it as a
-      // snapshot, and read the whole log four times to find it; now the
-      // rows are served as they are and the log is read as it is.
+    it("neither a snapshot nor a page of the log reconciles: a row around the log stays out", async () => {
+      // A row written into the old table around the log (the console) is
+      // not what is served any more: every reader reads the cache, which
+      // only the log's own append writes (docs/events-log-cache.md).
       const { env, driver } = await seededEnv()
       await driver.exec(
         "INSERT INTO nodes (user_id, id, type, text, props, updated_at, seq) " +
@@ -970,12 +962,57 @@ describe("tenant scoping — the adversarial suite", () => {
         }
       const before = await page()
       expect(before.events.some((event) => event.entity_id === "blk_aroundlog1")).toBe(false)
-      const pulled = (await (await get(env, "alice-token", "/api/replica/notes")).json()) as {
-        nodes: { id: string }[]
+      const snapshot = (await (await get(env, "alice-token", "/api/replica/cache")).json()) as {
+        rows: { entity_id: string }[]
       }
-      expect(pulled.nodes.some((node) => node.id === "blk_aroundlog1")).toBe(true)
+      expect(snapshot.rows.some((row) => row.entity_id === "blk_aroundlog1")).toBe(false)
       const after = await page()
       expect(after.events.some((event) => event.entity_id === "blk_aroundlog1")).toBe(false)
+    })
+
+    it("serves the cache in pages, keyed, to the tenant alone", async () => {
+      const { env } = await seededEnv()
+      const page = async (token: string, query: string) =>
+        (await (await get(env, token, `/api/replica/cache${query}`)).json()) as {
+          rows: { entity: string; entity_id: string; key: string; seq: number }[]
+          seq: number
+          cursor: [string, string, string] | null
+          replica_id: string
+        }
+      // Alice's first push: two blocks of four rows and a link of five.
+      const first = await page("alice-token", "?limit=8")
+      expect(first.rows).toHaveLength(8)
+      expect(first.rows.map((row) => `${row.entity} ${row.entity_id} ${row.key}`)).toEqual([
+        "block blk_noteaaaaaa deleted",
+        "block blk_noteaaaaaa notes_id",
+        "block blk_noteaaaaaa text",
+        "block blk_noteaaaaaa type",
+        "block blk_secret0001 deleted",
+        "block blk_secret0001 notes_id",
+        "block blk_secret0001 text",
+        "block blk_secret0001 type",
+      ])
+      expect(first).toMatchObject({ seq: 13, replica_id: "production" })
+      expect(first.cursor).toEqual(["block", "blk_secret0001", "type"])
+      const rest = await page(
+        "alice-token",
+        `?limit=8&after=${encodeURIComponent(JSON.stringify(first.cursor))}`,
+      )
+      expect(rest.rows.map((row) => `${row.entity_id} ${row.key}`)).toEqual([
+        "blk_noteaaaaaa|blk_secret0001|child deleted",
+        "blk_noteaaaaaa|blk_secret0001|child destination_id",
+        "blk_noteaaaaaa|blk_secret0001|child kind",
+        "blk_noteaaaaaa|blk_secret0001|child sort_key",
+        "blk_noteaaaaaa|blk_secret0001|child source_id",
+      ])
+      expect(rest.cursor).toBeNull()
+      // Bob's page holds none of Alice's rows.
+      expect(await page("bob-token", "")).toMatchObject({ rows: [], cursor: null, seq: 0 })
+      const bad = await get(env, "alice-token", "/api/replica/cache?after=nope")
+      expect(bad.status).toBe(400)
+      expect(await bad.json()).toEqual({ error: "invalid_after" })
+      const short = await get(env, "alice-token", '/api/replica/cache?after=["block"]')
+      expect(short.status).toBe(400)
     })
 
     it("one tenant's log and past are not another's to read", async () => {
@@ -1000,8 +1037,9 @@ describe("tenant scoping — the adversarial suite", () => {
 
     it("serves a past moment, one block's history, and a clean bill of health", async () => {
       const { env } = await seededEnv()
-      const edited = { ...aliceRows.nodes[1], text: "rewritten", updated_at: 200 }
-      await push(env, "alice-token", { nodes: [edited], links: [] })
+      await push(env, "alice-token", {
+        events: [keyEvent("blk_secret0001", "set", "text", "rewritten", 200)],
+      })
 
       // The first push was 13 rows: the moment at its end.
       const then = (await (await get(env, "alice-token", "/api/replica/at?seq=13")).json()) as {
@@ -1027,13 +1065,14 @@ describe("tenant scoping — the adversarial suite", () => {
       ])
 
       const verdict = await (await get(env, "alice-token", "/api/replica/verify")).json()
-      expect(verdict).toMatchObject({ ok: true, keyEvents: 14, rejected: 0 })
+      expect(verdict).toMatchObject({ ok: true, keyEvents: 14, drift: [], behind: 0 })
     })
 
     it("restores by appending — for the tenant, and only with a well-formed request", async () => {
       const { env } = await seededEnv()
-      const wiped = { ...aliceRows.nodes[1], text: "", updated_at: 200 }
-      await push(env, "alice-token", { nodes: [wiped], links: [] })
+      await push(env, "alice-token", {
+        events: [keyEvent("blk_secret0001", "set", "text", "", 200)],
+      })
 
       const bad = await post(env, "alice-token", "/api/replica/restore", { block: "", seq: "4" })
       expect(bad.status).toBe(400)
@@ -1049,12 +1088,15 @@ describe("tenant scoping — the adversarial suite", () => {
         seq: 13,
       })
       expect(await ok.json()).toEqual({ ok: true, events: 1 })
-      const pulled = (await (
-        await get(env, "alice-token", "/api/replica/notes?since=14")
-      ).json()) as {
-        nodes: { id: string; text: string }[]
+      const snapshot = (await (await get(env, "alice-token", "/api/replica/cache")).json()) as {
+        rows: { entity_id: string; key: string; value: string; seq: number }[]
       }
-      expect(pulled.nodes).toMatchObject([{ id: "blk_secret0001", text: "alice's secret" }])
+      const text = snapshot.rows.find(
+        (row) => row.entity_id === "blk_secret0001" && row.key === "text",
+      )
+      expect(text).toMatchObject({ value: JSON.stringify("alice's secret") })
+      // The restore's row carries a fresh seq, so every device pulls it.
+      expect(text?.seq).toBeGreaterThan(14)
     })
 
     it("takes a client's own events, scoped to the tenant, with the header's device as the fallback", async () => {
@@ -1109,11 +1151,14 @@ describe("tenant scoping — the adversarial suite", () => {
         events: { event: string }[]
       }
       expect(alices.events.map((e) => e.event)).not.toContain("evt_1")
-      // And the row is Bob's to pull, with the cursor he stamped.
-      const pulled = (await (await get(env, "bob-token", "/api/replica/notes")).json()) as {
-        nodes: { id: string; text: string }[]
+      // And the row is Bob's to take, with the cursor he stamped.
+      const snapshot = (await (await get(env, "bob-token", "/api/replica/cache")).json()) as {
+        rows: { entity_id: string; key: string; value: string }[]
       }
-      expect(pulled.nodes).toMatchObject([{ id: "blk_bob0000001", text: "bob's own" }])
+      expect(snapshot.rows.find((row) => row.key === "text")).toMatchObject({
+        entity_id: "blk_bob0000001",
+        value: JSON.stringify("bob's own"),
+      })
       const status = (await (await get(env, "bob-token", "/api/replica/status")).json()) as {
         replica_cursor: string
       }
@@ -1165,36 +1210,37 @@ describe("tenant scoping — the adversarial suite", () => {
   })
 
   // Which database answered (docs/preview-databases.md): production has no
-  // REPLICA_ID; a preview version carries its clone's id. Every pull and the
-  // status say, so a client can tell a rebuilt clone from the one it last
-  // pulled and discard a cursor that no longer means anything.
+  // REPLICA_ID; a preview version carries its clone's id. Every snapshot
+  // page, every page of the log and the status say, so a client can tell a
+  // rebuilt clone from the one it last pulled and discard a cursor that no
+  // longer means anything.
   describe("replica_id", () => {
-    type Labelled = { replica_id?: string; nodes?: unknown[] }
+    type Labelled = { replica_id?: string; rows?: unknown[] }
     const labelled = async (env: Env, path: string) =>
       (await (await get(env, "alice-token", path)).json()) as Labelled
 
-    it('is "production" without the var, on pulls and status alike', async () => {
+    it('is "production" without the var, on the snapshot, the log and status alike', async () => {
       const { env } = await seededEnv()
-      const full = await labelled(env, "/api/replica/notes")
-      const since = await labelled(env, "/api/replica/notes?since=0")
+      const snapshot = await labelled(env, "/api/replica/cache")
+      const log = await labelled(env, "/api/replica/events-log?since=0")
       const status = await labelled(env, "/api/replica/status")
-      expect(full.replica_id).toBe("production")
-      expect(since.replica_id).toBe("production")
+      expect(snapshot.replica_id).toBe("production")
+      expect(log.replica_id).toBe("production")
       expect(status.replica_id).toBe("production")
     })
 
     it("is the REPLICA_ID var when set, and an empty var counts as unset", async () => {
       const { env } = await seededEnv()
       const preview = { ...env, REPLICA_ID: "11111111-2222-4333-8444-555555555555" }
-      const full = await labelled(preview, "/api/replica/notes")
+      const snapshot = await labelled(preview, "/api/replica/cache")
       const status = await labelled(preview, "/api/replica/status")
-      expect(full.replica_id).toBe("11111111-2222-4333-8444-555555555555")
+      expect(snapshot.replica_id).toBe("11111111-2222-4333-8444-555555555555")
       expect(status.replica_id).toBe("11111111-2222-4333-8444-555555555555")
       // The rows are the same rows: the id is a label, not a filter.
-      expect(full.nodes?.length).toBeGreaterThan(0)
+      expect(snapshot.rows?.length).toBeGreaterThan(0)
 
       const blank = { ...env, REPLICA_ID: "" }
-      const body = await labelled(blank, "/api/replica/notes")
+      const body = await labelled(blank, "/api/replica/cache")
       expect(body.replica_id).toBe("production")
     })
   })
@@ -1245,46 +1291,6 @@ describe("the control plane is not tenant data", () => {
     expect(response.status).toBe(403)
     expect(await response.json()).toEqual({ error: "sign_in_required" })
     expect(await driver.exec("SELECT github_id FROM users WHERE github_id = 4343")).toEqual([])
-  })
-})
-
-describe("the legacy board guard (migrations/0020; removed with isLegacyBoard)", () => {
-  const legacy: NodeRow = {
-    id: "blk_board00000",
-    type: "note",
-    text: "Wall",
-    props: '{"board":true,"width":"full"}',
-    updated_at: 200,
-  }
-
-  it("retypes a board pushed in its old shape, strips the prop and leaves the rest alone", () => {
-    const bare: NodeRow = { ...legacy, id: "blk_board00001", props: '{"board":true}' }
-    const links = [link]
-    const out = retypeLegacyBoards({ nodes: [legacy, bare, node], links })
-    expect(out.nodes).toEqual([
-      { ...legacy, type: "board", props: '{"width":"full"}' },
-      { ...bare, type: "board", props: null },
-      node,
-    ])
-    expect(out.links).toBe(links)
-    // A payload with nothing to retype is the same object.
-    const plain = { nodes: [node], links: [link] }
-    expect(retypeLegacyBoards(plain)).toBe(plain)
-  })
-
-  it("a stale client's push lands as a board over the migrated row, never as a note again", async () => {
-    const tenant = await openTenant(1)
-    await corpusPut(
-      tenant,
-      { nodes: [{ ...legacy, type: "board", props: null, updated_at: 101 }], links: [] },
-      NOW,
-    )
-    // The route's guard, on a push that is the newer version.
-    await corpusPut(tenant, retypeLegacyBoards({ nodes: [legacy], links: [] }), NOW)
-    const { nodes } = await corpusPullFull(tenant)
-    expect(nodes.map(({ id, type, props }) => ({ id, type, props }))).toEqual([
-      { id: legacy.id, type: "board", props: '{"width":"full"}' },
-    ])
   })
 })
 

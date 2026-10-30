@@ -997,12 +997,13 @@ describe("delete_note", () => {
       .tenant(USER)
       .includingDeleted()
       .exec(
-        "SELECT id, deleted_at, seq FROM nodes WHERE user_id = :tenant AND id = ?1 " +
+        "SELECT value AS deleted_at, seq FROM events_log_cache WHERE user_id = :tenant " +
+          "AND entity = 'block' AND entity_id = ?1 AND key = 'deleted' " +
           "/* includes-deleted: the tombstone IS what this test is about */",
         [BETA],
       )
     expect(rows).toHaveLength(1)
-    expect(rows[0].deleted_at).not.toBeNull()
+    expect(rows[0].deleted_at).not.toBe("null")
     // A fresh sequence value is what carries the delete to the browser.
     expect(Number(rows[0].seq)).toBeGreaterThan(0)
   })
@@ -1029,7 +1030,7 @@ describe("replication", () => {
       .tenant(USER)
       .includingDeleted()
       .exec(
-        "SELECT seq FROM nodes WHERE user_id = :tenant " +
+        "SELECT seq FROM events_log_cache WHERE user_id = :tenant AND entity = 'block' " +
           "/* includes-deleted: reading the sequence, not the graph */",
       )
     const maximum = Math.max(...rows.map((row) => Number(row.seq)))

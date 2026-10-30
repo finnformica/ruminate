@@ -1,5 +1,5 @@
 import { useAtomValue, useStore } from "jotai"
-import { useCallback, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
 import { isEmptyDoc } from "../blocks/ops"
 import type { LinkPivots } from "../blocks/query"
 import { asBlockType, type BlockDoc, type ChangeHint } from "../blocks/types"
@@ -7,6 +7,7 @@ import type { ExpandedRule } from "../blocks/view"
 import { titlesFocus } from "../blocks/markers"
 import { basketDoc, basketToOps } from "../data/basket"
 import { filteredView, filterReach, type FilteredView } from "../data/filter-view"
+import { databaseEnsureBlocks, databaseEnsureNote } from "../data/database-mode"
 import { CORPUS_ROOT_ID, isNoteType } from "../data/graph"
 import { notePropsOps } from "../data/note-meta"
 import { docToOps } from "../data/ops"
@@ -98,6 +99,15 @@ export function useNoteDoc({
   const shared = useAtomValue(sharedOriginAtom)
   const exclude = useMemo(() => (shared.size > 0 ? new Set(shared.keys()) : undefined), [shared])
 
+  // The graph is loaded lazily (docs/events-log-cache.md, "The client"): a
+  // note is read whole the moment its page opens, and a row the walk opened
+  // whose children the graph held only in part is read next. A shared note
+  // is held whole in memory already.
+  useEffect(() => {
+    if (noteId === undefined || noteId === CORPUS_ROOT_ID || shared.has(noteId)) return
+    void databaseEnsureNote(noteId)
+  }, [noteId, shared])
+
   // What the filter and the sort come to, answered by the SEARCH engine —
   // one vocabulary and one comparator for the header's menus and the query
   // box alike (`src/utils/view-narrowing.ts`).
@@ -138,6 +148,9 @@ export function useNoteDoc({
       exclude,
     })
   }, [noteId, focusBlockId, snapshot, expanded, pivots, narrowing, keep, reach, exclude])
+  useEffect(() => {
+    if (view && view.unloaded.size > 0) void databaseEnsureBlocks([...view.unloaded])
+  }, [view])
   // Whether the doc is rooted at the focused block (the note node is then not
   // this doc's to write).
   const rootId = focusBlockId && view?.doc.rootBlockIds[0] === focusBlockId ? focusBlockId : null

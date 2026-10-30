@@ -1,5 +1,7 @@
 import { Link } from "@tanstack/react-router"
 import { useAtomValue } from "jotai"
+import { useEffect } from "react"
+import { databaseEnsureAll } from "../data/database-mode"
 import { parseISO } from "date-fns"
 import React from "react"
 import { dateMentionsAtom, notesAtom } from "../global-state"
@@ -14,6 +16,11 @@ import { listRow } from "./ui/list"
  * docs/metadata.md), and the weeks holding them — half of what the calendar
  * dots (`useCalendarMarks`, `day-changes.tsx`). */
 export function useDateMarks(): ReadonlySet<string> {
+  // The dates a note names are read off every note's rows: the calendar
+  // asks for the whole corpus (docs/events-log-cache.md, "The client").
+  useEffect(() => {
+    void databaseEnsureAll()
+  }, [])
   const mentions = useAtomValue(dateMentionsAtom)
   return React.useMemo(() => {
     const marked = new Set<string>(mentions.keys())

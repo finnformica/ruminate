@@ -2,7 +2,6 @@
 // it writes by hand is the bad shape it exists to recognise.
 import { beforeAll, describe, expect, it } from "vitest"
 import type { SqlDriver, SqlValue } from "../src/data/sql-driver"
-import { corpusPullSince } from "./handlers/replica-corpus"
 import {
   linksAbove,
   linksBelow,
@@ -18,8 +17,9 @@ import { sliceRows } from "./shares/slice"
 import { forTenant, type TenantDb } from "./tenancy-db"
 
 /**
- * Every statement a bounded read issues must reach `nodes` and `link` through
- * an index that narrows on something MORE than the tenant.
+ * Every statement a bounded read issues must reach `events_log_cache` (the
+ * cache of the log, docs/events-log-cache.md) through an index that narrows
+ * on something MORE than the tenant.
  *
  * This is the guard the row-count tests cannot be. `harness.measure` counts
  * the rows a statement RETURNS, and D1 bills the rows it SCANS; for a walk
@@ -44,7 +44,8 @@ const USER = 21
 const OWNER = 22
 
 /** The corpus tables the rule applies to, and how their aliases are declared. */
-const CORPUS_TABLE = /\b(?:FROM|JOIN)\s+(nodes|link)\b(?:\s+(?:AS\s+)?([A-Za-z_]\w*))?/gi
+const CORPUS_TABLE =
+  /\b(?:FROM|JOIN)\s+(events_log_cache|nodes|link)\b(?:\s+(?:AS\s+)?([A-Za-z_]\w*))?/gi
 const NOT_AN_ALIAS = new Set(["WHERE", "ON", "JOIN", "CROSS", "LEFT", "INNER", "SET", "USING"])
 
 /** Which names in `sql` (table or alias) stand for `nodes` or `link`. */
@@ -195,13 +196,6 @@ describe("the MCP loaders", () => {
     // Every note is a partition-wide question by nature; the index it is
     // answered on narrows by type, which is what keeps it off the blocks.
     expect(await scansOf(() => noteNodes(tenant))).toEqual([])
-  })
-})
-
-describe("the replica pull", () => {
-  it("reads only the rows past the cursor", async () => {
-    const tenant = recordingTenant(USER)
-    expect(await scansOf(() => corpusPullSince(tenant, 5))).toEqual([])
   })
 })
 
