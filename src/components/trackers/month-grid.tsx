@@ -26,7 +26,7 @@ import { Surface } from "../ui/surface"
 const LEVEL_STEPS = [0, 5, 7, 8, 9] as const
 
 /** A series's colour at a theme step, as CSS. */
-const colourVar = (colour: TrackerColour, step: number) => `var(--${colour}-${step})`
+export const colourVar = (colour: TrackerColour, step: number) => `var(--${colour}-${step})`
 
 /** The one place a series's colour shows outside its cells: a small dot
  * beside its name, in the strip, the cards and the Series editor. */

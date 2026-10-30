@@ -15,7 +15,13 @@ import {
   daysBetween,
   entryOf,
   entryText,
+  activeSummary,
   formatAmount,
+  heatmapWeeks,
+  isLogged,
+  recentEntries,
+  seriesOnDay,
+  shortDayLabel,
   isDone,
   isTracker,
   localDay,
@@ -410,6 +416,10 @@ describe("reading blocks", () => {
       date: "2026-10-27",
       value: false,
     })
+    // Text after the day is the entry's detail, for the Recent list.
+    expect(
+      entryOf({ id: "e", type: "done", text: "2026-10-27 · 50 lengths", props: null }, "check"),
+    ).toMatchObject({ value: true, detail: "50 lengths" })
     // A plain row with a day, a to-do with other text, or a bad day: not an
     // entry.
     expect(entryOf({ id: "e", type: "text", text: "2026-10-27", props: null }, "check")).toBeNull()
@@ -421,10 +431,15 @@ describe("reading blocks", () => {
   it("reads a number entry from a row that begins with the day and carries a number", () => {
     const read = (text: string, type = "text") =>
       entryOf({ id: "e", type, text, props: null }, "number")
-    expect(read("2026-10-27 · 5 km")).toEqual({ id: "e", date: "2026-10-27", value: 5 })
-    expect(read("2026-10-27 · 2.5 km")).toEqual({ id: "e", date: "2026-10-27", value: 2.5 })
-    expect(read("2026-10-27: 3,5")).toEqual({ id: "e", date: "2026-10-27", value: 3.5 })
-    expect(read("2026-10-27 ran 8km", "ul")).toEqual({ id: "e", date: "2026-10-27", value: 8 })
+    expect(read("2026-10-27 · 5 km")).toEqual({
+      id: "e",
+      date: "2026-10-27",
+      value: 5,
+      detail: "5 km",
+    })
+    expect(read("2026-10-27 · 2.5 km")).toMatchObject({ value: 2.5, detail: "2.5 km" })
+    expect(read("2026-10-27: 3,5")).toMatchObject({ value: 3.5, detail: "3,5" })
+    expect(read("2026-10-27 ran 8km", "ul")).toMatchObject({ value: 8, detail: "ran 8km" })
     expect(read("2026-10-27")).toBeNull()
     expect(read("2026-10-27 · km")).toBeNull()
     expect(read("ran 5 km on 2026-10-27")).toBeNull()
@@ -668,5 +683,146 @@ describe("the key schemas", () => {
     expect(trackerSeriesKeys.safeParse({ rollup: "max" }).success).toBe(false)
     expect(trackerSeriesKeys.safeParse({ step: 0 }).success).toBe(false)
     expect(trackerSeriesKeys.safeParse({ target: "5" }).success).toBe(false)
+  })
+})
+
+describe("activeSummary", () => {
+  const read = (logged: Record<string, boolean | number>) =>
+    stateOf({ id: "s1", kind: "check" }, logged)
+  const run = (logged: Record<string, boolean | number>) =>
+    stateOf({ id: "s2", kind: "number" }, logged)
+
+  it("counts a day when any series has something on it", () => {
+    const series = [
+      read({ "2026-10-27": true, "2026-10-28": true }),
+      run({ "2026-10-28": 5, "2026-10-29": 3 }),
+    ]
+    expect(activeSummary(series, "2026-10-29")).toEqual({
+      streak: 3,
+      lastWeek: 3,
+      lastFourWeeks: 3,
+      allTime: 3,
+    })
+  })
+
+  it("keeps the streak from yesterday while today has no entry yet", () => {
+    const series = [read({ "2026-10-26": true, "2026-10-27": true, "2026-10-28": true })]
+    expect(activeSummary(series, "2026-10-29").streak).toBe(3)
+    // A day missed before today ends it.
+    expect(activeSummary(series, "2026-10-30").streak).toBe(0)
+  })
+
+  it("does not count an open to-do or a zero", () => {
+    const series = [read({ "2026-10-28": false }), run({ "2026-10-29": 0 })]
+    expect(activeSummary(series, "2026-10-29")).toEqual({
+      streak: 0,
+      lastWeek: 0,
+      lastFourWeeks: 0,
+      allTime: 0,
+    })
+    expect(isLogged(series[0], "2026-10-28")).toBe(false)
+    expect(isLogged(series[1], "2026-10-29")).toBe(false)
+  })
+
+  it("holds the windows to 7 and 28 days that end on today", () => {
+    const today = "2026-10-29"
+    const series = [
+      read({
+        [today]: true,
+        [addDays(today, -6)]: true, // the oldest day of the last 7
+        [addDays(today, -7)]: true, // just before it
+        [addDays(today, -27)]: true, // the oldest day of the last 28
+        [addDays(today, -28)]: true, // just before it
+        [addDays(today, -400)]: true,
+        [addDays(today, 1)]: true, // after today: not counted
+      }),
+    ]
+    expect(activeSummary(series, today)).toEqual({
+      streak: 1,
+      lastWeek: 2,
+      lastFourWeeks: 4,
+      allTime: 6,
+    })
+  })
+
+  it("steps whole days across a daylight-saving change and a year end", () => {
+    // Europe's clocks go back on 2026-10-25: the windows still count days.
+    const autumn = [read({ "2026-10-24": true, "2026-10-25": true, "2026-10-26": true })]
+    expect(activeSummary(autumn, "2026-10-26")).toMatchObject({ streak: 3, lastWeek: 3 })
+    const newYear = [read({ "2025-12-30": true, "2025-12-31": true, "2026-01-01": true })]
+    expect(activeSummary(newYear, "2026-01-01")).toMatchObject({ streak: 3, lastWeek: 3 })
+  })
+
+  it("takes today from the viewer's local day at the edges of midnight", () => {
+    const series = [read({ "2026-10-28": true })]
+    // A minute before midnight on the 28th: today has its entry.
+    expect(activeSummary(series, localDay(new Date(2026, 9, 28, 23, 59))).streak).toBe(1)
+    // Just after midnight: the 29th is open, and the run holds from the 28th.
+    const justAfter = localDay(new Date(2026, 9, 29, 0, 1))
+    expect(justAfter).toBe("2026-10-29")
+    expect(activeSummary(series, justAfter)).toMatchObject({ streak: 1, lastWeek: 1 })
+    // A day later with nothing logged, the run is over.
+    expect(activeSummary(series, localDay(new Date(2026, 9, 30, 0, 1))).streak).toBe(0)
+  })
+})
+
+describe("heatmap", () => {
+  it("ends on the week today is in, Monday first", () => {
+    // 2026-10-29 is a Thursday.
+    const weeks = heatmapWeeks("2026-10-29")
+    expect(weeks).toHaveLength(12)
+    expect(weeks.every((week) => week.length === 7)).toBe(true)
+    expect(weeks[11][0]).toBe("2026-10-26")
+    expect(weeks[11][3]).toBe("2026-10-29")
+    expect(weeks[11][6]).toBe("2026-11-01")
+    expect(weeks[0][0]).toBe("2026-08-10")
+    expect(heatmapWeeks("2026-11-01", 2)).toEqual([
+      [
+        "2026-10-19",
+        "2026-10-20",
+        "2026-10-21",
+        "2026-10-22",
+        "2026-10-23",
+        "2026-10-24",
+        "2026-10-25",
+      ],
+      [
+        "2026-10-26",
+        "2026-10-27",
+        "2026-10-28",
+        "2026-10-29",
+        "2026-10-30",
+        "2026-10-31",
+        "2026-11-01",
+      ],
+    ])
+  })
+
+  it("names the series on a day, in the page's order", () => {
+    const series = [
+      stateOf({ id: "a", kind: "check", colour: "green" }, { "2026-10-29": true }),
+      stateOf({ id: "b", kind: "number", colour: "amber" }, { "2026-10-29": 2, "2026-10-28": 0 }),
+    ]
+    expect(seriesOnDay(series, "2026-10-29").map((s) => s.colour)).toEqual(["green", "amber"])
+    expect(seriesOnDay(series, "2026-10-28")).toEqual([])
+  })
+})
+
+describe("recentEntries", () => {
+  it("lists what was logged up to today, newest first, then in series order", () => {
+    const series = [
+      stateOf({ id: "a", name: "Swim", kind: "number" }, { "2026-10-27": 1, "2026-10-29": 2 }),
+      stateOf(
+        { id: "b", name: "Read", kind: "check" },
+        { "2026-10-29": true, "2026-10-28": false, "2026-10-30": true },
+      ),
+    ]
+    expect(
+      recentEntries(series, "2026-10-29").map(({ series: s, entry }) => `${entry.date} ${s.name}`),
+    ).toEqual(["2026-10-29 Swim", "2026-10-29 Read", "2026-10-27 Swim"])
+  })
+
+  it("labels a day short", () => {
+    expect(shortDayLabel("2026-10-29", "en-GB")).toBe("29 Oct")
   })
 })

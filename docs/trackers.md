@@ -165,6 +165,28 @@ has no keys to validate.
   with no sideways scroll; more scroll sideways. A pick leaves the menu
   open, so both can be set at once. The range and the layout are page
   state: a reload shows this month as cards.
+- **Activity** (`activity.tsx`, Finn 2026-10-29, after a friend's habit
+  tracker that reads well on a phone): a day is **active** when any series
+  has something on it (`isLogged`: a ticked check, or a number above zero;
+  no target is asked). At the top of the page, the summary line
+  (`activeSummary`): the streak of active days as a pill (`6-day streak`,
+  counted from yesterday while today is still open, as a series's streak
+  is), then `N of the last 7 days · N of the last 28 · N all time`, each
+  window ending on today. Under the Today strip, the activity card: a
+  heatmap of the last twelve weeks (`heatmapWeeks`, `HEATMAP_WEEKS`), a
+  column a week from Monday with this week at the right edge, a cell in the
+  colour of each series logged that day (`seriesOnDay`; split into diagonal
+  bands when there is more than one), today with a ring and the rest of
+  this week dashed; a legend of the series below it; then **Recent**
+  (`recentEntries`): the newest entries up to today as rows of day, series
+  and the entry's text after the day (`Entry.detail`, read only), five at
+  first and ten more for each **Show more**. The heatmap is for reading; the
+  strip and the range log. On a phone, or a window narrower than `lg`, the
+  activity card is what the page opens to. The ⋯ menu's **Range** group
+  then starts with **Heatmap**, ticked while the card is shown; a pick of
+  a range or a layout shows the range instead (that range ticked), and
+  **Heatmap** comes back (`display-groups.tsx`). A wider window shows the
+  card as a column beside the range, so its menu has no **Heatmap** row.
 - The range shown moves with the arrows beside its name, by a week, a
   month or a year; **This week**, **This month** or **This year** comes
   back. The page refreshes its idea of today every minute, so a tab
@@ -183,7 +205,11 @@ no scale for reads as the default, green.
 `src/data/tracker.test.ts` covers the days (local day, Monday start, month
 steps), the grid (October 2026, a month that begins on Sunday, a four-row
 February), the streak, the rollups, the target's three periods, the cell
-levels, the entry text in both shapes and the ops; `src/components/trackers/month-grid.test.tsx` renders
+levels, the active days (streak, the 7- and 28-day windows, today with no
+entry, midnight and daylight-saving edges), the heatmap's weeks, the Recent
+order, the entry text in both shapes and the ops; `src/components/trackers/month-grid.test.tsx` renders
 the grid and the strip; `src/data/key-events.test.ts` pins the key
 validation. `month-grid.stories.tsx` shows the page at desktop and phone
-widths.
+widths; `activity.stories.tsx` the summary line and the activity card;
+`display-groups.test.tsx` the ⋯ menu's Heatmap row on a narrow and a wide
+window.
