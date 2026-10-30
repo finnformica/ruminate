@@ -30,7 +30,7 @@ describe("the page width setting", () => {
   })
 })
 
-describe("the tap on a note of the notes page", () => {
+describe("the tap on a block of the notes page", () => {
   it("opens on a phone only by default, and each choice sets the app setting", () => {
     const store = createStore()
     render(
@@ -38,7 +38,7 @@ describe("the tap on a note of the notes page", () => {
         <EditorSection />
       </Provider>,
     )
-    const group = screen.getByRole("group", { name: "Tap a note on the notes page to open it" })
+    const group = screen.getByRole("group", { name: "Tap a block on the notes page to open it" })
     expect(group).toBeTruthy()
     expect(screen.getByRole("button", { name: "Phone only" }).getAttribute("aria-pressed")).toBe(
       "true",

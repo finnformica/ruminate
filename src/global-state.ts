@@ -645,7 +645,7 @@ export const expandedLevelsAtom = atom(
 export const pageWidthAtom = atomWithStorage<Width>("page-width", "fixed")
 
 /**
- * What a tap on a note of the notes page does (`RootTap`,
+ * What a tap on a block of the notes page does (`RootTap`,
  * `src/data/root-frame.ts`): open it on a phone, everywhere, or never.
  * Settings → Editor. Stored on this device; a value this build does not
  * know reads as the default.

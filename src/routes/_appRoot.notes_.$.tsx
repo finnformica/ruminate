@@ -48,7 +48,7 @@ import {
   ROOT_LABEL,
   isRootFrame,
   rootHomeOf,
-  rootTapOpens,
+  tapAction,
 } from "../data/root-frame"
 import { useCoarsePointer } from "../hooks/coarse-pointer"
 import { FilterMenu, SortMenu } from "../components/view-controls"
@@ -451,11 +451,12 @@ function NotePage({
   // Root opens with its note rows closed, as a list of notes: its own depth
   // until the reader sets one (`ROOT_DEPTH`).
   const depth = frame.depth ?? (isRoot ? ROOT_DEPTH : undefined)
-  // A tap on one of Root's notes opens it, on a phone or everywhere, as
-  // Settings → Editor asks (`rootTapOpens`); below a note a tap edits.
+  // The frame decides what a tap does (`tapAction`): on Root a tap on any
+  // row, a note or a block below one, opens it, on a phone or everywhere,
+  // as Settings → Editor asks; in any other frame a tap edits.
   const rootTap = useAtomValue(rootTapAtom)
   const coarse = useCoarsePointer()
-  const openRoots = isRoot && rootTapOpens(rootTap, coarse)
+  const tapOpens = tapAction(isRoot, coarse, rootTap) === "open"
   // The frame's own narrowing: a frame pushed starts with none.
   const filter = frame.filter ?? ""
   const sort = frame.sort ?? ""
@@ -1017,7 +1018,7 @@ function NotePage({
                   // move is only offered without one.
                   fixedRoots={isRoot}
                   movableRoots={isRoot && !narrowed}
-                  openRoots={openRoots}
+                  tapOpens={tapOpens}
                 />
                 {noteId && noteExists && share === null && !isRoot ? (
                   <UnassignedBasket noteId={noteId} />

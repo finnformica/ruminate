@@ -61,9 +61,10 @@ export interface BlockMenuTarget {
   places: number
   /** Pinned (`src/data/pins.ts`): listed in the sidebar's Pinned. */
   pinned: boolean
-  /** A tap opens the row (`BlockEditor.openRoots`), so the menu offers
-   * Rename to edit its text in place. */
-  opens?: boolean
+  /** A tap opens the row (`BlockEditor.tapOpens`), so the menu offers an
+   * entry to edit its text in place: Rename on a note (a root row), Edit on
+   * a block below one. */
+  opens?: "rename" | "edit"
   /** A figure row's layout (`src/blocks/figure.ts`): the side its picture
    * or card keeps to, and whether it has been dragged to a size of its own. */
   figure?: { align: FigureAlign; sized: boolean }
@@ -208,10 +209,13 @@ function menuEntries(target: BlockMenuTarget, actions: BlockActions): MenuEntry[
   const item = (e: Omit<Extract<MenuEntry, { kind: "item" }>, "kind">) =>
     push({ kind: "item", ...e })
 
-  // A row a tap opens has no tap left to edit it: Rename does, first, as
-  // a note's menu has it in the sidebar.
-  if (target.opens && keys.length === 1 && actions.rename) {
-    item({ label: "Rename", onSelect: () => actions.rename?.(keys) })
+  // A row a tap opens has no tap left to edit it: Rename (a note, as its
+  // menu has it in the sidebar) or Edit (a block) does, first.
+  if (target.opens && keys.length === 1 && actions.editText) {
+    item({
+      label: target.opens === "rename" ? "Rename" : "Edit",
+      onSelect: () => actions.editText?.(keys),
+    })
     section()
   }
 

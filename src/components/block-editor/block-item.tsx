@@ -88,11 +88,10 @@ export interface BlockEditorApi {
    */
   fixedRoots?: boolean
   /**
-   * Open a root row (`BlockEditor.openRoots`): set when a tap or a click on
-   * a root row opens it, by the focus path, in place of an edit or a
-   * selection. Rows below the roots never call it.
+   * Open a row (`BlockEditor.tapOpens`): set when a tap or a click on any
+   * row opens it, by the focus path, in place of an edit or a selection.
    */
-  openRoot?: (key: string) => void
+  openRow?: (key: string) => void
   /**
    * Rows kept only to say where a match lives — the unmatched ancestors of
    * a filtered view's matches (`src/data/filter-view.ts`). Drawn dimmed, so
@@ -1188,11 +1187,12 @@ export function BlockItem({
     </div>
   )
 
-  // A root row the editor opens on a tap (`BlockEditor.openRoots`: the
-  // notes page's notes): the tap, or a mouse's plain click, opens the note
-  // by the focus path rather than editing or selecting it. The block menu's
-  // Rename edits its text in place.
-  const opensOnTap = depth === 0 && api.openRoot !== undefined
+  // A row the editor opens on a tap (`BlockEditor.tapOpens`: every row of
+  // the notes page, at any depth): the tap, or a mouse's plain click, opens
+  // the row by the focus path rather than editing or selecting it. The key
+  // slot (a bullet's dot) is part of the row, so it opens too. The block
+  // menu's Rename or Edit edits its text in place.
+  const opensOnTap = api.openRow !== undefined
 
   // A finger's tap on the row — anywhere in it that is not a control (the
   // chevron, the checkbox, a link, the focus dot) — edits it, with the caret
@@ -1213,7 +1213,7 @@ export function BlockItem({
     if (target?.closest("button, input, a, textarea, [role='menu']")) return
     if (opensOnTap) {
       touchDown.current = null
-      api.openRoot?.(occurrence.key)
+      api.openRow?.(occurrence.key)
       return
     }
     const bodyEl = event.currentTarget.querySelector<HTMLElement>("[data-block-id]")
@@ -1273,7 +1273,7 @@ export function BlockItem({
       : {
           onClick: (event) => {
             if (isControl(event.target)) return
-            if (opensOnTap && !event.shiftKey) api.openRoot?.(occurrence.key)
+            if (opensOnTap && !event.shiftKey) api.openRow?.(occurrence.key)
             else api.select(occurrence.key, event.shiftKey)
           },
           onDoubleClick: (event) => {

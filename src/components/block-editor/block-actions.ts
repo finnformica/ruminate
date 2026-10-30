@@ -64,9 +64,9 @@ export interface BlockActions {
    * (`src/data/pins.ts`). Absent where the editor has no note of the
    * user's own behind it. */
   pin?: (keys: string[]) => void
-  /** Edit the row's text in place: a root row that a tap opens
-   * (`BlockEditor.openRoots`), which has no tap left to edit it. */
-  rename?: (keys: string[]) => void
+  /** Edit the row's text in place: a row that a tap opens
+   * (`BlockEditor.tapOpens`), which has no tap left to edit it. */
+  editText?: (keys: string[]) => void
   /** Share the block — and everything beneath it — with someone
    * (docs/sharing.md). Absent where the rows are not the user's own. */
   share?: (keys: string[]) => void
