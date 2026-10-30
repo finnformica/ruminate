@@ -491,13 +491,20 @@ multiply too. The boot's cost tracks the notes (and the first-level
 links the preview window scans in SQL), not the blocks; what a note costs
 is paid when it opens, and only for that note.
 
-| corpus                  | cache rows | notes | live blocks | boot `rootView` | nodes at boot | whole `getGraph` | largest note opened   |
-| ----------------------- | ---------- | ----- | ----------- | --------------- | ------------- | ---------------- | --------------------- |
-| 1x                      | 28,804     | 8     | 2,075       | 3 ms            | 17            | 60 ms            | 73 ms (1,818 nodes)   |
-| same notes, 10x blocks  | 184,270    | 8     | 15,548      | 14 ms           | 17            | 392 ms           | 501 ms (12,204 nodes) |
-| same notes, 100x blocks | see below  | 8     |             |                 | 17            |                  |                       |
-| 10x clone (notes too)   | 282,360    | 70    | 20,440      | 19 ms           | 141           | 647 ms           | 87 ms (1,800 nodes)   |
-| 100x clone (notes too)  | see below  |       |             |                 |               |                  |                       |
+| corpus                  | cache rows | notes | live blocks | boot `rootView` | nodes at boot | whole `getGraph` | largest note opened      |
+| ----------------------- | ---------- | ----- | ----------- | --------------- | ------------- | ---------------- | ------------------------ |
+| 1x                      | 28,804     | 8     | 2,075       | 3 ms            | 17            | 60 ms            | 73 ms (1,818 nodes)      |
+| same notes, 10x blocks  | 184,270    | 8     | 15,548      | 14 ms           | 17            | 392 ms           | 501 ms (12,204 nodes)    |
+| same notes, 100x blocks | 1,738,930  | 8     | 150,278     | 61 ms           | 17            | 3,851 ms         | 5,202 ms (116,064 nodes) |
+| 10x clone (notes too)   | 282,360    | 70    | 20,440      | 19 ms           | 141           | 647 ms           | 87 ms (1,800 nodes)      |
+| 100x clone (notes too)  | 2,823,600  | 700   | 204,400     | 170 ms          | 1,401         | 6,992 ms         | 94 ms (1,800 nodes)      |
+
+With a hundred times the blocks under the same notes the boot read is
+61 ms against 3.9 s for the whole graph: what grows is the preview
+window's scan of first-level links in SQL, not what the client holds (17
+nodes at boot either way). A note of 116,064 nodes opens in 5.2 s, which
+is that note's cost and nobody else's. With a hundred times the notes
+(700) the boot holds 1,401 nodes and reads 170 ms: O(notes), as asked.
 
 Migration 0032 on the clones (`wrangler d1 migrations apply --local`,
 0030 to 0032 together): 11 s at 10x, 3 min 20 s at 100x, wrangler's
