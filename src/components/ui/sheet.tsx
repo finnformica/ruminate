@@ -3,6 +3,7 @@ import { Drawer } from "vaul"
 import { cx } from "../../utils/cx"
 import { XIcon16 } from "../icons"
 import { IconButton } from "./icon-button"
+import { InModalContext } from "./layer"
 
 /**
  * A sheet: the panel that slides up from the bottom of a phone's screen.
@@ -16,6 +17,14 @@ import { IconButton } from "./icon-button"
  * the phone's form of a dialog. vaul (a Radix-based drawer) still does the sliding and the
  * swipe: it is the one place the app keeps something other than Base UI,
  * because its touch physics are the reason to have a sheet at all.
+ *
+ * vaul's own modal mode is off. A Radix modal sets `pointer-events: none`
+ * on the body and pulls focus back into its own element, and a Base UI menu
+ * or dialog opened from the sheet sits outside that element, in the page:
+ * it opened but took no tap. So the sheet draws its scrim itself, and a tap
+ * on the scrim puts the sheet away, as a modal's did. What the sheet holds
+ * is told it is in the modal layer (`InModalContext`), so a menu opened from
+ * it floats above the sheet rather than behind it.
  */
 
 type ContentProps = Omit<React.ComponentPropsWithoutRef<typeof Drawer.Content>, "title"> & {
@@ -33,8 +42,36 @@ type ContentProps = Omit<React.ComponentPropsWithoutRef<typeof Drawer.Content>, 
   size?: "tall" | "fit"
 }
 
-function Root(props: React.ComponentProps<typeof Drawer.Root>) {
-  return <Drawer.Root shouldScaleBackground={false} {...props} />
+/** A sheet is always controlled: the caller holds whether it is open. */
+type RootProps = {
+  open: boolean
+  onOpenChange?: (open: boolean) => void
+  children?: React.ReactNode
+}
+
+/** Whether the sheet is open and how to put it away, for the scrim. */
+const SheetContext = React.createContext<{ open: boolean; close: () => void }>({
+  open: false,
+  close: () => {},
+})
+
+function Root({ open, onOpenChange, children }: RootProps) {
+  const context = React.useMemo(
+    () => ({ open, close: () => onOpenChange?.(false) }),
+    [open, onOpenChange],
+  )
+  return (
+    <SheetContext.Provider value={context}>
+      <Drawer.Root
+        shouldScaleBackground={false}
+        modal={false}
+        open={open}
+        onOpenChange={onOpenChange}
+      >
+        {children}
+      </Drawer.Root>
+    </SheetContext.Provider>
+  )
 }
 
 function Content({
@@ -48,9 +85,22 @@ function Content({
   children,
   ...props
 }: ContentProps) {
+  const sheet = React.useContext(SheetContext)
   return (
     <Drawer.Portal>
-      <Drawer.Overlay className="fixed inset-0 z-modal bg-linear-to-t from-[#000000] to-[#00000000]" />
+      {/* vaul draws no overlay for a sheet that is not modal: this one is
+          its scrim, with vaul's fade (`data-vaul-overlay`), and `touch-none`
+          so a drag on it does not scroll the page beneath. Esc and the
+          close control put the sheet away from the keyboard. */}
+      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
+      <div
+        aria-hidden
+        data-vaul-overlay=""
+        data-vaul-snap-points="false"
+        data-state={sheet.open ? "open" : "closed"}
+        className="fixed inset-0 z-modal touch-none bg-linear-to-t from-[#000000] to-[#00000000]"
+        onClick={sheet.close}
+      />
       <Drawer.Content
         className={cx(
           "fixed bottom-0 left-0 right-0 z-modal flex flex-col rounded-t-xl bg-bg-overlay outline-none",
@@ -86,7 +136,7 @@ function Content({
             {title}
           </Drawer.Title>
         )}
-        {children}
+        <InModalContext.Provider value={true}>{children}</InModalContext.Provider>
       </Drawer.Content>
     </Drawer.Portal>
   )
