@@ -1,10 +1,15 @@
 # Events log cache
 
-Status: **proposed 2026-10-28, step 2 of the D1 plan. Finn approves this
-document before any code.** It assumes two branches have merged: step 1
+Status: **built in PR #310 (2026-10-30), after Finn's GO; designed
+2026-10-28 as step 2 of the D1 plan.** PR #310 is deploys 1 and 2 of
+section 10 in one: migration 0032, the Worker on the cache, the client on
+the cache with a lazily loaded graph (section 8), `MIN_REPLICA_PROTOCOL`
+3; deploy 3 (the drop of `nodes`, `link` and `delta_mat_values`) is a
+later PR. The decisions on the open questions are in section 11, the
+measurements on the production copy in section 9. It assumes step 1
 (migration 0030: genesis for every tenant, no reconcile in the Worker) and
 remove-views (no `views` table, no view events written, a share names its
-root). It covers blocks and links only.
+root), both merged. It covers blocks and links only.
 
 Today the server holds the log (`events_log`) and three kinds of projection
 beside it: `nodes` and `link` (one row per entity, with a `stamps` JSON
@@ -215,8 +220,10 @@ the entities it names from the cache, derives events (`rowsToEvents`,
   on the device: append to `events_log`, upsert the cache rows, patch the
   graph (section 8). The cursor moves to the page's last `seq`.
 - **The row pull is gone.** `GET /api/replica/notes` (full and `?since=`)
-  and the browser's row push (`PUT /api/replica/notes`) retire for browsers
-  (section 10 says when). A quiet sync is one request that reads one row.
+  and the browser's row push (`PUT /api/replica/notes`) are removed with
+  this deploy, and `MIN_REPLICA_PROTOCOL` rises to 3 with them (Finn,
+  2026-10-30: no compatibility window). A quiet sync is one request that
+  reads one row.
 - **A new device** gets one snapshot of the cache, then the log:
   1. `GET /api/replica/cache?after=<entity>|<entity_id>|<key>&limit=20000`.
      The first page reads `meta.cache_seq` and then the rows, in one batch
@@ -288,19 +295,19 @@ and the Workers runtime's memory limit. D1 also caps a compound `SELECT` at
 such cap, so a test pins the term count of every statement, as
 `event-log.test.ts` does today.
 
-| limit                         | value                | who hits it, and what the design does                                                                                                                                                       |
-| ----------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bound parameters per query    | 100                  | Every `IN (…)` reader: `nodesByIds`, `takenIds`, `ownPageIds`, the fold check's reads. They chunk at 80 ids (`CHUNK`), `:tenant` takes one. Longer lists go through `json_each(?1)`.        |
-| String, BLOB or row size      | 2 MB                 | The append: a push's events travel as ONE bound JSON. Runs are cut at 750 KB (`MAX_PARAM_BYTES`). The cache upsert's winners JSON is cut with them.                                         |
-| SQL statement length          | 100 KB               | The append's statements are large constants, under the cap. A multi-row `VALUES` upsert (the browser writes 1,000 keys a statement) is not an option on D1: the Worker uses `json_each`.    |
-| Queries per Worker invocation | 50 free, 1,000 paid  | The append: 2 statements per chunk, plus the stale read and the `meta` read. A paste of 10,000 events is ~14 chunks = 30 queries. Verify pages the log (10 pages at 1x) and the cache (2).  |
-| Query duration                | 30 s                 | The migration's backfill from the log (section 10), a window over every log row: 46,620 at 1x, 4.66 M at 100x. The bench measures it; the fallback is a backfill from the tables.           |
-| LIKE or GLOB pattern          | 50 bytes             | Why a link's keys are rows and not a prefix match on `entity_id` (section 1).                                                                                                               |
-| Arguments per SQL function    | 32                   | `json_object(…)` with more than 16 pairs. The rollback script's `stamps` rebuild has 7 pairs. `json_group_object` is an aggregate and has no such bound.                                    |
-| Compound SELECT terms         | 5                    | The migration's backfill: one `INSERT` per key group (blocks' columns, blocks' props, links), never a `UNION ALL` of ten arms. Genesis 0030 used the same shape.                            |
-| Worker memory                 | 128 MB               | The cache snapshot and verify at 100x: 2.8 M rows, 240 MB of text. Both page by the primary key (20,000 rows a page, ~2 MB of JSON). The old full row pull at 100x was ~100 MB and over it. |
-| Rows read per day             | 5 M free             | The snapshot: 28,081 rows at 1x, once per new device. A quiet sync reads 1 row; a push reads its entities' rows plus 1. `verify` is a diagnostic, run by hand.                              |
-| Time Travel                   | 7 days free, 30 paid | The rollback after `nodes` and `link` are dropped (section 10).                                                                                                                             |
+| limit                         | value                              | who hits it, and what the design does                                                                                                                                                       |
+| ----------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bound parameters per query    | 100                                | Every `IN (…)` reader: `nodesByIds`, `takenIds`, `ownPageIds`, the fold check's reads. They chunk at 80 ids (`CHUNK`), `:tenant` takes one. Longer lists go through `json_each(?1)`.        |
+| String, BLOB or row size      | 2 MB                               | The append: a push's events travel as ONE bound JSON. Runs are cut at 750 KB (`MAX_PARAM_BYTES`). The cache upsert's winners JSON is cut with them.                                         |
+| SQL statement length          | 100 KB                             | The append's statements are large constants, under the cap. A multi-row `VALUES` upsert (the browser writes 1,000 keys a statement) is not an option on D1: the Worker uses `json_each`.    |
+| Queries per Worker invocation | 1,000 (paid plan; 50 free)         | The append: 2 statements per chunk, plus the stale read and the `meta` read. A paste of 10,000 events is ~14 chunks = 30 queries. Verify pages the log (10 pages at 1x) and the cache (2).  |
+| Query duration                | 30 s                               | The migration's backfill from the log (section 10), a window over every log row: 46,620 at 1x, 4.66 M at 100x. The bench measures it; the fallback is a backfill from the tables.           |
+| LIKE or GLOB pattern          | 50 bytes                           | Why a link's keys are rows and not a prefix match on `entity_id` (section 1).                                                                                                               |
+| Arguments per SQL function    | 32                                 | `json_object(…)` with more than 16 pairs. The rollback script's `stamps` rebuild has 7 pairs. `json_group_object` is an aggregate and has no such bound.                                    |
+| Compound SELECT terms         | 5                                  | The migration's backfill: one `INSERT` per key group (blocks' columns, blocks' props, links), never a `UNION ALL` of ten arms. Genesis 0030 used the same shape.                            |
+| Worker memory                 | 128 MB                             | The cache snapshot and verify at 100x: 2.8 M rows, 240 MB of text. Both page by the primary key (20,000 rows a page, ~2 MB of JSON). The old full row pull at 100x was ~100 MB and over it. |
+| Rows read per day             | 25 billion a month included (paid) | The snapshot: 28,081 rows at 1x, once per new device. A quiet sync reads 1 row; a push reads its entities' rows plus 1. `verify` is a diagnostic, run by hand.                              |
+| Time Travel                   | 30 days (paid plan)                | The rollback after `nodes` and `link` are dropped (section 10).                                                                                                                             |
 
 ## 7. Drop `nodes`, `link` and the mirror
 
@@ -322,42 +329,53 @@ The device's store (`src/data/sql-note-store.ts`, OPFS) holds `events_log`
 `user_id`) and `meta`. `nodes`, `link`, `views`, `delta_mat_values` and the
 old `events` table go (schema step v17).
 
-### Boot
+### Boot: the first screen, not the corpus
 
-One statement builds the graph:
+Finn, 2026-10-30: the boot must be O(notes), not O(blocks). So the graph
+atom is a lazily loaded PART of the corpus, and `GraphSnapshot.loaded` says
+which ids it holds whole (their child links complete). The reads are
+`LazyReads` (`src/data/sql-lazy-reads.ts`), each a bounded part of the
+cache by index, merged into the atom (`mergeFragment`,
+`src/data/graph-patch.ts`); they mirror the MCP server's loaders and keep
+their invariants (a hop follows a child link only between two live nodes;
+a note's view is closed under the questions the app asks of it).
 
-```sql
-SELECT entity, entity_id, json_group_object(key, json(value)) AS fields,
-       MAX(seq) AS seq, MAX(updated_at) AS updated_at
-FROM events_log_cache
-WHERE value IS NOT NULL
-GROUP BY entity, entity_id
-```
+| when                                       | read                                                                                                                                                                                                        | loaded afterwards                  |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| boot (`rootView`)                          | every live note (`type` index), the corpus root and its order, one preview child per note (a window over the first hop; what an untitled note is named by), the pinned nodes (`props.pinned_at` index)      | the root                           |
+| a note opens (`noteView`)                  | its subtree, the blocks written in it with their subtrees (the basket's candidates), and the upward closure of all of them (what else reaches a block: a delete, a place count and the basket read exactly) | the note and everything beneath it |
+| a row opens whose children are partial     | the subtrees beneath it (`subtreeView`); the walk reports such rows (`GraphView.unloaded`) and the note page loads them                                                                                     | those subtrees                     |
+| a recent block is listed                   | just its node (`nodesView`)                                                                                                                                                                                 | nothing more                       |
+| search, the calendar (`databaseEnsureAll`) | the whole corpus, once: one grouped read (`getGraph`); every read is the whole graph from then on                                                                                                           | everything                         |
 
-One row per entity, 6,141 on production. The assembler (`cache-rows.ts`)
-reads each row's `fields`: an entity whose `deleted` is not `null`, or
-that has no `deleted` key, drops out; a block becomes a `NodeRow` with its
-`props.*` keys gathered into `props`; a link becomes a `LinkRow`. Then
-`buildGraphSnapshot` builds the node map, the child links per source sorted
-by `sort_key` (destination id tiebreak) and the parent links per
-destination, as it does today, and drops a link with a tombstoned end.
+The rules that keep a partial graph honest:
 
-The grouping was measured both ways (`node:sqlite`, Finn's tenant, median
-of 7; the browser's OPFS is slower, about 4x on today's read: 53 ms in the
-browser against 13 ms here):
+- **A save never reconciles the children of a parent the graph holds in
+  part** (`partsToOps`): the rows an unloaded parent did not show stay
+  where they are. A created node is loaded (it has no children but the
+  batch's).
+- **The patch after a batch adds a link only under a loaded source**
+  (`patchSnapshot`); a touched block comes with every adjacent link, so it
+  is loaded after the patch. A change inside a note not opened this
+  session reaches the graph when the note is opened.
+- **A delete of a note reads it whole first** (`useDeleteNote`): what only
+  it reaches is a question of its subtree and of what else reaches each
+  block. A block delete and a place count happen in the open note, whose
+  upward closure is loaded.
+- **A shared slice is whole**; merged, its nodes are loaded.
 
-| boot read                                                 | 1x (28,081 rows)    | 10x (280,810 rows) |
-| --------------------------------------------------------- | ------------------- | ------------------ |
-| A. every cache row, grouped in JS                         | 92 ms + 40 ms build | 1,210 ms + 458 ms  |
-| B. `GROUP BY` in SQL, one row per entity (chosen)         | 43 ms               | 469 ms             |
-| C. as A, without the link's three key rows                | 43 ms               | 711 ms             |
-| D. today's read: `nodes` + `link` with the props subquery | 13 ms               | 170 ms             |
+The boot read was measured against total blocks (section 9): flat.
 
-So the cache costs about 3x today's read at boot: roughly 170 ms in the
-browser at 1x, and about 2 s at 10x. At 1x that is fine. At 10x the whole-
-graph boot is the wrong design and the lazy reads the store already has
-(`childLinksOf`, `parentLinksOf`, `nodesOf`, moved to the cache) are the
-answer. That is an open question (section 11), not part of this step.
+The whole-graph read stays for `databaseEnsureAll` and was measured both
+ways (`node:sqlite`, Finn's tenant, median of 7; the browser's OPFS is
+slower, about 4x on today's read: 53 ms in the browser against 13 ms here):
+
+| whole-graph read                                                       | 1x (28,081 rows)    | 10x (280,810 rows) |
+| ---------------------------------------------------------------------- | ------------------- | ------------------ |
+| A. every cache row, grouped in JS                                      | 92 ms + 40 ms build | 1,210 ms + 458 ms  |
+| B. `GROUP BY` in SQL, one row per entity (chosen)                      | 43 ms               | 469 ms             |
+| C. as A, without the link's three key rows                             | 43 ms               | 711 ms             |
+| D. the read before the cache: `nodes` + `link` with the props subquery | 13 ms               | 170 ms             |
 
 ### Each new event
 
@@ -463,6 +481,83 @@ rows-read alarm except the snapshot and verify; the 1x boot stays under
 today's 3 s cold-start trigger with room to spare; at 10x the boot number
 decides the open question on lazy reads.
 
+### The boot against total blocks (2026-10-30)
+
+The lazy boot (`rootView`) against the whole-graph read, over `node:sqlite`
+with the owner's cache rows: the production copy (1x: 8 notes, 2,075 live
+blocks), the same 8 notes with every block copied 10x and 100x beneath
+them (`/tmp/cache-rollup/boot-scale.ts`), and the clones where the notes
+multiply too. The boot's cost tracks the notes (and the first-level
+links the preview window scans in SQL), not the blocks; what a note costs
+is paid when it opens, and only for that note.
+
+| corpus                  | cache rows | notes | live blocks | boot `rootView` | nodes at boot | whole `getGraph` | largest note opened   |
+| ----------------------- | ---------- | ----- | ----------- | --------------- | ------------- | ---------------- | --------------------- |
+| 1x                      | 28,804     | 8     | 2,075       | 3 ms            | 17            | 60 ms            | 73 ms (1,818 nodes)   |
+| same notes, 10x blocks  | 184,270    | 8     | 15,548      | 14 ms           | 17            | 392 ms           | 501 ms (12,204 nodes) |
+| same notes, 100x blocks | see below  | 8     |             |                 | 17            |                  |                       |
+| 10x clone (notes too)   | 282,360    | 70    | 20,440      | 19 ms           | 141           | 647 ms           | 87 ms (1,800 nodes)   |
+| 100x clone (notes too)  | see below  |       |             |                 |               |                  |                       |
+
+Migration 0032 on the clones (`wrangler d1 migrations apply --local`,
+0030 to 0032 together): 11 s at 10x, 3 min 20 s at 100x, wrangler's
+start-up included; no statement hit the 30 s query limit.
+
+### Measured on the production copy of 2026-10-30 (1x)
+
+Migration 0032 applied on a local miniflare D1 loaded with the copy
+(`wrangler d1 migrations apply --local`): 9 statements, 5 s wall time with
+wrangler's start-up. The backfill:
+
+| tenant (user_id) | cache rows | block rows | link rows | entities | verify                            |
+| ---------------- | ---------- | ---------- | --------- | -------- | --------------------------------- |
+| 42536816 (Finn)  | 28,804     | 11,324     | 17,480    | 6,264    | ok, drift 0, 48,095 events, 4.4 s |
+| 85790308         | 6,254      | 2,509      | 3,745     | 1,373    | ok, drift 0                       |
+| 255892914        | 2,589      | 1,154      | 1,435     | 575      | ok, drift 0                       |
+| 250833125        | 104        | 49         | 55        | 23       | ok, drift 0                       |
+| 4608155          | 69         | 34         | 35        | 15       | ok, drift 0                       |
+
+Every request a device makes, through the real `replica()` handler on
+that copy (median of 3; `rows_read` from D1's own meta; the "before"
+column is the same harness after step 1, 2026-10-28):
+
+| request                               | before: rows read                 | after: rows read | after: ms | after: bytes |
+| ------------------------------------- | --------------------------------- | ---------------- | --------- | ------------ |
+| idle sync (one log page, nothing new) | 15                                | 6                | 60        | 53           |
+| push of one edit                      | 551                               | 26               | 152       | 95           |
+| a log page of 2,000 events            | ~2,000                            | 2,005            | 201       | 797,871      |
+| fresh device: snapshot page 1 of 2    | (row pull: ~540, 969 KB, ~300 ms) | 20,006           | 471       | 3,732,771    |
+| fresh device: snapshot page 2 of 2    |                                   | 8,812            | 263       | 1,719,576    |
+| row pull served to protocol 2 (full)  | ~540                              | 28,810           | 251       | 987,956      |
+| status                                | ~1,800                            | 37,757           | 84        | 128          |
+| verify                                | (whole log + tables)              | 76,912           | 4,343     | 64           |
+
+The push went from 551 rows read to 26 and the idle sync from 15 to 6.
+The snapshot a fresh device takes is 5.4 MB of JSON over two pages against
+the 1 MB row pull it replaces: each cache row carries its stamp (40 bytes)
+and its key name. That is the one number that got worse; it is paid once
+per device, and a denser page shape (arrays, not objects) is the fix if it
+matters. `status` reads more than before (four seeks per live link) and is
+read once per session.
+
+The client, over `node:sqlite` with the owner's 28,804 rows (the browser's
+OPFS is slower, about 4x on today's read):
+
+| step                                                   | ms  |
+| ------------------------------------------------------ | --- |
+| import of the snapshot (28,804 rows, two pages)        | 198 |
+| replay of the unpushed tail on top                     | 1   |
+| first `getGraph` (the first paint's read, 2,075 nodes) | 74  |
+| a later `getGraph` (a reload)                          | 51  |
+| the patch read after a batch touching one block        | 1.7 |
+
+Today's reload read on the same engine was 13 ms (section 8, variant D),
+so the grouped read costs about four times the two-table read; in the
+browser that is the 53 ms Finn measured against roughly 200 ms. A fresh
+device's first paint is the snapshot's two requests plus its import plus
+the first read: about 1.2 s on this copy against the row pull's 300 ms
+plus its import, with the log no longer on the critical path at all.
+
 ## 10. Migration order and rollback
 
 Three deploys. The migration numbers are the next free ones after step 1's
@@ -487,13 +582,11 @@ Migration `00NN_events_log_cache.sql`:
    new Worker never writes them again.
 
 The Worker of the same deploy: the append of section 3, every reader of
-section 5, `GET /api/replica/cache`, `REPLICA_PROTOCOL` 3 accepted. The
-browser's row endpoints (`GET` and `PUT /api/replica/notes`) are served
-from the cache for protocol-2 bundles during this deploy: the full pull
-assembles every entity, the since-pull assembles the entities with a row
-at `seq > ?` (the `events_log_cache_seq` index), the row push goes through
-`writeRows` as it does for MCP. So a tab that has not reloaded keeps
-working.
+section 5, `GET /api/replica/cache`, `REPLICA_PROTOCOL` 3 and
+`MIN_REPLICA_PROTOCOL` 3. The browser's row endpoints (`GET` and
+`PUT /api/replica/notes`) are gone: a tab on the build before is refused
+with `client_too_old` and reloads (Finn, 2026-10-30: no compatibility
+window). `writeRows` stays for MCP and shares.
 
 **The deploy window.** `npm run deploy` applies the migration before it
 uploads the Worker. For those seconds the old Worker appends to the log and
@@ -530,19 +623,17 @@ and is why deploy 2 waits for deploy 1 to settle.
 
 ### Deploy 3: the drop
 
-A week or more after deploy 2, with `verify` clean for every tenant and
-the protocol-2 bundles gone from use (the Worker logs the protocol of each
-request): raise `MIN_REPLICA_PROTOCOL` to 3 in the dashboard first; then
-the migration `00NN+1_drop_projection_tables.sql` drops `nodes`, `link`,
+After deploys 1 and 2 have run with `verify` clean for every tenant: the
+migration `0033_drop_projection_tables.sql` drops `nodes`, `link`,
 `delta_mat_values` and their indexes (section 7), and the same Worker
-removes the row endpoints for browsers and `appendClientEvents`. `writeRows`
-stays for MCP and shares.
+removes `appendClientEvents` (the old-shape push door). `writeRows` stays
+for MCP and shares.
 
 **Rollback of deploy 3.** None by code. The tables are gone; the previous
 Worker cannot run. The recovery is D1 Time Travel to before the migration
-(7 days free, 30 paid), which also rewinds every write since, or the
+(30 days on the paid plan), which also rewinds every write since, or the
 rollback script of deploy 1 run against the restored schema. That is why
-the drop waits a week and runs last.
+the drop runs last.
 
 ### Never
 
@@ -551,33 +642,41 @@ the drop waits a week and runs last.
   (`check:queries` enforces it).
 - Never roll a Worker back past deploy 1 without the rollback script.
 
-## 11. Open questions for Finn
+## 11. Decided (Finn, 2026-10-30)
 
-1. **Plan.** Is production on the free or the paid D1 plan? It sets the
-   queries per invocation (50 or 1,000), the daily rows read (5 M) and
-   Time Travel (7 or 30 days), and so the rollback window of deploy 3.
-2. **A new device and the log.** Does a new device pull the whole log
-   (24 pages at 1x, 234 at 10x) for history, or only the cache plus the
-   log of the last N days, with older history read from the server on
-   demand? This document says the whole log, behind the screen.
-3. **The boot at 10x.** About 2 s in the browser by this measurement.
-   Accept it for now, or make the graph atom lazy (expand reads
-   `childLinksOf`) in a step of its own?
-4. **The deploy window.** Serve the row endpoints from the cache for a week
-   (this document), or raise `MIN_REPLICA_PROTOCOL` at deploy 1 and make
-   every open tab reload?
-5. **The backfill source.** From the log's fold by stamp (this document;
-   0 differences from the tables today), with the tables as the fallback
-   if 100x breaks the 30 s query limit. Confirm.
-6. **The liveness key.** `deleted` (as asked), holding `null` or the
-   tombstone ms. The stamp name today is `alive`. Confirm the name.
-7. **`updated_at` of an entity** as `MAX(updated_at)` over its rows
-   (section 1). Confirm.
-8. **The client's old `events` table.** Unread since schema v15. Drop it in
-   v17 (this document), or keep it?
-9. **`kind`.** Every link on production is `child`. Keep `kind` in the
-   link's id and as a row (this document), for the edge kinds the schema
-   reserved?
+The open questions of this document, answered by Finn on 2026-10-30. Each
+is built as decided in PR #310, which is deploys 1 and 2 of section 10 in
+one.
+
+1. **Plan.** The PAID D1 plan: 1,000 queries per Worker invocation, 30
+   days of Time Travel. Section 6 and the rollback window of section 10
+   read accordingly.
+2. **A new device and the log.** The whole log, behind the screen. A new
+   device takes the snapshot of the cache, draws, then pulls the log from
+   0 in pages for history.
+3. **The boot is O(notes), not O(blocks).** "Why does the time taken to
+   load increase to 2 s with 10x the data? If we're using the cache
+   properly and lazy loading everything it should be O(num_notes)." So
+   there is no whole-graph boot: the first screen reads the notes, the
+   root's order, one preview child per note and the pinned nodes; a note
+   is read whole when it is opened; search, the calendar and recents read
+   what they need on demand (section 8). Measured flat with total blocks
+   in section 9.
+4. **No compatibility window.** The row endpoints are not served from the
+   cache; `MIN_REPLICA_PROTOCOL` rises to 3 in the same deploy, so every
+   open tab of the build before reloads. Section 10's week is gone.
+5. **The backfill source.** The log's fold by stamp (migration 0032), with
+   the tables as the fallback if 100x breaks the 30 s query limit. On the
+   production copy of 2026-10-30 it took well under that (section 9).
+6. **The liveness key** is `deleted`: `null` while live, else the
+   tombstone's clock; a restore writes `null`.
+7. **An entity's `updated_at`** is `MAX(updated_at)` over its rows.
+8. **The client's old `events` table** is dropped in the local ladder's
+   v18 step, with `nodes`, `link` and `delta_mat_values`.
+9. **`kind`** stays in a link's id and as a row.
+10. **A block delete** keeps writing an explicit `unlink` per link plus the
+    `delete` (`deleteBlockOps`, as today). No dangling-link rule (Finn,
+    2026-10-28).
 
 ## Decisions in one list
 

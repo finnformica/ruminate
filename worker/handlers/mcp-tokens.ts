@@ -105,11 +105,13 @@ function parseMintBody(raw: unknown, now: number): MintBody | string {
 /** Which of these ids are live pages in the caller's own corpus. */
 async function ownPageIds(env: Env, userId: number, ids: string[]): Promise<Set<string>> {
   const tenant = forTenant(corpusDriver(env), { id: userId, login: String(userId), name: null })
-  const placeholders = ids.map((_, index) => `?${index + 1}`).join(", ")
   const rows = await tenant.exec(
-    `SELECT id FROM nodes WHERE user_id = :tenant AND deleted_at IS NULL ` +
-      `AND type = 'note' AND id IN (${placeholders})`,
-    ids,
+    "SELECT t.entity_id AS id FROM json_each(?1) AS j " +
+      "CROSS JOIN events_log_cache t ON t.user_id = :tenant AND t.entity = 'block' " +
+      "AND t.entity_id = j.value AND t.key = 'type' AND t.value = '\"note\"' " +
+      "CROSS JOIN events_log_cache l ON l.user_id = :tenant AND l.entity = 'block' " +
+      "AND l.entity_id = t.entity_id AND l.key = 'deleted' AND l.value = 'null'",
+    [JSON.stringify(ids)],
   )
   return new Set(rows.map((row) => String(row.id)))
 }

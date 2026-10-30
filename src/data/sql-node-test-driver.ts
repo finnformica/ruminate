@@ -27,7 +27,10 @@ export function createNodeSqlDriver(): SqlDriver {
   return {
     exec: (sql, params = []) => {
       const statement = db.prepare(sql)
-      if (/^\s*(select|explain)/i.test(sql)) {
+      // What returns rows, not what a statement opens with: `WITH … SELECT`
+      // is a query (the lazy reads of the cache are such), as the worker's
+      // test driver reads it.
+      if (/^\s*(?:select|with|explain)\b/i.test(sql) || /\breturning\b/i.test(sql)) {
         return Promise.resolve(statement.all(...params) as Record<string, SqlValue>[])
       }
       statement.run(...params)

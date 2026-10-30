@@ -16,6 +16,14 @@ import migration0028 from "../../migrations/0028_events_log.sql?raw"
 import migration0029 from "../../migrations/0029_backfill_delta_mat_values.sql?raw"
 import migration0030 from "../../migrations/0030_genesis_unlogged_rows.sql?raw"
 import migration0031 from "../../migrations/0031_drop_views.sql?raw"
+import migration0032 from "../../migrations/0032_events_log_cache.sql?raw"
+import {
+  cacheRowKey,
+  foldEventsToCache,
+  groupCacheRows,
+  rowsOfEntities,
+  type CacheRow,
+} from "../../src/data/cache-rows"
 import {
   assembleLogState,
   editsOf,
@@ -24,7 +32,6 @@ import {
   keyEventStamp,
   type KeyEvent,
 } from "../../src/data/key-events"
-import { nodePropsSql } from "../../src/data/node-props-sql"
 import {
   appendClientEvents,
   appendClientKeyEvents,
@@ -38,7 +45,7 @@ import {
   writeRows,
   type StoredKeyEvent,
 } from "./event-log"
-import { corpusPullFull, corpusPullSince, corpusPut } from "./replica-corpus"
+import { corpusPut } from "./replica-corpus"
 import type { LinkRow, NodeRow } from "./replica-payload"
 import { createTenantTestDriver } from "./sqlite-test-driver"
 
@@ -156,16 +163,47 @@ const rows = (log: readonly KeyEvent[]) =>
 const rowsOf = (log: StoredKeyEvent[], edit: string) =>
   rows(log.filter((row) => (row.event ?? row.id) === edit))
 
-/** A block's props as every reader of the Worker reads them: from its keys. */
-const PROPS_OF = nodePropsSql("nodes.id", "tenant").replace(/:tenant\b/g, "111")
-const propsRaw = async (driver: SqlDriver, id: string) =>
+/** Every row of a tenant's cache (docs/events-log-cache.md), raw. */
+const cacheRows = async (driver: SqlDriver, userId = 111): Promise<CacheRow[]> =>
   (
-    await driver.exec(`SELECT ${PROPS_OF} AS props FROM nodes WHERE user_id = 111 AND id = ?1`, [
-      id,
-    ])
-  )[0]?.props as string | null
+    await driver.exec(
+      "SELECT entity, entity_id, key, value, hlc, seq, updated_at FROM events_log_cache " +
+        "WHERE user_id = ?1 ORDER BY entity, entity_id, key",
+      [userId],
+    )
+  ).map((row) => ({
+    entity: row.entity as CacheRow["entity"],
+    entity_id: String(row.entity_id),
+    key: String(row.key),
+    value: row.value === null ? null : String(row.value),
+    hlc: String(row.hlc),
+    seq: row.seq === null ? null : Number(row.seq),
+    updated_at: Number(row.updated_at),
+  }))
+
+/** The cache as every reader of the Worker reads it: entities, tombstones too. */
+const cacheOf = async (driver: SqlDriver, userId = 111) =>
+  rowsOfEntities(groupCacheRows(await cacheRows(driver, userId)).values())
+const nodeOf = async (driver: SqlDriver, id: string) =>
+  (await cacheOf(driver)).nodes.find((row) => row.id === id)
+const linkOf = async (driver: SqlDriver, source: string, destination: string) =>
+  (await cacheOf(driver)).links.find(
+    (row) => row.source_id === source && row.destination_id === destination,
+  )
+/** A block's props as every reader of the Worker reads them: from its keys. */
+const propsRaw = async (driver: SqlDriver, id: string) => (await nodeOf(driver, id))?.props ?? null
 const propsOf = async (driver: SqlDriver, id: string) =>
   JSON.parse(String(await propsRaw(driver, id)))
+/** A block's `props.*` rows of the cache, tersely: `key=value`. */
+const keyRowsOf = async (driver: SqlDriver, id: string) =>
+  (await cacheRows(driver))
+    .filter((row) => row.entity === "block" && row.entity_id === id && row.key.startsWith("props."))
+    .map((row) => `${row.key.slice(6)}=${row.value}`)
+
+/** A write of nothing: what projects log rows appended around the Worker
+ * into the cache (the watermark's catch-up, `catchUpStatements`). */
+const catchUp = (tenant: TenantDb) =>
+  writeRows(tenant, { nodes: [], links: [] }, { actor: tenant.userId, origin: "system" })
 
 /** Old-shaped events as the old `events` table holds them: history from
  * before the cut-over, written by hand here since nothing writes it now. */
@@ -194,7 +232,7 @@ async function insertOldEvents(driver: SqlDriver, events: readonly RuminateEvent
 }
 
 describe("appending events", () => {
-  it("projects an append into nodes and link, logs view events as history — and the fold agrees with the tables", async () => {
+  it("projects an append into the cache, logs view events as history — and the fold agrees with the cache", async () => {
     const { driver, alice } = await open()
     const w = writer()
     await append(alice, [
@@ -214,23 +252,22 @@ describe("appending events", () => {
     const log = await readLog(alice)
     expect(log.map((row) => row.seq)).toEqual(log.map((_, i) => i + 1))
     expect(log).toHaveLength(28)
-    expect(await verifyLog(alice)).toMatchObject({ ok: true, keyEvents: 28, rejected: 0 })
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, keyEvents: 28, drift: [] })
 
-    const [a] = await driver.exec(
-      `SELECT nodes.*, ${PROPS_OF} AS props FROM nodes WHERE user_id = 111 AND id = 'a'`,
-    )
+    const a = await nodeOf(driver, "a")
     expect(a).toMatchObject({ text: "Heading, edited", type: "text", props: null, seq: 28 })
-    expect(a.deleted_at).not.toBeNull()
-    // The column stays as a mirror of the keys, written beside every change.
-    expect(await verifyLog(alice)).toMatchObject({ mirror: [] })
+    expect(a?.deleted_at).toBeDefined()
+    // A view event projects nothing: the cache holds blocks and links.
+    expect((await cacheRows(driver)).some((row) => row.entity_id === "v1")).toBe(false)
   })
 
-  it("plans the same six statements for one event or three hundred", () => {
+  it("plans the same three statements for one event or three hundred", () => {
+    // The log insert, the cache upsert, then the watermark.
     const w = writer()
     const ctx = { appendId: "x", actor: 111, origin: "replica" as const, client: null, now: 1 }
     const many = Array.from({ length: 300 }, (_, i) => w.block(`blk_${i}`, "text", `Block ${i}`))
-    expect(planKeyAppend(expandLog([w.block("a", "text", "A")]), ctx)).toHaveLength(6)
-    expect(planKeyAppend(expandLog(many), ctx)).toHaveLength(6)
+    expect(planKeyAppend(expandLog([w.block("a", "text", "A")]), ctx)).toHaveLength(3)
+    expect(planKeyAppend(expandLog(many), ctx)).toHaveLength(3)
   })
 
   it("cuts an append that would not fit one bound value into runs that do, in one batch", async () => {
@@ -246,14 +283,17 @@ describe("appending events", () => {
     const ctx = { appendId: "x", actor: 111, origin: "replica" as const, client: null, now: 1 }
     // A limit so small every edit is its own run: the hardest case for order.
     const statements = planKeyAppend(expandLog(events), ctx, 1)
-    expect(statements).toHaveLength(6 * events.length)
+    expect(statements).toHaveLength(2 * events.length + 1)
     await alice.includingDeleted().batch(statements)
     expect((await readLog(alice)).map((row) => row.seq)).toEqual(
       Array.from({ length: 11 }, (_, i) => i + 1),
     )
-    const rows = await driver.exec(
-      "SELECT id, text, seq, deleted_at IS NOT NULL AS dead FROM nodes WHERE user_id = 111 ORDER BY id",
-    )
+    const rows = (await cacheOf(driver)).nodes.map((row) => ({
+      id: row.id,
+      text: row.text,
+      seq: row.seq,
+      dead: row.deleted_at === undefined ? 0 : 1,
+    }))
     expect(rows).toEqual([
       { id: "a", text: "A3", seq: 10, dead: 0 },
       { id: "b", text: "B", seq: 11, dead: 1 },
@@ -270,11 +310,12 @@ describe("appending events", () => {
       Array.from({ length: 300 }, (_, i) => w.block(`blk_${i}`, "text", `Block ${i}`)),
     )
     const [{ n, lo, hi }] = await driver.exec(
-      "SELECT COUNT(*) AS n, MIN(seq) AS lo, MAX(seq) AS hi FROM nodes WHERE user_id = 111 AND id LIKE 'blk_%'",
+      "SELECT COUNT(DISTINCT entity_id) AS n, MIN(seq) AS lo, MAX(seq) AS hi " +
+        "FROM events_log_cache WHERE user_id = 111 AND entity = 'block' AND entity_id LIKE 'blk_%'",
     )
-    // Four rows per block (its create, type, text and note id): each row
-    // takes the seq of its last.
-    expect([n, lo, hi]).toEqual([300, 8, 1204])
+    // Four rows per block (its create, type, text and note id), each cache
+    // row at the seq of the event that set it.
+    expect([n, lo, hi]).toEqual([300, 5, 1204])
   })
 
   it("a re-sent append adds nothing and regresses nothing", async () => {
@@ -286,8 +327,7 @@ describe("appending events", () => {
     await append(alice, first)
 
     expect(await readLog(alice)).toHaveLength(5)
-    const [row] = await driver.exec("SELECT text, seq FROM nodes WHERE user_id = 111")
-    expect(row).toEqual({ text: "second", seq: 5 })
+    expect(await nodeOf(driver, "a")).toMatchObject({ text: "second", seq: 5 })
   })
 
   it("sequences each tenant on its own, and shows neither the other's log", async () => {
@@ -354,19 +394,12 @@ describe("what a push costs", () => {
       const plan = await driver.exec(`EXPLAIN QUERY PLAN ${sql}`, statement.params ?? [])
       const details = (plan as { detail: string }[]).map((row) => row.detail)
       for (const detail of details) {
-        const corpus = /^(?:SEARCH|SCAN) (?:nodes|link|views|delta_mat_values)\b/.test(detail)
+        const corpus = /^(?:SEARCH|SCAN) (?:events_log_cache|nodes|link|delta_mat_values)\b/.test(
+          detail,
+        )
         if (!corpus) continue
         expect(detail, sql.slice(0, 40)).toMatch(/^SEARCH/)
         expect(detail, sql.slice(0, 40)).not.toMatch(/\(user_id=\?\)$/)
-      }
-      // …and an UPDATE is driven FROM its changes, one seek each — not from
-      // the table, re-scanning the JSON for every row it finds (n² reads,
-      // which returns the right rows and which D1 bills for).
-      if (/UPDATE (?:nodes|link|views)\b[\s\S]*\bFROM j\b/.test(sql)) {
-        const loops = details.filter((detail) =>
-          /^(?:SCAN|SEARCH) (?:j|nodes|link|views)\b/.test(detail),
-        )
-        expect(loops[0], sql.slice(0, 60)).toMatch(/^SCAN j\b/)
       }
     }
   })
@@ -414,16 +447,15 @@ describe("every writer's rows become events", () => {
     expect(await verifyLog(alice)).toMatchObject({ ok: true, keyEvents: 20 })
   })
 
-  it("keeps the rows a pull serves exactly as the row planner left them", async () => {
-    const { alice } = await open()
+  it("keeps the entities as the row planner left them", async () => {
+    const { driver, alice } = await open()
     await corpusPut(alice, {
       nodes: [node("note", "note", "N", 100, { notes_id: undefined }), node("a", "text", "A", 110)],
       links: [child("note", "a", "a0", 110)],
       deleteNodes: [],
     })
     await corpusPut(alice, { nodes: [], links: [], deleteNodes: ["a"] }, 900)
-    const pulled = await corpusPullSince(alice, 0)
-    expect(pulled.cursor).toBe("14")
+    const pulled = await cacheOf(driver)
     expect(pulled.nodes.find((row) => row.id === "a")).toEqual({
       id: "a",
       type: "text",
@@ -478,15 +510,8 @@ describe("every writer's rows become events", () => {
       ],
       links: [child("note", "a", "a0", 100)],
     })
-    const pulled = await corpusPullFull(alice)
-    expect(pulled.nodes.find((row) => row.id === "a")?.props).toBe(
-      '{"align":"left","nested":{"x":[1]},"size":40}',
-    )
-    expect((pulled.delta_mat_values ?? []).map((row) => `${row.key}=${row.value}`).sort()).toEqual([
-      'align="left"',
-      'nested={"x":[1]}',
-      "size=40",
-    ])
+    expect(await propsRaw(driver, "a")).toBe('{"align":"left","nested":{"x":[1]},"size":40}')
+    expect(await keyRowsOf(driver, "a")).toEqual(['align="left"', 'nested={"x":[1]}', "size=40"])
     // One key unset, one changed, by a whole-props writer.
     await corpusPut(
       alice,
@@ -497,18 +522,8 @@ describe("every writer's rows become events", () => {
       2_000,
     )
     expect(await propsOf(driver, "a")).toEqual({ nested: { x: [1] }, size: 50 })
-    // The mirror column says the same, for a build that reads it.
-    expect(await driver.exec("SELECT props FROM nodes WHERE user_id = 111 AND id = 'a'")).toEqual([
-      { props: '{"nested":{"x":[1]},"size":50}' },
-    ])
-    const since = await corpusPullSince(alice, Number(pulled.cursor))
-    expect(since.nodes.map((row) => [row.id, row.props])).toEqual([
-      ["a", '{"nested":{"x":[1]},"size":50}'],
-    ])
-    expect((since.delta_mat_values ?? []).map((row) => `${row.key}=${row.value}`).sort()).toEqual([
-      "align=null",
-      "size=50",
-    ])
+    // The unset key keeps its row, with no value: the tombstone of a key.
+    expect(await keyRowsOf(driver, "a")).toEqual(["align=null", 'nested={"x":[1]}', "size=50"])
     // Every key gone: the column reads as none.
     await corpusPut(
       alice,
@@ -516,19 +531,8 @@ describe("every writer's rows become events", () => {
       3_000,
     )
     expect(await propsRaw(driver, "a")).toBeNull()
-    expect(
-      await driver.exec("SELECT key, value FROM delta_mat_values WHERE user_id = 111 ORDER BY key"),
-    ).toEqual([
-      { key: "align", value: null },
-      { key: "nested", value: null },
-      { key: "size", value: null },
-    ])
-    expect(await verifyLog(alice)).toMatchObject({
-      ok: true,
-      deltaMatValues: [],
-      mirror: [],
-      drift: { nodes: [] },
-    })
+    expect(await keyRowsOf(driver, "a")).toEqual(["align=null", "nested=null", "size=null"])
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, drift: [] })
   })
 })
 
@@ -542,7 +546,7 @@ describe("a client's own events, old-shaped", () => {
     })
 
   it("lands as it was made — cause, base, zone and all — and answers each event's seq", async () => {
-    const { alice } = await open()
+    const { driver, alice } = await open()
     const w = writer("dev.tab")
     const made = [w.block("note", "note", "N", null), w.block("a", "text", "A")]
     made[1] = { ...made[1], cause: "paste", tz: 60, base_seq: null }
@@ -569,8 +573,12 @@ describe("a client's own events, old-shaped", () => {
     expect(log[0].tz ?? null).toBeNull()
     expect(log[0].event_seq).toBeUndefined()
     // The projection follows, as for any append; the fold agrees.
-    const pulled = await corpusPullSince(alice, 0)
-    expect(pulled.nodes.map((row) => [row.id, row.text, row.seq])).toEqual([
+    const pulled = await cacheOf(driver)
+    expect(
+      pulled.nodes
+        .map((row) => [row.id, row.text, row.seq])
+        .sort((x, y) => Number(x[2]) - Number(y[2])),
+    ).toEqual([
       ["note", "N", 4],
       ["a", "A", 8],
     ])
@@ -602,8 +610,7 @@ describe("a client's own events, old-shaped", () => {
       "block.update a",
       "block.update a",
     ])
-    const [row] = await driver.exec("SELECT type, text FROM nodes WHERE user_id = 111")
-    expect(row).toEqual({ type: "h1", text: "A, after" })
+    expect(await nodeOf(driver, "a")).toMatchObject({ type: "h1", text: "A, after" })
     expect(await verifyLog(alice)).toMatchObject({ ok: true })
   })
 
@@ -636,7 +643,7 @@ describe("a client's own events, old-shaped", () => {
   })
 
   it("is idempotent: a re-sent push appends nothing, projects nothing, and answers the same seqs", async () => {
-    const { alice } = await open()
+    const { driver, alice } = await open()
     const w = writer("dev.tab")
     const made = [w.block("a", "text", "A"), w.edit("a", { text: "A!" })]
     const first = await client(alice, made)
@@ -645,8 +652,7 @@ describe("a client's own events, old-shaped", () => {
     await corpusPut(alice, { nodes: [node("a", "text", "A, elsewhere", 9_000)], links: [] })
     const second = await client(alice, made)
     expect(second).toEqual({ appended: 0, stale: 0, seqs: first.seqs })
-    const pulled = await corpusPullSince(alice, 0)
-    expect(pulled.nodes[0].text).toBe("A, elsewhere")
+    expect((await nodeOf(driver, "a"))?.text).toBe("A, elsewhere")
     expect(await verifyLog(alice)).toMatchObject({ ok: true, keyEvents: 6 })
   })
 
@@ -779,16 +785,25 @@ describe("genesis (migration 0030)", () => {
     ])
     expect(log[0]).toMatchObject({ cause: "snapshot", origin: "system", batch: "snapshot" })
     expect(log[5]).toMatchObject({ action: "create", value: 2 })
-    // Each snapshotted row takes the seq of its last row, under one stamp —
-    // the one the row derives without stamps — on every row of it.
+    // Each snapshotted row of the OLD table takes the seq of its last row,
+    // under one stamp — the one the row derives without stamps — on every
+    // row of it. The Worker writes the old table no more: the write of
+    // `new` reached the cache alone.
     const seqs = await driver.exec(
       "SELECT id, seq, stamps FROM nodes WHERE user_id = 111 ORDER BY id",
     )
     expect(seqs).toEqual([
-      { id: "new", seq: 25, stamps: expect.any(String) },
       { id: "old-1", seq: 5, stamps: null },
       { id: "old-2", seq: 9, stamps: null },
     ])
+    expect(await nodeOf(driver, "new")).toMatchObject({ text: "the first write", seq: 25 })
+    // …and the next write projected the snapshot into the cache, each
+    // register at the snapshot's one stamp.
+    expect(await nodeOf(driver, "old-1")).toMatchObject({
+      text: "from before the log",
+      props: '{"size":40}',
+      seq: 5,
+    })
     expect(new Set(log.slice(0, 5).map((row) => row.hlc))).toEqual(
       new Set([eventStamp({ at: 1, seq: 5 } as RuminateEvent)]),
     )
@@ -821,31 +836,45 @@ describe("genesis (migration 0030)", () => {
       "block.create c",
       "block.create b",
     ])
-    expect((await verifyLog(alice)).ok).toBe(true)
+    // The snapshot's rows sit above the watermark until the next write
+    // projects them (`catchUpStatements`); verify says so meanwhile.
+    expect(await verifyLog(alice)).toMatchObject({ ok: false, behind: 4 })
+    await catchUp(alice)
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, behind: 0, drift: [] })
+    expect(await nodeOf(driver, "b")).toMatchObject({ text: "another", seq: 12 })
   })
 
   it("verify names drift it cannot heal: a row changed without taking a sequence", async () => {
     const { driver, alice } = await open({ views: true })
     await corpusPut(alice, { nodes: [node("a", "text", "A", 100)], links: [] })
-    await driver.exec("UPDATE nodes SET text = 'edited in the console' WHERE user_id = 111")
+    await driver.exec(
+      "UPDATE events_log_cache SET value = '\"edited in the console\"' " +
+        "WHERE user_id = 111 AND key = 'text'",
+    )
     const verdict = await verifyLog(alice)
     expect(verdict.ok).toBe(false)
-    expect(verdict.drift.nodes).toEqual(["a"])
+    expect(verdict.drift).toEqual(["block a text: value"])
   })
 
-  it("verify names a key changed without taking a sequence", async () => {
+  it("verify names a key changed without taking a sequence, and a row the log does not hold", async () => {
     const { driver, alice } = await open({ views: true })
     await corpusPut(alice, {
       nodes: [node("a", "image", "A", 100, { props: '{"size":40}' })],
       links: [],
     })
-    await driver.exec("UPDATE delta_mat_values SET value = '50' WHERE user_id = 111")
+    await driver.exec(
+      "UPDATE events_log_cache SET value = '50' WHERE user_id = 111 AND key = 'props.size'",
+    )
+    await driver.exec(
+      "INSERT INTO events_log_cache (user_id, entity, entity_id, key, value, hlc, seq, updated_at) " +
+        "VALUES (111, 'block', 'a', 'props.ghost', '1', 'x', 1, 1)",
+    )
     const verdict = await verifyLog(alice)
     expect(verdict.ok).toBe(false)
-    expect(verdict.deltaMatValues).toEqual(["a size"])
-    expect(verdict.drift.nodes).toEqual(["a"])
-    // …and the mirror column no longer says what the keys say.
-    expect(verdict.mirror).toEqual(["a"])
+    expect(verdict.drift).toEqual([
+      "block a props.size: value",
+      "block a props.ghost: only in the cache",
+    ])
   })
 })
 
@@ -956,9 +985,7 @@ describe("the 19 September wipe", () => {
       ],
     })
     await corpusPut(alice, { nodes: [node("call", "text", "", 250)], links: [] })
-    const wiped = await driver.exec(
-      "SELECT id, text FROM nodes WHERE user_id = 111 AND id IN ('call', 'b1')",
-    )
+    const wiped = (await cacheOf(driver)).nodes.filter((row) => ["call", "b1"].includes(row.id))
     expect(wiped.map((row) => row.text)).toEqual(["", ""])
     const afterWipe = (await readLog(alice)).at(-1)?.seq as number
 
@@ -981,20 +1008,24 @@ describe("the 19 September wipe", () => {
     })
     expect(restored.events).toBe(6)
 
-    const after = await driver.exec(
-      "SELECT id, type, text, deleted_at FROM nodes WHERE user_id = 111 AND id IN ('call', 'b1', 'b2') ORDER BY id",
-    )
+    const restoredRows = await cacheOf(driver)
+    const after = restoredRows.nodes
+      .filter((row) => ["call", "b1", "b2"].includes(row.id))
+      .map((row) => ({
+        id: row.id,
+        type: row.type,
+        text: row.text,
+        deleted_at: row.deleted_at ?? null,
+      }))
     expect(after).toEqual([
       { id: "b1", type: "ul", text: first, deleted_at: null },
       { id: "b2", type: "ul", text: second, deleted_at: null },
       { id: "call", type: "h1", text: "Call notes", deleted_at: null },
     ])
-    const live = await driver.exec(
-      "SELECT source_id || '>' || destination_id AS edge FROM link WHERE user_id = 111 AND deleted_at IS NULL ORDER BY edge",
-    )
-    expect(live.map((row) => row.edge)).toEqual(
-      expect.arrayContaining(["section>call", "call>b1", "call>b2"]),
-    )
+    const live = restoredRows.links
+      .filter((row) => row.deleted_at === undefined)
+      .map((row) => `${row.source_id}>${row.destination_id}`)
+    expect(live).toEqual(expect.arrayContaining(["section>call", "call>b1", "call>b2"]))
     // The restore is in the log as what it was — nothing was rewound — and
     // the rows it touched carry fresh seqs, so every device pulls them.
     const tail = (await readLog(alice)).filter((row) => row.seq > afterWipe)
@@ -1004,11 +1035,12 @@ describe("the 19 September wipe", () => {
         .filter((row) => row.key === "")
         .every((row) => row.action === "restore" && row.ref_seq === before),
     ).toBe(true)
-    expect((await corpusPullSince(alice, afterWipe)).nodes.map((row) => row.id).sort()).toEqual([
-      "b1",
-      "b2",
-      "call",
-    ])
+    expect(
+      restoredRows.nodes
+        .filter((row) => (row.seq ?? 0) > afterWipe)
+        .map((row) => row.id)
+        .sort(),
+    ).toEqual(["b1", "b2", "call"])
     expect((await verifyLog(alice)).ok).toBe(true)
     // …and restoring again is nothing: it is already there.
     expect(
@@ -1018,25 +1050,12 @@ describe("the 19 September wipe", () => {
 })
 
 describe("by stamp", () => {
-  /** The projections as compared across orders: everything but `seq`, which
-   * is the order the events arrived in, and `legacy`. */
-  const tables = async (driver: SqlDriver) => {
-    const read = async (sql: string) =>
-      (await driver.exec(sql)).map((row): Record<string, unknown> => {
-        const { legacy: _, ...stamps } = JSON.parse(String(row.stamps)) as Record<string, unknown>
-        return { ...row, stamps }
-      })
-    return {
-      nodes: await read(
-        `SELECT id, type, text, ${PROPS_OF} AS props, updated_at, deleted_at, notes_id, stamps ` +
-          "FROM nodes WHERE user_id = 111 ORDER BY id",
-      ),
-      links: await read(
-        "SELECT source_id, destination_id, kind, sort_key, updated_at, deleted_at, stamps " +
-          "FROM link WHERE user_id = 111 ORDER BY source_id, destination_id",
-      ),
-    }
-  }
+  /** The cache as compared across orders: every register's value and stamp
+   * — everything but `seq`, which is the order the events arrived in. */
+  const tables = async (driver: SqlDriver) => ({
+    rows: (await cacheRows(driver)).map(({ seq: _seq, ...row }) => row),
+    ...(await cacheOf(driver)),
+  })
 
   it("lands the same events in any order as the same tables", async () => {
     const a = writer("dev.a")
@@ -1066,15 +1085,20 @@ describe("by stamp", () => {
       [made, fromB, fromA],
       [made, [...fromA, ...fromB].reverse()],
     ]
-    const results = []
+    const results: Awaited<ReturnType<typeof tables>>[] = []
     for (const order of orders) {
       const { driver, alice } = await open()
       for (const events of order) await append(alice, events)
-      expect(await verifyLog(alice)).toMatchObject({ ok: true, rejected: 0 })
+      expect(await verifyLog(alice)).toMatchObject({ ok: true, drift: [] })
       results.push(await tables(driver))
     }
-    expect(results[1]).toEqual(results[0])
-    expect(results[2]).toEqual(results[0])
+    const sansSeq = (read: (typeof results)[number]) => ({
+      rows: read.rows,
+      nodes: read.nodes.map(({ seq: _seq, ...row }) => row),
+      links: read.links.map(({ seq: _seq, ...row }) => row),
+    })
+    expect(sansSeq(results[1])).toEqual(sansSeq(results[0]))
+    expect(sansSeq(results[2])).toEqual(sansSeq(results[0]))
 
     const block = results[0].nodes.find((row) => row.id === "a")
     expect(block).toMatchObject({
@@ -1082,9 +1106,9 @@ describe("by stamp", () => {
       text: "A, by a",
       props: null,
     })
-    expect(block?.deleted_at).not.toBeNull()
+    expect(block?.deleted_at).toBeDefined()
     expect(results[0].links[0]).toMatchObject({ sort_key: "a5" })
-    expect(results[0].links[0].deleted_at).not.toBeNull()
+    expect(results[0].links[0].deleted_at).toBeDefined()
   })
 
   it("keeps both of two devices' changes to two fields of one block", async () => {
@@ -1095,8 +1119,7 @@ describe("by stamp", () => {
     await append(alice, [stampedAt(a.edit("a", { text: "A, by a" }), 2_000)])
     // B changed the type before A's edit, and its push arrives after it.
     await append(alice, [stampedAt(b.edit("a", { type: "h1" }), 1_500)])
-    const [row] = await driver.exec("SELECT type, text, seq FROM nodes WHERE user_id = 111")
-    expect(row).toEqual({ type: "h1", text: "A, by a", seq: 6 })
+    expect(await nodeOf(driver, "a")).toMatchObject({ type: "h1", text: "A, by a", seq: 6 })
     expect(await verifyLog(alice)).toMatchObject({ ok: true })
   })
 
@@ -1109,9 +1132,9 @@ describe("by stamp", () => {
     await append(alice, first)
     await append(alice, edit)
     await append(alice, [stampedAt(b.edit("a", { type: "h1" }), 2_000)])
-    const before = await driver.exec("SELECT * FROM nodes WHERE user_id = 111")
+    const before = await cacheRows(driver)
     await append(alice, [...first, ...edit])
-    expect(await driver.exec("SELECT * FROM nodes WHERE user_id = 111")).toEqual(before)
+    expect(await cacheRows(driver)).toEqual(before)
     expect(await readLog(alice)).toHaveLength(6)
   })
 
@@ -1123,26 +1146,32 @@ describe("by stamp", () => {
     await append(alice, blocks)
     const log = await readLog(alice)
     expect(log[39].hlc).toBeUndefined()
-    const [row] = await driver.exec("SELECT stamps FROM nodes WHERE user_id = 111 AND id = 'blk_9'")
     // Each register's stamp is its own row's: the create's, the type's, the
     // text's, the note id's, in the order they were appended.
     const at = (seq: number) => `001792540800123-0000-seq:${String(seq).padStart(15, "0")}`
     expect(keyEventStamp(log[39])).toBe(at(40))
-    expect(JSON.parse(String(row.stamps))).toEqual({
-      alive: at(37),
+    const stamps = Object.fromEntries(
+      (await cacheRows(driver))
+        .filter((row) => row.entity_id === "blk_9")
+        .map((row) => [row.key, row.hlc]),
+    )
+    expect(stamps).toEqual({
+      deleted: at(37),
       type: at(38),
       text: at(39),
       notes_id: at(40),
-      props: at(37),
     })
   })
 
-  it("keeps what the old rule made of a row from before stamps, and resolves by stamp from there", async () => {
+  it("projects log rows appended around the Worker on the next write, by the stamp each derives", async () => {
     const { driver, alice } = await open()
     const w = writer("dev.old")
-    // Folded by seq, as the projection was before 0025: an edit from a clock
-    // that ran behind still landed. By stamp it would not have. The rows are
-    // the old log's, mirrored per key by 0028 (`event_seq`).
+    // Two rows from before stamps, written into the log around the Worker
+    // (a hand-run statement, the Worker before the cache in the deploy
+    // window). The old projection folded by seq, so the edit from a clock
+    // that ran behind landed; the cache is the fold by stamp, where it
+    // does not. On production of 2026-10-28 the two agreed on every
+    // register (docs/events-log-cache.md).
     const legacy = [
       { ...w.block("a", "text", "A"), at: 2_000, seq: 1 },
       { ...w.edit("a", { text: "by the old rule" }), at: 1_000, seq: 2 },
@@ -1167,34 +1196,35 @@ describe("by stamp", () => {
         ],
       )
     }
-    await driver.exec(
-      "INSERT INTO nodes (user_id, id, type, text, updated_at, notes_id, seq) " +
-        "VALUES (111, 'a', 'text', 'by the old rule', 1000, 'note', 2)",
-    )
-    expect(await verifyLog(alice)).toMatchObject({ ok: true, keyEvents: 5 })
+    // Nothing projected yet: the cache is behind the log by those rows.
+    expect(await verifyLog(alice)).toMatchObject({ ok: false, behind: 5, keyEvents: 5 })
+    expect(await nodeOf(driver, "a")).toBeUndefined()
 
-    // Each field of the row resolves by the stamp of its last event: (1000, seq 2).
+    // The next write projects them, each register at the stamp its row
+    // derives (`keyEventStamp`: the OLD log's seq for a mirrored row).
     const n = writer("dev.new")
-    await append(alice, [
-      stampedAt(n.edit("a", { type: "h1" }), 1_500),
-      stampedAt(n.edit("a", { text: "behind the row" }), 900),
-    ])
-    const [row] = await driver.exec("SELECT type, text, stamps FROM nodes WHERE user_id = 111")
-    expect(row).toMatchObject({ type: "h1", text: "by the old rule" })
-    const held = eventStamp({ at: 1_000, seq: 2 } as RuminateEvent)
-    expect(JSON.parse(String(row.stamps))).toEqual({
-      type: encodeHlc({ ms: 1_500, counter: 0, device: "dev.new" }),
-      text: held,
-      props: held,
-      notes_id: held,
-      alive: held,
-      legacy: 2,
+    await append(alice, [stampedAt(n.edit("a", { type: "h1" }), 2_500)])
+    expect(await nodeOf(driver, "a")).toMatchObject({ type: "h1", text: "A" })
+    const held = Object.fromEntries(
+      (await cacheRows(driver))
+        .filter((row) => row.entity_id === "a")
+        .map((row) => [row.key, row.hlc]),
+    )
+    expect(held).toEqual({
+      deleted: eventStamp({ at: 2_000, seq: 1 } as RuminateEvent),
+      type: encodeHlc({ ms: 2_500, counter: 0, device: "dev.new" }),
+      text: eventStamp({ at: 2_000, seq: 1 } as RuminateEvent),
+      notes_id: eventStamp({ at: 2_000, seq: 1 } as RuminateEvent),
     })
-    expect(await verifyLog(alice)).toMatchObject({ ok: true, keyEvents: 7 })
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, keyEvents: 6, behind: 0, drift: [] })
+    // An edit behind every stamp the row holds sets nothing.
+    await append(alice, [stampedAt(n.edit("a", { text: "behind the row" }), 900)])
+    expect(await nodeOf(driver, "a")).toMatchObject({ text: "A" })
+    expect(await verifyLog(alice)).toMatchObject({ ok: true })
   })
 
   it("stamps what the row door derives with the replica's clock, after what the rows held", async () => {
-    const { alice } = await open()
+    const { driver, alice } = await open()
     const w = writer("dev.fast")
     // A device whose clock runs ahead of the replica's.
     await append(alice, [stampedAt(w.block("a", "text", "A"), 9_000_000)])
@@ -1205,8 +1235,7 @@ describe("by stamp", () => {
     )
     const log = await readLog(alice)
     expect(log[4].hlc).toBe(encodeHlc({ ms: 9_000_000, counter: 1, device: "server:mcp" }))
-    const pulled = await corpusPullSince(alice, 0)
-    expect(pulled.nodes[0].text).toBe("A, by an agent")
+    expect((await nodeOf(driver, "a"))?.text).toBe("A, by an agent")
     expect(await verifyLog(alice)).toMatchObject({ ok: true })
   })
 })
@@ -1276,7 +1305,13 @@ describe("the per-key log", () => {
     for (const statement of planKeyAppend(events, ctx)) {
       expect(terms(statement.sql)).toBeLessThanOrEqual(5)
     }
-    for (const migration of [migration0028, migration0029, migration0030, migration0031]) {
+    for (const migration of [
+      migration0028,
+      migration0029,
+      migration0030,
+      migration0031,
+      migration0032,
+    ]) {
       for (const statement of migration.split(";")) {
         expect(terms(statement)).toBeLessThanOrEqual(5)
       }
@@ -1357,18 +1392,9 @@ describe("the per-key log", () => {
       ...made.slice(4).map(() => made[4].id),
     ])
     expect(await propsOf(driver, "a")).toEqual({ align: "left", size: 40 })
-    expect(
-      await driver.exec("SELECT key, value FROM delta_mat_values WHERE user_id = 111 ORDER BY key"),
-    ).toEqual([
-      { key: "align", value: '"left"' },
-      { key: "size", value: "40" },
-    ])
-    expect(await verifyLog(alice)).toMatchObject({
-      ok: true,
-      keyEvents: 10,
-      rows: { nodes: 2, deltaMatValues: 2 },
-      deltaMatValues: [],
-    })
+    expect(await keyRowsOf(driver, "a")).toEqual(['align="left"', "size=40"])
+    // Ten rows of the log, ten of the cache: one per key set.
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, keyEvents: 10, rows: 10, drift: [] })
     // A re-sent push appends nothing and answers the same seqs.
     const again = await client(alice, made)
     expect(again).toEqual({ appended: 0, stale: 0, seqs: landed.seqs })
@@ -1387,13 +1413,12 @@ describe("the per-key log", () => {
     const late = await client(alice, [dev.row("block", "a", "set", "props.align", "right")])
     expect(late.stale).toBe(0)
     expect(await propsOf(driver, "a")).toEqual({ align: "right", size: 80 })
-    const verdict = await verifyLog(alice)
-    expect(verdict).toMatchObject({ ok: true, deltaMatValues: [] })
-    // The row's `props` stamp is the highest of its keys'.
-    const [row] = await driver.exec("SELECT stamps FROM nodes WHERE user_id = 111 AND id = 'a'")
-    expect(JSON.parse(String(row.stamps)).props).toBe(
-      encodeHlc({ ms: 2_001, counter: 0, device: "phone" }),
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, drift: [] })
+    // Each key holds the stamp of the event that set it.
+    const size = (await cacheRows(driver)).find(
+      (row) => row.entity_id === "a" && row.key === "props.size",
     )
+    expect(size?.hlc).toBe(encodeHlc({ ms: 2_001, counter: 0, device: "phone" }))
   })
 
   it("an unset is a tombstone of the key: an older set that arrives later loses to it", async () => {
@@ -1407,11 +1432,7 @@ describe("the per-key log", () => {
     const late = await client(alice, [phone.row("block", "a", "set", "props.size", 50)])
     expect(late.stale).toBe(1)
     expect(await propsRaw(driver, "a")).toBeNull()
-    expect(
-      await driver.exec(
-        "SELECT key, value FROM delta_mat_values WHERE user_id = 111 AND block_id = 'a'",
-      ),
-    ).toEqual([{ key: "size", value: null }])
+    expect(await keyRowsOf(driver, "a")).toEqual(["size=null"])
     expect(await verifyLog(alice)).toMatchObject({ ok: true })
   })
 
@@ -1474,72 +1495,85 @@ describe("the per-key log", () => {
     expect(await verifyLog(alice)).toMatchObject({ ok: true })
   })
 
-  it("seeds a tenant's per-key stamps once from the fold, where the migration left one stamp per block", async () => {
+  it("migration 0032's backfill is the fold by stamp: the same cache the Worker keeps", async () => {
     const { driver, alice } = await open()
-    const w = writer()
-    // A tenant as the cut-over finds it when it wrote nothing since 0028: its
-    // history mirrored in the per-key log, a row projected by the old rule
-    // with no stamps, and its keys backfilled by 0029 at the row's stamp.
-    const old = [
-      w.block("note", "note", "N", null),
-      w.block("a", "image", "A"),
-      w.edit("a", { props: '{"size":40}' }),
-      w.edit("a", { props: '{"size":40,"align":"left"}' }),
-    ]
-    const placed = old.map((event, i) => ({ ...event, seq: i + 1 }))
-    for (const [i, row] of expandLog(placed).entries()) {
-      await driver.exec(
-        "INSERT INTO events_log (user_id, seq, id, entity, entity_id, action, key, value, batch, " +
-          "origin, device, actor, at, received_at, append, event_id, event_seq) " +
-          "VALUES (111, ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'b', 'replica', ?8, 111, ?9, ?9, 'old', ?10, ?11)",
-        [
-          i + 1,
-          row.id,
-          row.entity,
-          row.entity_id,
-          row.action,
-          row.key,
-          JSON.stringify(row.value ?? null),
-          row.device,
-          row.at,
-          row.event ?? null,
-          row.event_seq ?? null,
+    // Every door and every shape: rows (derived stamps), old-shaped events
+    // with and without a stamp, key events; sets, unsets, a delete with a
+    // value and one without, a restore, a link unlinked and re-linked.
+    await corpusPut(
+      alice,
+      {
+        nodes: [
+          node("note", "note", "N", 100, { notes_id: undefined }),
+          node("a", "image", "A", 100, { props: '{"size":40,"align":"left"}' }),
+          node("b", "text", "B", 100),
         ],
-      )
-    }
-    const at = placed[3].at
-    await driver.exec(
-      "INSERT INTO nodes (user_id, id, type, text, updated_at, notes_id, seq) " +
-        "VALUES (111, 'note', 'note', 'N', ?1, NULL, 1), (111, 'a', 'image', 'A', ?2, 'note', 4)",
-      [placed[0].at, at],
+        links: [child("note", "a", "a0", 100), child("note", "b", "a1", 100)],
+      },
+      1_000,
     )
-    const rowStamp = eventStamp({ at, seq: 4 } as RuminateEvent)
-    await driver.exec(
-      "INSERT INTO delta_mat_values (user_id, block_id, key, value, hlc, seq, updated_at) " +
-        "VALUES (111, 'a', 'size', '40', ?1, 4, ?2), (111, 'a', 'align', '\"left\"', ?1, 4, ?2)",
-      [rowStamp, at],
-    )
-    expect(await verifyLog(alice)).toMatchObject({ ok: true, keyEvents: 10, deltaMatValues: [] })
-    expect(
-      await driver.exec(
-        "SELECT value FROM meta WHERE user_id = 111 AND key = 'delta_mat_values_seeded'",
-      ),
-    ).toHaveLength(1)
-    // A later key event projects from the keys, and the row's other keys
-    // keep the stamp the row derives.
-    const dev = keyWriter("dev.a")
-    dev.at(9_000)
-    await client(alice, [dev.row("block", "a", "unset", "props.size", null)])
-    expect(await propsOf(driver, "a")).toEqual({ align: "left" })
-    expect(
-      await driver.exec(
-        "SELECT key, value, hlc FROM delta_mat_values WHERE user_id = 111 ORDER BY key",
-      ),
-    ).toEqual([
-      { key: "align", value: '"left"', hlc: rowStamp },
-      { key: "size", value: null, hlc: encodeHlc({ ms: 9_001, counter: 0, device: "dev.a" }) },
+    const w = writer("dev.old")
+    await append(alice, [
+      stampedAt(w.edit("a", { props: '{"size":50}' }), 2_000),
+      w.remove("b"),
+      w.unlink("note", "b"),
     ])
-    expect(await verifyLog(alice)).toMatchObject({ ok: true, deltaMatValues: [] })
+    await append(alice, [stampedAt(w.link("note", "b", "a2"), 3_000)])
+    const dev = keyWriter("dev.key")
+    dev.at(4_000)
+    await client(alice, [
+      dev.row("block", "a", "unset", "props.size", null),
+      dev.row("block", "a", "set", "text", "A!"),
+      dev.row("block", "b", "restore", "", null),
+      dev.row("block", "b", "delete", "", 4_500),
+    ])
+    const kept = await cacheRows(driver)
+    expect(kept.length).toBeGreaterThan(20)
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, drift: [] })
+
+    // The cache gone, the backfill statement of 0032 run again by hand:
+    // the rows come back as they were, register for register.
+    await driver.exec("DELETE FROM events_log_cache WHERE user_id = 111")
+    const backfill = migration0032.slice(migration0032.indexOf("INSERT INTO events_log_cache"))
+    await driver.execScript(backfill)
+    expect(await cacheRows(driver)).toEqual(kept)
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, drift: [], behind: 0 })
+    // …and it is the TypeScript fold, row for row.
+    const fold = foldEventsToCache(await readLog(alice))
+    for (const row of kept) {
+      const want = fold.get(cacheRowKey(row.entity, row.entity_id, row.key))
+      expect(want, `${row.entity} ${row.entity_id} ${row.key}`).toMatchObject({
+        value: row.value,
+        hlc: row.hlc,
+        seq: row.seq,
+        updated_at: row.updated_at,
+      })
+    }
+    expect(fold.size).toBe(kept.length)
+  })
+
+  it("every write carries the watermark, and projects what was appended around the Worker", async () => {
+    const { driver, alice } = await open()
+    const dev = keyWriter("dev.a")
+    await client(alice, [...dev.block("note", {}), ...dev.block("a", { size: 40 })])
+    const watermark = async () =>
+      (await driver.exec("SELECT value FROM meta WHERE user_id = 111 AND key = 'cache_seq'"))[0]
+        ?.value
+    expect(await watermark()).toBe("9")
+    // A row written into the log around the Worker: a hand-run statement.
+    await driver.exec(
+      "INSERT INTO events_log (user_id, seq, id, entity, entity_id, action, key, value, batch, " +
+        "origin, device, actor, at, received_at, append, hlc) " +
+        "VALUES (111, 10, 'by_hand', 'block', 'a', 'set', 'text', '\"by hand\"', 'b', 'system', " +
+        "'console', 111, 9000, 9000, 'hand', '000000000009000-0000-console')",
+    )
+    expect(await verifyLog(alice)).toMatchObject({ ok: false, behind: 1 })
+    expect(await nodeOf(driver, "a")).toMatchObject({ text: "a" })
+    dev.at(9_500)
+    await client(alice, [dev.row("block", "a", "set", "props.align", "left")])
+    expect(await nodeOf(driver, "a")).toMatchObject({ text: "by hand", seq: 11 })
+    expect(await watermark()).toBe("11")
+    expect(await verifyLog(alice)).toMatchObject({ ok: true, behind: 0, drift: [] })
   })
 
   it("cuts an append into runs that fit without parting a create from its keys", async () => {
@@ -1560,11 +1594,9 @@ describe("the per-key log", () => {
     const ctx = { appendId: "x", actor: 111, origin: "replica" as const, client: null, now: 1 }
     // A limit so small every edit is its own run: the hardest case for order.
     const statements = planKeyAppend(named, ctx, 1)
-    expect(statements).toHaveLength(6 * 3)
+    expect(statements).toHaveLength(2 * 3 + 1)
     await alice.includingDeleted().batch(statements)
-    expect(await driver.exec("SELECT sort_key FROM link WHERE user_id = 111")).toEqual([
-      { sort_key: "a0" },
-    ])
+    expect(await linkOf(driver, "note", "a")).toMatchObject({ sort_key: "a0" })
     expect((await readLog(alice)).map((row) => row.seq)).toEqual(events.map((_, i) => i + 1))
     expect(await verifyLog(alice)).toMatchObject({ ok: true, keyEvents: 14 })
   })
@@ -1594,11 +1626,11 @@ describe("the per-key log", () => {
 })
 
 // -----------------------------------------------------------------------------
-// Nothing reads `nodes.props` (migrations/0029)
+// Nothing reads the old tables (migrations/0032)
 // -----------------------------------------------------------------------------
 
-describe("the cut-over", () => {
-  it("no statement in the Worker or the browser store reads the props column of nodes", () => {
+describe("the cache", () => {
+  it("no statement in the Worker or the browser store reads nodes, link or delta_mat_values", () => {
     const proc = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } })
       .process
     const { readdirSync, readFileSync } = proc?.getBuiltinModule?.("node:fs") as {
@@ -1624,19 +1656,12 @@ describe("the cut-over", () => {
     walk("src/data")
     const offenders: string[] = []
     for (const path of files) {
-      // The code, not its comments: a comment names the column in prose.
+      // The code, not its comments: a comment names a table in prose.
       const text = readFileSync(path, "utf8")
         .replace(/\/\*[\s\S]*?\*\//g, "")
         .replace(/^\s*\/\/.*$/gm, "")
-      // Every string literal: a column named as `<alias>.props`, or `props`
-      // bare in a column list, is a read of the column — unless it is the
-      // mirror's write (an insert or update of `nodes`). `AS props` (the
-      // derived column), `'props'` (a stamps key) and `props.` (a key
-      // register) are not.
       for (const literal of text.match(/`(?:[^`\\]|\\.)*`|"(?:[^"\\]|\\.)*"/g) ?? []) {
-        if (/INSERT INTO nodes \(|UPDATE nodes SET|props = CASE WHEN|excluded\.props/.test(literal))
-          continue
-        if (/\b[a-z_]+\.props\b/.test(literal) || /[(,]\s*props\s*[,)]/.test(literal)) {
+        if (/\b(?:FROM|JOIN|INTO|UPDATE)\s+(?:nodes|link|delta_mat_values)\b/.test(literal)) {
           offenders.push(`${path}: ${literal.slice(0, 80)}`)
         }
       }

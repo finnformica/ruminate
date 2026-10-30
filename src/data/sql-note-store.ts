@@ -1,101 +1,70 @@
 import migration0001 from "../../migrations/0001_init.sql?raw"
 import migration0002 from "../../migrations/0002_nodes.sql?raw"
+import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import {
-  toLinkRow,
-  toNodeRow,
-  type LinkRow,
-  type NodeRow,
-} from "../../worker/handlers/replica-payload"
+  cacheWinners,
+  foldCacheRows,
+  GROUPED_COLUMNS,
+  LIVE_FIELDS,
+  rowsOfGrouped,
+  type CacheEntity,
+  type CacheRow,
+} from "./cache-rows"
 import { ensureCorpusSchema } from "./corpus-schema"
-import { eventStamp, type EntityKeys, type RuminateEvent, type StampedState } from "./events"
+import type { EntityKeys } from "./events"
+import { CHILD_KIND, buildGraphSnapshot } from "./graph"
 import {
-  CACHE_TABLES,
-  cacheRowStatements,
-  isCachedEntity,
-  type CachedEntity,
-  derivedStamps,
-  entityIdOfRow,
-  entityOfRow,
-  fillStampsStatements,
-  keyValues,
-} from "./fold-cache"
-import {
-  assembleStamped,
   coalesceTypingKeys,
-  foldKeysByStamp,
   parseStoredKeyEvent,
-  propsRegister,
-  type DeltaMatValueRow,
   type KeyEvent,
   type LoggedKeyEvent,
 } from "./key-events"
-import { CHILD_KIND, buildGraphSnapshot, parseProps } from "./graph"
-import { nodePropsSql } from "./node-props-sql"
 import type { NoteStore } from "./note-store"
 import type { SqlDriver, SqlStatement, SqlValue } from "./sql-driver"
-
-/** The `meta` flag of the one-time stamp fill (`fillStampsStatements`). */
-export const CACHE_STAMPS_KEY = "cache_stamps"
+import { createLazyReads } from "./sql-lazy-reads"
 
 /**
- * The SQL implementation of `NoteStore` — the store the app runs on, over the
- * schema v3 graph (docs/graph-schema-v2.md): `nodes` + `link` + `meta`, and
- * since v9 the device's own `events` (docs/event-sourcing.md).
+ * The SQL implementation of `NoteStore` — the store the app runs on: the
+ * device's log (`events_log`, docs/event-sourcing.md) and the cache of its
+ * fold (`events_log_cache`, docs/events-log-cache.md), the same two tables
+ * the replica holds, without the tenant column.
  *
- * Backed by any `SqlDriver` (sqlite-wasm/OPFS in the browser, `node:sqlite` in
- * tests) and the exact migration files that initialize the D1 replica — in the
- * **single-tenant** shape (`corpus-schema.ts`): one user per browser profile,
- * so no `user_id` column, but the same `deleted_at` soft deletes the replica
- * has.
+ * Backed by any `SqlDriver` (sqlite-wasm/OPFS in the browser, `node:sqlite`
+ * in tests) and the exact migration files that initialize the D1 replica —
+ * in the **single-tenant** shape (`corpus-schema.ts`): one user per browser
+ * profile, so no `user_id` column.
  *
- * **The log is the truth; the rows are a cache of its fold**
- * (docs/event-only-sync.md, "The cache"). A write arrives as the per-key
- * events the editor's ops amount to (`opsToKeyEvents`), and a pull as the
- * per-key events of the replica's log. Each lands in one transaction:
- * appended to `events_log`, and applied to the cache rows of the entities
- * it names, register by register by stamp (`foldKeysByStamp`,
- * `fold-cache.ts`), a block's keys to `delta_mat_values` beside its row. Each
- * row keeps the stamp of each register (`stamps`), so it is the fold of its
+ * **The log is the truth; the cache is its fold, key by key.** A write
+ * arrives as the per-key events the editor's ops amount to
+ * (`opsToKeyEvents`), and a pull as the per-key events of the replica's
+ * log. Each lands in one transaction: appended to `events_log`, and
+ * upserted into the cache row of each register it sets, under a higher
+ * stamp only (`WHERE excluded.hlc > hlc`). There is no read before the
+ * write and nothing is folded again: the cache is the fold of its
  * entity's events, in any order, and an event applied twice changes
- * nothing. No other row is read, and nothing is folded again: a read is an
- * index lookup. The old `events` table stays, unread (schema v15). A block's
- * props are its `delta_mat_values` rows: every read of a block derives the
- * column from them (`NODE_PROPS`), as the replica does, and the `props`
- * column is written beside them as a mirror.
+ * nothing. A read groups an entity's rows (`GROUPED_COLUMNS`,
+ * `rowsOfGrouped`): the whole live graph in one statement at boot, the
+ * touched entities after a batch.
  *
- * **Soft deletes.** Nothing here hard-deletes a corpus row. A delete stamps
- * `deleted_at` (and bumps `updated_at`, so the tombstone replicates like any
- * edit); every row a single write retires shares that write's one timestamp,
- * so a future restore is "revive the rows stamped at T". Reads discard
- * tombstones at read time — `loadMemGraph` loads only live rows and
- * `buildGraphSnapshot` drops links whose endpoints are gone — so deletes never
- * cascade at write time and a link to a deleted node survives as the position
- * a restore would put it back into.
- *
- * **The stamp fill.** Rows from before the cache have no stamps. The first
- * open of this build gives each the stamps its last event derives
- * (`derivedStamps`), once, under the `cache_stamps` flag in `meta`.
+ * **Soft deletes.** Nothing here hard-deletes an entity. A delete sets its
+ * `deleted` row to the tombstone's clock; reads leave a tombstoned entity
+ * out, and a link with a tombstoned end (`buildGraphSnapshot`), so deletes
+ * never cascade at write time and a link to a deleted node survives as the
+ * position a restore would put it back into.
  */
 
 /**
  * Open a `NoteStore` on `driver`, applying the migrations when the database is
- * empty. A v1 database is migrated in place by `0002` (which drops the v1
- * tables — contents re-pull from the replica), a v2 one gains its soft-delete
- * columns, and anything else unrecognized is reset. The ladder itself lives in
- * `corpus-schema.ts`, shared with the D1 corpus.
+ * empty. The ladder itself lives in `corpus-schema.ts`, shared with the D1
+ * corpus; its v18 step is this store's shape.
  */
-export async function openSqlNoteStore(
-  driver: SqlDriver,
-  options: { now?: () => number } = {},
-): Promise<NoteStore> {
+export async function openSqlNoteStore(driver: SqlDriver): Promise<NoteStore> {
   await ensureCorpusSchema(driver, { init: migration0001, nodes: migration0002 }, "single")
-  const now = options.now ?? Date.now
-  await fillStampsOnce(driver, now())
 
   return {
     getGraph: async () => {
-      const mem = await loadMemGraph(driver)
-      return buildGraphSnapshot(mem.nodes, mem.links)
+      const { nodes, links } = rowsOfGrouped(await driver.exec(LIVE_GRAPH), { live: true })
+      return buildGraphSnapshot(nodes, links)
     },
 
     applyEvents: async (events, options = {}) => {
@@ -126,7 +95,7 @@ export async function openSqlNoteStore(
       // The cache takes what is appended. An event a run coalesced away was
       // applied when it was appended, and the one that replaced it has the
       // higher stamp, so the row is the fold of what the log keeps.
-      statements.push(...(await cacheStatements(driver, appended)))
+      statements.push(...upsertStatements(cacheWinners(appended)))
       if (statements.length > 0) await driver.batch(statements)
     },
 
@@ -135,32 +104,21 @@ export async function openSqlNoteStore(
     markEventsPushed: async (seqs) => {
       if (seqs.length === 0) return
       const statements: SqlStatement[] = []
-      // A placed event moves to the end of the log's append order.
       for (const [id, seq] of seqs) {
+        // A placed event moves to the end of the log's append order.
         statements.push({
           sql: `UPDATE events_log SET seq = ?, position = ${NEXT_POSITION} WHERE id = ?`,
           params: [seq, id],
         })
-      }
-      // A row's `seq` is its last event's — the cursors' order: stamp the
-      // rows these events changed, and the keys of the blocks, never
-      // backwards.
-      for (const [id, seq] of seqs) {
-        for (const table of ["nodes", "link"] as const) {
-          statements.push({
-            sql:
-              `UPDATE ${table} SET seq = ?1 WHERE (seq IS NULL OR seq < ?1) AND ` +
-              (table === "link"
-                ? "source_id || '|' || destination_id || '|' || kind = "
-                : "id = ") +
-              `(SELECT entity_id FROM events_log WHERE id = ?2 AND entity = '${ENTITY_OF[table]}')`,
-            params: [seq, id],
-          })
-        }
+        // The row the event set — still at its stamp — takes its place in
+        // the log, never backwards.
         statements.push({
           sql:
-            "UPDATE delta_mat_values SET seq = ?1 WHERE (seq IS NULL OR seq < ?1) AND block_id = " +
-            "(SELECT entity_id FROM events_log WHERE id = ?2 AND entity = 'block')",
+            "UPDATE events_log_cache SET seq = ?1 WHERE (seq IS NULL OR seq < ?1) " +
+            "AND (entity, entity_id, key, hlc) = (SELECT entity, entity_id, " +
+            "CASE WHEN action IN ('set', 'unset') THEN key ELSE 'deleted' END, hlc " +
+            "FROM events_log WHERE id = ?2) " +
+            "/* includes-deleted: a placed tombstone takes its seq too */",
           params: [seq, id],
         })
       }
@@ -171,7 +129,7 @@ export async function openSqlNoteStore(
       if (events.length === 0) return
       await driver.batch([
         ...events.map(insertPulledEventStatement),
-        ...(await cacheStatements(driver, events)),
+        ...upsertStatements(cacheWinners(events)),
       ])
     },
 
@@ -179,95 +137,65 @@ export async function openSqlNoteStore(
 
     foldOfLog: (keys) => loadFoldOfLog(driver, keys),
 
-    getRowsOf: (keys) => loadRowsOf(driver, keys),
+    cacheRowsOf: (keys) => loadCacheRows(driver, keys),
 
-    getDeltaMatValuesOf: (ids) => loadDeltaMatValuesOf(driver, ids),
+    liveEntitiesOf: (keys) => loadLiveEntities(driver, keys),
 
-    childLinksOf: (ids) =>
-      readChunked(driver, ids, LIVE_LINKS, "source_id", toLinkRow, ORDER_LINKS),
+    getAllRows: async () => rowsOfGrouped(await driver.exec(ALL_ENTITIES)),
 
-    parentLinksOf: (ids) =>
-      readChunked(driver, ids, LIVE_LINKS, "destination_id", toLinkRow, ORDER_LINKS),
+    importCacheRows: async (rows) => {
+      if (rows.length === 0) return
+      await driver.batch(upsertStatements(rows))
+    },
 
-    nodesOf: (ids) => readChunked(driver, ids, LIVE_NODES, "id", toNodeRow),
-
-    getAllRows: () => loadAllRows(driver),
-
-    applyPull: async (plan, values = []) => {
-      const statements: SqlStatement[] = []
-      for (const [source, destination, kind] of plan.deleteLinks) {
-        // tenant-exempt: a row absent from the replica's key lists no longer
-        // exists there at all (purged, or never replicated) — there is no
-        // tombstone to mirror, so the local copy goes too.
-        statements.push({
-          sql: "DELETE FROM link WHERE source_id = ? AND destination_id = ? AND kind = ?",
-          params: [source, destination, kind],
-        })
-      }
-      for (const id of plan.deleteNodes) {
-        // tenant-exempt: as above — mirroring a purge, not performing a delete.
-        statements.push({
-          sql: "DELETE FROM link WHERE source_id = ? OR destination_id = ?",
-          params: [id, id],
-        })
-        // tenant-exempt: as above.
-        statements.push({ sql: "DELETE FROM nodes WHERE id = ?", params: [id] })
-      }
-      // Rows from outside the log (a repair from the screen) take the stamps
-      // their last event derives, as the stamp fill gives them — except a
-      // key the replica's own key rows name, which takes the replica's.
-      const valuesOf = new Map<string, DeltaMatValueRow[]>()
-      for (const row of values) {
-        const held = valuesOf.get(row.block_id)
-        if (held) held.push(row)
-        else valuesOf.set(row.block_id, [row])
-      }
-      for (const node of plan.nodes) {
-        statements.push(...upsertNodeStatements(node, valuesOf.get(node.id) ?? []))
-        valuesOf.delete(node.id)
-      }
-      for (const link of plan.links) statements.push(upsertLinkStatement(link))
-      // A key row of a block the plan does not carry: the row alone.
-      for (const rows of valuesOf.values()) {
-        for (const row of rows) statements.push(upsertDeltaMatValueStatement(row))
-      }
+    applyUnpushedToCache: async () => {
+      const statements = upsertStatements(cacheWinners(await loadUnpushed(driver)))
       if (statements.length > 0) await driver.batch(statements)
     },
 
-    getLiveRows: (keys) => loadLiveRows(driver, keys),
+    rebuildCacheFromLog: async () => {
+      // An unpushed event reads with a provisional seq (`loadLog`); its
+      // cache row has none until the push lands.
+      const events = (await loadLog(driver)).map((event) => {
+        if (!event.pending) return event
+        const { seq: _provisional, pending: _pending, ...unpushed } = event
+        return unpushed
+      })
+      const rows = [...foldCacheRows(cacheWinners(events)).values()]
+      await driver.batch([
+        // tenant-exempt: a cache rebuild from the device's own log, not a
+        // delete of anything that happened.
+        { sql: "DELETE FROM events_log_cache" },
+        ...upsertStatements(rows),
+      ])
+    },
+
+    clearCache: async () => {
+      // tenant-exempt: the cache is re-pulled; the log stays.
+      await driver.batch([{ sql: "DELETE FROM events_log_cache" }])
+    },
 
     clear: async () => {
       await driver.batch([
-        // tenant-exempt: a cache reset discards the local database wholesale —
-        // a wipe, not a delete, and tombstones would only resurrect the rows
-        // the next pull replaces.
-        { sql: "DELETE FROM link" },
-        // tenant-exempt: as above.
-        { sql: "DELETE FROM nodes" },
-        // tenant-exempt: as above — the device's log of a corpus it no longer
-        // holds, unpushed events included (see `NoteStore.clear`).
-        { sql: "DELETE FROM events" },
-        // tenant-exempt: as above.
+        // tenant-exempt: a cache reset of the local store, which is one user
+        // per browser profile — nothing is tombstoned, so nothing replicates.
+        { sql: "DELETE FROM events_log_cache" },
+        // The device's log goes with the rows it describes: a wiped cache
+        // pulls the tenant's log again from the start, this device's own
+        // placed events among it.
         { sql: "DELETE FROM events_log" },
-        // tenant-exempt: as above.
-        { sql: "DELETE FROM delta_mat_values" },
       ])
     },
+
+    lazy: createLazyReads(driver),
 
     getMeta: async (key) => {
       const rows = await driver.exec("SELECT value FROM meta WHERE key = ?", [key])
-      return rows.length > 0 && rows[0].value != null ? String(rows[0].value) : null
+      return rows.length ? String(rows[0].value) : null
     },
 
     setMeta: async (key, value) => {
-      await driver.batch([
-        {
-          sql:
-            "INSERT INTO meta (key, value) VALUES (?, ?) " +
-            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-          params: [key, value],
-        },
-      ])
+      await driver.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", [key, value])
     },
 
     close: () => driver.close(),
@@ -275,31 +203,26 @@ export async function openSqlNoteStore(
 }
 
 // -----------------------------------------------------------------------------
-// Reads
+// Reads: an entity is the group of its rows
 // -----------------------------------------------------------------------------
 
-/** The LIVE graph — what the snapshot is built from. `seq` rides along: it is
- * what an edit of the row says it believed it was changing (`base_seq`). */
-async function loadMemGraph(driver: SqlDriver): Promise<{ nodes: NodeRow[]; links: LinkRow[] }> {
-  const [nodeRows, linkRows] = await Promise.all([driver.exec(LIVE_NODES), driver.exec(LIVE_LINKS)])
-  return { nodes: nodeRows.map(toNodeRow), links: linkRows.map(toLinkRow) }
-}
+/** The grouped read of every row of an entity with a value: an unset key
+ * has none and is left out of the group. */
+const GROUPED =
+  `SELECT ${GROUPED_COLUMNS("c")} FROM events_log_cache c WHERE c.value IS NOT NULL ` +
+  "GROUP BY c.entity, c.entity_id " +
+  "/* includes-deleted: every entity grouped; the reads below keep the live ones ($.deleted) */"
 
-/** A block's `props` as its `delta_mat_values` rows say (`nodePropsSql`):
- * the one spelling every read of a block here uses. */
-const NODE_PROPS = nodePropsSql("nodes.id", "single")
+/** The LIVE graph — what the snapshot is built from: every created entity
+ * whose `deleted` row says `null`. A link with a tombstoned end is read and
+ * dropped by `buildGraphSnapshot`, which does not see the tombstone's row:
+ * only the live ones are read, so a link whose end is missing is dropped. */
+const LIVE_GRAPH = `SELECT * FROM (${GROUPED}) WHERE ${LIVE_FIELDS("fields")}`
 
-const LIVE_NODES =
-  `SELECT id, type, text, ${NODE_PROPS} AS props, updated_at, notes_id, seq FROM nodes ` +
-  "WHERE deleted_at IS NULL"
-// A live link with a tombstoned end is not read: `buildGraphSnapshot` drops
-// it when it sees the tombstone, and only the live nodes are read here. The
-// fold reads out the same graph (`toGraphSnapshot`, `readOutEntities`).
-const LIVE_LINKS =
-  "SELECT source_id, destination_id, kind, sort_key, updated_at, seq FROM link " +
-  "WHERE deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM nodes " +
-  "WHERE nodes.id IN (link.source_id, link.destination_id) " +
-  "AND nodes.deleted_at IS NOT NULL)"
+/** Every created entity, tombstones included. */
+const ALL_ENTITIES =
+  `SELECT * FROM (${GROUPED}) WHERE json_type(fields, '$.deleted') IS NOT NULL ` +
+  "/* includes-deleted: Recently deleted and the full push read tombstones too */"
 
 /** Keys in one statement: well under SQLite's bound on parameters. */
 const KEYS_PER_READ = 300
@@ -309,55 +232,101 @@ const inChunks = <T>(items: readonly T[]) =>
     items.slice(i * KEYS_PER_READ, (i + 1) * KEYS_PER_READ),
   )
 
-/** The live rows of the named entities, by the rules `loadMemGraph` reads
- * the whole tables with (`NoteStore.getLiveRows`). */
-async function loadLiveRows(
+/** The live entities of one kind among `ids`, grouped. */
+async function liveByIds(
+  driver: SqlDriver,
+  entity: CacheEntity,
+  ids: readonly string[],
+): Promise<Record<string, SqlValue>[]> {
+  const out: Record<string, SqlValue>[] = []
+  for (const chunk of inChunks([...new Set(ids)])) {
+    out.push(
+      ...(await driver.exec(
+        `SELECT * FROM (SELECT ${GROUPED_COLUMNS("c")} FROM json_each(?) AS j ` +
+          "CROSS JOIN events_log_cache c ON c.entity = ? AND c.entity_id = j.value " +
+          `WHERE c.value IS NOT NULL GROUP BY c.entity, c.entity_id) WHERE ${LIVE_FIELDS("fields")} ` +
+          "/* includes-deleted: grouped, then only the live ones kept ($.deleted) */",
+        [JSON.stringify(chunk), entity],
+      )),
+    )
+  }
+  return out
+}
+
+/** The ids of the live links adjacent to these blocks, by the `source_id`
+ * and `destination_id` indexes. */
+async function adjacentLinkIds(driver: SqlDriver, blockIds: readonly string[]): Promise<string[]> {
+  const out = new Set<string>()
+  for (const chunk of inChunks([...new Set(blockIds)])) {
+    for (const key of ["source_id", "destination_id"]) {
+      const rows = await driver.exec(
+        "SELECT s.entity_id FROM json_each(?) AS j " +
+          `CROSS JOIN events_log_cache s ON s.key = '${key}' AND s.value = json_quote(j.value) ` +
+          "CROSS JOIN events_log_cache d ON d.entity = 'link' AND d.entity_id = s.entity_id " +
+          "AND d.key = 'deleted' AND d.value = 'null'",
+        [JSON.stringify(chunk)],
+      )
+      for (const row of rows) out.add(String(row.entity_id))
+    }
+  }
+  return [...out]
+}
+
+/** What a patch of the graph needs (`NoteStore.liveEntitiesOf`). */
+async function loadLiveEntities(
   driver: SqlDriver,
   keys: EntityKeys,
 ): Promise<{ nodes: NodeRow[]; links: LinkRow[] }> {
-  const marks = (n: number) => Array(n).fill("?").join(", ")
-  const nodes: NodeRow[] = []
-  for (const ids of inChunks([...keys.blocks])) {
-    const rows = await driver.exec(`${LIVE_NODES} AND id IN (${marks(ids.length)})`, ids)
-    nodes.push(...rows.map(toNodeRow))
-  }
-  const links: LinkRow[] = []
-  const linkKeys = [...keys.links].map((id) => id.split("|"))
-  for (const chunk of inChunks(linkKeys)) {
-    const rows = await driver.exec(
-      `${LIVE_LINKS} AND (${chunk
-        .map(() => "(source_id = ? AND destination_id = ? AND kind = ?)")
-        .join(" OR ")})`,
-      chunk.flat(),
-    )
-    // The graph holds child links only (`buildGraphSnapshot`).
-    links.push(...rows.map(toLinkRow).filter((link) => link.kind === CHILD_KIND))
-  }
-  return { nodes, links }
+  const blockIds = [...keys.blocks]
+  const linkIds = [...new Set([...keys.links, ...(await adjacentLinkIds(driver, blockIds))])]
+  const nodes = rowsOfGrouped(await liveByIds(driver, "block", blockIds), { live: true }).nodes
+  const links = rowsOfGrouped(await liveByIds(driver, "link", linkIds), { live: true }).links
+  return { nodes, links: links.filter((link) => link.kind === CHILD_KIND) }
 }
 
-/** Every row, tombstones included — what replication has to carry. */
-async function loadAllRows(driver: SqlDriver): Promise<{ nodes: NodeRow[]; links: LinkRow[] }> {
-  const [nodeRows, linkRows] = await Promise.all([
-    driver.exec(
-      `SELECT id, type, text, ${NODE_PROPS} AS props, updated_at, deleted_at, notes_id, seq ` +
-        `FROM nodes WHERE ${CREATED} ` +
-        "/* includes-deleted: the full-push source; a delete only reaches other " +
-        "devices if its tombstone travels */",
-    ),
-    driver.exec(
-      "SELECT source_id, destination_id, kind, sort_key, updated_at, deleted_at, seq FROM link " +
-        `WHERE ${CREATED} /* includes-deleted: as above */`,
-    ),
-  ])
-  return { nodes: nodeRows.map(toNodeRow), links: linkRows.map(toLinkRow) }
+const toCacheRow = (raw: Record<string, SqlValue>): CacheRow => ({
+  entity: String(raw.entity) as CacheEntity,
+  entity_id: String(raw.entity_id),
+  key: String(raw.key),
+  value: raw.value === null || raw.value === undefined ? null : String(raw.value),
+  hlc: String(raw.hlc),
+  seq: raw.seq === null || raw.seq === undefined ? null : Number(raw.seq),
+  updated_at: Number(raw.updated_at),
+})
+
+/** The cache rows of the named entities, every key (`NoteStore.cacheRowsOf`). */
+async function loadCacheRows(driver: SqlDriver, keys: EntityKeys): Promise<CacheRow[]> {
+  const out: CacheRow[] = []
+  const named: [CacheEntity, ReadonlySet<string>][] = [
+    ["block", keys.blocks],
+    ["link", keys.links],
+  ]
+  for (const [entity, ids] of named) {
+    for (const chunk of inChunks([...ids])) {
+      const rows = await driver.exec(
+        "SELECT c.entity, c.entity_id, c.key, c.value, c.hlc, c.seq, c.updated_at " +
+          "FROM json_each(?) AS j CROSS JOIN events_log_cache c ON c.entity = ? " +
+          "AND c.entity_id = j.value /* includes-deleted: the fold holds tombstones */",
+        [JSON.stringify(chunk), entity],
+      )
+      out.push(...rows.map(toCacheRow))
+    }
+  }
+  return out
 }
 
 // -----------------------------------------------------------------------------
 // The device's log
 // -----------------------------------------------------------------------------
 
-const ENTITY_OF = { nodes: "block", link: "link" } as const
+const EVENT_COLUMNS =
+  "id, seq, entity, entity_id, action, key, value, v, batch, device, cause, base_seq, ref_seq, " +
+  "at, tz, hlc, event_id, event_seq"
+
+/** A stored row as a key event, placed when it is; null (reported) for a
+ * row that is not one. */
+const toEvent = (row: Record<string, SqlValue>): LoggedKeyEvent | null =>
+  parseStoredKeyEvent(row as Record<string, unknown>)
 
 /** The queue: events the replica has not acknowledged, in the order made. */
 async function loadUnpushed(driver: SqlDriver): Promise<KeyEvent[]> {
@@ -396,230 +365,81 @@ async function loadLog(driver: SqlDriver): Promise<LoggedKeyEvent[]> {
   return out
 }
 
-// -----------------------------------------------------------------------------
-// The cache
-// -----------------------------------------------------------------------------
-
-/** A row no create has reached is held, not read (`fold-cache.ts`). */
-const CREATED = "(stamps IS NULL OR json_extract(stamps, '$.alive') IS NOT NULL)"
-
-const EVENT_COLUMNS =
-  "id, seq, entity, entity_id, action, key, value, v, batch, device, cause, base_seq, ref_seq, " +
-  "at, tz, hlc, event_id, event_seq"
-
-/** A stored row as a key event, placed when it is; null (reported) for a
- * row that is not one. */
-const toEvent = (row: Record<string, SqlValue>): LoggedKeyEvent | null =>
-  parseStoredKeyEvent(row as Record<string, unknown>)
-
-/** The cached entities a batch of events names, by kind. A view event is
- * history only (docs/removing-views.md): no cache row is kept for it. */
-function keysOfEvents(events: readonly KeyEvent[]) {
-  const keys = { block: new Set<string>(), link: new Set<string>() }
-  for (const event of events) {
-    if (isCachedEntity(event.entity)) keys[event.entity].add(event.entity_id)
-  }
-  return keys
-}
-
-/** `(k1 = ? AND k2 = ?) OR …` for a chunk of entity ids, with its params. */
-/** Every column of an entity's cache row, a block's `props` derived from
- * its keys (`NODE_PROPS`) rather than read from the mirror column. */
-const columnsOf = (entity: CachedEntity) =>
-  entity === "block"
-    ? `id, type, text, ${NODE_PROPS} AS props, updated_at, deleted_at, notes_id, seq, stamps`
-    : "*"
-
-function whereKeys(
-  entity: CachedEntity,
-  ids: readonly string[],
-): { sql: string; params: string[] } {
-  const { key } = CACHE_TABLES[entity]
-  if (key.length === 1) {
-    return { sql: `${key[0]} IN (${ids.map(() => "?").join(", ")})`, params: [...ids] }
-  }
-  return {
-    sql: ids.map(() => `(${key.map((column) => `${column} = ?`).join(" AND ")})`).join(" OR "),
-    params: ids.flatMap((id) => keyValues(entity, id)),
-  }
-}
-
-/** The cache rows of the named entities, as the fold's entities. */
-async function loadCacheState(
-  driver: SqlDriver,
-  keys: Record<CachedEntity, ReadonlySet<string>>,
-): Promise<StampedState> {
-  const state: StampedState = { blocks: new Map(), links: new Map(), views: new Map() }
-  const tables = { block: state.blocks, link: state.links } as unknown as Record<
-    CachedEntity,
-    Map<string, ReturnType<typeof entityOfRow>>
-  >
-  for (const entity of Object.keys(keys) as CachedEntity[]) {
-    for (const ids of inChunks([...keys[entity]])) {
-      const where = whereKeys(entity, ids)
-      const rows = await driver.exec(
-        `SELECT ${columnsOf(entity)} FROM ${CACHE_TABLES[entity].table} WHERE ${where.sql} ` +
-          "/* includes-deleted: the fold holds tombstones */",
-        where.params,
-      )
-      for (const row of rows)
-        tables[entity].set(entityIdOfRow(entity, row), entityOfRow(entity, row))
-    }
-  }
-  return state
-}
-
-/**
- * The statements that bring the cache rows of the entities `events` names
- * up to them: each row read, the events applied by stamp (`foldByStamp`),
- * and the row written back. They go in the same batch as the append, so the
- * log and the cache move together or not at all.
- */
-async function cacheStatements(
-  driver: SqlDriver,
-  events: readonly KeyEvent[],
-): Promise<SqlStatement[]> {
-  if (events.length === 0) return []
-  const keys = keysOfEvents(events)
-  const state = foldKeysByStamp(events, await loadCacheState(driver, keys))
-  const tables = { block: state.blocks, link: state.links }
-  const statements: SqlStatement[] = []
-  for (const entity of Object.keys(keys) as CachedEntity[]) {
-    const table = tables[entity] as Map<string, Parameters<typeof cacheRowStatements>[1][0][1]>
-    const entries = [...keys[entity]].flatMap((id) => {
-      const value = table.get(id)
-      return value ? [[id, value] as const] : []
-    })
-    statements.push(...cacheRowStatements(entity, entries))
-  }
-  return statements
-}
-
-/** The fold of the log (`foldKeysByStamp`): of the named entities' events,
- * by the `events_log_entity` index, or of the whole log, in the old shape
- * with each block's props assembled (`assembleStamped`). What the fold
- * check compares the cache with. */
-async function loadFoldOfLog(driver: SqlDriver, keys?: EntityKeys): Promise<StampedState> {
+/** The fold of the log by stamp (`foldEventsToCache`): of the named
+ * entities' events, read by the `events_log_entity` index, or of the whole
+ * log. What the fold check compares the cache with. An unpushed event has
+ * no `seq`, as its cache row has none. */
+async function loadFoldOfLog(driver: SqlDriver, keys?: EntityKeys): Promise<Map<string, CacheRow>> {
   const events: KeyEvent[] = []
   const take = (rows: Record<string, SqlValue>[]) => {
     for (const row of rows) {
       const event = toEvent(row)
-      if (event !== null) events.push(event)
+      if (event === null) continue
+      // An unpushed event has no seq, as its cache row has none.
+      if (row.seq === null) {
+        const { seq: _unplaced, ...unpushed } = event
+        events.push(unpushed)
+      } else events.push(event)
     }
   }
   if (!keys) {
     take(await driver.exec(`SELECT ${EVENT_COLUMNS} FROM events_log`))
-    return assembleStamped(foldKeysByStamp(events))
-  }
-  const named: [CachedEntity, ReadonlySet<string>][] = [
-    ["block", keys.blocks],
-    ["link", keys.links],
-  ]
-  for (const [entity, ids] of named) {
-    for (const chunk of inChunks([...ids])) {
-      take(
-        await driver.exec(
-          `SELECT ${EVENT_COLUMNS} FROM events_log WHERE entity = ? AND entity_id IN ` +
-            `(${chunk.map(() => "?").join(", ")})`,
-          [entity, ...chunk],
-        ),
-      )
+  } else {
+    const named: [CacheEntity, ReadonlySet<string>][] = [
+      ["block", keys.blocks],
+      ["link", keys.links],
+    ]
+    for (const [entity, ids] of named) {
+      for (const chunk of inChunks([...ids])) {
+        take(
+          await driver.exec(
+            `SELECT ${EVENT_COLUMNS} FROM events_log WHERE entity = ? AND entity_id IN ` +
+              `(${chunk.map(() => "?").join(", ")})`,
+            [entity, ...chunk],
+          ),
+        )
+      }
     }
   }
-  return assembleStamped(foldKeysByStamp(events))
+  return foldCacheRows(cacheWinners(events))
 }
 
-/** The `delta_mat_values` rows of the named blocks (`NoteStore.getDeltaMatValuesOf`). */
-async function loadDeltaMatValuesOf(
-  driver: SqlDriver,
-  ids: readonly string[],
-): Promise<DeltaMatValueRow[]> {
-  const out: DeltaMatValueRow[] = []
-  for (const chunk of inChunks([...new Set(ids)])) {
-    const rows = await driver.exec(
-      "SELECT block_id, key, value, hlc, seq, updated_at FROM delta_mat_values WHERE block_id IN " +
-        `(${chunk.map(() => "?").join(", ")})`,
-      chunk,
-    )
-    for (const row of rows) {
-      out.push({
-        block_id: String(row.block_id),
-        key: String(row.key),
-        value: row.value === null ? null : String(row.value),
-        hlc: String(row.hlc),
-        ...(row.seq === null ? {} : { seq: Number(row.seq) }),
-        updated_at: Number(row.updated_at),
-      })
-    }
-  }
-  return out
-}
+// -----------------------------------------------------------------------------
+// Writes
+// -----------------------------------------------------------------------------
 
-/** Every cache row of the named entities, tombstones too, as the replica's
- * rows look (`NoteStore.getRowsOf`). */
-async function loadRowsOf(
-  driver: SqlDriver,
-  keys: EntityKeys,
-): Promise<{ nodes: NodeRow[]; links: LinkRow[] }> {
-  const read = async <R>(
-    entity: CachedEntity,
-    ids: ReadonlySet<string>,
-    map: (row: Record<string, SqlValue>) => R,
-  ) => {
-    const out: R[] = []
-    for (const chunk of inChunks([...ids])) {
-      const where = whereKeys(entity, chunk)
-      const rows = await driver.exec(
-        `SELECT ${columnsOf(entity)} FROM ${CACHE_TABLES[entity].table} ` +
-          `WHERE ${CREATED} AND (${where.sql}) ` +
-          "/* includes-deleted: compared with the replica's rows, tombstones too */",
-        where.params,
-      )
-      out.push(...rows.map(map))
-    }
-    return out
-  }
-  return {
-    nodes: await read("block", keys.blocks, toNodeRow),
-    links: await read("link", keys.links, toLinkRow),
-  }
-}
+/** Rows per upsert: seven columns each, well under the parameter bound. */
+const ROWS_PER_WRITE = 500
 
-const ORDER_LINKS = " ORDER BY sort_key, destination_id"
-
-/** Live rows by one column, in chunks: the lazy reads of the walk. */
-async function readChunked<R>(
-  driver: SqlDriver,
-  ids: readonly string[],
-  base: string,
-  column: string,
-  map: (row: Record<string, SqlValue>) => R,
-  order = "",
-): Promise<R[]> {
-  const out: R[] = []
-  for (const chunk of inChunks([...new Set(ids)])) {
-    const kind = base === LIVE_LINKS ? ` AND kind = '${CHILD_KIND}'` : ""
-    const rows = await driver.exec(
-      `${base} AND ${column} IN (${chunk.map(() => "?").join(", ")})${kind}${order}`,
-      chunk,
-    )
-    out.push(...rows.map(map))
+/**
+ * The upsert of cache rows by stamp: each lands only above the stamp its
+ * register holds — the one rule every write to the cache follows, on the
+ * replica too (`CACHE_UPSERT`, worker/handlers/event-log.ts). One
+ * multi-row statement per `ROWS_PER_WRITE` rows.
+ */
+function upsertStatements(rows: readonly CacheRow[]): SqlStatement[] {
+  const statements: SqlStatement[] = []
+  for (let i = 0; i < rows.length; i += ROWS_PER_WRITE) {
+    const chunk = rows.slice(i, i + ROWS_PER_WRITE)
+    statements.push({
+      sql:
+        "INSERT INTO events_log_cache (entity, entity_id, key, value, hlc, seq, updated_at) " +
+        `VALUES ${chunk.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(", ")} ` +
+        "ON CONFLICT (entity, entity_id, key) DO UPDATE SET value = excluded.value, " +
+        "hlc = excluded.hlc, seq = excluded.seq, updated_at = excluded.updated_at " +
+        "WHERE excluded.hlc > events_log_cache.hlc",
+      params: chunk.flatMap((row) => [
+        row.entity,
+        row.entity_id,
+        row.key,
+        row.value,
+        row.hlc,
+        row.seq,
+        row.updated_at,
+      ]),
+    })
   }
-  return out
-}
-
-/** Fill the stamps of rows from before the cache, once (`CACHE_STAMPS_KEY`).
- * The flag is set in the same transaction as the fill. */
-async function fillStampsOnce(driver: SqlDriver, now: number): Promise<void> {
-  const [flag] = await driver.exec("SELECT value FROM meta WHERE key = ?", [CACHE_STAMPS_KEY])
-  if (flag) return
-  await driver.batch([
-    ...fillStampsStatements(),
-    {
-      sql: "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING",
-      params: [CACHE_STAMPS_KEY, String(now)],
-    },
-  ])
+  return statements
 }
 
 /**
@@ -678,105 +498,4 @@ const insertEventStatement = (event: KeyEvent): SqlStatement => ({
     "cause, base_seq, ref_seq, at, tz, hlc, event_id, event_seq, seq, position) " +
     `VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ${NEXT_POSITION})`,
   params: eventParams(event),
-})
-
-// -----------------------------------------------------------------------------
-// The pull: the replica's rows, verbatim
-// -----------------------------------------------------------------------------
-
-/** A node row as the replica's rows look, verbatim — its props in the
- * mirror column and as one key row each, at the stamp the row derives
- * (`derivedStamps`). With the replica's own key rows of the block
- * (`pulled`, its `delta_mat_values`), each key is a register of its own in
- * `stamps`: a pulled key at the replica's stamp, any other at the row's. The
- * fold reads a key's stamp from there (`entityOfRow`), so the log's replay
- * beats a pulled key only as it beats it on the replica. */
-const upsertNodeStatements = (node: NodeRow, pulled: DeltaMatValueRow[] = []): SqlStatement[] => {
-  const stamp = eventStamp({ at: node.updated_at, seq: node.seq ?? 0 } as RuminateEvent)
-  const keys = new Map<string, DeltaMatValueRow>()
-  for (const [key, value] of Object.entries(parseProps(node.props) ?? {})) {
-    if (value === null || value === undefined) continue
-    keys.set(key, {
-      block_id: node.id,
-      key,
-      value: JSON.stringify(value),
-      hlc: stamp,
-      ...(node.seq !== undefined && node.seq !== null ? { seq: node.seq } : {}),
-      updated_at: node.updated_at,
-    })
-  }
-  for (const row of pulled) keys.set(row.key, row)
-  let stamps = derivedStamps("block", node)
-  if (pulled.length > 0) {
-    const keyed = JSON.parse(stamps) as Record<string, string>
-    let top = ""
-    for (const row of keys.values()) {
-      keyed[propsRegister(row.key)] = row.hlc
-      if (row.hlc > top) top = row.hlc
-    }
-    keyed.props = top
-    stamps = JSON.stringify(keyed)
-  }
-  return [
-    {
-      sql:
-        "INSERT INTO nodes (id, type, text, props, updated_at, deleted_at, notes_id, seq, stamps) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
-        "ON CONFLICT (id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
-        "props = excluded.props, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, " +
-        // A note id is set once and never cleared by a row that carries none.
-        "notes_id = COALESCE(excluded.notes_id, nodes.notes_id), seq = excluded.seq, " +
-        "stamps = excluded.stamps",
-      params: [
-        node.id,
-        node.type,
-        node.text,
-        node.props,
-        node.updated_at,
-        node.deleted_at ?? null,
-        node.notes_id ?? null,
-        node.seq ?? null,
-        stamps,
-      ],
-    },
-    // The row's keys replace the block's: a key the row no longer names
-    // is gone from it.
-    { sql: "DELETE FROM delta_mat_values WHERE block_id = ?", params: [node.id] },
-    ...[...keys.values()].map((row): SqlStatement => ({
-      sql:
-        "INSERT INTO delta_mat_values (block_id, key, value, hlc, seq, updated_at) " +
-        "VALUES (?, ?, ?, ?, ?, ?)",
-      params: [node.id, row.key, row.value, row.hlc, row.seq ?? null, row.updated_at],
-    })),
-  ]
-}
-
-/** One of the replica's `delta_mat_values` rows, as the pull carries it:
- * the key's value and the stamp the replica resolved it by. */
-const upsertDeltaMatValueStatement = (row: DeltaMatValueRow): SqlStatement => ({
-  sql:
-    "INSERT INTO delta_mat_values (block_id, key, value, hlc, seq, updated_at) " +
-    "VALUES (?, ?, ?, ?, ?, ?) " +
-    "ON CONFLICT (block_id, key) DO UPDATE SET value = excluded.value, hlc = excluded.hlc, " +
-    "seq = excluded.seq, updated_at = excluded.updated_at",
-  params: [row.block_id, row.key, row.value, row.hlc, row.seq ?? null, row.updated_at],
-})
-
-const upsertLinkStatement = (link: LinkRow): SqlStatement => ({
-  sql:
-    "INSERT INTO link (source_id, destination_id, kind, sort_key, updated_at, deleted_at, seq, " +
-    "stamps) VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
-    "ON CONFLICT (source_id, destination_id, kind) DO UPDATE SET " +
-    "sort_key = excluded.sort_key, updated_at = excluded.updated_at, " +
-    "deleted_at = excluded.deleted_at, seq = excluded.seq, stamps = excluded.stamps",
-  params: [
-    link.source_id,
-    link.destination_id,
-    link.kind,
-    link.sort_key,
-    link.updated_at,
-    link.deleted_at ?? null,
-    link.seq ?? null,
-    derivedStamps("link", link),
-  ],
 })

@@ -56,7 +56,7 @@
 // history, the calendar and the replica's `verify` read the log that way.
 
 import type { LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
-import { CHILD_KIND, buildGraphSnapshot, type GraphSnapshot } from "./graph"
+import { buildGraphSnapshot, type GraphSnapshot } from "./graph"
 import { decodeHlc, encodeHlc } from "./hlc"
 import type { Op } from "./ops"
 
@@ -504,33 +504,6 @@ function stampedRows(state: StampedState, only?: EntityKeys) {
     if (row.seq === 0) delete row.seq
   }
   return rows
-}
-
-/**
- * The live rows of the named entities, by the rules of the whole read-out
- * (`toGraphSnapshot`): a live node; a live child link whose ends are not
- * tombstoned. The fold check reads a batch with this, without the cost of
- * the whole graph.
- */
-export function readOutEntities(
-  state: StampedState,
-  keys: EntityKeys,
-): { nodes: NodeRow[]; links: LinkRow[] } {
-  const rows = stampedRows(state, keys)
-  const tombstoned = (id: string) => {
-    const node = state.blocks.get(id)
-    return node !== undefined && node.created && !node.alive
-  }
-  return {
-    nodes: rows.nodes.filter((row) => !isTombstoned(row)),
-    links: rows.links.filter(
-      (row) =>
-        row.kind === CHILD_KIND &&
-        !isTombstoned(row) &&
-        !tombstoned(row.source_id) &&
-        !tombstoned(row.destination_id),
-    ),
-  }
 }
 
 /** The live graph the fold by stamp holds. */

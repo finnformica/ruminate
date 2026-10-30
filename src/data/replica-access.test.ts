@@ -66,7 +66,7 @@ describe("denial plumbing through the real fetch paths", () => {
   it("a refused pull sets the status; an admitted pull clears it", async () => {
     const responses = [
       jsonResponse({ error: "signup_closed" }, 403),
-      jsonResponse({ nodes: [], links: [], views: [], cursor: null }),
+      jsonResponse({ events: [], cursor: null }),
     ]
     const fetchImpl = vi.fn(async () => responses.shift() as Response)
     const source = createD1NoteSource({
@@ -74,18 +74,16 @@ describe("denial plumbing through the real fetch paths", () => {
       auth: stubAuth,
     })
 
-    await expect(source.pullFull()).rejects.toThrow("403")
+    await expect(source.pullEvents(0, 2_000)).rejects.toThrow("403")
     expect(store.get(replicaAccessDeniedAtom)).toBe("signup_closed")
 
-    await source.pullFull()
+    await source.pullEvents(0, 2_000)
     expect(store.get(replicaAccessDeniedAtom)).toBeNull()
   })
 
   it("a refused push sets the status and the queue keeps the events for retry", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ error: "blocked" }, 403))
     const handle = startReplicaSync({
-      getNoteCount: () => 0,
-      getAllRows: async () => ({ nodes: [], links: [] }),
       getUnpushedEvents: async () => [
         {
           id: "evt_1",

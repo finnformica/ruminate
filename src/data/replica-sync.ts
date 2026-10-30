@@ -1,12 +1,5 @@
 import { getDefaultStore } from "jotai"
-import {
-  REPLICA_PROTOCOL_HEADERS,
-  type LinkRow,
-  type NodeRow,
-  type ReplicaPutPayload,
-  type ReplicaPutResult,
-  type ReplicaStatusBody,
-} from "../../worker/handlers/replica-payload"
+import { REPLICA_PROTOCOL_HEADERS } from "../../worker/handlers/replica-payload"
 import { MAX_KEY_EVENTS_PER_PUT, type KeyEvent, type KeyEventsPutResult } from "./key-events"
 import { writerHeaders } from "./writer-identity"
 import type { NoteId } from "../schema"
@@ -32,18 +25,16 @@ import {
  *   across reloads, with nothing to merge back after a failure. A push sends
  *   them in the order they were made (`PUT /api/replica/events`), and the
  *   response's `seq` per event marks them pushed (`markEventsPushed`).
+ * - **Events, and nothing else** (docs/events-log-cache.md, "Sync is the log,
+ *   and nothing else"). There is no push of rows and no full push: a repair
+ *   rebuilds the device's cache from its own log, and the unpushed tail of
+ *   that log is what reaches the replica.
  * - **Debounced.** Saves notify the loop; a push is scheduled ~2s out, and
  *   everything unpushed by then goes in one request.
  * - **Flush on hide.** `visibilitychange → hidden` / `pagehide` push
  *   immediately with `fetch keepalive`, so closing or backgrounding the tab
  *   inside the debounce window doesn't strand the last save.
- * - **A full push is rows.** After a repair, or when the session's status
- *   check finds the replica drastically behind, every row the store holds goes out through the row door
- *   (`PUT /api/replica/notes`), all node rows before any link rows (links
- *   reference nodes) in chunks; the replica derives whatever differs. The
- *   cursor rides only the final chunk — it means "the replica reflects local
- *   state as of this push".
- * - **Every tab pushes its own writes.** Last-writer-wins per row at the
+ * - **Every tab pushes its own writes.** Last-writer-wins per key at the
  *   replica makes concurrent tab pushes safe.
  * - **Auth.** Same-origin fetch so the `gh_refresh` cookie rides along, plus
  *   the current GitHub access token as a Bearer header (`ensureFreshToken` /
@@ -56,22 +47,14 @@ import {
  *   nothing failed.
  * - **Cursor.** A monotonic ms-timestamp cursor is sent with each push and
  *   confirmed by the push's own response, which echoes the cursor the batch
- *   committed. No second request.
- * - **Status is diagnostics, not plumbing.** `GET /api/replica/status` costs
- *   a scan of the tenant's rows, so it is NOT fetched after every push (that
- *   alone consumed most of a D1 free-tier daily read budget on a corpus of a
- *   few hundred rows). It runs once per session, after the first successful
- *   push — enough to catch a
- *   replica that is drastically behind, which is a fact about history, not
- *   about the save that just happened.
+ *   committed. No second request: `GET /api/replica/status` is not fetched
+ *   here any more (it reads the whole corpus, for counts nothing acts on).
  */
 
 const DEBOUNCE_MS = 2_000
-const CHUNK_ROWS = 500
+const CHUNK_EVENTS = 500
 const BACKOFF_START_MS = 2_000
 const BACKOFF_MAX_MS = 60_000
-/** Minimum gap between automatic drastically-behind full pushes. */
-const AUTO_FULL_PUSH_COOLDOWN_MS = 5 * 60_000
 /** `fetch keepalive` bodies are capped around 64 KB; larger flushes go out as
  * ordinary requests and take their chances with the unload. */
 const KEEPALIVE_BODY_LIMIT = 60_000
@@ -96,13 +79,6 @@ interface ReplicaAuth {
 }
 
 export interface ReplicaSyncOptions {
-  /** How many notes the local graph holds — compared against the replica's
-   * note count to notice a replica left drastically behind. */
-  getNoteCount: () => number
-  /** Every current row of every corpus table — the full-push source (the
-   * store). Tombstones included: a delete only reaches other devices if its
-   * tombstone travels, and a full push is how a repaired replica catches up. */
-  getAllRows: () => Promise<{ nodes: NodeRow[]; links: LinkRow[] }>
   /** The store's unpushed events, oldest first — the queue. */
   getUnpushedEvents: () => Promise<KeyEvent[]>
   /** Stamp pushed events with the `seq` the replica gave each. */
@@ -112,7 +88,9 @@ export interface ReplicaSyncOptions {
   /** Injectable for tests; default the real github-session helpers. */
   auth?: ReplicaAuth
   debounceMs?: number
-  chunkRows?: number
+  /** How many events one request carries, at most (`MAX_KEY_EVENTS_PER_PUT`
+   * caps it; the replica cuts a run by bytes as well, `planKeyAppend`). */
+  chunkEvents?: number
   backoffStartMs?: number
   backoffMaxMs?: number
 }
@@ -134,21 +112,9 @@ export interface ReplicaSyncHandle {
    * coalesce a typing run into one of these (`NoteStore.applyEvents`), or
    * the replica would hold an event this device's log no longer does. */
   inFlightEventIds?(): Set<string>
-  /** Queue a full-corpus push (after a repair). The push loop also queues one
-   * itself when the session's status check finds the replica far behind. */
-  requestFullPush(): void
   stop(): void
   /** Wait for all queued replication work — tests only. */
   flush(): Promise<void>
-}
-
-/** Is the replica missing enough notes that only a full push can be trusted to
- * catch it up? (Empty while notes exist locally, or missing more than ~10% of
- * the corpus — lost pushes rather than ordinary write-behind lag.) */
-export function isReplicaDrasticallyBehind(localNotes: number, remoteNotes: number): boolean {
-  if (localNotes === 0) return false
-  if (remoteNotes <= 0) return true
-  return localNotes - remoteNotes > Math.max(3, Math.ceil(localNotes * 0.1))
 }
 
 /** Start the replication loop. Returns a handle the database runtime drives. */
@@ -156,10 +122,7 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   const fetchImpl = options.fetchImpl ?? fetch
   const auth: ReplicaAuth = options.auth ?? { ensureFreshToken, getAccessToken, withAuthRetry }
   const debounceMs = options.debounceMs ?? DEBOUNCE_MS
-  const chunkRows = options.chunkRows ?? CHUNK_ROWS
-  // A row is a few key events, so a run of `chunkRows` key events is fewer
-  // rows than it was; the replica cuts a run by bytes as well (`planKeyAppend`).
-  const chunkEvents = Math.min(chunkRows, MAX_KEY_EVENTS_PER_PUT)
+  const chunkEvents = Math.min(options.chunkEvents ?? CHUNK_EVENTS, MAX_KEY_EVENTS_PER_PUT)
   const backoffStartMs = options.backoffStartMs ?? BACKOFF_START_MS
   const backoffMaxMs = options.backoffMaxMs ?? BACKOFF_MAX_MS
 
@@ -171,7 +134,6 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   /** Ids snapshotted into a push that has not finished yet (see `pendingNoteIds`). */
   let inFlightNoteIds = new Set<NoteId>()
   let inFlightEventIds = new Set<string>()
-  let fullPushRequested = false
   let stopped = false
   let timer: ReturnType<typeof setTimeout> | null = null
   /** Current retry delay after a failure; null while healthy. */
@@ -179,13 +141,9 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   /** The next push should use `fetch keepalive` (tab going away). */
   let useKeepalive = false
   let lastCursorMs = 0
-  let lastSentCursor: string | null = null
-  let lastAutoFullPushAt = 0
-  /** Has the one automatic remote-status check for this session run yet? */
-  let statusCheckedThisSession = false
   /** How many deletes the queue held when last read (diagnostics). */
   let queuedDeletes = 0
-  /** Serialize all pushes/status fetches; one task's failure never breaks it. */
+  /** Serialize all pushes; one task's failure never breaks it. */
   let queue: Promise<void> = Promise.resolve()
 
   function patchDiagnostics(patch: Partial<ReplicaDiagnostics>) {
@@ -198,11 +156,7 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   }
 
   function reportPending() {
-    patchDiagnostics({
-      pendingNotes: dirtyNoteIds.size,
-      pendingDeletes: queuedDeletes,
-      fullPushPending: fullPushRequested,
-    })
+    patchDiagnostics({ pendingNotes: dirtyNoteIds.size, pendingDeletes: queuedDeletes })
   }
 
   function recordError(error: unknown) {
@@ -217,7 +171,7 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     })
   }
 
-  const hasWork = () => fullPushRequested || queued
+  const hasWork = () => queued
 
   /** Schedule the next queue tick. Schedule-once: events arriving while a tick
    * is already pending coalesce into it (never postponing it — a steady stream
@@ -281,14 +235,6 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     )
   }
 
-  /** Push one row payload; returns the cursor the replica committed, if any. */
-  async function putRows(payload: ReplicaPutPayload, keepalive: boolean): Promise<string | null> {
-    const response = await put("/api/replica/notes", JSON.stringify(payload), keepalive)
-    // The (tiny) body is drained either way so the connection can be reused.
-    const result = (await response.json().catch(() => null)) as ReplicaPutResult | null
-    return typeof result?.cursor === "string" ? result.cursor : null
-  }
-
   /** Push one run of events; returns what the replica said of them. */
   async function putEvents(
     events: KeyEvent[],
@@ -304,83 +250,14 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     return result
   }
 
-  async function fetchRemoteStatus(): Promise<void> {
-    const response = await authorizedFetch((token) =>
-      fetchImpl("/api/replica/status", {
-        method: "GET",
-        credentials: "same-origin",
-        headers: { ...REPLICA_PROTOCOL_HEADERS, Authorization: `Bearer ${token}` },
-      }),
-    )
-    const body = (await response.json()) as ReplicaStatusBody
-    patchDiagnostics({
-      remote: {
-        pages: body.counts.pages,
-        nodes: body.counts.nodes,
-        links: body.counts.links,
-        cursor: body.replica_cursor,
-        fetchedAt: Date.now(),
-      },
-      cursorConfirmed: lastSentCursor !== null && body.replica_cursor === lastSentCursor,
-    })
-
-    // Counts drastically behind → the replica missed pushes (another device,
-    // an old bug, a wiped database): schedule a self-healing full push.
-    const localNotes = options.getNoteCount()
-    const now = Date.now()
-    if (
-      isReplicaDrasticallyBehind(localNotes, body.counts.pages) &&
-      now - lastAutoFullPushAt > AUTO_FULL_PUSH_COOLDOWN_MS
-    ) {
-      lastAutoFullPushAt = now
-      fullPushRequested = true
-      reportPending()
-      schedule(debounceMs)
-    }
-  }
-
   /** Monotonic per-client cursor (ms timestamp, bumped on collision). */
   function nextCursor(): string {
     lastCursorMs = Math.max(Date.now(), lastCursorMs + 1)
     return String(lastCursorMs)
   }
 
-  /** Split rows into payload chunks: every node row precedes every link row
-   * (links reference nodes), cursor the last. */
-  function buildRowPayloads(
-    nodes: NodeRow[],
-    links: LinkRow[],
-    cursor: string,
-  ): ReplicaPutPayload[] {
-    const payloads: ReplicaPutPayload[] = []
-    let nodeIndex = 0
-    let linkIndex = 0
-    do {
-      const chunkNodes = nodes.slice(nodeIndex, nodeIndex + chunkRows)
-      nodeIndex += chunkNodes.length
-      const room = chunkRows - chunkNodes.length
-      const chunkLinks = nodeIndex >= nodes.length ? links.slice(linkIndex, linkIndex + room) : []
-      linkIndex += chunkLinks.length
-      payloads.push({ nodes: chunkNodes, links: chunkLinks })
-    } while (nodeIndex < nodes.length || linkIndex < links.length)
-    payloads[payloads.length - 1].cursor = cursor
-    return payloads
-  }
-
-  /** The full corpus, as rows, through the row door. */
-  async function pushAllRows(keepalive: boolean): Promise<{ cursor: string; committed: boolean }> {
-    const all = await options.getAllRows()
-    const cursor = nextCursor()
-    const payloads = buildRowPayloads(all.nodes, all.links, cursor)
-    // The cursor rides the final chunk, so the final response is the one
-    // that confirms it — no follow-up request.
-    let committed: string | null = null
-    for (const payload of payloads) committed = await putRows(payload, keepalive)
-    return { cursor, committed: committed === cursor }
-  }
-
   /** The queue, through the events door, in runs of `chunkEvents`. Returns
-   * false when there was nothing to push. */
+   * null when there was nothing to push. */
   async function pushEvents(
     events: KeyEvent[],
     keepalive: boolean,
@@ -414,12 +291,8 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       return
     }
 
-    // Snapshot and clear the pending state; a failure puts it back. A full
-    // push is rows, so the queue is not drained by it: `queued` stands, and
-    // the events go on the tick after.
-    const wasFullPush = fullPushRequested
-    fullPushRequested = false
-    if (!wasFullPush) queued = false
+    // Snapshot and clear the pending state; a failure puts it back.
+    queued = false
     const snapshotNoteIds = new Set(dirtyNoteIds)
     dirtyNoteIds.clear()
     inFlightNoteIds = snapshotNoteIds
@@ -427,20 +300,17 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     useKeepalive = false
 
     try {
-      const events = wasFullPush ? [] : await options.getUnpushedEvents()
+      const events = await options.getUnpushedEvents()
       queuedDeletes = events.filter((event) => event.action === "delete").length
       inFlightEventIds = new Set(events.map((event) => event.id))
       reportPending()
-      const pushed = wasFullPush
-        ? await pushAllRows(keepalive)
-        : await pushEvents(events, keepalive)
+      const pushed = await pushEvents(events, keepalive)
 
       inFlightNoteIds = new Set()
       inFlightEventIds = new Set()
       queuedDeletes = 0
       backoffMs = null
       if (pushed !== null) {
-        lastSentCursor = pushed.cursor
         patchDiagnostics({
           lastPushAt: Date.now(),
           lastPushNotes: snapshotNoteIds.size,
@@ -450,21 +320,12 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
         })
       }
       reportPending()
-      // Once per session, look at the remote counts: a replica that is
-      // drastically behind got that way from lost pushes or a wiped database,
-      // not from the save that just landed, so checking after every push buys
-      // nothing and costs a scan of the corpus. (Best-effort.)
-      if (pushed !== null && !statusCheckedThisSession) {
-        statusCheckedThisSession = true
-        await fetchRemoteStatus().catch(recordError)
-      }
     } catch (error) {
       // The events are still in the store's queue; put the guards back and
       // retry with backoff. Never touches the local rows.
       inFlightNoteIds = new Set()
       inFlightEventIds = new Set()
-      if (wasFullPush) fullPushRequested = true
-      else queued = true
+      queued = true
       for (const id of snapshotNoteIds) dirtyNoteIds.add(id)
       reportPending()
       recordError(error)
@@ -506,12 +367,6 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       if (stopped) return
       queued = true
       for (const id of noteIds) dirtyNoteIds.add(id)
-      reportPending()
-      schedule(debounceMs)
-    },
-    requestFullPush() {
-      if (stopped) return
-      fullPushRequested = true
       reportPending()
       schedule(debounceMs)
     },

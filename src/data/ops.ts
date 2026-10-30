@@ -126,9 +126,13 @@ export function applyOps(snapshot: GraphSnapshot, ops: readonly Op[], now: numbe
     if (list.length === 0) parentLinks.delete(destination)
   }
 
+  // On a lazily loaded graph a created node's children are complete: it
+  // has none but what this batch links beneath it.
+  const loaded = snapshot.loaded === undefined ? undefined : new Set(snapshot.loaded)
   for (const op of ops) {
     switch (op.op) {
       case "create":
+        loaded?.add(op.id)
         nodes.set(op.id, {
           id: op.id,
           type: op.type,
@@ -184,11 +188,14 @@ export function applyOps(snapshot: GraphSnapshot, ops: readonly Op[], now: numbe
         for (const link of parentLinks.get(op.id) ?? []) dropChild(link.source_id, op.id)
         childLinks.delete(op.id)
         parentLinks.delete(op.id)
+        loaded?.delete(op.id)
         break
       }
     }
   }
-  return { nodes, childLinks, parentLinks }
+  return loaded === undefined
+    ? { nodes, childLinks, parentLinks }
+    : { nodes, childLinks, parentLinks, loaded }
 }
 
 /** Every node's parents (sources of the child links into it), as sets the
@@ -655,6 +662,17 @@ export function partsToOps(
   const parents = parentLookup(snapshot)
 
   for (const [parentId, wanted] of childrenOf) {
+    // On a lazily loaded graph a parent whose children the graph holds only
+    // in part is not this edit's to reconcile: the rows it did not show
+    // stay exactly where they are (`GraphSnapshot.loaded`).
+    if (
+      snapshot.loaded !== undefined &&
+      snapshot.nodes.has(parentId) &&
+      !snapshot.loaded.has(parentId)
+    ) {
+      for (const destination of wanted) parents(destination).add(parentId)
+      continue
+    }
     // A block under itself is the one loop refused: it has no closing row to
     // show. Every other loop is kept.
     const desired = wanted.filter((id) => id !== parentId)

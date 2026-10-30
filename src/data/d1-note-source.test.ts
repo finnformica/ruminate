@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
-import {
-  REPLICA_PROTOCOL_HEADERS,
-  type LinkRow,
-  type NodeRow,
-} from "../../worker/handlers/replica-payload"
-import { createD1NoteSource, expandPendingNodeIds, planPullApplication } from "./d1-note-source"
+import { REPLICA_PROTOCOL_HEADERS } from "../../worker/handlers/replica-payload"
+import { createD1NoteSource } from "./d1-note-source"
 
 /** Fake auth mirroring the real helpers: `withAuthRetry` refreshes once and
  * retries when the operation throws a 401-shaped error. */
@@ -33,53 +29,51 @@ function fakeAuth(tokens: string[]) {
 
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
 
-const node = (id: string, updated_at = 0, text = id): NodeRow => ({
-  id,
-  type: id.startsWith("blk_") ? "text" : "note",
-  text,
-  props: null,
-  updated_at,
-})
-
-const link = (source: string, destination: string, updated_at = 0, sortKey = "a0"): LinkRow => ({
-  source_id: source,
-  destination_id: destination,
-  kind: "child",
-  sort_key: sortKey,
-  updated_at,
-})
+const page = {
+  rows: [
+    {
+      entity: "block",
+      entity_id: "a",
+      key: "text",
+      value: '"A"',
+      hlc: "000000000000001-0000-x",
+      seq: 1,
+      updated_at: 1,
+    },
+  ],
+  seq: 7,
+  cursor: ["block", "a", "text"],
+}
 
 describe("createD1NoteSource", () => {
-  it("pullFull GETs the corpus with cookie credentials and a Bearer token", async () => {
-    const body = { nodes: [node("a", 1)], links: [link("a", "blk_1", 1)], cursor: "77" }
-    const fetchImpl = vi.fn(async () => jsonResponse(body))
+  it("pullCache GETs the first page of the cache with cookie credentials and a Bearer token", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(page))
     const { auth } = fakeAuth(["tok-1"])
     const source = createD1NoteSource({ fetchImpl: fetchImpl as unknown as typeof fetch, auth })
 
-    await expect(source.pullFull()).resolves.toEqual(body)
-    expect(fetchImpl).toHaveBeenCalledWith("/api/replica/notes", {
+    await expect(source.pullCache(null, 20_000)).resolves.toEqual(page)
+    expect(fetchImpl).toHaveBeenCalledWith("/api/replica/cache?limit=20000", {
       method: "GET",
       credentials: "same-origin",
       headers: { ...REPLICA_PROTOCOL_HEADERS, Authorization: "Bearer tok-1" },
     })
   })
 
-  it("pullSince sends the cursor verbatim — no skew window to subtract", async () => {
-    const body = { nodes: [], links: [], cursor: "412" }
-    const fetchImpl = vi.fn(async (_url: string) => jsonResponse(body))
+  it("pullCache asks for the next page after the cursor the last one answered with", async () => {
+    const fetchImpl = vi.fn(async (_url: string) => jsonResponse({ ...page, cursor: null }))
     const { auth } = fakeAuth(["tok-1"])
     const source = createD1NoteSource({ fetchImpl: fetchImpl as unknown as typeof fetch, auth })
 
-    await expect(source.pullSince("407")).resolves.toEqual(body)
-    expect(fetchImpl.mock.calls[0][0]).toBe("/api/replica/notes?since=407")
-
-    await source.pullSince("0")
-    expect(fetchImpl.mock.calls[1][0]).toBe("/api/replica/notes?since=0")
+    const next = await source.pullCache(["link", "a|b|child", "sort_key"], 500)
+    expect(next.cursor).toBeNull()
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      `/api/replica/cache?after=${encodeURIComponent('["link","a|b|child","sort_key"]')}&limit=500`,
+    )
   })
 
   it("pullEvents asks for the per-key log past a seq, bounded", async () => {
     const fetchImpl = vi.fn(async () =>
-      jsonResponse({ events: [{ id: "evt_1", seq: 7 }], cursor: 7 }),
+      jsonResponse({ events: [{ id: "evt_1", seq: 7 }], cursor: 7, replica_id: "production" }),
     )
     const { auth } = fakeAuth(["tok-1"])
     const source = createD1NoteSource({ fetchImpl: fetchImpl as unknown as typeof fetch, auth })
@@ -91,18 +85,18 @@ describe("createD1NoteSource", () => {
     })
     expect(body.cursor).toBe(7)
     expect(body.events).toHaveLength(1)
+    expect(body.replica_id).toBe("production")
   })
 
   it("a 401 refreshes the token once and retries", async () => {
-    const body = { nodes: [], links: [], cursor: null }
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
       const token = (init?.headers as Record<string, string>).Authorization
-      return token === "Bearer tok-2" ? jsonResponse(body) : jsonResponse({}, 401)
+      return token === "Bearer tok-2" ? jsonResponse(page) : jsonResponse({}, 401)
     })
     const { auth, refresh } = fakeAuth(["tok-1", "tok-2"])
     const source = createD1NoteSource({ fetchImpl: fetchImpl as unknown as typeof fetch, auth })
 
-    await expect(source.pullFull()).resolves.toEqual(body)
+    await expect(source.pullCache(null, 20_000)).resolves.toEqual(page)
     expect(refresh).toHaveBeenCalledTimes(1)
     expect(fetchImpl).toHaveBeenCalledTimes(2)
   })
@@ -112,7 +106,7 @@ describe("createD1NoteSource", () => {
     const { auth } = fakeAuth(["tok-1"])
     const source = createD1NoteSource({ fetchImpl: fetchImpl as unknown as typeof fetch, auth })
 
-    await expect(source.pullFull()).rejects.toThrow("Replica pull failed (500)")
+    await expect(source.pullEvents(0, 2_000)).rejects.toThrow("Replica pull failed (500)")
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
@@ -126,104 +120,7 @@ describe("createD1NoteSource", () => {
         withAuthRetry: (operation) => operation(),
       },
     })
-    await expect(source.pullFull()).rejects.toThrow("not signed in")
+    await expect(source.pullCache(null, 20_000)).rejects.toThrow("not signed in")
     expect(fetchImpl).not.toHaveBeenCalled()
-  })
-})
-
-describe("expandPendingNodeIds", () => {
-  it("expands pending note ids to their full local subtrees", () => {
-    const links = [
-      link("a", "blk_a1"),
-      link("blk_a1", "blk_a2"),
-      link("b", "blk_b1"),
-      link("shared-source", "blk_a2"),
-    ]
-    expect(expandPendingNodeIds(new Set(["a"]), links)).toEqual(new Set(["a", "blk_a1", "blk_a2"]))
-  })
-
-  it("includes pending notes that have no local rows yet", () => {
-    expect(expandPendingNodeIds(new Set(["created"]), [])).toEqual(new Set(["created"]))
-  })
-})
-
-describe("planPullApplication", () => {
-  it("upserts strictly newer remote rows only (per-row LWW)", () => {
-    const plan = planPullApplication({
-      localNodes: [node("a", 100), node("blk_1", 100)],
-      localLinks: [link("a", "blk_1", 100)],
-      remoteNodes: [node("a", 100), node("blk_1", 200, "newer")],
-      remoteLinks: [link("a", "blk_1", 50, "z9")],
-      pendingNodeIds: new Set(),
-    })
-    expect(plan.nodes).toEqual([node("blk_1", 200, "newer")])
-    expect(plan.links).toEqual([]) // remote link is older — local wins
-    expect(plan.deleteNodes).toEqual([])
-    expect(plan.deleteLinks).toEqual([])
-  })
-
-  it("a full pull is 'everything changed' — new rows included", () => {
-    const plan = planPullApplication({
-      localNodes: [node("a", 1)],
-      localLinks: [],
-      remoteNodes: [node("a", 1), node("fresh", 1)],
-      remoteLinks: [],
-      pendingNodeIds: new Set(),
-    })
-    expect(plan.nodes).toEqual([node("fresh", 1)])
-  })
-
-  it("a deletion arrives as a tombstoned ROW, not as an absence", () => {
-    const tombstone = { ...node("gone", 200), deleted_at: 200 }
-    const plan = planPullApplication({
-      localNodes: [node("keep", 1), node("gone", 1)],
-      localLinks: [link("keep", "blk_k", 1)],
-      // The remote says nothing about `keep` and nothing about the link: a
-      // since-pull only carries what changed, and silence must mean "still
-      // there", never "delete it".
-      remoteNodes: [tombstone],
-      remoteLinks: [],
-      pendingNodeIds: new Set(),
-    })
-    expect(plan.nodes).toEqual([tombstone])
-    expect(plan.deleteNodes).toEqual([])
-    expect(plan.deleteLinks).toEqual([])
-  })
-
-  it("a tombstoned link is a row too — and an older tombstone still loses", () => {
-    const tombstone = { ...link("a", "blk_1", 200), deleted_at: 200 }
-    const plan = planPullApplication({
-      localNodes: [],
-      localLinks: [link("a", "blk_1", 100), link("a", "blk_2", 300)],
-      remoteLinks: [tombstone, { ...link("a", "blk_2", 150), deleted_at: 150 }],
-      remoteNodes: [],
-      pendingNodeIds: new Set(),
-    })
-    expect(plan.links).toEqual([tombstone])
-  })
-
-  it("never touches rows owned by pending notes — in either direction", () => {
-    const pending = expandPendingNodeIds(new Set(["a", "created"]), [link("a", "blk_a1", 1)])
-    const plan = planPullApplication({
-      // "created" exists only locally and is queued for push; "a" has a queued
-      // local edit the pull would otherwise revert.
-      localNodes: [node("a", 1), node("blk_a1", 1), node("created", 1)],
-      localLinks: [link("a", "blk_a1", 1)],
-      remoteNodes: [node("a", 999), node("blk_a1", 999)],
-      remoteLinks: [link("a", "blk_a1", 999, "b0")],
-      pendingNodeIds: pending,
-    })
-    expect(plan).toEqual({ nodes: [], links: [], views: [], deleteNodes: [], deleteLinks: [] })
-  })
-
-  it("skips rows whose local copy already matches (equal updated_at)", () => {
-    const plan = planPullApplication({
-      localNodes: [node("a", 5)],
-      localLinks: [link("a", "blk_1", 5)],
-      remoteNodes: [node("a", 5)],
-      remoteLinks: [link("a", "blk_1", 5)],
-      pendingNodeIds: new Set(),
-    })
-    expect(plan).toEqual({ nodes: [], links: [], views: [], deleteNodes: [], deleteLinks: [] })
   })
 })

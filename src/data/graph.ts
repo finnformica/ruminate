@@ -382,6 +382,17 @@ export interface GraphSnapshot {
   /** Child links per source, sorted by sort key (destination id tiebreak). */
   childLinks: Map<string, LinkRow[]>
   /**
+   * The ids whose child links are COMPLETE, when the graph is a lazily
+   * loaded part of the corpus (docs/events-log-cache.md, "The client"): at
+   * boot the notes' order and one preview child per note, then each note's
+   * subtree as it is opened (`src/data/database-mode.ts`, `ensureNote`). A
+   * walk that opens a row not in it says so (`GraphView.unloaded`), and a
+   * save never reconciles the children of such a parent (`partsToOps`).
+   * Absent on a whole graph: the sample graph, a shared slice, the MCP
+   * server's views.
+   */
+  loaded?: ReadonlySet<string>
+  /**
    * The same links per destination, sorted by source id: who holds a node.
    * The reverse index is a by-product of building the snapshot, never
    * computed by scanning it — `buildGraphSnapshot` fills both directions from
@@ -484,10 +495,13 @@ export function parseProps(props: string | null): BlockProps | null {
 }
 
 /** A walk's result: the doc, and the keys the fold rule closed — the rows
- * drawn with a chevron and nothing beneath them. */
+ * drawn with a chevron and nothing beneath them. `unloaded` is the open
+ * rows whose children the graph does not hold yet (`GraphSnapshot.loaded`):
+ * what the runtime loads next, on a lazily loaded graph; empty otherwise. */
 export interface GraphView {
   doc: BlockDoc
   collapsed: Set<string>
+  unloaded: Set<string>
 }
 
 /** Every occurrence open: the eager walk (export, search, the basket). */
@@ -677,6 +691,8 @@ export function walkGraph(
   const rule: WalkRule = { pivots, expanded }
   const blocks: Record<string, Block> = {}
   const collapsed = new Set<string>()
+  const unloaded = new Set<string>()
+  const loaded = graph.loaded
   const path = new Set<string>()
   if (rootId) path.add(rootId)
 
@@ -812,6 +828,9 @@ export function walkGraph(
       return true
     }
     const next = levelBeneath(rule, row)
+    // An open row whose children the graph holds only in part (a lazily
+    // loaded graph): walked as far as it goes, and reported for loading.
+    if (loaded !== undefined && followsDown && !loaded.has(id)) unloaded.add(id)
     path.add(id)
     const shown = beneathDown.filter((childId) => visit(childId, key, next, "down", query, id, own))
     if (pruned) {
@@ -856,7 +875,12 @@ export function walkGraph(
       visit(parentId, null, startLevel, "up", rootQuery, rootId, "up"),
     )
   }
-  return { doc, collapsed }
+  // The view's own root (a note) is walked through its children: when the
+  // graph holds them only in part, the note itself is what to load.
+  if (loaded !== undefined && rootId !== undefined && rootQuery === "down" && !loaded.has(rootId)) {
+    unloaded.add(rootId)
+  }
+  return { doc, collapsed, unloaded }
 }
 
 /** The eager walk: everything `rootIds` reach, every occurrence open. */
@@ -892,13 +916,13 @@ export function noteView(
   const entries = noteEntries(note.props)
   const title = emittedNoteTitle(note.id, note.text)
   const props = title !== null ? { title, ...(entries ?? {}) } : entries
-  const { doc, collapsed } = walkGraph(childIdsOf(graph, noteId), graph, {
+  const { doc, collapsed, unloaded } = walkGraph(childIdsOf(graph, noteId), graph, {
     expanded,
     pivots,
     rootId: noteId,
     narrowing,
   })
-  return { doc: { ...doc, props }, collapsed }
+  return { doc: { ...doc, props }, collapsed, unloaded }
 }
 
 /**

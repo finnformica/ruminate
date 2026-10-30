@@ -24,6 +24,7 @@ import migration0027 from "../../migrations/0027_view_stack.sql?raw"
 import migration0028 from "../../migrations/0028_events_log.sql?raw"
 import migration0029 from "../../migrations/0029_backfill_delta_mat_values.sql?raw"
 import migration0031 from "../../migrations/0031_drop_views.sql?raw"
+import migration0032 from "../../migrations/0032_events_log_cache.sql?raw"
 import migration0003 from "../../migrations/0003_control_plane.sql?raw"
 import migration0010 from "../../migrations/0010_user_email.sql?raw"
 import migration0011 from "../../migrations/0011_user_email_required.sql?raw"
@@ -124,6 +125,10 @@ export async function createTenantTestDriver(
   // D1 only: the `views` table dropped (docs/removing-views.md). `views`
   // keeps it, for a suite that runs 0030's genesis first, as production did.
   if (!options.views) await driver.execScript(migration0031)
+  // D1 only: the cache of the log and its backfill (docs/events-log-cache.md).
+  // The local ladder's v18 step makes the browser's copy without the
+  // backfill: a device takes a snapshot of the replica's instead.
+  await driver.execScript(migration0032)
   return driver
 }
 
