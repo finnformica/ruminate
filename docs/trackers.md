@@ -152,11 +152,23 @@ has no keys to validate.
   of seven, a year as a heatmap of its weeks, `yearWeeks`, sized to the
   card so a phone does not scroll sideways), or as the **Grid**
   (`journal-grid.tsx`): one table, a row per day with its weekday and
-  number at the left (a year names each month above its first day), a
-  column per series, as a bullet journal's habit page is drawn. A column is
-  headed by its series's colour alone: the Today strip's chips are the
-  legend, and the name is the column's `aria-label`. A tap on a grid cell
-  logs as a tap on a card's cell does. The grid's card fills the space left
+  number at the left ("Mon 2", today's number in a chip), a column per
+  series, as a bullet journal's habit page is drawn. Each month is a
+  group of rows (`grid-cols-subgrid`) that starts under a divider, with its
+  name ("November 2026") just below. The name is not pinned: it scrolls in
+  and out with its divider, and a month whose first day is before the range
+  (a week that starts mid-month) has no divider in view and no name. A year names the current month and
+  every second month from it (`month-labels.ts`: the step is 2, or 3 when
+  rows are too short to keep two names a name's height apart); the other
+  months have the divider alone. A thin line above each Monday starts a
+  week (Finn, 2026-11-02). A column is headed by its
+  series's colour alone: the Today strip's chips are the legend, and the
+  name is the column's `aria-label`. Every cell up to today logs in place:
+  a tap on a check series's cell ticks or clears the day, and on a number
+  series's cell opens the Today strip's field with − and + for that day in
+  a popover (`NumberControl`), so the entry is the one the strip writes.
+  The arrow keys move between cells, Enter or Space edits, and every cell
+  is at least 32 px for a finger. The grid's card fills the space left
   under the Today strip and date row, down to the bottom of the screen, and
   scrolls in its own box under the row of colours and beside the day
   column, both of which stay put; the page itself does not scroll in this
@@ -177,7 +189,21 @@ has no keys to validate.
   column a week from Monday with this week at the right edge, a cell in the
   colour of each series logged that day (`seriesOnDay`; split into diagonal
   bands when there is more than one), today with a ring and the rest of
-  this week dashed; a legend of the series below it; then **Recent**
+  this week dashed. A week that runs into a new month is split into two
+  columns (`heatmapColumns`), the other month's days drawn as hollow placeholders, a 0.5 px outline and 0.5 px stripes in one solid colour (`--neutral-6`) and no fill (no data, not tappable), so a straight line divides the
+  months: one element per boundary, in a narrow track of its own with a gap
+  each side, from the Monday row down to Sunday. A cell is a rounded square
+  (`rounded-sm`: the theme's `rounded` is 8 px, a circle at this size).
+  Each month's short name ("Oct", 11 px) sits above its divider, its first
+  letter over the line. A weekday's name takes no height, so each row is
+  exactly a cell high and the cells read as squares; the month the heatmap opens in is named only when
+  the heatmap opens on its 1st. Every month when the names fit, else this month and every second or third
+  (`fitMonthLabels` in `month-labels.ts`, at the narrowest column: the
+  desktop card). The day axis names all seven weekdays when a row is tall
+  enough for each name, else Mon, Wed and Fri (`axisWeekdays`, from the
+  measured cell height), and today's weekday in bold; a dot under today's
+  column marks it (Finn, 2026-11-02). A legend of the series is below it;
+  then **Recent**
   (`recentEntries`): the newest entries up to today as rows of day, series
   and the entry's text after the day (`Entry.detail`, read only), five at
   first and ten more for each **Show more**. The heatmap is for reading; the

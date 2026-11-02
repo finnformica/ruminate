@@ -1,0 +1,127 @@
+import { describe, expect, it } from "vitest"
+import { MONTH_LABEL_HEIGHT, fitMonthLabels, labelledMonths, yearLabelStep } from "./month-labels"
+
+const YEAR = Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, "0")}`)
+const DAYS_IN = (month: string) =>
+  new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).getUTCDate()
+
+/** The journal grid's row: a 32 px cell and 2 px between rows, the same at
+ * 390 px wide as on a desktop. */
+const PITCH = 34
+/** The divider's space above a month: `mt-2` and a 1 px border. */
+const DIVIDER = 9
+
+describe("yearLabelStep", () => {
+  it("labels every second month at the grid's row height", () => {
+    expect(yearLabelStep(PITCH)).toBe(2)
+  })
+
+  it("skips more months when rows are too short to keep two names apart", () => {
+    expect(yearLabelStep(0.5)).toBe(3)
+  })
+})
+
+describe("labelledMonths", () => {
+  it("always labels the current month, and every second one either side", () => {
+    for (const current of YEAR) {
+      const labelled = labelledMonths(YEAR, current, 2)
+      expect(labelled.has(current)).toBe(true)
+      const at = YEAR.indexOf(current)
+      for (const [i, month] of YEAR.entries()) {
+        expect(labelled.has(month)).toBe((i - at) % 2 === 0)
+      }
+    }
+    expect([...labelledMonths(YEAR, "2026-11", 3)]).toEqual([
+      "2026-02",
+      "2026-05",
+      "2026-08",
+      "2026-11",
+    ])
+  })
+
+  it("labels a past year's months as this year's", () => {
+    const past = YEAR.map((month) => month.replace("2026", "2025"))
+    expect([...labelledMonths(past, "2026-11", 2)]).toEqual([
+      "2025-01",
+      "2025-03",
+      "2025-05",
+      "2025-07",
+      "2025-09",
+      "2025-11",
+    ])
+  })
+
+  it("keeps two names at least a name's height apart at any scroll", () => {
+    // Where each month starts and ends down the grid, as drawn: a label row
+    // when it has a name, then a row a day.
+    const step = yearLabelStep(PITCH)
+    for (const current of YEAR) {
+      const labelled = labelledMonths(YEAR, current, step)
+      let y = 0
+      const spans: { top: number; end: number }[] = []
+      for (const [i, month] of YEAR.entries()) {
+        const top = y + (i > 0 ? DIVIDER : 0)
+        const end = top + (labelled.has(month) ? MONTH_LABEL_HEIGHT : 0) + DAYS_IN(month) * PITCH
+        // A name is not pinned: it scrolls with its divider, so it only
+        // ever covers its own box.
+        if (labelled.has(month)) spans.push({ top, end: top + MONTH_LABEL_HEIGHT })
+        y = end
+      }
+      for (let i = 1; i < spans.length; i++) {
+        expect(spans[i].top - spans[i - 1].end).toBeGreaterThanOrEqual(MONTH_LABEL_HEIGHT)
+      }
+    }
+  })
+})
+
+describe("fitMonthLabels", () => {
+  // The heatmap's narrowest week column: the desktop card (21 px) and a
+  // phone at 390 px wide (25 px); a short month's name ("Sept") and the
+  // space after it are 34 px wide.
+  const WIDTH = 34
+  const at = (pitch: number, columns: [string, number][]) =>
+    columns.map(([month, column]) => ({ month, start: column * pitch }))
+
+  it("names every month when the names fit", () => {
+    for (const pitch of [21, 25]) {
+      const months = at(pitch, [
+        ["2026-08", 0],
+        ["2026-09", 3],
+        ["2026-10", 7],
+      ])
+      expect([...fitMonthLabels(months, "2026-10", WIDTH)]).toEqual([
+        "2026-08",
+        "2026-09",
+        "2026-10",
+      ])
+    }
+  })
+
+  it("names this month and every second when two names are a column apart", () => {
+    for (const pitch of [21, 25]) {
+      const months = at(pitch, [
+        ["2026-08", 0],
+        ["2026-09", 1],
+        ["2026-10", 5],
+        ["2026-11", 9],
+      ])
+      const named = fitMonthLabels(months, "2026-11", WIDTH)
+      expect([...named]).toEqual(["2026-09", "2026-11"])
+      // No two names closer than a name's width.
+      const starts = months.filter((m) => named.has(m.month)).map((m) => m.start)
+      for (let i = 1; i < starts.length; i++) {
+        expect(starts[i] - starts[i - 1]).toBeGreaterThanOrEqual(WIDTH)
+      }
+    }
+  })
+
+  it("names only this month when no step fits", () => {
+    const months = at(1, [
+      ["2026-09", 0],
+      ["2026-10", 1],
+      ["2026-11", 2],
+      ["2026-12", 3],
+    ])
+    expect([...fitMonthLabels(months, "2026-11", WIDTH)]).toEqual(["2026-11"])
+  })
+})
