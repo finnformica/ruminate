@@ -4,19 +4,20 @@
 // Workers (Node's `web-push` does not). aes128gcm, not the older `aesgcm`
 // draft: Apple's push service takes only the RFC.
 //
-// The keys: `VAPID_PRIVATE_KEY` is a Worker secret, the private key as a
-// JWK (`node scripts/vapid-keys.mjs` prints a new pair). `VAPID_PUBLIC_KEY`
-// is a wrangler var, the public key the browser subscribes with. The public
-// key is also in the JWK (`x`, `y`), so with the var empty the Worker
-// derives it, and with the var set the Worker refuses a var that does not
-// match the secret: a subscription made with the wrong key cannot be sent to.
+// The keys, base64url, in the format of web-push's `generateVAPIDKeys`:
+// `VAPID_PRIVATE_KEY` is a Worker secret, the raw P-256 private scalar `d`
+// (32 bytes). `VAPID_PUBLIC_KEY` is a wrangler var, the uncompressed public
+// point (65 bytes): the key the browser subscribes with. The Worker refuses
+// a pair that does not match (`vapid_key_mismatch`): a push signed with the
+// wrong key is refused by every push service.
 
 import { buildPushPayload } from "@block65/webcrypto-web-push"
 import type { Env } from "../types"
 import type { ReminderPayload } from "./message"
 
-/** Who sends: the VAPID `sub` claim, a contact URL for the push services. */
-const VAPID_SUBJECT = "https://github.com/finnformica/ruminate"
+/** Who sends: the VAPID `sub` claim, a contact URL for the push services.
+ * The app's own production address (`workers_dev`, wrangler.jsonc). */
+const VAPID_SUBJECT = "https://ruminate.finnformica.workers.dev"
 
 /** How long a push service holds a reminder for a device that is offline. */
 const TTL_SECONDS = 4 * 60 * 60
@@ -28,10 +29,18 @@ export interface PushTarget {
   auth: string
 }
 
-const base64UrlToBytes = (value: string): Uint8Array => {
+const BASE64URL_RE = /^[A-Za-z0-9_-]+$/
+
+/** The bytes of a base64url string; null when it is not one. */
+const base64UrlToBytes = (value: string): Uint8Array | null => {
+  if (!BASE64URL_RE.test(value)) return null
   const base64 = value.replace(/-/g, "+").replace(/_/g, "/")
   const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4)
-  return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0))
+  try {
+    return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0))
+  } catch {
+    return null
+  }
 }
 
 const bytesToBase64Url = (bytes: Uint8Array): string =>
@@ -40,49 +49,66 @@ const bytesToBase64Url = (bytes: Uint8Array): string =>
     .replace(/\//g, "_")
     .replace(/=+$/, "")
 
-/** The private key, parsed; null when the secret is missing or malformed. */
-function privateJwk(env: Env): JsonWebKey | null {
-  if (!env.VAPID_PRIVATE_KEY) return null
-  try {
-    const jwk = JSON.parse(env.VAPID_PRIVATE_KEY) as JsonWebKey
-    return jwk.kty === "EC" && jwk.crv === "P-256" && jwk.d && jwk.x && jwk.y ? jwk : null
-  } catch {
-    return null
-  }
-}
-
-/** The uncompressed P-256 point of a JWK, base64url: the key a browser's
- * `PushManager.subscribe` takes as `applicationServerKey`. */
-export function publicKeyOfJwk(jwk: JsonWebKey): string {
-  const x = base64UrlToBytes(jwk.x ?? "")
-  const y = base64UrlToBytes(jwk.y ?? "")
-  const point = new Uint8Array(1 + x.length + y.length)
-  point[0] = 4
-  point.set(x, 1)
-  point.set(y, 1 + x.length)
-  return bytesToBase64Url(point)
-}
-
-/** The keys the Worker sends with, or null when push is not set up here:
- * no secret, a malformed one, or a public key var that does not match it. */
-export function vapidKeys(env: Env): VapidKeys | null {
-  const jwk = privateJwk(env)
-  if (jwk === null) return null
-  const derived = publicKeyOfJwk(jwk)
-  if (env.VAPID_PUBLIC_KEY && env.VAPID_PUBLIC_KEY !== derived) {
-    console.error(
-      JSON.stringify({ event: "vapid_key_mismatch", note: "VAPID_PUBLIC_KEY is not the secret's" }),
-    )
-    return null
-  }
-  return { publicKey: derived, privateKey: jwk.d as string }
-}
-
 /** The VAPID key pair, base64url: the raw public point and the private
- * scalar (the JWK's `d`). */
+ * scalar `d`. */
 export interface VapidKeys {
   publicKey: string
   privateKey: string
+}
+
+/** Whether `d` is the private key of `point`: sign with the pair, verify
+ * with the public half. */
+async function isPair(point: Uint8Array, d: string): Promise<boolean> {
+  const x = bytesToBase64Url(point.slice(1, 33))
+  const y = bytesToBase64Url(point.slice(33, 65))
+  try {
+    const algorithm = { name: "ECDSA", namedCurve: "P-256" }
+    const signer = await crypto.subtle.importKey(
+      "jwk",
+      { kty: "EC", crv: "P-256", x, y, d },
+      algorithm,
+      false,
+      ["sign"],
+    )
+    const verifier = await crypto.subtle.importKey(
+      "jwk",
+      { kty: "EC", crv: "P-256", x, y },
+      algorithm,
+      false,
+      ["verify"],
+    )
+    const data = new TextEncoder().encode("vapid pair check")
+    const sign = { name: "ECDSA", hash: "SHA-256" }
+    const signature = await crypto.subtle.sign(sign, signer, data)
+    return await crypto.subtle.verify(sign, verifier, signature, data)
+  } catch {
+    return false
+  }
+}
+
+/** The answer for the keys last checked: one check per isolate. */
+let checked: { publicKey: string; privateKey: string; ok: boolean } | null = null
+
+/** The keys the Worker sends with, or null when push is not set up here:
+ * either key missing or malformed, or a pair that does not match. */
+export async function vapidKeys(env: Env): Promise<VapidKeys | null> {
+  const publicKey = env.VAPID_PUBLIC_KEY ?? ""
+  const privateKey = env.VAPID_PRIVATE_KEY ?? ""
+  const point = base64UrlToBytes(publicKey)
+  const d = base64UrlToBytes(privateKey)
+  if (point?.length !== 65 || point[0] !== 4 || d?.length !== 32) return null
+  if (checked?.publicKey !== publicKey || checked.privateKey !== privateKey) {
+    checked = { publicKey, privateKey, ok: await isPair(point, privateKey) }
+    if (!checked.ok) {
+      console.error(
+        JSON.stringify({
+          event: "vapid_key_mismatch",
+          note: "VAPID_PRIVATE_KEY is not the pair of VAPID_PUBLIC_KEY",
+        }),
+      )
+    }
+  }
+  return checked.ok ? { publicKey, privateKey } : null
 }
 
 /** What the push service said: taken, gone (the subscription is dead and is

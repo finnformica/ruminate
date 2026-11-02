@@ -46,7 +46,7 @@ export async function runReminders(
   fetchImpl: typeof fetch = fetch,
 ): Promise<ReminderRun> {
   const run: ReminderRun = { due: 0, checked: 0, sent: 0, gone: 0, failed: 0, rowsRead: 0 }
-  const keys = vapidKeys(env)
+  const keys = await vapidKeys(env)
   if (keys === null) return run
   const driver = meteredDriver(env, (rowsRead) => {
     run.rowsRead += rowsRead

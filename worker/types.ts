@@ -70,12 +70,12 @@ export interface Env {
   AI?: Ai
   /**
    * Habit reminders (docs/reminders.md, worker/reminders/push.ts). The
-   * VAPID private key, a P-256 JWK as JSON: a secret, set with `wrangler
-   * secret put VAPID_PRIVATE_KEY`. Without it reminders are off and the
+   * VAPID private key: the raw P-256 scalar `d`, base64url (32 bytes). A
+   * secret, already set on the Worker. Without it reminders are off and the
    * settings card says so.
    */
   VAPID_PRIVATE_KEY?: string
-  /** The VAPID public key (base64url), a wrangler var. Empty: derived from
-   * the private key. Set: it must be the private key's. */
+  /** The VAPID public key: the uncompressed point, base64url (65 bytes). A
+   * wrangler var; it must be the pair of the private key. */
   VAPID_PUBLIC_KEY?: string
 }

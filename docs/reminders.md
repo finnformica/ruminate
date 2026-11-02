@@ -101,18 +101,28 @@ About 60 rows per subscription due, whatever the size of the corpus.
 (RFC 8292) and aes128gcm (RFC 8291) on Web Crypto, so it runs on Workers
 (Node's `web-push` does not). Apple's push service takes only aes128gcm.
 
-The keys:
+The keys are set, both in base64url, in the format of web-push's
+`generateVAPIDKeys`:
 
-- `VAPID_PRIVATE_KEY`, a Worker secret: the private key as a P-256 JWK.
-  `node scripts/vapid-keys.mjs` prints a new pair. Set it with
-  `npx wrangler secret put VAPID_PRIVATE_KEY`. Never commit it.
-- `VAPID_PUBLIC_KEY`, a wrangler var: the public key, base64url. Empty, the
-  Worker derives it from the secret's `x` and `y`. Set, it must match the
-  secret, or reminders stay off and the Worker logs `vapid_key_mismatch`.
+- `VAPID_PRIVATE_KEY`, a Worker secret, already set on the `ruminate`
+  Worker: the raw P-256 private scalar `d` (32 bytes). Never commit it.
+- `VAPID_PUBLIC_KEY`, a wrangler var in `vars` and `previews.vars`: the
+  uncompressed public point (65 bytes). The browser subscribes with it
+  (`GET /api/reminders` hands it to the settings card).
 
-Without the secret the cron does nothing and the card says reminders are not
-set up on this server. A new key pair ends every subscription: each device
-must turn reminders on again.
+The Worker checks once per isolate that the two are one pair (it signs with
+the secret and verifies with the var). A missing key, a malformed one or a
+pair that does not match turns reminders off: the cron does nothing, the
+Worker logs `vapid_key_mismatch` for a wrong pair, and the card says
+reminders are not set up on this server.
+
+The VAPID subject (the JWT's `sub`) is the app's production address,
+`https://ruminate.finnformica.workers.dev`.
+
+To rotate the pair (optional, never a setup step), run
+`node scripts/vapid-keys.mjs`, put the public key in wrangler.jsonc and set
+the private key with `npx wrangler secret put VAPID_PRIVATE_KEY`. A new pair
+ends every subscription: each device must turn reminders on again.
 
 ## The service worker
 

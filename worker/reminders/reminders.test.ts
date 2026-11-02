@@ -11,7 +11,7 @@ import type { Env } from "../types"
 import { runReminders } from "./cron"
 import { checkHabits, missingHabits, readDayEntries, readHabits, type Habit } from "./habits"
 import { reminderMessage } from "./message"
-import { publicKeyOfJwk, vapidKeys } from "./push"
+import { vapidKeys } from "./push"
 import { dueSubscriptions, saveSubscription, subscriptionOf } from "./store"
 
 const USER = 31
@@ -277,14 +277,30 @@ async function browserKeys(): Promise<{ p256dh: string; auth: string }> {
   return { p256dh: b64(raw), auth: b64(crypto.getRandomValues(new Uint8Array(16))) }
 }
 
-let vapidEnv: Env
-
-beforeAll(async () => {
+/** A VAPID pair in the Worker's format: the public point and the raw `d`,
+ * base64url (the format of web-push's `generateVAPIDKeys`). */
+async function vapidPair(): Promise<{ VAPID_PUBLIC_KEY: string; VAPID_PRIVATE_KEY: string }> {
   const pair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
     "sign",
   ])) as CryptoKeyPair
-  const jwk = await crypto.subtle.exportKey("jwk", pair.privateKey)
-  vapidEnv = { ...harness.env, VAPID_PRIVATE_KEY: JSON.stringify(jwk) }
+  const jwk = (await crypto.subtle.exportKey("jwk", pair.privateKey)) as JsonWebKey
+  const raw = new Uint8Array((await crypto.subtle.exportKey("raw", pair.publicKey)) as ArrayBuffer)
+  const b64 = (bytes: Uint8Array) =>
+    btoa(String.fromCharCode(...bytes))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "")
+  return { VAPID_PUBLIC_KEY: b64(raw), VAPID_PRIVATE_KEY: jwk.d as string }
+}
+
+/** The public key committed in wrangler.jsonc. */
+const COMMITTED_PUBLIC_KEY =
+  "BJi3MWqzpp5H-6v6jBS3GDRXm0aMccdEyi4QpMbTSIHXaeKd3ci2fc-WyY_G5E17j_hq65i-LfKqNS3n2bVOmG4"
+
+let vapidEnv: Env
+
+beforeAll(async () => {
+  vapidEnv = { ...harness.env, ...(await vapidPair()) }
 })
 
 beforeEach(async () => {
@@ -318,13 +334,22 @@ function pushService(answers: Record<string, number> = {}) {
 }
 
 describe("the VAPID keys", () => {
-  it("derive the public key from the secret, and refuse a var that is not its", () => {
-    const keys = vapidKeys(vapidEnv)
-    expect(keys?.publicKey).toBe(publicKeyOfJwk(JSON.parse(vapidEnv.VAPID_PRIVATE_KEY!)))
-    expect(keys?.publicKey).toMatch(/^B[A-Za-z0-9_-]{86}$/)
-    expect(vapidKeys({ ...vapidEnv, VAPID_PUBLIC_KEY: keys!.publicKey })).not.toBeNull()
-    expect(vapidKeys({ ...vapidEnv, VAPID_PUBLIC_KEY: "Bnope" })).toBeNull()
-    expect(vapidKeys(harness.env)).toBeNull()
+  it("take the public point from the var and the raw d from the secret", async () => {
+    expect(await vapidKeys(vapidEnv)).toEqual({
+      publicKey: vapidEnv.VAPID_PUBLIC_KEY,
+      privateKey: vapidEnv.VAPID_PRIVATE_KEY,
+    })
+  })
+
+  it("refuse a missing or malformed key, and a pair that does not match", async () => {
+    expect(await vapidKeys(harness.env)).toBeNull()
+    expect(await vapidKeys({ ...vapidEnv, VAPID_PRIVATE_KEY: undefined })).toBeNull()
+    expect(await vapidKeys({ ...vapidEnv, VAPID_PUBLIC_KEY: "Bnope" })).toBeNull()
+    expect(await vapidKeys({ ...vapidEnv, VAPID_PRIVATE_KEY: "not base64url!" })).toBeNull()
+    const other = await vapidPair()
+    expect(await vapidKeys({ ...vapidEnv, VAPID_PRIVATE_KEY: other.VAPID_PRIVATE_KEY })).toBeNull()
+    // The committed public key with a secret that is not its pair.
+    expect(await vapidKeys({ ...vapidEnv, VAPID_PUBLIC_KEY: COMMITTED_PUBLIC_KEY })).toBeNull()
   })
 })
 
@@ -365,7 +390,17 @@ describe("the cron", () => {
     // VAPID and aes128gcm: the push services' headers.
     const headers = service.calls[0].headers
     expect(headers.get("content-encoding")).toBe("aes128gcm")
-    expect(headers.get("authorization")).toMatch(/^vapid t=.+, k=.+$/)
+    const authorization = headers.get("authorization") ?? ""
+    expect(authorization).toMatch(/^vapid t=.+, k=.+$/)
+    expect(authorization.endsWith(`k=${vapidEnv.VAPID_PUBLIC_KEY}`)).toBe(true)
+    // The JWT's subject is the app's production address, not a person.
+    const claims = JSON.parse(
+      atob(authorization.split("t=")[1].split(".")[1].replace(/-/g, "+").replace(/_/g, "/")),
+    ) as { sub: string; aud: string }
+    expect(claims).toMatchObject({
+      sub: "https://ruminate.finnformica.workers.dev",
+      aud: "https://push.test",
+    })
 
     const phone = await subscriptionOf(harness.control, USER, "https://push.test/phone")
     expect(phone?.lastSentDay).toBe(TODAY)

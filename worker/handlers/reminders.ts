@@ -81,7 +81,7 @@ export async function reminders(
   if (session instanceof Response) return session
   const { pathname, searchParams } = new URL(request.url)
   const control = controlPlaneDriver(env)
-  const keys = vapidKeys(env)
+  const keys = await vapidKeys(env)
 
   if (pathname === REMINDERS_PATH && request.method === "GET") {
     const endpoint = searchParams.get("endpoint")

@@ -1,13 +1,16 @@
 #!/usr/bin/env node
-// Print a new VAPID key pair for habit reminders (docs/reminders.md).
+// Optional: rotate the VAPID key pair of habit reminders (docs/reminders.md).
+// Not a setup step: the pair is already set. Use it only to replace the pair.
 //
 //   node scripts/vapid-keys.mjs
 //
-// The private key is a P-256 JWK: set it as the Worker secret, never in a
-// file in this repo.
-//   npx wrangler secret put VAPID_PRIVATE_KEY   (paste the JWK line)
-// The public key (base64url) may go in wrangler.jsonc as VAPID_PUBLIC_KEY;
-// left empty, the Worker derives it from the secret.
+// It prints both keys, base64url, in the format of web-push's
+// `generateVAPIDKeys`: the public key is the uncompressed P-256 point
+// (65 bytes), the private key the raw scalar `d` (32 bytes).
+//   1. Put the public key in wrangler.jsonc as VAPID_PUBLIC_KEY (`vars` and
+//      `previews.vars`).
+//   2. Set the private key with `npx wrangler secret put VAPID_PRIVATE_KEY`.
+//      Never put it in a file in this repo.
 //
 // A new pair ends every existing subscription: each browser subscribed with
 // the old public key, so each must turn reminders on again.
@@ -20,8 +23,6 @@ const pair = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-
 ])
 const jwk = await webcrypto.subtle.exportKey("jwk", pair.privateKey)
 const raw = new Uint8Array(await webcrypto.subtle.exportKey("raw", pair.publicKey))
-const publicKey = Buffer.from(raw).toString("base64url")
-const privateJwk = JSON.stringify({ kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, d: jwk.d })
 
-console.log(`VAPID_PUBLIC_KEY=${publicKey}`)
-console.log(`VAPID_PRIVATE_KEY=${privateJwk}`)
+console.log(`VAPID_PUBLIC_KEY=${Buffer.from(raw).toString("base64url")}`)
+console.log(`VAPID_PRIVATE_KEY=${jwk.d}`)

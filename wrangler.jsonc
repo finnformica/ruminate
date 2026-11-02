@@ -179,7 +179,7 @@
       "ALLOWED_GITHUB_ID": "42536816",
       "SIGNUP_MODE": "invite",
       "VITE_IMAGES_ENABLED": "true",
-      "VAPID_PUBLIC_KEY": "",
+      "VAPID_PUBLIC_KEY": "BJi3MWqzpp5H-6v6jBS3GDRXm0aMccdEyi4QpMbTSIHXaeKd3ci2fc-WyY_G5E17j_hq65i-LfKqNS3n2bVOmG4",
     },
   },
   // The GitHub OAuth client id is public (it's already baked into the frontend
@@ -216,12 +216,12 @@
     // Image uploads: the Worker's half of the switch (the client's half is the
     // same variable in .env.production). Both are "true"; see the binding above.
     "VITE_IMAGES_ENABLED": "true",
-    // Habit reminders' VAPID public key (base64url, worker/reminders/push.ts).
-    // Empty: the Worker derives it from the private key, the secret
-    //   npx wrangler secret put VAPID_PRIVATE_KEY
-    // which is the JWK `node scripts/vapid-keys.mjs` prints. Set: it must be
-    // that key's public half, or reminders stay off and the Worker logs
-    // `vapid_key_mismatch`. Never commit the private key.
-    "VAPID_PUBLIC_KEY": "",
+    // Habit reminders' VAPID public key: the uncompressed P-256 point,
+    // base64url (worker/reminders/push.ts). The browser subscribes with it.
+    // Its private half is the secret VAPID_PRIVATE_KEY (the raw scalar `d`,
+    // base64url), already set on this Worker; never commit it. The two must
+    // be one pair, or reminders stay off and the Worker logs
+    // `vapid_key_mismatch`. To rotate, see scripts/vapid-keys.mjs.
+    "VAPID_PUBLIC_KEY": "BJi3MWqzpp5H-6v6jBS3GDRXm0aMccdEyi4QpMbTSIHXaeKd3ci2fc-WyY_G5E17j_hq65i-LfKqNS3n2bVOmG4",
   },
 }
