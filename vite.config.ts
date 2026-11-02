@@ -65,7 +65,13 @@ export default defineConfig({
     // "Update Ruminate" can appear.
     visualizer({ filename: "stats.html" }) as unknown as PluginOption,
     VitePWA({
-      strategies: "generateSW",
+      // A worker of our own (src/sw.ts) rather than a generated one, for
+      // habit reminders' `push` and `notificationclick` (docs/reminders.md).
+      // It keeps the generated worker's precache, navigate fallback and
+      // prompt flow; the manifest of the build is injected into it.
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
       registerType: "prompt",
       injectRegister: "auto",
       manifest: {
@@ -84,24 +90,22 @@ export default defineConfig({
         start_url: "/",
         display: "standalone",
       },
-      workbox: {
+      injectManifest: {
         // The SQL store's worker chunk and the sqlite wasm it loads are
         // precached with the rest: they ARE the notes when signed in, and a
         // cold start offline (the app closed and reopened on a phone) has
         // nowhere else to get them — without them the store never opens,
         // nothing loads, and nothing written is kept.
         globPatterns: ["**/*.{html,css,js,woff2,wasm}"],
-        ignoreURLParametersMatching: [/^utm_/, /^fbclid$/],
-        // No `skipWaiting` here: with registerType "prompt" the new service
-        // worker must *wait* until the user clicks "Update Ruminate", which
-        // posts SKIP_WAITING to the waiting worker and reloads. Auto-skipping
-        // would activate the worker on install, leaving nothing for the button
-        // to message — so the button would appear to do nothing.
-        navigateFallback: "index.html",
+        // No `skipWaiting` in the worker: with registerType "prompt" the new
+        // service worker must *wait* until the user clicks "Update Ruminate",
+        // which posts SKIP_WAITING to the waiting worker and reloads.
+        // Auto-skipping would activate the worker on install, leaving nothing
+        // for the button to message — so the button would appear to do
+        // nothing. The navigate fallback (index.html) and its denylist of
+        // function routes, and the ignored URL parameters, are in src/sw.ts.
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5MB
         sourcemap: true,
-        // Do not cache function routes
-        navigateFallbackDenylist: [/cors-proxy/, /file-proxy/, /git-lfs-file/, /github-auth/],
       },
       devOptions: {
         enabled: process.env.NODE_ENV === "development",
