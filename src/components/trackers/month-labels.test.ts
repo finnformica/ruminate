@@ -62,9 +62,9 @@ describe("labelledMonths", () => {
       for (const [i, month] of YEAR.entries()) {
         const top = y + (i > 0 ? DIVIDER : 0)
         const end = top + (labelled.has(month) ? MONTH_LABEL_HEIGHT : 0) + DAYS_IN(month) * PITCH
-        // A name sticks only inside its own month: from its place down to
-        // the month's end, never into the next one.
-        if (labelled.has(month)) spans.push({ top, end })
+        // A name is not pinned: it scrolls with its divider, so it only
+        // ever covers its own box.
+        if (labelled.has(month)) spans.push({ top, end: top + MONTH_LABEL_HEIGHT })
         y = end
       }
       for (let i = 1; i < spans.length; i++) {

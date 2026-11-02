@@ -145,8 +145,9 @@ export function heatmapColumns(weeks: readonly DayString[][]): HeatmapColumn[] {
  * outline. A week that runs into a new month is split in two columns
  * (`heatmapColumns`), the other month's days drawn as placeholders (a
  * dashed outline on a grey fill, no data), so one straight line, a single
- * element the grid's full height, divides the months. Each month is named
- * over its first column: every month when the names fit, else this month
+ * element the grid's full height, divides the months. Each month whose
+ * first day is in the heatmap is named over its first column, beside its
+ * divider (the month the heatmap opens in has no divider, and no name): every month when the names fit, else this month
  * and every second or third (month-labels.ts, as the Grid's year does;
  * Finn, 2026-11-02). The day axis names every weekday when a row is tall
  * enough, else Mon, Wed and Fri (`axisWeekdays`). The columns share the
@@ -166,14 +167,18 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
       ),
     [columns],
   )
+  // The months named: those whose first day, and so whose divider, is in
+  // the heatmap. The month the heatmap opens in is named only when it opens
+  // on the 1st (Finn, 2026-11-02).
   const named = React.useMemo(() => {
     const pitch = (HEATMAP_MIN_WIDTH + HEATMAP_GAP) / columns.length
+    const shown = starts.filter(({ column }) => column > 0 || columns[0].days[0]?.endsWith("-01"))
     return fitMonthLabels(
-      starts.map(({ month, column }) => ({ month, start: column * pitch })),
+      shown.map(({ month, column }) => ({ month, start: column * pitch })),
       monthOf(today),
       HEATMAP_LABEL_WIDTH,
     )
-  }, [starts, columns.length, today])
+  }, [starts, columns, today])
   const todayWeekday = weekdayFromMonday(today)
 
   // A cell's height, to tell whether every weekday's name fits beside it.

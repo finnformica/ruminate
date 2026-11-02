@@ -164,22 +164,30 @@ describe("JournalGrid", () => {
     expect(onSetEntry).toHaveBeenLastCalledWith("s2", "2026-10-27", 4.5)
   })
 
-  it("names each month over its first row, under a divider", () => {
-    // A week that runs from October into November.
+  it("names a month under its divider, and not a month that starts before the range", () => {
+    // A week that runs from October into November: 1 October is not in it,
+    // so October has no divider in view and no name.
     grid("week")
     const labels = document.querySelectorAll("[data-month-label]")
-    expect([...labels].map((label) => label.textContent)).toEqual(["October 2026", "November 2026"])
+    expect([...labels].map((label) => label.textContent)).toEqual(["November 2026"])
     // The November label sits just before 1 November's row.
-    const november = labels[1]
+    const november = labels[0]
     expect(
       november.nextElementSibling?.querySelector("[data-day-row]")?.getAttribute("data-day-row"),
     ).toBe("2026-11-01")
-    // Each name is the first thing in its own month, under the divider.
+    // The name is the first thing in its own month, under the divider.
     const groups = [...document.querySelectorAll("[data-month]")]
     expect(groups.map((group) => group.getAttribute("data-month"))).toEqual(["2026-10", "2026-11"])
     expect(groups[1].firstElementChild).toBe(november)
     expect(groups[1].className).toContain("border-t")
     expect(groups[0].className).not.toContain("border-t")
+    expect(groups[0].querySelector("[data-month-label]")).toBeNull()
+    cleanup()
+    // A month from its 1st is named.
+    grid("month")
+    expect([...document.querySelectorAll("[data-month-label]")].map((l) => l.textContent)).toEqual([
+      "October 2026",
+    ])
   })
 
   it("draws every month's divider in a year, and names this month and every second", () => {
@@ -196,12 +204,15 @@ describe("JournalGrid", () => {
       "October 2026",
       "December 2026",
     ])
-    // A name sits inside its own month, so it sticks only while that
-    // month's days scroll by.
+    // A name is not pinned: it sits in its own month, just above the
+    // month's first day, and scrolls out with the divider.
     for (const label of labels) {
-      expect(label.parentElement?.getAttribute("data-month")).toBe(
-        label.getAttribute("data-month-label"),
-      )
+      const month = label.getAttribute("data-month-label")
+      expect(label.parentElement?.getAttribute("data-month")).toBe(month)
+      expect(label.className).not.toContain("sticky")
+      expect(
+        label.nextElementSibling?.querySelector("[data-day-row]")?.getAttribute("data-day-row"),
+      ).toBe(`${month}-01`)
     }
     // A month's days are all there, named or not.
     expect(screen.getAllByTestId("journal-row")).toHaveLength(365)
@@ -293,10 +304,10 @@ describe("JournalGrid", () => {
     const scrolled = vi.spyOn(Element.prototype, "scrollTop", "set")
     try {
       grid("month")
-      // 900 down, less the 20 px of colours and the 20 px of the month's
-      // name over the rows, less half of what is left around the row:
-      // (300 - 40 - 20) / 2.
-      expect(scrolled).toHaveBeenLastCalledWith(740)
+      // 900 down, less the 20 px of colours, less half of what is left
+      // around the row: (300 - 20 - 20) / 2. A month's name is not pinned,
+      // so it does not cover a row.
+      expect(scrolled).toHaveBeenLastCalledWith(750)
     } finally {
       top.mockRestore()
       height.mockRestore()

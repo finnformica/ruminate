@@ -153,11 +153,11 @@ has no keys to validate.
   card so a phone does not scroll sideways), or as the **Grid**
   (`journal-grid.tsx`): one table, a row per day with its weekday and
   number at the left ("Mon 2", today's number in a chip), a column per
-  series, as a bullet journal's habit page is drawn. Each month starts
-  under a divider with its name ("November 2026"), and the name stays
-  under the row of colours while its own days scroll: each month is a
-  group of rows (`grid-cols-subgrid`), so the next month pushes the name
-  out and two names never overlap. A year names the current month and
+  series, as a bullet journal's habit page is drawn. Each month is a
+  group of rows (`grid-cols-subgrid`) that starts under a divider, with its
+  name ("November 2026") just below. The name is not pinned: it scrolls in
+  and out with its divider, and a month whose first day is before the range
+  (a week that starts mid-month) has no divider in view and no name. A year names the current month and
   every second month from it (`month-labels.ts`: the step is 2, or 3 when
   rows are too short to keep two names a name's height apart); the other
   months have the divider alone. A thin line above each Monday starts a
@@ -194,7 +194,8 @@ has no keys to validate.
   (a dashed outline on a grey fill, no data, not tappable), so a straight
   line divides the months: one element per boundary, the grid's full
   height. Each month's short name ("Oct") sits over its first column,
-  every month when the names fit, else this month and every second or third
+  beside its divider; the month the heatmap opens in is named only when
+  the heatmap opens on its 1st. Every month when the names fit, else this month and every second or third
   (`fitMonthLabels` in `month-labels.ts`, at the narrowest column: the
   desktop card). The day axis names all seven weekdays when a row is tall
   enough for each name, else Mon, Wed and Fri (`axisWeekdays`, from the

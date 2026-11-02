@@ -124,21 +124,41 @@ describe("ActivityHeatmap", () => {
     ).toHaveLength(0)
   })
 
-  it("names every month over its first column, when the names fit", () => {
-    heatmap("2026-10-29")
-    expect(labels()).toEqual(["Aug", "Sept", "Oct", "Nov"])
-    const columns = [...document.querySelectorAll('[role="columnheader"]')]
-    const named = columns.flatMap((column, c) =>
+  const namedColumns = () =>
+    [...document.querySelectorAll('[role="columnheader"]')].flatMap((column, c) =>
       column.getAttribute("data-month-label") ? [c] : [],
     )
-    expect(named).toEqual([0, 4, 9, 14])
+
+  it("names a month only beside its divider, never the month it opens in mid-month", () => {
+    // From Monday 10 August: 1 August is before the heatmap, so August has
+    // no divider and no name.
+    heatmap("2026-10-29")
+    expect(labels()).toEqual(["Sept", "Oct", "Nov"])
+    expect(namedColumns()).toEqual([4, 9, 14])
+    // Each name is over the column its divider stands before.
+    const dividers = [...document.querySelectorAll<HTMLElement>("[data-month-divider]")]
+    expect(dividers.map((divider) => divider.style.gridColumn)).toEqual(
+      namedColumns().map((c) => `${c + 2} / span 1`),
+    )
+    cleanup()
+    // From Monday 31 August: August's one day has no name either.
+    heatmap("2026-11-19")
+    expect(labels()).toEqual(["Sept", "Oct", "Nov"])
+    expect(namedColumns()[0]).toBe(1)
   })
 
-  it("thins the names when two would overlap, and always names this month", () => {
-    // From Monday 31 August: August has one column, and September starts
-    // in the next, too close for both names.
-    heatmap("2026-11-19")
-    expect(labels()).toEqual(["Sept", "Nov"])
+  it("names the month it opens in when it opens on the 1st", () => {
+    // From Monday 1 June: June starts in the first column.
+    heatmap("2026-08-20")
+    expect(labels()).toEqual(["Jun", "Jul", "Aug"])
+    expect(namedColumns()).toEqual([0, 5, 10])
+  })
+
+  it("does not pin a name", () => {
+    heatmap("2026-10-29")
+    for (const label of document.querySelectorAll("[data-month-label]")) {
+      expect(label.className).not.toContain("sticky")
+    }
   })
 
   it("names every weekday on the day axis, and marks today", () => {

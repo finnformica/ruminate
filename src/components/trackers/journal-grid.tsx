@@ -42,10 +42,12 @@ type Editing = { seriesId: string; day: DayString; anchor: HTMLElement }
  * page is drawn (Finn turned it on its side, 2026-10-29). At the left of each
  * day, its weekday and its number ("Mon 2"), today's number in a chip; a
  * thin line above each Monday starts a week; each month starts under a
- * divider with its name ("November 2026"), which stays under the row of
- * colours while its days scroll by (Finn, 2026-11-02). A year names the
- * current month and every second or third month from it (month-labels.ts);
- * the others have the divider alone. Above each
+ * divider with its name ("November 2026") just below it. The name scrolls
+ * with its divider and is not pinned: a month whose first day is before the
+ * range (a week that starts mid-month) has no divider in view, and no name
+ * (Finn, 2026-11-02). A year names the current month and every second or
+ * third month from it (month-labels.ts); the others have the divider alone.
+ * Above each
  * column, only the series's colour: the Today strip's chips above the grid
  * are its legend, and the name is the column's label for a screen reader.
  *
@@ -85,8 +87,9 @@ export function JournalGrid({
   // The days a cell can be logged on, and the keyboard moved to.
   const loggable = React.useMemo(() => days.filter((day) => day <= today), [days, today])
   const { column, cell, pitch } = SIZES[range]
-  // The range's days by month, and the months whose name is drawn: every
-  // one in a week or a month, every second or third in a year.
+  // The range's days by month, and the months whose name is drawn: those
+  // whose first day, and so whose divider, is in the range; in a year, every
+  // second or third of them.
   const months = React.useMemo(() => {
     const groups: { month: MonthString; days: DayString[] }[] = []
     for (const day of days) {
@@ -97,7 +100,7 @@ export function JournalGrid({
     return groups
   }, [days])
   const labelled = React.useMemo(() => {
-    const all = months.map((group) => group.month)
+    const all = months.filter((group) => group.days[0].endsWith("-01")).map((group) => group.month)
     return range === "year"
       ? labelledMonths(all, monthOf(today), yearLabelStep(pitch))
       : new Set(all)
@@ -172,10 +175,9 @@ export function JournalGrid({
       box.scrollTop = 0
       return
     }
-    // What stays put over the rows: the colours, and a month's name.
+    // What stays put over the rows: the colours.
     const colours = box.querySelector<HTMLElement>("[data-series-row]")
-    const month = box.querySelector<HTMLElement>("[data-month-label]")
-    const fixed = (colours?.offsetHeight ?? 0) + (month?.offsetHeight ?? 0)
+    const fixed = colours?.offsetHeight ?? 0
     box.scrollTop = row.offsetTop - fixed - (box.clientHeight - fixed - row.offsetHeight) / 2
   }, [days, today])
 
@@ -190,8 +192,8 @@ export function JournalGrid({
       className="flex min-h-0 flex-1 flex-col"
     >
       {/* The scroll padding keeps a cell the keyboard moves to clear of the
-          colours, the month's name and the day column over it. */}
-      <div ref={scroller} className="min-h-0 flex-1 scroll-pl-20 scroll-pt-16 overflow-auto pb-3">
+          colours and the day column over it. */}
+      <div ref={scroller} className="min-h-0 flex-1 scroll-pl-20 scroll-pt-10 overflow-auto pb-3">
         <div
           role="grid"
           aria-label="Days by series"
@@ -228,9 +230,8 @@ export function JournalGrid({
           </div>
           {months.map(({ month, days: monthDays }, m) => (
             // A month is a group of rows on the grid's own columns, under a
-            // divider. Its name sticks under the colours only while its own
-            // days scroll by: the next month pushes it out, so two names
-            // never overlap (Finn, 2026-11-02).
+            // divider, its name just below the divider. The name is not
+            // pinned: it scrolls out with its divider (Finn, 2026-11-02).
             <div
               key={month}
               role="rowgroup"
@@ -241,12 +242,10 @@ export function JournalGrid({
               )}
             >
               {labelled.has(month) ? (
-                // The name stays at the left when the grid scrolls sideways.
-                <div
-                  aria-hidden
-                  data-month-label={month}
-                  className="sticky top-8 z-[15] col-span-full bg-bg-card"
-                >
+                // The divider runs the grid's full width, so it stays in view
+                // when the grid scrolls sideways; the name stays at the left
+                // with it.
+                <div aria-hidden data-month-label={month} className="col-span-full">
                   <span className="sticky left-0 inline-block px-3 py-1.5 text-xs font-bold leading-4 text-text-secondary">
                     {monthLabel(month)}
                   </span>
