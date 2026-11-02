@@ -189,7 +189,13 @@ has no keys to validate.
   column a week from Monday with this week at the right edge, a cell in the
   colour of each series logged that day (`seriesOnDay`; split into diagonal
   bands when there is more than one), today with a ring and the rest of
-  this week dashed; a legend of the series below it; then **Recent**
+  this week dashed. A stepped line in the gaps between cells divides the
+  months; each month's short name ("Oct") sits over the week it starts in,
+  every month when the names fit, else this month and every second or third
+  (`fitMonthLabels` in `month-labels.ts`, at the narrowest column: the
+  desktop card). The day axis names Mon, Wed and Fri, and today's weekday
+  in bold; a dot under the last week marks today's (Finn, 2026-11-02). A
+  legend of the series is below it; then **Recent**
   (`recentEntries`): the newest entries up to today as rows of day, series
   and the entry's text after the day (`Entry.detail`, read only), five at
   first and ten more for each **Show more**. The heatmap is for reading; the

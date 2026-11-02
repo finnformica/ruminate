@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { MONTH_LABEL_HEIGHT, labelledMonths, yearLabelStep } from "./month-labels"
+import { MONTH_LABEL_HEIGHT, fitMonthLabels, labelledMonths, yearLabelStep } from "./month-labels"
 
 const YEAR = Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, "0")}`)
 const DAYS_IN = (month: string) =>
@@ -71,5 +71,57 @@ describe("labelledMonths", () => {
         expect(spans[i].top - spans[i - 1].end).toBeGreaterThanOrEqual(MONTH_LABEL_HEIGHT)
       }
     }
+  })
+})
+
+describe("fitMonthLabels", () => {
+  // The heatmap's narrowest week column: the desktop card (21 px) and a
+  // phone at 390 px wide (25 px); a short month's name ("Sept") and the
+  // space after it are 34 px wide.
+  const WIDTH = 34
+  const at = (pitch: number, columns: [string, number][]) =>
+    columns.map(([month, column]) => ({ month, start: column * pitch }))
+
+  it("names every month when the names fit", () => {
+    for (const pitch of [21, 25]) {
+      const months = at(pitch, [
+        ["2026-08", 0],
+        ["2026-09", 3],
+        ["2026-10", 7],
+      ])
+      expect([...fitMonthLabels(months, "2026-10", WIDTH)]).toEqual([
+        "2026-08",
+        "2026-09",
+        "2026-10",
+      ])
+    }
+  })
+
+  it("names this month and every second when two names are a column apart", () => {
+    for (const pitch of [21, 25]) {
+      const months = at(pitch, [
+        ["2026-08", 0],
+        ["2026-09", 1],
+        ["2026-10", 5],
+        ["2026-11", 9],
+      ])
+      const named = fitMonthLabels(months, "2026-11", WIDTH)
+      expect([...named]).toEqual(["2026-09", "2026-11"])
+      // No two names closer than a name's width.
+      const starts = months.filter((m) => named.has(m.month)).map((m) => m.start)
+      for (let i = 1; i < starts.length; i++) {
+        expect(starts[i] - starts[i - 1]).toBeGreaterThanOrEqual(WIDTH)
+      }
+    }
+  })
+
+  it("names only this month when no step fits", () => {
+    const months = at(1, [
+      ["2026-09", 0],
+      ["2026-10", 1],
+      ["2026-11", 2],
+      ["2026-12", 3],
+    ])
+    expect([...fitMonthLabels(months, "2026-11", WIDTH)]).toEqual(["2026-11"])
   })
 })
