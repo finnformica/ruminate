@@ -79,7 +79,7 @@ describe("axisWeekdays", () => {
 })
 
 describe("ActivityHeatmap", () => {
-  it("draws one straight divider element per month boundary, the grid's full height", () => {
+  it("draws one straight divider per month boundary, in its own track, Monday to Sunday", () => {
     heatmap("2026-10-29")
     const dividers = [...document.querySelectorAll<HTMLElement>("[data-month-divider]")]
     expect(dividers.map((divider) => divider.dataset.monthDivider)).toEqual([
@@ -87,16 +87,27 @@ describe("ActivityHeatmap", () => {
       "2026-10",
       "2026-11",
     ])
-    // Each in the gap before its month's first column (the day axis is
-    // grid column 1), from the names down past Sunday.
-    expect(dividers.map((divider) => divider.style.gridColumn)).toEqual([
-      "6 / span 1",
-      "11 / span 1",
-      "16 / span 1",
-    ])
-    for (const divider of dividers) expect(divider.style.gridRow).toBe("1 / 9")
-    // No cell draws a piece of a line.
+    // The tracks: the day axis, fifteen columns, and a narrow track before
+    // each month's first column, which the divider stands in, with a gap
+    // each side of it.
+    const template = screen.getByTestId("activity-heatmap").style.gridTemplateColumns
+    expect(template.split(" minmax(0, 1fr)").length - 1).toBe(15)
+    expect(template.match(/6px/g)).toHaveLength(3)
+    expect(dividers.map((divider) => divider.style.gridColumn)).toEqual(["6", "12", "18"])
+    // From the Monday row (2) down past Sunday (8), not up into the names.
+    for (const divider of dividers) expect(divider.style.gridRow).toBe("2 / 9")
+    // No cell draws a piece of a line, and no cell sits in a divider's track.
     expect(document.querySelectorAll("[data-divider]")).toHaveLength(0)
+    const cells = document.querySelectorAll<HTMLElement>('[role="gridcell"]')
+    for (const cell of cells) expect(["6", "12", "18"]).not.toContain(cell.style.gridColumn)
+  })
+
+  it("draws days as rounded squares, not circles", () => {
+    heatmap("2026-10-29")
+    for (const cell of document.querySelectorAll('[role="gridcell"]')) {
+      expect(cell.className).toContain("rounded-sm")
+      expect(cell.className).not.toMatch(/rounded(-full|-lg)?( |$)/)
+    }
   })
 
   it("draws the other month's days in a split week as placeholders with no data", () => {
@@ -109,8 +120,10 @@ describe("ActivityHeatmap", () => {
       expect(placeholder.hasAttribute("data-day")).toBe(false)
       expect(placeholder.hasAttribute("aria-label")).toBe(false)
       expect(placeholder.tabIndex).toBe(-1)
-      expect(placeholder.className).toContain("border-dashed")
-      expect(placeholder.className).toContain("bg-bg-secondary")
+      // Striped, with no outline and no fill.
+      expect(placeholder.style.backgroundImage).toContain("repeating-linear-gradient")
+      expect(placeholder.className).not.toContain("border")
+      expect(placeholder.className).not.toContain("bg-")
     }
     // Every day is drawn once; only the two logged days count as entries.
     expect(document.querySelectorAll("[data-day]")).toHaveLength(84)
@@ -124,9 +137,11 @@ describe("ActivityHeatmap", () => {
     ).toHaveLength(0)
   })
 
-  const namedColumns = () =>
-    [...document.querySelectorAll('[role="columnheader"]')].flatMap((column, c) =>
-      column.getAttribute("data-month-label") ? [c] : [],
+  // The tracks the names stand in: a divider's for a month that starts in
+  // the heatmap, the first column's for the month it opens on.
+  const namedTracks = () =>
+    [...document.querySelectorAll<HTMLElement>("[data-month-label]")].map(
+      (label) => label.style.gridColumn,
     )
 
   it("names a month only beside its divider, never the month it opens in mid-month", () => {
@@ -134,24 +149,29 @@ describe("ActivityHeatmap", () => {
     // no divider and no name.
     heatmap("2026-10-29")
     expect(labels()).toEqual(["Sept", "Oct", "Nov"])
-    expect(namedColumns()).toEqual([4, 9, 14])
-    // Each name is over the column its divider stands before.
+    // Each name sits on top of its divider: the same track, the row above.
     const dividers = [...document.querySelectorAll<HTMLElement>("[data-month-divider]")]
-    expect(dividers.map((divider) => divider.style.gridColumn)).toEqual(
-      namedColumns().map((c) => `${c + 2} / span 1`),
-    )
+    expect(namedTracks()).toEqual(dividers.map((divider) => divider.style.gridColumn))
+    for (const label of document.querySelectorAll<HTMLElement>("[data-month-label]")) {
+      expect(label.style.gridRow).toBe("1")
+      expect(label.className).toContain("justify-center")
+      // A little smaller than the text around it.
+      expect(label.className).toContain("text-[11px]")
+    }
     cleanup()
     // From Monday 31 August: August's one day has no name either.
     heatmap("2026-11-19")
     expect(labels()).toEqual(["Sept", "Oct", "Nov"])
-    expect(namedColumns()[0]).toBe(1)
+    // September's divider stands before the second column.
+    expect(namedTracks()[0]).toBe("3")
   })
 
   it("names the month it opens in when it opens on the 1st", () => {
     // From Monday 1 June: June starts in the first column.
     heatmap("2026-08-20")
     expect(labels()).toEqual(["Jun", "Jul", "Aug"])
-    expect(namedColumns()).toEqual([0, 5, 10])
+    // June over the first column; July and August on their dividers.
+    expect(namedTracks()).toEqual(["2", "7", "13"])
   })
 
   it("does not pin a name", () => {
@@ -187,10 +207,11 @@ describe("ActivityHeatmap", () => {
     expect([...current].map((day) => day.getAttribute("data-day"))).toEqual(["2026-10-29"])
     expect(cell("2026-10-29").className).toContain("ring-2")
     // One dot, under October's half of the last week: the column today is
-    // in (after the day axis, the 14th of 15).
+    // in (the 14th of 15), past the day axis and three divider tracks.
     const marks = screen.getAllByTestId("heatmap-today-mark")
     expect(marks).toHaveLength(1)
-    const dots = [...marks[0].parentElement!.parentElement!.children]
-    expect(dots.findIndex((dot) => dot.contains(marks[0]))).toBe(14)
+    expect(marks[0].dataset.column).toBe("13")
+    expect(marks[0].style.gridColumn).toBe("17")
+    expect(marks[0].style.gridRow).toBe("9")
   })
 })

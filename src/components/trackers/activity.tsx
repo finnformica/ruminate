@@ -87,8 +87,9 @@ const HEATMAP_MIN_WIDTH = 262
 /** The gap between columns and between rows (`gap-1`). */
 const HEATMAP_GAP = 4
 
-/** A month's short name at its widest ("Sept", four letters of text-xs)
- * and the space after it. */
+/** A month's short name at its widest ("Sept", four letters at 11 px) and
+ * room to spare: two names, each centred over its divider, at least this
+ * far apart never touch. */
 const HEATMAP_LABEL_WIDTH = 34
 
 /** A weekday's name on the day axis: a 12 px line (`text-[10px]
@@ -136,18 +137,31 @@ export function heatmapColumns(weeks: readonly DayString[][]): HeatmapColumn[] {
   return columns
 }
 
+/** The track a divider stands in, between two months' columns: with the
+ * gap each side of it, the line has room to breathe (Finn, 2026-11-02). */
+const DIVIDER_TRACK = 6
+
+/** Diagonal stripes for a placeholder: a day of the other month in a split
+ * week, shown as no day at all. */
+const STRIPES: React.CSSProperties = {
+  backgroundImage:
+    "repeating-linear-gradient(135deg, var(--color-border-secondary) 0 1px, transparent 1px 4px)",
+}
+
 /**
  * The heatmap: one column a week, one row a weekday from Monday, the week
- * today is in at the right edge (`heatmapWeeks`). A cell is filled in the
- * colour of the series logged that day, split into bands when there is more
- * than one. Today has a ring, its weekday is named in bold and a dot sits
- * under its column; the days of this week still to come have a dashed
- * outline. A week that runs into a new month is split in two columns
- * (`heatmapColumns`), the other month's days drawn as placeholders (a
- * dashed outline on a grey fill, no data), so one straight line, a single
- * element the grid's full height, divides the months. Each month whose
- * first day is in the heatmap is named over its first column, beside its
- * divider (the month the heatmap opens in has no divider, and no name): every month when the names fit, else this month
+ * today is in at the right edge (`heatmapWeeks`). A cell is a rounded
+ * square filled in the colour of the series logged that day, split into
+ * bands when there is more than one. Today has a ring, its weekday is named
+ * in bold and a dot sits under its column; the days of this week still to
+ * come have a dashed outline. A week that runs into a new month is split in
+ * two columns (`heatmapColumns`), the other month's days drawn as striped
+ * placeholders (no data), so one straight line divides the months: a
+ * single element in a narrow track of its own between the two months, from
+ * the Monday row down to Sunday, with the month's name above it. A month
+ * whose first day is in the heatmap is named; the month the heatmap opens
+ * in has no divider, and is named over its first column only when the
+ * heatmap opens on its 1st. Every month when the names fit, else this month
  * and every second or third (month-labels.ts, as the Grid's year does;
  * Finn, 2026-11-02). The day axis names every weekday when a row is tall
  * enough, else Mon, Wed and Fri (`axisWeekdays`). The columns share the
@@ -167,18 +181,35 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
       ),
     [columns],
   )
+  // The grid's tracks: the day axis, then each column, with a divider's
+  // track before each month's first column. `track[c]` is column c's.
+  const { template, track } = React.useMemo(() => {
+    const parts = ["auto"]
+    const track: number[] = []
+    columns.forEach((column, c) => {
+      if (c > 0 && column.month !== columns[c - 1].month) parts.push(`${DIVIDER_TRACK}px`)
+      parts.push("minmax(0, 1fr)")
+      track.push(parts.length)
+    })
+    return { template: parts.join(" "), track }
+  }, [columns])
+  const dividers = starts.length - 1
   // The months named: those whose first day, and so whose divider, is in
   // the heatmap. The month the heatmap opens in is named only when it opens
   // on the 1st (Finn, 2026-11-02).
   const named = React.useMemo(() => {
-    const pitch = (HEATMAP_MIN_WIDTH + HEATMAP_GAP) / columns.length
+    const room = HEATMAP_MIN_WIDTH + HEATMAP_GAP - dividers * (DIVIDER_TRACK + HEATMAP_GAP)
+    const pitch = room / columns.length
     const shown = starts.filter(({ column }) => column > 0 || columns[0].days[0]?.endsWith("-01"))
     return fitMonthLabels(
-      shown.map(({ month, column }) => ({ month, start: column * pitch })),
+      shown.map(({ month, column }) => ({
+        month,
+        start: column * pitch + (track[column] - 2 - column) * (DIVIDER_TRACK + HEATMAP_GAP),
+      })),
       monthOf(today),
       HEATMAP_LABEL_WIDTH,
     )
-  }, [starts, columns, today])
+  }, [starts, columns, track, dividers, today])
   const todayWeekday = weekdayFromMonday(today)
 
   // A cell's height, to tell whether every weekday's name fits beside it.
@@ -193,6 +224,12 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
   }, [columns])
   const weekdays = axisWeekdays(rowHeight, todayWeekday)
 
+  // Every item has its place: rows are the names (1), Monday to Sunday (2
+  // to 8) and today's dot (9).
+  const at = (column: number, row: number | string): React.CSSProperties => ({
+    gridColumn: column,
+    gridRow: row,
+  })
   return (
     <div className="flex flex-col gap-3">
       <div
@@ -200,26 +237,29 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
         role="grid"
         aria-label="Active days, by week"
         data-testid="activity-heatmap"
-        className="relative grid items-center gap-1"
-        style={{ gridTemplateColumns: `auto repeat(${columns.length}, minmax(0, 1fr))` }}
+        className="grid items-center gap-1"
+        style={{ gridTemplateColumns: template }}
       >
+        {/* The names: over its divider for a month that starts in the
+            heatmap, over the first column for the month it opens on. */}
         <div role="row" className="contents">
-          <div aria-hidden />
-          {columns.map((column, c) => {
-            const month = starts.find((entry) => entry.column === c)?.month
-            const label = month && named.has(month) ? monthShortLabel(month) : null
-            return (
+          {starts.map(({ month, column }) =>
+            named.has(month) ? (
               <div
-                key={c}
+                key={month}
                 role="columnheader"
-                aria-label={label ?? undefined}
-                data-month-label={label ? month : undefined}
-                className="overflow-visible whitespace-nowrap text-xs leading-4 text-text-secondary"
+                aria-label={monthShortLabel(month)}
+                data-month-label={month}
+                className={cx(
+                  "flex overflow-visible whitespace-nowrap text-[11px] leading-4 text-text-secondary",
+                  column > 0 && "justify-center",
+                )}
+                style={at(column > 0 ? track[column] - 1 : track[column], 1)}
               >
-                {label}
+                {monthShortLabel(month)}
               </div>
-            )
-          })}
+            ) : null,
+          )}
         </div>
         {WEEKDAY_NAMES.map((weekday, d) => (
           <div key={weekday} role="row" aria-label={weekday} className="contents">
@@ -231,6 +271,7 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
                 "pr-1 text-[10px] leading-3 tabular-nums",
                 d === todayWeekday ? "font-bold text-text" : "text-text-secondary",
               )}
+              style={at(1, d + 2)}
             >
               {weekdays.has(d) ? WEEKDAY_SHORT[d] : null}
             </div>
@@ -244,7 +285,8 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
                     role="gridcell"
                     aria-hidden
                     data-placeholder
-                    className="aspect-square rounded border border-dashed border-border bg-bg-secondary opacity-60"
+                    className="aspect-square rounded-sm"
+                    style={{ ...at(track[c], d + 2), ...STRIPES }}
                   />
                 )
               }
@@ -265,42 +307,45 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
                   data-day={day}
                   data-series={on.length}
                   className={cx(
-                    "aspect-square rounded",
+                    "aspect-square rounded-sm",
                     future ? "border border-dashed border-border" : "bg-bg-secondary",
                     day === today && "ring-2 ring-text-secondary",
                   )}
-                  style={future ? undefined : cellFill(on.map((s) => s.colour))}
+                  style={{
+                    ...at(track[c], d + 2),
+                    ...(future ? undefined : cellFill(on.map((s) => s.colour))),
+                  }}
                 />
               )
             })}
           </div>
         ))}
-        {/* Under today's column, a dot: where you are. */}
-        <div aria-hidden className="contents">
-          <div />
-          {columns.map((column, c) => (
-            <div key={c} className="flex h-1.5 justify-center">
-              {column.days.includes(today) ? (
-                <span
-                  data-testid="heatmap-today-mark"
-                  className="size-1.5 rounded-full bg-text-secondary"
-                />
-              ) : null}
-            </div>
-          ))}
-        </div>
-        {/* A line between two months: one element down the gap before the
-            new month's first column, from the names to the last weekday.
-            Placed by its grid area, it takes no cell of its own. */}
+        {/* A line between two months: one element in its own track, from
+            the Monday row down to Sunday, under the month's name. */}
         {starts.slice(1).map(({ month, column }) => (
           <div
             key={month}
             aria-hidden
             data-month-divider={month}
-            className="pointer-events-none absolute inset-y-0 -left-[3px] w-px bg-border"
-            style={{ gridColumn: `${column + 2} / span 1`, gridRow: "1 / 9" }}
+            className="w-px self-stretch justify-self-center bg-border"
+            style={at(track[column] - 1, "2 / 9")}
           />
         ))}
+        {/* Under today's column, a dot: where you are. */}
+        {columns.map((column, c) =>
+          column.days.includes(today) ? (
+            <div
+              key={c}
+              aria-hidden
+              data-testid="heatmap-today-mark"
+              data-column={c}
+              className="flex h-1.5 justify-center"
+              style={at(track[c], 9)}
+            >
+              <span className="size-1.5 rounded-full bg-text-secondary" />
+            </div>
+          ) : null,
+        )}
       </div>
       {series.length > 0 ? (
         <ul
