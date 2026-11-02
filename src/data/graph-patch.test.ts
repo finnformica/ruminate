@@ -86,6 +86,49 @@ describe("patchSnapshot", () => {
     expect(childIdsOf(after, "n")).toEqual(["a", "b"])
   })
 
+  it("on a lazy graph, a touched block whose children are not in hand stays unloaded", () => {
+    // Finn, 2026-11-02: on a fresh device the log pull touched every note
+    // while the graph held one preview child each; the patch marked the
+    // note loaded, so expanding it showed the preview alone.
+    const lazy = {
+      ...buildGraphSnapshot([node("n"), node("a")], [link("n", "a", "a0")]),
+      loaded: new Set<string>(),
+    }
+    const patched = patchSnapshot(lazy, keys(["n"]), {
+      nodes: [node("n", "n edited")],
+      // The store knows three children; the graph holds the node of one.
+      links: [link("n", "a", "a0"), link("n", "b", "a1"), link("n", "c", "a2")],
+    })
+    expect(patched.nodes.get("n")?.text).toBe("n edited")
+    expect(patched.loaded?.has("n")).toBe(false)
+    // What it showed, still live, stays; nothing new under a partial list.
+    expect(childIdsOf(patched, "n")).toEqual(["a"])
+    // The far ends read beside the touched block (`patchGraph`): held as
+    // nodes, so the list is whole and the block loaded; they stay unloaded.
+    const withFar = patchSnapshot(lazy, keys(["n"]), {
+      nodes: [node("n", "n edited"), node("b"), node("c")],
+      links: [link("n", "a", "a0"), link("n", "b", "a1"), link("n", "c", "a2")],
+    })
+    expect(withFar.loaded?.has("n")).toBe(true)
+    expect(withFar.loaded?.has("b")).toBe(false)
+    expect(childIdsOf(withFar, "n")).toEqual(["a", "b", "c"])
+    // Every child in hand (a block created with its children in one batch):
+    // loaded, and the list whole.
+    const whole = patchSnapshot(lazy, keys(["n", "b", "c"]), {
+      nodes: [node("n"), node("b"), node("c")],
+      links: [link("n", "a", "a0"), link("n", "b", "a1"), link("n", "c", "a2")],
+    })
+    expect(whole.loaded?.has("n")).toBe(true)
+    expect(childIdsOf(whole, "n")).toEqual(["a", "b", "c"])
+    // A block loaded before stays loaded, its list rebuilt from the store.
+    const kept = patchSnapshot({ ...whole, loaded: new Set(["n"]) }, keys(["n"]), {
+      nodes: [node("n")],
+      links: [link("n", "a", "a0"), link("n", "c", "a2")],
+    })
+    expect(kept.loaded?.has("n")).toBe(true)
+    expect(childIdsOf(kept, "n")).toEqual(["a", "c"])
+  })
+
   it("does not touch the maps it was given", () => {
     const before = graph()
     patchSnapshot(before, keys(["a"], ["n|b|child"]), { nodes: [], links: [] })

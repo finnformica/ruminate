@@ -33,7 +33,25 @@ describe("a lazily loaded graph", () => {
     const graph = partial()
     const view = noteView("n", graph)
     expect(view?.doc.rootBlockIds).toEqual(["a"])
-    expect([...(view?.unloaded ?? [])]).toEqual(["n"])
+    // The row `a`, open and not loaded, is reported too, though the graph
+    // holds nothing beneath it: the load says whether it is a leaf.
+    expect([...(view?.unloaded ?? [])]).toEqual(["a", "n"])
+    // An open ROW beneath the root whose children are in part: reported,
+    // and drawn with nothing beneath it, never the part in hand (Finn,
+    // 2026-11-02). The row stays a row.
+    const deeper = mergeFragment(graph, {
+      nodes: [node("a"), node("a1")],
+      links: [link("n", "a", "a0"), link("a", "a1", "a0")],
+      loaded: ["n"],
+    })
+    const rows = noteView("n", deeper)
+    expect([...(rows?.unloaded ?? [])]).toEqual(["a"])
+    expect(rows?.doc.rootBlockIds).toEqual(["a"])
+    expect(rows?.doc.blocks.a.children).toEqual([])
+    // A closed row is drawn closed with what it holds, and not reported.
+    const folded = walkGraph(["a"], deeper, { expanded: () => false, rootId: "n" })
+    expect(folded.unloaded.size).toBe(0)
+    expect(folded.doc.blocks.a.children).toEqual(["a1"])
     // Loaded whole, nothing is reported.
     const whole = mergeFragment(graph, {
       nodes: [node("a"), node("b")],

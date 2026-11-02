@@ -375,10 +375,22 @@ The rules that keep a partial graph honest:
   part** (`partsToOps`): the rows an unloaded parent did not show stay
   where they are. A created node is loaded (it has no children but the
   batch's).
-- **The patch after a batch adds a link only under a loaded source**
-  (`patchSnapshot`); a touched block comes with every adjacent link, so it
-  is loaded after the patch. A change inside a note not opened this
-  session reaches the graph when the note is opened.
+- **The patch after a batch reads the far ends it lacks** (`patchGraph`,
+  one `nodesView` read), so a touched block's child list is whole and the
+  block is loaded after the patch; the far ends land as nodes, unloaded.
+  A touched block is called loaded only when every live child link the
+  store found at it reaches a node the graph holds (`patchSnapshot`); one
+  whose children are not in hand stays unloaded and keeps what it showed.
+  Finn, 2026-11-02: a pulled edit to a note the Root frame held by its
+  preview child alone marked it loaded with that one child, and expanding
+  it showed the preview alone. A change inside a note not opened this
+  session reaches the graph when the note is opened, or the row when it
+  is expanded.
+- **An open row whose children are not in hand shows a loading mark and
+  nothing beneath it** (`GraphView.unloaded`, `BlockEditor.loading`),
+  never the part the graph holds, until the subtree lands. A row the
+  graph holds no children of is reported too: the load says whether it
+  is a leaf.
 - **A delete of a note reads it whole first** (`useDeleteNote`): what only
   it reaches is a question of its subtree and of what else reaches each
   block. A block delete and a place count happen in the open note, whose
@@ -747,6 +759,12 @@ one.
     0), and the skeleton waits for the device's own notes and nothing else
     (`seeded`): never a partial list that looks complete. The snapshot and
     the history come after the first paint.
+12. **An expanded row never shows a partial child list** (Finn,
+    2026-11-02, the same test: some expanded notes showed some children,
+    and a focus showed them all). The patch after a pulled or local edit
+    no longer marks a touched block loaded unless its children are in
+    hand (section 8), and the walk draws a loading mark under an open row
+    whose children are on their way.
 
 ## Decisions in one list
 

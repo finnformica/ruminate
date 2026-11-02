@@ -86,7 +86,8 @@ export function mergeFragment(graph: GraphSnapshot, fragment: GraphFragment): Gr
  * `rows` is what the store answered for `touched` (`NoteStore.liveEntitiesOf`):
  * the live rows of the touched blocks, and every live link among the
  * touched links or adjacent to a touched block, live by its own `deleted`
- * row. A touched block the store did not answer for is gone (tombstoned, or
+ * row — and, on a lazily loaded graph, the live far ends of those links
+ * the graph did not hold (`patchGraph`), which land as nodes, unloaded. A touched block the store did not answer for is gone (tombstoned, or
  * never created); a link is kept only when it is a child link and both its
  * ends are in the patched node map — the rule `buildGraphSnapshot` applies.
  * The links re-judged are the touched ones, the ones the graph held
@@ -94,10 +95,16 @@ export function mergeFragment(graph: GraphSnapshot, fragment: GraphFragment): Gr
  * block that was tombstoned takes its links out, and one that was revived
  * brings them back.
  *
- * On a lazily loaded graph (`loaded`), a touched block's child list comes
- * whole with the adjacent links, so the block is loaded after the patch;
- * and a link under a source the graph does not hold in full is not added —
- * the note it is in shows it when it is opened and loaded whole.
+ * On a lazily loaded graph (`loaded`), a touched block is loaded after the
+ * patch when it was before, or when every live child link the store found
+ * at it reaches a node the graph holds (a block created with its children
+ * in one batch): its child list then comes whole with the adjacent links.
+ * A touched block whose children the graph does not hold stays unloaded —
+ * the log pull on a fresh device touches every note while the graph holds
+ * one preview child each (Finn, 2026-11-02: expanding such a note showed
+ * the preview alone) — and keeps the links it held that are still live; a
+ * link under a source not held in full is not added. The note it is in
+ * shows it when it is opened, or the row when it is expanded.
  */
 export function patchSnapshot(
   graph: GraphSnapshot,
@@ -114,9 +121,24 @@ export function patchSnapshot(
       loaded?.delete(id)
     } else {
       nodes.set(id, row)
-      loaded?.add(id)
     }
   }
+  // A far end the store answered beside the touched blocks: held from now
+  // on, its own children not.
+  for (const row of rows.nodes) if (!touched.blocks.has(row.id)) nodes.set(row.id, row)
+  // Whether a touched block's children are all in hand: every live child
+  // link the store found at it reaches a node the patched graph holds.
+  const complete = (id: string) =>
+    rows.links.every(
+      (link) => link.source_id !== id || link.kind !== CHILD_KIND || nodes.has(link.destination_id),
+    )
+  if (loaded !== undefined) {
+    for (const id of touched.blocks) {
+      if (fresh.has(id) && !loaded.has(id) && complete(id)) loaded.add(id)
+    }
+  }
+  const heldUnder = (source: string, destination: string) =>
+    (graph.childLinks.get(source) ?? []).some((link) => link.destination_id === destination)
 
   const idOf = (link: LinkRow) => linkEntityId(link.source_id, link.destination_id, link.kind)
   const judged = new Set<string>(touched.links)
@@ -129,7 +151,11 @@ export function patchSnapshot(
     judged.add(idOf(link))
     if (link.kind !== CHILD_KIND) continue
     if (!nodes.has(link.source_id) || !nodes.has(link.destination_id)) continue
-    if (loaded !== undefined && !loaded.has(link.source_id)) continue
+    // Under a source not held in full: only what the graph showed already
+    // (a note's preview child), still live; nothing new.
+    if (loaded !== undefined && !loaded.has(link.source_id)) {
+      if (!heldUnder(link.source_id, link.destination_id)) continue
+    }
     kept.set(idOf(link), link)
   }
 

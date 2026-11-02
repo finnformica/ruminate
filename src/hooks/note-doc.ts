@@ -19,6 +19,7 @@ import type { NoteId } from "../schema"
 import { rootToOps } from "./results-doc"
 
 const NOTHING_COLLAPSED: ReadonlySet<string> = new Set()
+const NOTHING_LOADING: ReadonlySet<string> = new Set()
 const NO_CONTEXT: ReadonlySet<string> = new Set()
 const NO_PIVOTS: LinkPivots = new Map()
 
@@ -212,6 +213,9 @@ export function useNoteDoc({
   return {
     doc: view?.doc ?? defaultDoc,
     collapsed: view?.collapsed ?? NOTHING_COLLAPSED,
+    /** The open rows whose children are on their way (`GraphView.unloaded`):
+     * drawn with a loading mark and nothing beneath them until they land. */
+    loading: view?.unloaded ?? NOTHING_LOADING,
     /** The rows kept only as context by the filter — drawn dimmed. */
     context: view?.context ?? NO_CONTEXT,
     /** How many rows the filter matched; null when nothing is filtered. */

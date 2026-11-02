@@ -874,9 +874,28 @@ export function databaseEnsureAll(): Promise<void> {
 async function patchGraph(activation: DatabaseModeRuntime, keys: EntityKeys) {
   if (runtime !== activation || !activation.store) return
   if (keys.blocks.size + keys.links.size === 0) return
-  const rows = await activation.store.liveEntitiesOf(keys)
+  let rows = await activation.store.liveEntitiesOf(keys)
   if (runtime !== activation) return
   const store = jotai()
+  // The far ends the graph does not hold: read too, so a touched block's
+  // child list is whole and the patch can call it loaded (a pulled edit
+  // to a note the Root frame holds by its preview child alone, a child
+  // created in a later page of the log than its parent, a block moved in
+  // from a note not opened). Their own children stay unloaded: the walk
+  // reports them when they open.
+  const held = store.get(databaseGraphAtom).nodes
+  const answered = new Set(rows.nodes.map((row) => row.id))
+  const missing = new Set<string>()
+  for (const link of rows.links) {
+    for (const id of [link.source_id, link.destination_id]) {
+      if (!answered.has(id) && !held.has(id)) missing.add(id)
+    }
+  }
+  if (missing.size > 0) {
+    const far = await activation.store.lazy.nodesView([...missing])
+    if (runtime !== activation) return
+    rows = { nodes: [...rows.nodes, ...far.nodes], links: rows.links }
+  }
   const patched = patchSnapshot(store.get(databaseGraphAtom), keys, rows)
   store.set(databaseGraphAtom, applyOps(patched, activation.pendingOps, Date.now()))
 }

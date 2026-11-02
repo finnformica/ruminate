@@ -21,6 +21,7 @@ import {
   databaseModeStatusAtom,
   databaseApplyOps,
   databaseEnsureAll,
+  databaseEnsureBlocks,
   databaseEventLog,
   eventLogVersionAtom,
   flushDatabaseMode,
@@ -31,7 +32,16 @@ import {
   stopDatabaseMode,
 } from "./database-mode"
 import type { D1NoteSource } from "./d1-note-source"
-import { CORPUS_ROOT_ID, NOTE_TYPE, NOTE_TYPES, docToGraph, noteDoc, rollup } from "./graph"
+import {
+  CORPUS_ROOT_ID,
+  NOTE_TYPE,
+  NOTE_TYPES,
+  childIdsOf,
+  docToGraph,
+  noteDoc,
+  noteView,
+  rollup,
+} from "./graph"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import type { NoteStore } from "./note-store"
@@ -445,6 +455,58 @@ describe("database mode boot", () => {
     expect(await notesOf(store)).toEqual({ "note-a": deep, "note-b": NOTE_B })
     await databaseEnsureAll()
     expect(graph().nodes.get("blk_a000000001")?.text).toBe("A child")
+  })
+
+  it("a note expanded before its children are loaded shows the full list, in order", async () => {
+    // Finn, 2026-11-02: on a fresh device, some expanded notes showed only
+    // some children; a focus on the note showed them all. The graph held
+    // the note's preview child alone (the first screen), a pulled edit to
+    // the note touched it, and the patch marked it loaded with the one
+    // child it had. Here the device has its snapshot, the pull brings one
+    // edit to the note, and the note is still reported for loading; the
+    // load brings every child in sibling order, and nothing beneath it is
+    // drawn before that.
+    const outline =
+      "- first\n  id:: blk_c000000001\n- second\n  id:: blk_c000000002\n" +
+      "  - nested\n    id:: blk_c000000003\n- third\n  id:: blk_c000000004\n"
+    const seeded = await seededStore({ "note-c": outline }, "500")
+    const { source } = stubSource({ events: [placed(501, "note-c", "note-c, edited")] })
+    await boot({ store: seeded, source })
+    // The edit has landed and touched the note: its direct children are
+    // read whole (the far ends the graph lacked), so the list is complete
+    // and the note loaded; the children's own lists are not in hand, and
+    // the walk says so for each open one, drawing nothing beneath it.
+    expect(graph().loaded?.has("note-c")).toBe(true)
+    expect(childIdsOf(graph(), "note-c")).toEqual([
+      "blk_c000000001",
+      "blk_c000000002",
+      "blk_c000000004",
+    ])
+    expect(childIdsOf(graph(), "blk_c000000002")).toEqual([])
+    const before = noteView("note-c", graph())
+    expect([...(before?.unloaded ?? [])].sort()).toEqual([
+      "blk_c000000001",
+      "blk_c000000002",
+      "blk_c000000004",
+    ])
+    expect(before?.doc.blocks.blk_c000000002.children).toEqual([])
+    // The expand loads the subtrees whole.
+    await databaseEnsureBlocks([...(before?.unloaded ?? [])])
+    expect(childIdsOf(graph(), "blk_c000000002")).toEqual(["blk_c000000003"])
+    const after = noteView("note-c", graph())
+    expect(after?.unloaded.size).toBe(0)
+    expect(after?.doc.rootBlockIds).toEqual(["blk_c000000001", "blk_c000000002", "blk_c000000004"])
+    expect(after?.doc.blocks.blk_c000000002.children).toEqual(["blk_c000000003"])
+    // A rename of the note on this device (the Root frame's row) touches
+    // it too, and leaves the list whole.
+    databaseApplyOps([{ op: "setText", id: "note-c", text: "note-c, renamed" }])
+    await flushDatabaseMode()
+    expect(graph().loaded?.has("note-c")).toBe(true)
+    expect(childIdsOf(graph(), "note-c")).toEqual([
+      "blk_c000000001",
+      "blk_c000000002",
+      "blk_c000000004",
+    ])
   })
 
   it("later boots serve local contents and pull only the log past the stored cursor", async () => {

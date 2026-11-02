@@ -497,7 +497,9 @@ export function parseProps(props: string | null): BlockProps | null {
 /** A walk's result: the doc, and the keys the fold rule closed — the rows
  * drawn with a chevron and nothing beneath them. `unloaded` is the open
  * rows whose children the graph does not hold yet (`GraphSnapshot.loaded`):
- * what the runtime loads next, on a lazily loaded graph; empty otherwise. */
+ * drawn with nothing beneath them and a loading mark, never the part the
+ * graph happens to hold, and what the runtime loads next, on a lazily
+ * loaded graph; empty otherwise. */
 export interface GraphView {
   doc: BlockDoc
   collapsed: Set<string>
@@ -819,7 +821,11 @@ export function walkGraph(
       : (block.upstream ?? []).filter((parentId) =>
           direction === "down" ? !skip(parentId) : parentId !== rootId,
         )
-    if (beneathDown.length === 0 && beneathUp.length === 0) return true
+    // An open row whose children the graph does not hold in full (a lazily
+    // loaded graph) — a row it holds no children of at all among them: the
+    // load says whether it is a leaf.
+    const partial = loaded !== undefined && followsDown && !loaded.has(id)
+    if (beneathDown.length === 0 && beneathUp.length === 0 && !partial) return true
     const row = { key, id, level, type: block.type }
     // A closed row is not walked: under the filter, the index has said a
     // held row is beneath it.
@@ -827,10 +833,16 @@ export function walkGraph(
       collapsed.add(key)
       return true
     }
+    // Reported for loading, and drawn with nothing beneath it until they
+    // land — never the part the graph holds, which is not the list. The
+    // fold rule still decides whether the row is open; the row keeps its
+    // chevron through `BlockEditor.loading`.
+    if (partial) {
+      unloaded.add(id)
+      block.children = []
+      return true
+    }
     const next = levelBeneath(rule, row)
-    // An open row whose children the graph holds only in part (a lazily
-    // loaded graph): walked as far as it goes, and reported for loading.
-    if (loaded !== undefined && followsDown && !loaded.has(id)) unloaded.add(id)
     path.add(id)
     const shown = beneathDown.filter((childId) => visit(childId, key, next, "down", query, id, own))
     if (pruned) {

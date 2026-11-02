@@ -481,6 +481,7 @@ export function BlockEditor({
   tapOpens = false,
   emptyable = false,
   context,
+  loading,
   diff,
   onEditingChange,
 }: {
@@ -631,6 +632,10 @@ export function BlockEditor({
    * navigates exactly as the note does.
    */
   context?: ReadonlySet<string>
+  /** Open rows whose children are still on their way (`BlockEditorApi.loading`):
+   * the graph is loaded lazily, and a row expanded before its children
+   * landed shows a loading mark, never the part in hand. */
+  loading?: ReadonlySet<string>
   /** The outline is a diff (`BlockEditorApi.diff`): the calendar's day. */
   diff?: BlockDiff
   /**
@@ -2534,6 +2539,7 @@ export function BlockEditor({
     fixedRoots,
     openRow: tapOpens && !readOnly ? (key) => navigateFocus(idOfKey(key)) : undefined,
     context,
+    loading,
     diff,
     // Browsing: a click opens the row (BlockItem routes a read-only row's
     // click here).

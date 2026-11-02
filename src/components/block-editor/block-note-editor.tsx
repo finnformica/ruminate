@@ -108,6 +108,7 @@ export function BlockNoteEditor({
   starter = true,
   rowRemoval = "unlink",
   context,
+  loading,
   onEditingChange,
   pivots,
   onPivot,
@@ -187,6 +188,8 @@ export function BlockNoteEditor({
   /** Rows the view keeps only as context — a filter's unmatched ancestors
    * (`src/data/filter-view.ts`), drawn dimmed. */
   context?: ReadonlySet<string>
+  /** Open rows whose children are on their way (`BlockEditor.loading`). */
+  loading?: ReadonlySet<string>
   /** Told which block is being edited as it changes (`BlockEditor`). */
   onEditingChange?: (id: string | null) => void
   /** The frame's link pivots and the way to set one (`BlockEditor`). */
@@ -446,6 +449,7 @@ export function BlockNoteEditor({
       // basket) the last row may go, and the basket goes with it.
       emptyable={!starter}
       context={context}
+      loading={loading}
       onEditingChange={onEditingChange}
       fixedRoots={fixedRoots}
       movableRoots={movableRoots}
