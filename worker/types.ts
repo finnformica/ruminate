@@ -68,4 +68,14 @@ export interface Env {
    * path answers 501 and the Anthropic path is unaffected.
    */
   AI?: Ai
+  /**
+   * Habit reminders (docs/reminders.md, worker/reminders/push.ts). The
+   * VAPID private key, a P-256 JWK as JSON: a secret, set with `wrangler
+   * secret put VAPID_PRIVATE_KEY`. Without it reminders are off and the
+   * settings card says so.
+   */
+  VAPID_PRIVATE_KEY?: string
+  /** The VAPID public key (base64url), a wrangler var. Empty: derived from
+   * the private key. Set: it must be the private key's. */
+  VAPID_PUBLIC_KEY?: string
 }
