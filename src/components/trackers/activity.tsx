@@ -143,12 +143,16 @@ export function heatmapColumns(weeks: readonly DayString[][]): HeatmapColumn[] {
  * edge has its first letter over the line. */
 const DIVIDER_TRACK = 6
 
-/** Diagonal stripes for a placeholder: a day of the other month in a split
- * week, shown as no day at all, inside a thin border that gives it its
- * shape. */
+/** Dashed diagonal stripes for a placeholder: a day of the other month in a
+ * split week, shown as no day at all, inside a thin dashed border that gives
+ * it its shape. A mask at right angles to the stripes cuts each into 2 px
+ * dashes; it is on an inner box, so the border is not cut too. */
+const DASH_MASK = "repeating-linear-gradient(45deg, #000 0 2px, transparent 2px 4px)"
 const STRIPES: React.CSSProperties = {
   backgroundImage:
     "repeating-linear-gradient(135deg, var(--color-border-secondary) 0 1px, transparent 1px 4px)",
+  maskImage: DASH_MASK,
+  WebkitMaskImage: DASH_MASK,
 }
 
 /**
@@ -290,9 +294,11 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
                     role="gridcell"
                     aria-hidden
                     data-placeholder
-                    className="aspect-square rounded-sm border border-border-secondary"
-                    style={{ ...at(track[c], d + 2), ...STRIPES }}
-                  />
+                    className="relative aspect-square overflow-hidden rounded-sm border border-dashed border-border-secondary"
+                    style={at(track[c], d + 2)}
+                  >
+                    <span data-stripes className="absolute inset-0" style={STRIPES} />
+                  </div>
                 )
               }
               const on = seriesOnDay(series, day)
