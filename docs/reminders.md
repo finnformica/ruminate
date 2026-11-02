@@ -69,31 +69,34 @@ question.
 
 ### The reads, and their cost
 
-Both reads go through the cache of the log (`events_log_cache`,
-docs/events-log-cache.md), and each is bounded by its question:
+Both reads go through the projections of the log: `nodes`, `link`, and a
+block's props as its `delta_mat_values` rows (docs/event-sourcing.md). Each
+is bounded by its question:
 
-- **The series**: the live trackers on the `type` index, one hop down on the
-  `source_id` index, then primary-key seeks for each child's `kind`, text
-  and liveness.
+- **The series**: the live trackers on `nodes_tenant_type`, one hop down on
+  `link_tenant_source`, then primary-key seeks for each child and its
+  `kind` key in `delta_mat_values`.
 - **Today's entries**: the live blocks whose text begins with today, on the
-  partial index `events_log_cache_day_text` (migrations/0033), then one hop
-  up on the `destination_id` index. The index holds only text that begins
-  with a year. Its condition is on `substr(value, 1, 5)`, not on `value`:
-  SQLite turns `value GLOB '"[0-9]…'` into the range `'"' <= value < '#'`
-  and seeks on that instead of on the day, which read every entry of every
-  day (2,962 rows for 6 on the bench below).
+  partial index `nodes_tenant_day_text` (migrations/0033), then one hop up
+  on `link_tenant_destination`. The index holds only live text that begins
+  with a year. Its condition is on `substr(text, 1, 4)`, not on `text`:
+  SQLite turns `text GLOB '[0-9]…'` into the range `'0' <= text < ':'` and
+  seeks on that instead of on the day, which reads every entry of every day.
 
-Measured on a local miniflare D1 (2026-11-02), a reader with two trackers of
-four series, a year of entries each and 2,000 other blocks (44,502 cache
-rows), with two devices due:
+When the cache of the log lands (PR #310, `events_log_cache`), these reads
+move to the cache table, and the index moves with them.
 
-| run                               | rows read |
-| --------------------------------- | --------- |
-| 1 reader due (2 subscriptions)    | 118       |
-| 10 readers due (20 subscriptions) | 1,198     |
-| nothing due                       | 1         |
+Measured on a local miniflare D1 (2026-11-02, main's schema). Each reader
+has two trackers of four series, a year of entries in each, and 2,000 other
+blocks (4,956 blocks each). Each reader has two devices due.
 
-About 60 rows per subscription due, whatever the size of the corpus.
+| run                              | blocks | rows read |
+| -------------------------------- | ------ | --------- |
+| 1 reader due (2 subscriptions)   | 4,956  | 52        |
+| 5 readers due (10 subscriptions) | 24,780 | 268       |
+| nothing due                      | 24,780 | 1         |
+
+About 53 rows per reader due, whatever the size of the corpus.
 
 ## Web Push
 

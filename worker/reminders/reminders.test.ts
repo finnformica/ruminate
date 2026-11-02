@@ -242,7 +242,7 @@ describe("the plans", () => {
       recorded[1].params,
     )
     expect(entriesPlan.map((row) => String(row.detail)).join("\n")).toContain(
-      "events_log_cache_day_text",
+      "nodes_tenant_day_text",
     )
   })
 

@@ -42,13 +42,16 @@ CREATE INDEX push_subscriptions_due ON push_subscriptions (next_due_at);
 CREATE INDEX push_subscriptions_user ON push_subscriptions (user_id);
 
 -- Today's tracker entries, by their text: an entry's text begins with its
--- day (`"2026-11-02"`, `"2026-11-02 · 5 km"`, as JSON), so a range on this
--- index finds one day's entries in a corpus with one seek. Partial, on
--- text that begins with a year only, so an ordinary block's text costs no
--- index write. A query uses it only when it repeats the condition word for
--- word (worker/reminders/habits.ts). The condition is on `substr(value…)`,
--- not on `value` itself: SQLite turns `value GLOB '"[0-9]…'` into the range
--- `'"' <= value < '#'` and then seeks on that range, which is every entry
--- of every day, rather than on the day the query names.
-CREATE INDEX events_log_cache_day_text ON events_log_cache (user_id, value)
-  WHERE key = 'text' AND substr(value, 1, 5) GLOB '"[0-9][0-9][0-9][0-9]';
+-- day (`2026-11-02`, `2026-11-02 · 5 km`), so a range on this index finds
+-- one day's live entries in a corpus with one seek. Partial, on live text
+-- that begins with a year only, so an ordinary block's text costs no index
+-- write. A query uses it only when it repeats the condition word for word
+-- (worker/reminders/habits.ts). The condition is on `substr(text, 1, 4)`,
+-- not on `text` itself: SQLite turns `text GLOB '[0-9]…'` into the range
+-- `'0' <= text < ':'` and then seeks on that range, which is every entry of
+-- every day, rather than on the day the query names.
+--
+-- When the cache of the log lands (PR #310, events_log_cache), the reminder
+-- reads move to `events_log_cache`, and this index moves with them.
+CREATE INDEX nodes_tenant_day_text ON nodes (user_id, text)
+  WHERE deleted_at IS NULL AND substr(text, 1, 4) GLOB '[0-9][0-9][0-9][0-9]';
