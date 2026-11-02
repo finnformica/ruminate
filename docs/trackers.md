@@ -152,11 +152,18 @@ has no keys to validate.
   of seven, a year as a heatmap of its weeks, `yearWeeks`, sized to the
   card so a phone does not scroll sideways), or as the **Grid**
   (`journal-grid.tsx`): one table, a row per day with its weekday and
-  number at the left (a year names each month above its first day), a
-  column per series, as a bullet journal's habit page is drawn. A column is
-  headed by its series's colour alone: the Today strip's chips are the
-  legend, and the name is the column's `aria-label`. A tap on a grid cell
-  logs as a tap on a card's cell does. The grid's card fills the space left
+  number at the left ("Mon 2", today's number in a chip), a column per
+  series, as a bullet journal's habit page is drawn. Each month is named
+  ("November 2026") over its first day, under a divider, and the name
+  stays under the row of colours while its days scroll; a thin line above
+  each Monday starts a week (Finn, 2026-11-02). A column is headed by its
+  series's colour alone: the Today strip's chips are the legend, and the
+  name is the column's `aria-label`. Every cell up to today logs in place:
+  a tap on a check series's cell ticks or clears the day, and on a number
+  series's cell opens the Today strip's field with − and + for that day in
+  a popover (`NumberControl`), so the entry is the one the strip writes.
+  The arrow keys move between cells, Enter or Space edits, and every cell
+  is at least 32 px for a finger. The grid's card fills the space left
   under the Today strip and date row, down to the bottom of the screen, and
   scrolls in its own box under the row of colours and beside the day
   column, both of which stay put; the page itself does not scroll in this

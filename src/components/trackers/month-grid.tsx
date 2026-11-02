@@ -388,6 +388,7 @@ export function DayCell({
   selected,
   compact = false,
   className = "aspect-square",
+  tabIndex,
   onToggle,
   onPickDay,
 }: {
@@ -401,6 +402,9 @@ export function DayCell({
   compact?: boolean
   /** The cell's box. */
   className?: string
+  /** Its place in the tab order, where a grid moves the keyboard between
+   * cells itself (journal-grid.tsx). */
+  tabIndex?: number
   onToggle: (seriesId: string, day: DayString, done: boolean) => void
   onPickDay: (day: DayString) => void
 }) {
@@ -425,8 +429,10 @@ export function DayCell({
         aria-current={day === today ? "date" : undefined}
         data-testid="day-cell"
         data-day={day}
+        data-series={series.id}
         data-level={level}
         disabled={future}
+        tabIndex={tabIndex}
         onClick={() => (check ? onToggle(series.id, day, !done) : onPickDay(day))}
         // The wall's tile, at a day's size: the one focus ring, the control
         // radius, the hover tint on an empty day, the selected ring, and the

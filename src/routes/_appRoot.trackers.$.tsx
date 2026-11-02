@@ -257,10 +257,7 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
                       start={start}
                       today={today}
                       selectedDay={day}
-                      onToggle={(seriesId, cellDay, done) =>
-                        writes.setEntry(seriesId, cellDay, done ? true : null)
-                      }
-                      onPickDay={(cellDay) => setPickedDay(cellDay === today ? null : cellDay)}
+                      onSetEntry={writes.setEntry}
                     />
                   ) : (
                     <MonthGrid

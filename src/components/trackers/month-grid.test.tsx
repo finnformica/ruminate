@@ -91,14 +91,12 @@ describe("JournalGrid", () => {
         start={start}
         today={TODAY}
         selectedDay={TODAY}
-        onToggle={vi.fn()}
-        onPickDay={vi.fn()}
+        onSetEntry={vi.fn()}
       />,
     )
 
   it("draws a row per day and a column per series, and logs a tap", () => {
-    const onToggle = vi.fn()
-    const onPickDay = vi.fn()
+    const onSetEntry = vi.fn()
     render(
       <JournalGrid
         series={[READ, RUN]}
@@ -106,8 +104,7 @@ describe("JournalGrid", () => {
         start={TODAY}
         today={TODAY}
         selectedDay={TODAY}
-        onToggle={onToggle}
-        onPickDay={onPickDay}
+        onSetEntry={onSetEntry}
       />,
     )
     const rows = screen.getAllByTestId("journal-row")
@@ -120,10 +117,120 @@ describe("JournalGrid", () => {
       "Tue 27 Oct: nothing",
       "Tue 27 Oct: 4 km",
     ])
+    // A past day's check cell ticks the day, and a ticked one clears it.
     fireEvent.click(within(rows[23]).getAllByTestId("day-cell")[0])
-    expect(onToggle).toHaveBeenCalledWith("s1", "2026-10-24", true)
-    fireEvent.click(today[1])
-    expect(onPickDay).toHaveBeenCalledWith("2026-10-27")
+    expect(onSetEntry).toHaveBeenLastCalledWith("s1", "2026-10-24", true)
+    fireEvent.click(within(rows[24]).getAllByTestId("day-cell")[0])
+    expect(onSetEntry).toHaveBeenLastCalledWith("s1", "2026-10-25", null)
+    // A day after today is not loggable.
+    expect(within(rows[27]).getAllByTestId("day-cell")[0].hasAttribute("disabled")).toBe(true)
+  })
+
+  it("edits a past day's number in place, with the Today strip's field", async () => {
+    const onSetEntry = vi.fn()
+    render(
+      <JournalGrid
+        series={[READ, RUN]}
+        range="month"
+        start={TODAY}
+        today={TODAY}
+        selectedDay={TODAY}
+        onSetEntry={onSetEntry}
+      />,
+    )
+    const rows = screen.getAllByTestId("journal-row")
+    fireEvent.click(within(rows[19]).getAllByTestId("day-cell")[1])
+    const editor = await screen.findByTestId("grid-cell-editor")
+    expect(within(editor).getByRole("heading").textContent).toBe("Tue 20 Oct")
+    const field = within(editor).getByRole("spinbutton")
+    fireEvent.change(field, { target: { value: "5" } })
+    fireEvent.keyDown(field, { key: "Enter" })
+    expect(onSetEntry).toHaveBeenCalledWith("s2", "2026-10-20", 5)
+    // The + steps from the day's own value: today's 4 km, by 0.5.
+    cleanup()
+    render(
+      <JournalGrid
+        series={[READ, RUN]}
+        range="month"
+        start={TODAY}
+        today={TODAY}
+        selectedDay={TODAY}
+        onSetEntry={onSetEntry}
+      />,
+    )
+    fireEvent.click(within(screen.getAllByTestId("journal-row")[26]).getAllByTestId("day-cell")[1])
+    const more = await screen.findByRole("button", { name: "More Run" })
+    fireEvent.click(more)
+    expect(onSetEntry).toHaveBeenLastCalledWith("s2", "2026-10-27", 4.5)
+  })
+
+  it("names each month over its first row, under a divider", () => {
+    // A week that runs from October into November.
+    grid("week")
+    const labels = document.querySelectorAll("[data-month-label]")
+    expect([...labels].map((label) => label.textContent)).toEqual(["October 2026", "November 2026"])
+    // The November label sits just before 1 November's row.
+    const november = labels[1]
+    expect(
+      november.nextElementSibling?.querySelector("[data-day-row]")?.getAttribute("data-day-row"),
+    ).toBe("2026-11-01")
+    expect(november.className).toContain("border-t")
+    expect(labels[0].className).not.toContain("border-t")
+    cleanup()
+    grid("year")
+    expect(document.querySelectorAll("[data-month-label]")).toHaveLength(12)
+  })
+
+  it("marks the start of each week with a line above its Monday", () => {
+    // October 2026 begins on a Thursday: its Mondays are the 5th, 12th,
+    // 19th and 26th.
+    grid("month")
+    const weeks = [...document.querySelectorAll("[data-week-start]")]
+    expect(weeks.map((line) => line.getAttribute("data-week-start"))).toEqual([
+      "2026-10-05",
+      "2026-10-12",
+      "2026-10-19",
+      "2026-10-26",
+    ])
+    cleanup()
+    // A Monday that is the first of a month has the month's divider instead.
+    grid("month", "2026-06-01")
+    expect(document.querySelector('[data-week-start="2026-06-01"]')).toBeNull()
+    expect(document.querySelector('[data-month-label="2026-06"]')).not.toBeNull()
+  })
+
+  it("labels each row with its weekday and number, and marks today", () => {
+    grid("month")
+    const rows = screen.getAllByTestId("journal-row")
+    const header = (i: number) => within(rows[i]).getByRole("rowheader")
+    expect(header(1).textContent).toBe("Fri2")
+    expect(header(25).textContent).toBe("Mon26")
+    const current = screen
+      .getAllByRole("rowheader")
+      .filter((row) => row.getAttribute("aria-current") === "date")
+    expect(current.map((row) => row.getAttribute("data-day-row"))).toEqual([TODAY])
+    expect(header(26).querySelector(".bg-text")?.textContent).toBe("27")
+  })
+
+  it("moves between cells with the arrow keys, never past today", () => {
+    grid("month")
+    const cell = (day: string, series: string) =>
+      document.querySelector<HTMLElement>(`[data-day="${day}"][data-series="${series}"]`)!
+    // One tab stop: today's first cell.
+    const stops = screen.getAllByTestId("day-cell").filter((c) => c.tabIndex === 0)
+    expect(stops).toEqual([cell(TODAY, "s1")])
+    cell(TODAY, "s1").focus()
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" })
+    expect(document.activeElement).toBe(cell("2026-10-26", "s1"))
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" })
+    expect(document.activeElement).toBe(cell("2026-10-26", "s2"))
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" })
+    expect(document.activeElement).toBe(cell("2026-10-26", "s2"))
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" })
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" })
+    expect(document.activeElement).toBe(cell(TODAY, "s2"))
+    expect(cell(TODAY, "s2").tabIndex).toBe(0)
+    expect(cell(TODAY, "s1").tabIndex).toBe(-1)
   })
 
   it("heads each column with its series's colour and no name, named for a screen reader", () => {
@@ -160,9 +267,10 @@ describe("JournalGrid", () => {
     const scrolled = vi.spyOn(Element.prototype, "scrollTop", "set")
     try {
       grid("month")
-      // 900 down, less the 20 px of colours, less half of what is left
-      // around the row: (300 - 20 - 20) / 2.
-      expect(scrolled).toHaveBeenLastCalledWith(750)
+      // 900 down, less the 20 px of colours and the 20 px of the month's
+      // name over the rows, less half of what is left around the row:
+      // (300 - 40 - 20) / 2.
+      expect(scrolled).toHaveBeenLastCalledWith(740)
     } finally {
       top.mockRestore()
       height.mockRestore()

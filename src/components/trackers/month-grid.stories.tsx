@@ -117,8 +117,7 @@ function Tracker({
           start={TODAY}
           today={TODAY}
           selectedDay={day}
-          onToggle={(seriesId, cellDay, done) => setEntry(seriesId, cellDay, done ? true : null)}
-          onPickDay={(cellDay) => setDay(cellDay)}
+          onSetEntry={setEntry}
         />
       ) : (
         <MonthGrid
