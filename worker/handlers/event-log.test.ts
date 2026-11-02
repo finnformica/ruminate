@@ -17,6 +17,7 @@ import migration0029 from "../../migrations/0029_backfill_delta_mat_values.sql?r
 import migration0030 from "../../migrations/0030_genesis_unlogged_rows.sql?raw"
 import migration0031 from "../../migrations/0031_drop_views.sql?raw"
 import migration0032 from "../../migrations/0032_events_log_cache.sql?raw"
+import migration0033 from "../../migrations/0033_cache_pinned_index.sql?raw"
 import {
   cacheRowKey,
   foldEventsToCache,
@@ -1311,6 +1312,7 @@ describe("the per-key log", () => {
       migration0030,
       migration0031,
       migration0032,
+      migration0033,
     ]) {
       for (const statement of migration.split(";")) {
         expect(terms(statement)).toBeLessThanOrEqual(5)

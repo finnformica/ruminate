@@ -1015,6 +1015,64 @@ describe("tenant scoping — the adversarial suite", () => {
       expect(short.status).toBe(400)
     })
 
+    it("serves the first screen — the notes, their order, a preview each, the pins — to the tenant alone", async () => {
+      // What a fresh device takes before the snapshot (docs/events-log-cache.md,
+      // "Sync is the log"): Alice's note, the one child that names it, and
+      // the link between them — not grouped, every key, as the snapshot
+      // carries them — and none of what Bob holds.
+      const { env } = await seededEnv()
+      const bobRows = {
+        nodes: [
+          { id: "blk_notebbbbbb", type: "note", text: "bob's note", props: null, updated_at: 100 },
+        ],
+        links: [],
+      }
+      expect(
+        (await push(env, "bob-token", { events: keyEventsOf(bobRows), cursor: "c1" })).status,
+      ).toBe(200)
+      const screen = async (token: string) =>
+        (await (await get(env, token, "/api/replica/first-screen")).json()) as {
+          rows: { entity: string; entity_id: string; key: string }[]
+          seq: number
+          replica_id: string
+        }
+      const alice = await screen("alice-token")
+      expect(alice.rows.map((row) => `${row.entity} ${row.entity_id} ${row.key}`).sort()).toEqual(
+        [
+          "block blk_noteaaaaaa deleted",
+          "block blk_noteaaaaaa notes_id",
+          "block blk_noteaaaaaa text",
+          "block blk_noteaaaaaa type",
+          "block blk_secret0001 deleted",
+          "block blk_secret0001 notes_id",
+          "block blk_secret0001 text",
+          "block blk_secret0001 type",
+          "link blk_noteaaaaaa|blk_secret0001|child deleted",
+          "link blk_noteaaaaaa|blk_secret0001|child destination_id",
+          "link blk_noteaaaaaa|blk_secret0001|child kind",
+          "link blk_noteaaaaaa|blk_secret0001|child sort_key",
+          "link blk_noteaaaaaa|blk_secret0001|child source_id",
+        ].sort(),
+      )
+      expect(alice).toMatchObject({ seq: 13, replica_id: "production" })
+      // A deleted note leaves the screen, and so does its preview.
+      const gone = keyEventsOf(
+        {
+          nodes: aliceRows.nodes.map((node) => ({ ...node, deleted_at: 200, updated_at: 200 })),
+          links: aliceRows.links.map((link) => ({ ...link, deleted_at: 200, updated_at: 200 })),
+        },
+        "dev12345.tab001",
+        NOW + 1,
+      )
+      expect((await push(env, "alice-token", { events: gone, cursor: "c2" })).status).toBe(200)
+      expect((await screen("alice-token")).rows).toEqual([])
+      // Bob's screen is Bob's.
+      const bob = await screen("bob-token")
+      expect(new Set(bob.rows.map((row) => row.entity_id))).toEqual(
+        new Set(bobRows.nodes.map((node) => node.id)),
+      )
+    })
+
     it("one tenant's log and past are not another's to read", async () => {
       const { env } = await seededEnv()
       const log = (await (await get(env, "bob-token", "/api/replica/events")).json()) as {

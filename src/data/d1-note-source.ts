@@ -2,6 +2,7 @@ import {
   REPLICA_PROTOCOL_HEADERS,
   type CachePageBody,
   type CachePageCursor,
+  type FirstScreenBody,
 } from "../../worker/handlers/replica-payload"
 import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github-session"
 import type { LoggedKeyEvent } from "./key-events"
@@ -44,6 +45,13 @@ interface EventsPageBody {
 }
 
 export interface D1NoteSource {
+  /**
+   * The rows of the first screen — the notes, the root's order, one preview
+   * child each, the pinned nodes — what a device whose cache is empty takes
+   * FIRST, so the list of notes draws before the snapshot is taken behind
+   * it (docs/events-log-cache.md, "Sync is the log").
+   */
+  pullFirstScreen(): Promise<FirstScreenBody>
   /**
    * One page of the replica's cache of the log, in primary-key order after
    * `after` (the `cursor` the page before answered with; null for the
@@ -91,6 +99,11 @@ export function createD1NoteSource(options: D1NoteSourceOptions = {}): D1NoteSou
   }
 
   return {
+    pullFirstScreen: async () => {
+      const response = await authorizedGet("/api/replica/first-screen")
+      return (await response.json()) as FirstScreenBody
+    },
+
     pullCache: async (after, limit) => {
       const query =
         after === null

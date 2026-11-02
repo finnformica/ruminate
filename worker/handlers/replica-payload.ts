@@ -222,6 +222,18 @@ export interface CachePageBody {
   replica_id?: string
 }
 
+/** The body of `GET /api/replica/first-screen`: the rows of the first
+ * screen (the notes, the root's order, one preview child each, the pinned
+ * nodes), not paged — the notes, not the blocks. */
+export interface FirstScreenBody {
+  rows: CacheRow[]
+  /** The watermark the rows were read behind (`meta.cache_seq`), for
+   * information. */
+  seq: number
+  /** As on the pull bodies: which database answered. */
+  replica_id?: string
+}
+
 /** The body of `GET /api/replica/status`. */
 export interface ReplicaStatusBody {
   /** LIVE rows only — tombstones are not part of "how big is my corpus".

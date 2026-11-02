@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type {
   CachePageBody,
   CachePageCursor,
+  FirstScreenBody,
   LinkRow,
   NodeRow,
   ReplicaCorpusBody,
@@ -30,7 +31,7 @@ import {
   stopDatabaseMode,
 } from "./database-mode"
 import type { D1NoteSource } from "./d1-note-source"
-import { NOTE_TYPE, docToGraph, noteDoc, rollup } from "./graph"
+import { CORPUS_ROOT_ID, NOTE_TYPE, NOTE_TYPES, docToGraph, noteDoc, rollup } from "./graph"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import type { NoteStore } from "./note-store"
@@ -85,6 +86,7 @@ function stubSource(responses: {
   replicaId?: string
 }) {
   const calls = {
+    firstScreen: 0,
     cache: [] as [CachePageCursor | null, number][],
     events: [] as [number, number][],
   }
@@ -114,7 +116,66 @@ function stubSource(responses: {
   /** The cache: the fold by stamp of the log, in primary-key order. */
   const cacheRows = () =>
     [...foldEventsToCache(keyed(log)).values()].sort((a, b) => compareKeys(keyOf(a), keyOf(b)))
+  /** The first screen, as the Worker reads it (`readFirstScreenRows`):
+   * the rows of the live notes, the root and its live child links, one
+   * preview child per note with its link, and the pinned nodes. */
+  const firstScreenRows = () => {
+    const rows = cacheRows()
+    const valueOf = (entity: string, id: string, key: string) =>
+      rows.find((r) => r.entity === entity && r.entity_id === id && r.key === key)?.value ?? null
+    const live = (entity: "block" | "link", id: string) => valueOf(entity, id, "deleted") === "null"
+    const blockIds = new Set<string>([CORPUS_ROOT_ID])
+    const linkIds = new Set<string>()
+    for (const row of rows) {
+      if (row.entity === "block" && row.key === "type" && live("block", row.entity_id)) {
+        if ([...NOTE_TYPES].some((type) => row.value === JSON.stringify(type))) {
+          blockIds.add(row.entity_id)
+        }
+      }
+      if (row.entity === "block" && row.key === "props.pinned_at" && row.value !== null) {
+        blockIds.add(row.entity_id)
+      }
+    }
+    const childLinks = (parent: string) =>
+      rows
+        .filter(
+          (r) =>
+            r.entity === "link" &&
+            r.key === "source_id" &&
+            r.value === JSON.stringify(parent) &&
+            live("link", r.entity_id) &&
+            live(
+              "block",
+              String(JSON.parse(valueOf("link", r.entity_id, "destination_id") ?? '""')),
+            ),
+        )
+        .map((r) => ({
+          id: r.entity_id,
+          far: String(JSON.parse(valueOf("link", r.entity_id, "destination_id") ?? '""')),
+          sort: String(JSON.parse(valueOf("link", r.entity_id, "sort_key") ?? '""')),
+        }))
+    for (const link of childLinks(CORPUS_ROOT_ID)) linkIds.add(link.id)
+    for (const noteId of [...blockIds]) {
+      if (noteId === CORPUS_ROOT_ID) continue
+      const [first] = childLinks(noteId).sort((a, b) =>
+        a.sort === b.sort ? a.far.localeCompare(b.far) : a.sort.localeCompare(b.sort),
+      )
+      if (first) {
+        linkIds.add(first.id)
+        blockIds.add(first.far)
+      }
+    }
+    return rows.filter((r) =>
+      r.entity === "block" ? blockIds.has(r.entity_id) : linkIds.has(r.entity_id),
+    )
+  }
   const source: D1NoteSource = {
+    pullFirstScreen: async () => {
+      calls.firstScreen += 1
+      if (responses.fail) throw new Error("offline")
+      const body: FirstScreenBody = { rows: firstScreenRows(), seq: log.length, ...id }
+      return body
+    },
     pullCache: async (after, limit) => {
       calls.cache.push([after, limit])
       if (responses.fail) throw new Error("offline")
@@ -319,7 +380,8 @@ describe("database mode boot", () => {
     })
     const store = await boot({ source })
 
-    // One page of the cache, then the log from the start.
+    // The first screen, one page of the cache, then the log from the start.
+    expect(calls.firstScreen).toBe(1)
     expect(calls.cache).toEqual([[null, 20_000]])
     expect(calls.events[0]).toEqual([0, 2_000])
     expect(await notesOf(store)).toEqual({ "note-a": NOTE_A, "note-b": NOTE_B })
@@ -327,8 +389,62 @@ describe("database mode boot", () => {
     expect(Number(await store.getMeta("events_pull_cursor"))).toBeGreaterThan(0)
     // The files atom carries the repo-file-shaped map every consumer reads.
     expect(files()).toEqual({ "note-a.md": NOTE_A, "note-b.md": NOTE_B })
-    expect(status()).toMatchObject({ status: "ready", pull: "idle", emptyOffline: false })
+    expect(status()).toMatchObject({
+      status: "ready",
+      pull: "idle",
+      emptyOffline: false,
+      seeded: true,
+    })
     expect(isDatabaseModeActive()).toBe(true)
+  })
+
+  it("a fresh device draws its own notes from the first screen, before the snapshot", async () => {
+    // Finn's report of 2026-11-02: on a fresh device the skeleton ended and
+    // the list showed the notes other people shared, alone, until the
+    // snapshot (5 MB, 5–10 s) had landed. Here the snapshot never answers
+    // until released: the notes are on screen from the first screen alone,
+    // the status says the device is seeded, and the snapshot has not been
+    // asked for yet.
+    const deep = "- A\n  id:: blk_a000000000\n  - A child\n    id:: blk_a000000001\n"
+    const { source, calls } = stubSource({
+      rows: remoteCorpus({ "note-a": deep, "note-b": NOTE_B }),
+    })
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const pullCache = source.pullCache
+    source.pullCache = async (after, limit) => {
+      await gate
+      return pullCache(after, limit)
+    }
+    const store = await openSqlNoteStore(createNodeSqlDriver())
+    startDatabaseMode({
+      openStore: async () => ({ store, persistence: "memory" }),
+      openReplicaSync: async () => null,
+      source,
+      foldCheckMs: 0,
+      pullRetryMs: 10 * 60_000,
+    })
+    try {
+      // The notes, their names, and nothing beneath them but the preview.
+      await vi.waitFor(() => expect(status().seeded).toBe(true))
+      expect(calls.firstScreen).toBe(1)
+      expect(graph().nodes.get("note-a")?.type).toBe(NOTE_TYPE)
+      expect(graph().nodes.get("note-b")?.type).toBe(NOTE_TYPE)
+      expect(graph().nodes.get("blk_a000000000")?.text).toBe("A")
+      expect(graph().nodes.has("blk_a000000001")).toBe(false)
+      expect(status()).toMatchObject({ status: "ready", pull: "pulling", lastPullAt: null })
+      // Nothing of the snapshot or the log has landed.
+      expect((await store.getMeta("cache_seeded")) ?? "").toBe("")
+      expect(await store.eventLog()).toEqual([])
+    } finally {
+      release()
+    }
+    await flushDatabaseMode()
+    expect(calls.cache).toHaveLength(1)
+    expect(await store.getMeta("cache_seeded")).not.toBeNull()
+    expect(await notesOf(store)).toEqual({ "note-a": deep, "note-b": NOTE_B })
+    await databaseEnsureAll()
+    expect(graph().nodes.get("blk_a000000001")?.text).toBe("A child")
   })
 
   it("later boots serve local contents and pull only the log past the stored cursor", async () => {
@@ -973,9 +1089,10 @@ describe("replica identity", () => {
       replicaId: "clone-two",
     })
     const store = await boot({ store: seeded, source })
-    // The first page said "clone-two": the cache was wiped and the snapshot
-    // started over.
-    expect(calls.cache).toHaveLength(2)
+    // The first screen said "clone-two": the cache was wiped before its rows
+    // landed, and the snapshot that followed found the id adopted already.
+    expect(calls.firstScreen).toBe(1)
+    expect(calls.cache).toHaveLength(1)
     expect(await notesOf(store)).toEqual({ "note-b": NOTE_B })
   })
 })

@@ -224,16 +224,30 @@ the entities it names from the cache, derives events (`rowsToEvents`,
   this deploy, and `MIN_REPLICA_PROTOCOL` rises to 3 with them (Finn,
   2026-10-30: no compatibility window). A quiet sync is one request that
   reads one row.
-- **A new device** gets one snapshot of the cache, then the log:
+- **A new device** gets the first screen, then one snapshot of the cache,
+  then the log: 0. `GET /api/replica/first-screen` (Finn, 2026-11-02): the rows of the
+  first screen, as the device reads them from its own cache at boot
+  (section 8) — the live notes, the corpus root and its live child
+  links, one preview child per note with its link, and the pinned nodes
+  (`readFirstScreenRows`, `worker/handlers/cache-reads.ts`; one
+  statement, two compound terms, on the `type`, `source_id` and
+  `props.pinned_at` indexes; migration 0033 adds the last). The device
+  imports them, replays its unpushed tail on top, draws the graph and
+  ends the page's skeleton (`DatabaseModeStatus.seeded`). The notes,
+  not the blocks: 30 KB on production against the snapshot's 5.4 MB.
+  Until this request lands the notes page shows its skeleton, whatever
+  the shares have delivered meanwhile: a list of the shared notes alone
+  looks complete and is wrong (`isBootingAtom`).
   1. `GET /api/replica/cache?after=<entity>|<entity_id>|<key>&limit=20000`.
      The first page reads `meta.cache_seq` and then the rows, in one batch
      (one transaction), and every page answers that `seq`. Pages are keyed
      by the primary key, never by offset, so a row written between pages is
      either in a later page or in the log past `seq`. Cache rows are never
      deleted, so a keyset page misses nothing.
-  2. The device writes each page straight into its cache (an insert, no
-     stamp check: the table is empty) and draws the graph after the last
-     page.
+  2. The device writes each page into its cache by stamp (the first
+     screen's rows are there already; the upsert leaves an equal stamp
+     alone) and reads the graph again after the last page. A note opened
+     meanwhile reads after the snapshot, on the same queue.
   3. The device sets its log cursor to 0 and pulls the whole log in pages
      behind the screen, as today. Every event up to `seq` lands on a row
      that already holds a stamp at least as high, so it changes nothing;
@@ -347,6 +361,13 @@ a note's view is closed under the questions the app asks of it).
 | a row opens whose children are partial     | the subtrees beneath it (`subtreeView`); the walk reports such rows (`GraphView.unloaded`) and the note page loads them                                                                                     | those subtrees                     |
 | a recent block is listed                   | just its node (`nodesView`)                                                                                                                                                                                 | nothing more                       |
 | search, the calendar (`databaseEnsureAll`) | the whole corpus, once: one grouped read (`getGraph`); every read is the whole graph from then on                                                                                                           | everything                         |
+
+On a fresh device the same first screen comes from the server first
+(`pullFirstScreen`, section 4), so the list is on screen in one small
+request; the snapshot and the log follow behind it. The skeleton of the
+notes page and the sidebar waits for exactly that — the user's own notes
+in the device's cache (`seeded`) — and never for the whole snapshot, the
+log, or what the shares brought.
 
 The rules that keep a partial graph honest:
 
@@ -565,6 +586,38 @@ device's first paint is the snapshot's two requests plus its import plus
 the first read: about 1.2 s on this copy against the row pull's 300 ms
 plus its import, with the log no longer on the critical path at all.
 
+### The user's path on a fresh device and on a reload (2026-11-02)
+
+Finn's test of the preview of PR #310 (2026-11-02): on a fresh device the
+skeleton ended, the shared notes showed alone, and the own notes came 5–10
+s later. Two causes: `isBootingAtom` ended the boot as soon as `notesAtom`
+held any note, and the shares' notes count there; and the own notes waited
+for the whole snapshot (5.4 MB, two pages, imported into OPFS) before the
+first `refreshGraph`. The fix is section 4's step 0 and `seeded`.
+
+Measured on the user's real path: the real client runtime
+(`startDatabaseMode`, the SQL store, the source, the atoms) over the real
+`replica()` handler on a local miniflare D1 loaded with the production copy
+of 2026-10-30, in one process (`/home/orca/bench-scale-data/boot/`). "Own
+notes visible" is the moment `isBootingAtom` turns false with the notes
+page's rows non-empty, as the page re-renders on. Median of 3. The device
+store is `node:sqlite`, not OPFS, and there is no network round trip, so
+the browser's numbers are higher on every row alike; what the table shows
+is what each build puts on the critical path.
+
+| build                         | fresh device: requests before the own notes show  | own notes visible | reload: own notes visible | whole history settled |
+| ----------------------------- | ------------------------------------------------- | ----------------- | ------------------------- | --------------------- |
+| production main (`d22e54a`)   | `GET /api/replica/notes`: 224 ms, 1,004 KB        | 629 ms            | 48 ms (2 requests)        | 13.1 s (26 requests)  |
+| this PR before the fix        | the snapshot: 551 ms, 3,645 KB + 257 ms, 1,679 KB | 1,117 ms          | 22 ms (1 request)         | 13.3 s (27 requests)  |
+| this PR with the first screen | `GET /api/replica/first-screen`: 106 ms, 30 KB    | 144 ms            | 26 ms (1 request)         | 13.5 s (28 requests)  |
+
+A fresh device shows its own notes in one request of 30 KB, about four
+times sooner than production main and eight times sooner than this PR
+before the fix; the snapshot and the whole log follow behind the screen
+and take the same 13 s on every build (the log pull is unchanged: 24
+pages of 2,000 events at about 500 ms each, request plus import). A
+reload is one request on this PR against two on main.
+
 ## 10. Migration order and rollback
 
 Three deploys. The migration numbers are the next free ones after step 1's
@@ -588,9 +641,12 @@ Migration `00NN_events_log_cache.sql`:
 4. Nothing is dropped. `nodes`, `link` and `delta_mat_values` stay, and the
    new Worker never writes them again.
 
+Migration `0033_cache_pinned_index.sql`: the partial index on
+`props.pinned_at` the first screen reads the pinned nodes on (section 4).
+
 The Worker of the same deploy: the append of section 3, every reader of
-section 5, `GET /api/replica/cache`, `REPLICA_PROTOCOL` 3 and
-`MIN_REPLICA_PROTOCOL` 3. The browser's row endpoints (`GET` and
+section 5, `GET /api/replica/cache`, `GET /api/replica/first-screen`,
+`REPLICA_PROTOCOL` 3 and `MIN_REPLICA_PROTOCOL` 3. The browser's row endpoints (`GET` and
 `PUT /api/replica/notes`) are gone: a tab on the build before is refused
 with `client_too_old` and reloads (Finn, 2026-10-30: no compatibility
 window). `writeRows` stays for MCP and shares.
@@ -631,7 +687,7 @@ and is why deploy 2 waits for deploy 1 to settle.
 ### Deploy 3: the drop
 
 After deploys 1 and 2 have run with `verify` clean for every tenant: the
-migration `0033_drop_projection_tables.sql` drops `nodes`, `link`,
+migration `0034_drop_projection_tables.sql` drops `nodes`, `link`,
 `delta_mat_values` and their indexes (section 7), and the same Worker
 removes `appendClientEvents` (the old-shape push door). `writeRows` stays
 for MCP and shares.
@@ -684,6 +740,13 @@ one.
 10. **A block delete** keeps writing an explicit `unlink` per link plus the
     `delete` (`deleteBlockOps`, as today). No dangling-link rule (Finn,
     2026-10-28).
+11. **A fresh device draws its own notes first** (Finn, 2026-11-02, from
+    the preview of PR #310: the skeleton ended, the shared notes showed
+    alone, and the own notes came 5–10 s later, after the snapshot). The
+    device asks for the first screen before the snapshot (section 4, step
+    0), and the skeleton waits for the device's own notes and nothing else
+    (`seeded`): never a partial list that looks complete. The snapshot and
+    the history come after the first paint.
 
 ## Decisions in one list
 
@@ -695,8 +758,10 @@ one.
   lookup keys, and a `seq` index.
 - The append is two statements: the log insert and one upsert by stamp.
   A `cache_seq` watermark in `meta` closes the deploy window.
-- Sync is the log. A new device takes one keyset-paged snapshot of the
-  cache, then the log from 0 behind the screen.
+- Sync is the log. A new device takes the first screen (the notes) in one
+  small request, then one keyset-paged snapshot of the cache, then the log
+  from 0, the last two behind the screen. The notes page's skeleton waits
+  for the device's own notes, not for the shares.
 - Every server reader assembles entities from cache rows in one shared
   module; the SQL rollup is `GROUP BY` with `json_group_object`.
 - The backfill is the fold of the log by stamp, so `verify` compares the

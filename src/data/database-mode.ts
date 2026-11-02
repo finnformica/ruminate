@@ -39,8 +39,10 @@ import {
  *
  *   boot   open SQL store → discard it if its cache generation or its owner is
  *          not this one → serve local contents immediately → a device whose
- *          cache is empty takes a snapshot of the replica's (`pullCacheSnapshot`)
- *          → pull the log past the events cursor (`pullEventLog`)
+ *          cache is empty takes the first screen of the replica's
+ *          (`pullFirstScreen`: the notes, drawn at once) and then a snapshot
+ *          of the whole of it (`pullCacheSnapshot`) → pull the log past the
+ *          events cursor (`pullEventLog`)
  *   edits  the editor's ops (src/data/ops.ts) apply to the graph atom at
  *          once and become the EVENTS they amount to (`opsToEvents`,
  *          docs/event-sourcing.md); those coalesce for a moment, then land in
@@ -244,6 +246,13 @@ export interface DatabaseModeStatus {
   pull: "idle" | "pulling" | "error"
   lastPullAt: number | null
   lastPullError: string | null
+  /** Does the device's cache hold this user's own notes — the first screen
+   * (`pullFirstScreen`) or the whole snapshot? False on a fresh device until
+   * its first request lands, and after a wipe, so the notes page shows its
+   * skeleton rather than a list that is still on its way (`isBootingAtom`).
+   * What other people shared (shared-mode.ts) arrives on its own and never
+   * counts. */
+  seeded: boolean
   /** First-ever boot without a reachable replica: nothing local, nothing
    * pulled — the UI shows an explanatory empty state. */
   emptyOffline: boolean
@@ -255,6 +264,7 @@ const OFF_STATUS: DatabaseModeStatus = {
   lastPullAt: null,
   lastPullError: null,
   emptyOffline: false,
+  seeded: false,
 }
 
 export const databaseModeStatusAtom = atom<DatabaseModeStatus>(OFF_STATUS)
@@ -480,10 +490,13 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
       const saved = decodeHlc((await opened.store.getMeta(HLC_KEY)) ?? "")
       if (saved !== null) activation.lastStamp = receiveHlc(activation.lastStamp, saved)
 
-      // The cache is the state: boot reads it, with nothing to fold.
+      // The cache is the state: boot reads it, with nothing to fold. A
+      // cache that took its snapshot holds the notes; a fresh one holds
+      // nothing yet, and the page keeps its skeleton until the first
+      // screen lands (`pullFirstScreen`).
       await refreshGraph(activation)
       if (runtime !== activation) return
-      patchStatus({ status: "ready" })
+      patchStatus({ status: "ready", seeded: await cacheSeeded(opened.store) })
 
       // Start the push loop before the first pull, so the pull can consult
       // `pendingNoteIds` (edits made while the pull is in flight are safe).
@@ -1038,11 +1051,14 @@ function runPull(activation: DatabaseModeRuntime) {
     try {
       await flushOps(activation)
       // A device whose cache is empty — a fresh profile, a wiped cache —
-      // takes a snapshot of the replica's first, so every note shows now,
-      // and the log catches up behind it. A different database behind the
-      // URL wipes everything and starts the pull over, once.
+      // takes the first screen of the replica's first, so the notes show
+      // now, then a snapshot of the whole of it, and the log catches up
+      // behind both. A different database behind the URL wipes everything
+      // and starts the pull over, once.
       for (let attempt = 0; attempt < 2; attempt += 1) {
         if (!(await cacheSeeded(store))) {
+          await pullFirstScreen(activation, store)
+          if (runtime !== activation) return
           await pullCacheSnapshot(activation, store)
           if (runtime !== activation) return
         }
@@ -1109,6 +1125,7 @@ async function adoptReplica(
     await store.clear()
     await resetCursors(store)
     activation.loadedNotes.clear()
+    patchStatus({ seeded: false })
   }
   // The id is recorded either way, so the next page is this database's.
   if (typeof seen === "string" && seen.length > 0) await store.setMeta(REPLICA_ID_KEY, seen)
@@ -1116,14 +1133,38 @@ async function adoptReplica(
 }
 
 /**
- * The first screen of a device whose cache is empty: the replica's cache,
- * page by page (`pullCache`, keyset-paged), written as it is — every row at
- * the stamp the replica holds for it — then this device's unpushed events
- * replayed on top by stamp, so a local edit not yet pushed still wins where
- * it should, and the graph drawn at once. The log then catches up in pages
- * behind the screen (`pullEventLog`): an event the cache already holds
- * changes nothing (its stamp does not beat the row's), a later one lands as
- * on any cache row (docs/events-log-cache.md, "Sync is the log").
+ * The first screen of a device whose cache is empty, before the snapshot:
+ * the rows of the notes, the root's order, one preview child each and the
+ * pinned nodes (`pullFirstScreen`, one small request — the notes, not the
+ * blocks), written as they are, this device's unpushed events replayed on
+ * top by stamp, and the graph drawn from them at once. The page's skeleton
+ * ends here (`seeded`): the list it shows is this user's own notes, whole.
+ * The snapshot of everything else follows behind it (`pullCacheSnapshot`);
+ * a note opened meanwhile reads after it, on the same queue.
+ */
+async function pullFirstScreen(activation: DatabaseModeRuntime, store: NoteStore) {
+  const screen = await activation.source.pullFirstScreen()
+  if (runtime !== activation) return
+  // A different database answered: the wipe clears what the old one left,
+  // and the rows in hand are the new one's, so they land after it.
+  await adoptReplica(activation, store, screen.replica_id)
+  await store.importCacheRows(screen.rows)
+  await store.applyUnpushedToCache()
+  await refreshGraph(activation)
+  if (runtime !== activation) return
+  patchStatus({ seeded: true })
+}
+
+/**
+ * The whole cache of a device whose cache is empty, behind the first
+ * screen: the replica's cache, page by page (`pullCache`, keyset-paged),
+ * written as it is — every row at the stamp the replica holds for it —
+ * then this device's unpushed events replayed on top by stamp, so a local
+ * edit not yet pushed still wins where it should, and the graph read
+ * again. The log then catches up in pages behind the screen
+ * (`pullEventLog`): an event the cache already holds changes nothing (its
+ * stamp does not beat the row's), a later one lands as on any cache row
+ * (docs/events-log-cache.md, "Sync is the log").
  */
 async function pullCacheSnapshot(activation: DatabaseModeRuntime, store: NoteStore) {
   let after: CachePageCursor | null = null
@@ -1142,6 +1183,8 @@ async function pullCacheSnapshot(activation: DatabaseModeRuntime, store: NoteSto
   await store.applyUnpushedToCache()
   await store.setMeta(CACHE_SEEDED_KEY, String(Date.now()))
   await refreshGraph(activation)
+  if (runtime !== activation) return
+  patchStatus({ seeded: true })
 }
 
 /**

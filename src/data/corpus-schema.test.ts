@@ -102,6 +102,7 @@ describe("the migrations that have shipped", () => {
       "0030_genesis_unlogged_rows.sql": "439905659178bc6b",
       "0031_drop_views.sql": "ccea3b83d4b170e3",
       "0032_events_log_cache.sql": "dd7b988ddbb72fe6",
+      "0033_cache_pinned_index.sql": "62d1419e1f88eccf",
     }
     const files = Object.fromEntries(
       Object.entries(MIGRATION_FILES).map(([path, sql]) => [path.split("/").pop()!, sql]),

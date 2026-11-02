@@ -135,6 +135,80 @@ export async function readLiveWrittenIn(
 }
 
 /**
+ * One hop DOWN from the rows of `v` (a column `id`): the live child links
+ * out of each (`s`, the link's `source_id` row) and the live node at the far
+ * end (`d`, its `destination_id` row). The hop the MCP loaders take
+ * (`worker/mcp/graph-load.ts`), spelled out here so the guard's scan of this
+ * file sees the statement that runs.
+ */
+const HOP_DOWN =
+  "CROSS JOIN events_log_cache s ON s.user_id = :tenant AND s.key = 'source_id' " +
+  "AND s.value = json_quote(v.id) AND s.entity_id GLOB '*|child' " +
+  "CROSS JOIN events_log_cache ld ON ld.user_id = :tenant AND ld.entity = 'link' " +
+  "AND ld.entity_id = s.entity_id AND ld.key = 'deleted' AND ld.value = 'null' " +
+  "CROSS JOIN events_log_cache d ON d.user_id = :tenant AND d.entity = 'link' " +
+  "AND d.entity_id = s.entity_id AND d.key = 'destination_id' " +
+  "CROSS JOIN events_log_cache fd ON fd.user_id = :tenant AND fd.entity = 'block' " +
+  "AND fd.entity_id = json_extract(d.value, '$') AND fd.key = 'deleted' AND fd.value = 'null' "
+
+/**
+ * The rows of the first screen, not grouped: what a device whose cache is
+ * empty takes before the snapshot (`GET /api/replica/first-screen`,
+ * docs/events-log-cache.md, "Sync is the log"), the same read the device
+ * makes of its own cache at boot (`LazyReads.rootView`,
+ * src/data/sql-lazy-reads.ts) — the live notes (every block whose `type`
+ * is one of `types`), the corpus root and its live child links (the notes'
+ * order), one preview child per note (the first in sibling order, which an
+ * untitled note is named by) with its link, and the pinned nodes. Every
+ * row of each, tombstoned keys included, as the snapshot carries them: the
+ * device imports them as rows. Cost: the notes, not the blocks.
+ */
+export async function readFirstScreenRows(
+  tenant: TenantDb,
+  types: readonly string[],
+  rootId: string,
+): Promise<CacheRow[]> {
+  const columns = "c.entity, c.entity_id, c.key, c.value, c.hlc, c.seq, c.updated_at"
+  const rows = await tenant.includingDeleted().exec(
+    // The live notes, on the `type` index.
+    "WITH notes (id) AS (SELECT t.entity_id FROM json_each(?1) AS j " +
+      "CROSS JOIN events_log_cache t ON t.user_id = :tenant AND t.key = 'type' " +
+      "AND t.value = json_quote(j.value) " +
+      "CROSS JOIN events_log_cache l ON l.user_id = :tenant AND l.entity = 'block' " +
+      "AND l.entity_id = t.entity_id AND l.key = 'deleted' AND l.value = 'null'), " +
+      // The root and its order: one hop down from it.
+      "root (id) AS (SELECT ?2), " +
+      "root_edges (link_id) AS (SELECT s.entity_id " +
+      `FROM root v ${HOP_DOWN}), ` +
+      // One preview child per note: the window picks the first by sort key.
+      "hops (link_id, far, src, sort_key) AS (SELECT s.entity_id, " +
+      "json_extract(d.value, '$'), v.id, json_extract(k.value, '$') " +
+      `FROM notes v ${HOP_DOWN} CROSS JOIN events_log_cache k ON k.user_id = :tenant ` +
+      "AND k.entity = 'link' AND k.entity_id = s.entity_id AND k.key = 'sort_key'), " +
+      "previews (link_id, far) AS (SELECT link_id, far FROM (SELECT link_id, far, " +
+      "ROW_NUMBER() OVER (PARTITION BY src ORDER BY sort_key, far) AS rn FROM hops) " +
+      "WHERE rn = 1), " +
+      // The pinned nodes, on the `props.pinned_at` index (0033).
+      "pinned (id) AS (SELECT p.entity_id FROM events_log_cache p " +
+      "WHERE p.user_id = :tenant AND p.key = 'props.pinned_at' AND p.value IS NOT NULL), " +
+      // The blocks and the links of the screen: four terms, then two.
+      "blocks (id) AS (SELECT id FROM notes UNION SELECT id FROM root " +
+      "UNION SELECT far FROM previews UNION SELECT id FROM pinned), " +
+      "links (id) AS (SELECT link_id FROM root_edges UNION SELECT link_id FROM previews) " +
+      `SELECT ${columns} FROM blocks b CROSS JOIN events_log_cache c ` +
+      "ON c.user_id = :tenant AND c.entity = 'block' AND c.entity_id = b.id " +
+      "UNION ALL " +
+      `SELECT ${columns} FROM links lk CROSS JOIN events_log_cache c ` +
+      "ON c.user_id = :tenant AND c.entity = 'link' AND c.entity_id = lk.id " +
+      "/* includes-deleted: the device imports the rows as the snapshot carries them; " +
+      "the hops crossed live links to live nodes only, and a pinned tombstone is kept " +
+      "out by the device ($.deleted) */",
+    [JSON.stringify([...types]), rootId],
+  )
+  return rows.map(toRow)
+}
+
+/**
  * One page of the cache, in primary-key order, after `after` (the key of
  * the last row of the page before, or null for the first): what a new
  * device takes before it pulls the log (docs/events-log-cache.md, "Sync").

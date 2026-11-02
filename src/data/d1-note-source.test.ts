@@ -59,6 +59,20 @@ describe("createD1NoteSource", () => {
     })
   })
 
+  it("pullFirstScreen GETs the rows of the first screen, before any page of the cache", async () => {
+    const screen = { rows: page.rows, seq: 7, replica_id: "production" }
+    const fetchImpl = vi.fn(async () => jsonResponse(screen))
+    const { auth } = fakeAuth(["tok-1"])
+    const source = createD1NoteSource({ fetchImpl: fetchImpl as unknown as typeof fetch, auth })
+
+    await expect(source.pullFirstScreen()).resolves.toEqual(screen)
+    expect(fetchImpl).toHaveBeenCalledWith("/api/replica/first-screen", {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { ...REPLICA_PROTOCOL_HEADERS, Authorization: "Bearer tok-1" },
+    })
+  })
+
   it("pullCache asks for the next page after the cursor the last one answered with", async () => {
     const fetchImpl = vi.fn(async (_url: string) => jsonResponse({ ...page, cursor: null }))
     const { auth } = fakeAuth(["tok-1"])

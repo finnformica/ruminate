@@ -25,14 +25,15 @@
 // runs is the one a reader sees.
 
 import type { TenantDb } from "../tenancy-db"
-import { NOTE_TYPES } from "../../src/data/graph"
+import { CORPUS_ROOT_ID, NOTE_TYPES } from "../../src/data/graph"
 import { appendClientEvents, appendClientKeyEvents, writeRows } from "./event-log"
-import { cacheSeqOf, readCachePage } from "./cache-reads"
+import { cacheSeqOf, readCachePage, readFirstScreenRows } from "./cache-reads"
 import type { EventsPutPayload, EventsPutResult } from "../../src/data/events"
 import type { KeyEventsPutPayload, KeyEventsPutResult } from "../../src/data/key-events"
 import type {
   CachePageBody,
   CachePageCursor,
+  FirstScreenBody,
   ReplicaPutPayload,
   ReplicaPutResult,
   ReplicaStatusBody,
@@ -59,6 +60,21 @@ export async function corpusCachePage(
     seq,
     cursor: last === undefined ? null : [last.entity, last.entity_id, last.key],
   }
+}
+
+/**
+ * The first screen of a device whose cache is empty (`GET
+ * /api/replica/first-screen`, docs/events-log-cache.md, "Sync is the log"):
+ * the rows of the notes, the root's order, one preview child each and the
+ * pinned nodes (`readFirstScreenRows`), so the list of notes draws before
+ * the snapshot of the whole cache is taken behind it.
+ */
+export async function corpusFirstScreen(
+  tenant: TenantDb,
+): Promise<Omit<FirstScreenBody, "replica_id">> {
+  const seq = await cacheSeqOf(tenant)
+  const rows = await readFirstScreenRows(tenant, NOTE_TYPES, CORPUS_ROOT_ID)
+  return { rows, seq }
 }
 
 /**

@@ -15,6 +15,7 @@
 //   GET /api/replica/events — the event log, or one entity's history
 //   GET /api/replica/events-log — the per-key log (docs/event-sourcing.md)
 //   GET /api/replica/cache  — one page of the cache of the log (docs/events-log-cache.md)
+//   GET /api/replica/first-screen — the rows of the first screen, before the snapshot
 //   GET /api/replica/at     — the corpus as it stood at a seq or a time
 //   GET /api/replica/verify — does folding the log still yield the cache?
 //   POST /api/replica/restore — put a block back the way it was, by appending
@@ -62,6 +63,7 @@ import { parseEventsPayload } from "../../src/data/events"
 import { isKeyEventsBody, parseKeyEventsPayload } from "../../src/data/key-events"
 import {
   corpusCachePage,
+  corpusFirstScreen,
   corpusPutEvents,
   corpusPutKeyEvents,
   corpusStatus,
@@ -204,6 +206,7 @@ export async function replica(
     (pathname === "/api/replica/events" && (method === "GET" || method === "PUT")) ||
     (pathname === "/api/replica/events-log" && method === "GET") ||
     (pathname === "/api/replica/cache" && method === "GET") ||
+    (pathname === "/api/replica/first-screen" && method === "GET") ||
     (pathname === "/api/replica/at" && method === "GET") ||
     (pathname === "/api/replica/verify" && method === "GET") ||
     (pathname === "/api/replica/restore" && method === "POST")
@@ -220,6 +223,9 @@ export async function replica(
   if (pathname === "/api/replica/events") return replicaEvents(request, tenant)
   if (pathname === "/api/replica/events-log") return replicaKeyEvents(request, tenant, env)
   if (pathname === "/api/replica/cache") return replicaCache(request, tenant, env)
+  if (pathname === "/api/replica/first-screen") {
+    return jsonResponse({ ...(await corpusFirstScreen(tenant)), replica_id: replicaId(env) })
+  }
   if (pathname === "/api/replica/at") return replicaAt(request, tenant)
   if (pathname === "/api/replica/verify") return jsonResponse(await verifyLog(tenant))
   if (pathname === "/api/replica/restore") return replicaRestore(request, tenant)
