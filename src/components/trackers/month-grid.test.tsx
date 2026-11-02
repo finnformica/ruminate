@@ -174,11 +174,37 @@ describe("JournalGrid", () => {
     expect(
       november.nextElementSibling?.querySelector("[data-day-row]")?.getAttribute("data-day-row"),
     ).toBe("2026-11-01")
-    expect(november.className).toContain("border-t")
-    expect(labels[0].className).not.toContain("border-t")
-    cleanup()
+    // Each name is the first thing in its own month, under the divider.
+    const groups = [...document.querySelectorAll("[data-month]")]
+    expect(groups.map((group) => group.getAttribute("data-month"))).toEqual(["2026-10", "2026-11"])
+    expect(groups[1].firstElementChild).toBe(november)
+    expect(groups[1].className).toContain("border-t")
+    expect(groups[0].className).not.toContain("border-t")
+  })
+
+  it("draws every month's divider in a year, and names this month and every second", () => {
     grid("year")
-    expect(document.querySelectorAll("[data-month-label]")).toHaveLength(12)
+    const groups = [...document.querySelectorAll("[data-month]")]
+    expect(groups).toHaveLength(12)
+    expect(groups.slice(1).every((group) => group.className.includes("border-t"))).toBe(true)
+    const labels = [...document.querySelectorAll("[data-month-label]")]
+    expect(labels.map((label) => label.textContent)).toEqual([
+      "February 2026",
+      "April 2026",
+      "June 2026",
+      "August 2026",
+      "October 2026",
+      "December 2026",
+    ])
+    // A name sits inside its own month, so it sticks only while that
+    // month's days scroll by.
+    for (const label of labels) {
+      expect(label.parentElement?.getAttribute("data-month")).toBe(
+        label.getAttribute("data-month-label"),
+      )
+    }
+    // A month's days are all there, named or not.
+    expect(screen.getAllByTestId("journal-row")).toHaveLength(365)
   })
 
   it("marks the start of each week with a line above its Monday", () => {

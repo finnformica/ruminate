@@ -153,10 +153,15 @@ has no keys to validate.
   card so a phone does not scroll sideways), or as the **Grid**
   (`journal-grid.tsx`): one table, a row per day with its weekday and
   number at the left ("Mon 2", today's number in a chip), a column per
-  series, as a bullet journal's habit page is drawn. Each month is named
-  ("November 2026") over its first day, under a divider, and the name
-  stays under the row of colours while its days scroll; a thin line above
-  each Monday starts a week (Finn, 2026-11-02). A column is headed by its
+  series, as a bullet journal's habit page is drawn. Each month starts
+  under a divider with its name ("November 2026"), and the name stays
+  under the row of colours while its own days scroll: each month is a
+  group of rows (`grid-cols-subgrid`), so the next month pushes the name
+  out and two names never overlap. A year names the current month and
+  every second month from it (`month-labels.ts`: the step is 2, or 3 when
+  rows are too short to keep two names a name's height apart); the other
+  months have the divider alone. A thin line above each Monday starts a
+  week (Finn, 2026-11-02). A column is headed by its
   series's colour alone: the Today strip's chips are the legend, and the
   name is the column's `aria-label`. Every cell up to today logs in place:
   a tap on a check series's cell ticks or clears the day, and on a number

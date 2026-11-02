@@ -6,6 +6,7 @@ import {
   rangeDays,
   weekdayFromMonday,
   type DayString,
+  type MonthString,
   type SeriesState,
   type TrackerRange,
 } from "../../data/tracker"
@@ -13,6 +14,7 @@ import { cx } from "../../utils/cx"
 import { Popover } from "../ui/popover"
 import { Surface } from "../ui/surface"
 import { ColourDot, DayCell } from "./month-grid"
+import { labelledMonths, yearLabelStep } from "./month-labels"
 import { NumberControl } from "./today-strip"
 
 /** A series's column (`--series-column`) and the cell in it, per range: a
@@ -20,11 +22,12 @@ import { NumberControl } from "./today-strip"
  * between cells. Every cell is at least 32 px, big enough to tap on a phone,
  * and a phone (390 px) still shows six series beside the day column with no
  * sideways scroll (Finn, 2026-10-29; the year's cells grew to a month's when
- * they became the place to log a past day, 2026-11-02). */
-const SIZES: Record<TrackerRange, { column: string; cell: string }> = {
-  week: { column: "[--series-column:44px]", cell: "size-10" },
-  month: { column: "[--series-column:36px]", cell: "size-8" },
-  year: { column: "[--series-column:36px]", cell: "size-8" },
+ * they became the place to log a past day, 2026-11-02). `pitch` is a row's
+ * height: the cell and the 2 px between rows. */
+const SIZES: Record<TrackerRange, { column: string; cell: string; pitch: number }> = {
+  week: { column: "[--series-column:44px]", cell: "size-10", pitch: 42 },
+  month: { column: "[--series-column:36px]", cell: "size-8", pitch: 34 },
+  year: { column: "[--series-column:36px]", cell: "size-8", pitch: 34 },
 }
 
 /** A row's weekday, beside its number: "Mon 2". */
@@ -38,9 +41,11 @@ type Editing = { seriesId: string; day: DayString; anchor: HTMLElement }
  * table, a row per day and a column per series, as a bullet journal's habit
  * page is drawn (Finn turned it on its side, 2026-10-29). At the left of each
  * day, its weekday and its number ("Mon 2"), today's number in a chip; a
- * thin line above each Monday starts a week; each month is named ("November
- * 2026") over its first day, under a divider, and the name stays under the
- * row of colours while its days scroll by (Finn, 2026-11-02). Above each
+ * thin line above each Monday starts a week; each month starts under a
+ * divider with its name ("November 2026"), which stays under the row of
+ * colours while its days scroll by (Finn, 2026-11-02). A year names the
+ * current month and every second or third month from it (month-labels.ts);
+ * the others have the divider alone. Above each
  * column, only the series's colour: the Today strip's chips above the grid
  * are its legend, and the name is the column's label for a screen reader.
  *
@@ -79,7 +84,24 @@ export function JournalGrid({
   const days = React.useMemo(() => rangeDays(range, start), [range, start])
   // The days a cell can be logged on, and the keyboard moved to.
   const loggable = React.useMemo(() => days.filter((day) => day <= today), [days, today])
-  const { column, cell } = SIZES[range]
+  const { column, cell, pitch } = SIZES[range]
+  // The range's days by month, and the months whose name is drawn: every
+  // one in a week or a month, every second or third in a year.
+  const months = React.useMemo(() => {
+    const groups: { month: MonthString; days: DayString[] }[] = []
+    for (const day of days) {
+      const month = monthOf(day)
+      if (groups[groups.length - 1]?.month !== month) groups.push({ month, days: [] })
+      groups[groups.length - 1].days.push(day)
+    }
+    return groups
+  }, [days])
+  const labelled = React.useMemo(() => {
+    const all = months.map((group) => group.month)
+    return range === "year"
+      ? labelledMonths(all, monthOf(today), yearLabelStep(pitch))
+      : new Set(all)
+  }, [months, range, today, pitch])
   const scroller = React.useRef<HTMLDivElement>(null)
 
   // The cell the keyboard enters the grid at (the one tab stop): the cell
@@ -204,82 +226,93 @@ export function JournalGrid({
               )
             })}
           </div>
-          {days.map((day, i) => {
-            const weekday = weekdayFromMonday(day)
-            const newMonth = i === 0 || day.endsWith("-01")
-            const isToday = day === today
-            return (
-              <React.Fragment key={day}>
-                {newMonth ? (
-                  // The month over its first day, across the row: under the
-                  // colours while its days scroll by, a later month's name
-                  // drawn over it. The name itself stays at the left when
-                  // the grid scrolls sideways.
-                  <div
-                    aria-hidden
-                    data-month-label={monthOf(day)}
-                    className={cx(
-                      "sticky top-8 z-[15] col-span-full bg-bg-card",
-                      i > 0 && "mt-2 border-t border-border",
-                    )}
-                  >
-                    <span className="sticky left-0 inline-block px-3 py-1.5 text-xs font-bold leading-4 text-text-secondary">
-                      {monthLabel(monthOf(day))}
-                    </span>
-                  </div>
-                ) : weekday === 0 ? (
-                  // A week starts on Monday: a thin line above it.
-                  <div
-                    aria-hidden
-                    data-week-start={day}
-                    className="col-span-full h-px bg-border-secondary"
-                  />
-                ) : null}
-                <div role="row" data-testid="journal-row" className="contents">
-                  <div
-                    role="rowheader"
-                    aria-label={dayLabel(day)}
-                    aria-current={isToday ? "date" : undefined}
-                    data-day-row={day}
-                    className={cx(
-                      stickyLeft,
-                      "flex h-full items-center gap-1 self-stretch text-xs leading-4 tabular-nums",
-                      isToday ? "font-bold text-text" : "text-text-secondary",
-                      // A weekend reads lighter, as a journal's ruled page does.
-                      !isToday && weekday >= 5 && "text-text-tertiary",
-                    )}
-                  >
-                    <span className="w-7">{WEEKDAY_SHORT[weekday]}</span>
-                    {/* Today's number in a chip, as the calendar marks it. */}
-                    <span
-                      className={cx(
-                        "min-w-5 rounded-sm px-1 text-right",
-                        isToday && "bg-text text-bg",
-                      )}
-                    >
-                      {Number(day.slice(8))}
-                    </span>
-                  </div>
-                  {series.map((state, c) => (
-                    <DayCell
-                      key={state.series.id}
-                      className={cx(cell, "justify-self-center")}
-                      state={state}
-                      day={day}
-                      days={days}
-                      today={today}
-                      selected={day === selectedDay && selectedDay !== today}
-                      tabIndex={day === activeDay && c === activeColumn ? 0 : -1}
-                      onToggle={(seriesId, cellDay, done) =>
-                        onSetEntry(seriesId, cellDay, done ? true : null)
-                      }
-                      onPickDay={(cellDay) => openEditor(state.series.id, cellDay)}
-                    />
-                  ))}
+          {months.map(({ month, days: monthDays }, m) => (
+            // A month is a group of rows on the grid's own columns, under a
+            // divider. Its name sticks under the colours only while its own
+            // days scroll by: the next month pushes it out, so two names
+            // never overlap (Finn, 2026-11-02).
+            <div
+              key={month}
+              role="rowgroup"
+              data-month={month}
+              className={cx(
+                "col-span-full grid grid-cols-subgrid items-center gap-y-0.5",
+                m > 0 && "mt-2 border-t border-border",
+              )}
+            >
+              {labelled.has(month) ? (
+                // The name stays at the left when the grid scrolls sideways.
+                <div
+                  aria-hidden
+                  data-month-label={month}
+                  className="sticky top-8 z-[15] col-span-full bg-bg-card"
+                >
+                  <span className="sticky left-0 inline-block px-3 py-1.5 text-xs font-bold leading-4 text-text-secondary">
+                    {monthLabel(month)}
+                  </span>
                 </div>
-              </React.Fragment>
-            )
-          })}
+              ) : null}
+              {monthDays.map((day, d) => {
+                const weekday = weekdayFromMonday(day)
+                const isToday = day === today
+                return (
+                  <React.Fragment key={day}>
+                    {d > 0 && weekday === 0 ? (
+                      // A week starts on Monday: a thin line above it. A
+                      // month's first day has the month's divider instead.
+                      <div
+                        aria-hidden
+                        data-week-start={day}
+                        className="col-span-full h-px bg-border-secondary"
+                      />
+                    ) : null}
+                    <div role="row" data-testid="journal-row" className="contents">
+                      <div
+                        role="rowheader"
+                        aria-label={dayLabel(day)}
+                        aria-current={isToday ? "date" : undefined}
+                        data-day-row={day}
+                        className={cx(
+                          stickyLeft,
+                          "flex h-full items-center gap-1 self-stretch text-xs leading-4 tabular-nums",
+                          isToday ? "font-bold text-text" : "text-text-secondary",
+                          // A weekend reads lighter, as a journal's ruled page does.
+                          !isToday && weekday >= 5 && "text-text-tertiary",
+                        )}
+                      >
+                        <span className="w-7">{WEEKDAY_SHORT[weekday]}</span>
+                        {/* Today's number in a chip, as the calendar marks it. */}
+                        <span
+                          className={cx(
+                            "min-w-5 rounded-sm px-1 text-right",
+                            isToday && "bg-text text-bg",
+                          )}
+                        >
+                          {Number(day.slice(8))}
+                        </span>
+                      </div>
+                      {series.map((state, c) => (
+                        <DayCell
+                          key={state.series.id}
+                          className={cx(cell, "justify-self-center")}
+                          state={state}
+                          day={day}
+                          days={days}
+                          today={today}
+                          selected={day === selectedDay && selectedDay !== today}
+                          tabIndex={day === activeDay && c === activeColumn ? 0 : -1}
+                          onToggle={(seriesId, cellDay, done) =>
+                            onSetEntry(seriesId, cellDay, done ? true : null)
+                          }
+                          onPickDay={(cellDay) => openEditor(state.series.id, cellDay)}
+                        />
+                      ))}
+                    </div>
+                  </React.Fragment>
+                )
+              })}
+            </div>
+          ))}
         </div>
       </div>
       <Popover
