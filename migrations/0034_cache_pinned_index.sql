@@ -1,4 +1,4 @@
--- Migration number: 0033    2026-11-02
+-- Migration number: 0034    2026-11-02
 --
 -- The first screen a new device asks for (`GET /api/replica/first-screen`,
 -- docs/events-log-cache.md, "Sync is the log") holds the pinned nodes, read

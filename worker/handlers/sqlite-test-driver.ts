@@ -25,7 +25,7 @@ import migration0028 from "../../migrations/0028_events_log.sql?raw"
 import migration0029 from "../../migrations/0029_backfill_delta_mat_values.sql?raw"
 import migration0031 from "../../migrations/0031_drop_views.sql?raw"
 import migration0032 from "../../migrations/0032_events_log_cache.sql?raw"
-import migration0033 from "../../migrations/0033_cache_pinned_index.sql?raw"
+import migration0034 from "../../migrations/0034_cache_pinned_index.sql?raw"
 import migration0003 from "../../migrations/0003_control_plane.sql?raw"
 import migration0010 from "../../migrations/0010_user_email.sql?raw"
 import migration0011 from "../../migrations/0011_user_email_required.sql?raw"
@@ -132,7 +132,7 @@ export async function createTenantTestDriver(
   await driver.execScript(migration0032)
   // D1 only: the pinned-nodes index the first screen reads on; the local
   // ladder's v18 step made the browser's.
-  await driver.execScript(migration0033)
+  await driver.execScript(migration0034)
   return driver
 }
 

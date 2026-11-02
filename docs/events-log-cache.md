@@ -231,7 +231,7 @@ the entities it names from the cache, derives events (`rowsToEvents`,
   links, one preview child per note with its link, and the pinned nodes
   (`readFirstScreenRows`, `worker/handlers/cache-reads.ts`; one
   statement, two compound terms, on the `type`, `source_id` and
-  `props.pinned_at` indexes; migration 0033 adds the last). The device
+  `props.pinned_at` indexes; migration 0034 adds the last). The device
   imports them, replays its unpushed tail on top, draws the graph and
   ends the page's skeleton (`DatabaseModeStatus.seeded`). The notes,
   not the blocks: 30 KB on production against the snapshot's 5.4 MB.
@@ -653,7 +653,7 @@ Migration `00NN_events_log_cache.sql`:
 4. Nothing is dropped. `nodes`, `link` and `delta_mat_values` stay, and the
    new Worker never writes them again.
 
-Migration `0033_cache_pinned_index.sql`: the partial index on
+Migration `0034_cache_pinned_index.sql`: the partial index on
 `props.pinned_at` the first screen reads the pinned nodes on (section 4).
 
 The Worker of the same deploy: the append of section 3, every reader of
@@ -699,7 +699,7 @@ and is why deploy 2 waits for deploy 1 to settle.
 ### Deploy 3: the drop
 
 After deploys 1 and 2 have run with `verify` clean for every tenant: the
-migration `0034_drop_projection_tables.sql` drops `nodes`, `link`,
+migration `0035_drop_projection_tables.sql` drops `nodes`, `link`,
 `delta_mat_values` and their indexes (section 7), and the same Worker
 removes `appendClientEvents` (the old-shape push door). `writeRows` stays
 for MCP and shares.

@@ -188,7 +188,7 @@ export async function readFirstScreenRows(
       "previews (link_id, far) AS (SELECT link_id, far FROM (SELECT link_id, far, " +
       "ROW_NUMBER() OVER (PARTITION BY src ORDER BY sort_key, far) AS rn FROM hops) " +
       "WHERE rn = 1), " +
-      // The pinned nodes, on the `props.pinned_at` index (0033).
+      // The pinned nodes, on the `props.pinned_at` index (0034).
       "pinned (id) AS (SELECT p.entity_id FROM events_log_cache p " +
       "WHERE p.user_id = :tenant AND p.key = 'props.pinned_at' AND p.value IS NOT NULL), " +
       // The blocks and the links of the screen: four terms, then two.
