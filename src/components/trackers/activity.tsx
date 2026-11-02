@@ -92,9 +92,9 @@ const HEATMAP_GAP = 4
  * far apart never touch. */
 const HEATMAP_LABEL_WIDTH = 34
 
-/** A weekday's name on the day axis: a 12 px line (`text-[10px]
- * leading-3`) and 4 px clear of the next. */
-const AXIS_LABEL_PITCH = 16
+/** A weekday's name on the day axis: 10 px of text (`text-[10px]
+ * leading-none`) and 2 px clear of the next. */
+const AXIS_LABEL_PITCH = 12
 
 /** The weekdays the day axis names, 0 for Monday: all seven when a row is
  * tall enough for each name, else Mon, Wed and Fri, as a paper calendar's
@@ -138,11 +138,14 @@ export function heatmapColumns(weeks: readonly DayString[][]): HeatmapColumn[] {
 }
 
 /** The track a divider stands in, between two months' columns: with the
- * gap each side of it, the line has room to breathe (Finn, 2026-11-02). */
+ * gap each side of it, the line has room to breathe (Finn, 2026-11-02).
+ * About a letter of an 11 px name wide, so a name that starts at its left
+ * edge has its first letter over the line. */
 const DIVIDER_TRACK = 6
 
 /** Diagonal stripes for a placeholder: a day of the other month in a split
- * week, shown as no day at all. */
+ * week, shown as no day at all, inside a thin border that gives it its
+ * shape. */
 const STRIPES: React.CSSProperties = {
   backgroundImage:
     "repeating-linear-gradient(135deg, var(--color-border-secondary) 0 1px, transparent 1px 4px)",
@@ -250,10 +253,10 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
                 role="columnheader"
                 aria-label={monthShortLabel(month)}
                 data-month-label={month}
-                className={cx(
-                  "flex overflow-visible whitespace-nowrap text-[11px] leading-4 text-text-secondary",
-                  column > 0 && "justify-center",
-                )}
+                // Over a divider, the name starts at its track's left edge:
+                // the track is about a letter wide, so the first letter sits
+                // over the line, and the name reads on to the right.
+                className="overflow-visible whitespace-nowrap text-[11px] leading-4 text-text-secondary"
                 style={at(column > 0 ? track[column] - 1 : track[column], 1)}
               >
                 {monthShortLabel(month)}
@@ -268,7 +271,9 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
               aria-label={weekday}
               data-weekday={d}
               className={cx(
-                "pr-1 text-[10px] leading-3 tabular-nums",
+                // No height of its own: the row is a cell high, so rows are
+                // as far apart as columns and the cells read as squares.
+                "flex h-0 items-center self-center pr-1 text-[10px] leading-none tabular-nums",
                 d === todayWeekday ? "font-bold text-text" : "text-text-secondary",
               )}
               style={at(1, d + 2)}
@@ -285,7 +290,7 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
                     role="gridcell"
                     aria-hidden
                     data-placeholder
-                    className="aspect-square rounded-sm"
+                    className="aspect-square rounded-sm border border-border-secondary"
                     style={{ ...at(track[c], d + 2), ...STRIPES }}
                   />
                 )

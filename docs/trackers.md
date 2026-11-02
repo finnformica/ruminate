@@ -191,11 +191,13 @@ has no keys to validate.
   bands when there is more than one), today with a ring and the rest of
   this week dashed. A week that runs into a new month is split into two
   columns (`heatmapColumns`), the other month's days drawn as striped
-  placeholders (no data, not tappable), so a straight line divides the
+  placeholders in a thin border (no data, not tappable), so a straight line divides the
   months: one element per boundary, in a narrow track of its own with a gap
   each side, from the Monday row down to Sunday. A cell is a rounded square
   (`rounded-sm`: the theme's `rounded` is 8 px, a circle at this size).
-  Each month's short name ("Oct", 11 px) sits on top of its divider; the month the heatmap opens in is named only when
+  Each month's short name ("Oct", 11 px) sits above its divider, its first
+  letter over the line. A weekday's name takes no height, so each row is
+  exactly a cell high and the cells read as squares; the month the heatmap opens in is named only when
   the heatmap opens on its 1st. Every month when the names fit, else this month and every second or third
   (`fitMonthLabels` in `month-labels.ts`, at the narrowest column: the
   desktop card). The day axis names all seven weekdays when a row is tall

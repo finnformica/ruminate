@@ -73,8 +73,10 @@ describe("axisWeekdays", () => {
   it("names every weekday when a row is tall enough, else Mon, Wed and Fri, and today", () => {
     expect([...axisWeekdays(null, 3)].sort()).toEqual([0, 1, 2, 3, 4, 5, 6])
     expect([...axisWeekdays(12, 5)].sort()).toEqual([0, 1, 2, 3, 4, 5, 6])
-    expect([...axisWeekdays(8, 3)].sort()).toEqual([0, 2, 3, 4])
-    expect([...axisWeekdays(8, 4)].sort()).toEqual([0, 2, 4])
+    // The desktop card's cells (about 11.7 px) have room for all seven.
+    expect([...axisWeekdays(11.7, 5)].sort()).toEqual([0, 1, 2, 3, 4, 5, 6])
+    expect([...axisWeekdays(6, 3)].sort()).toEqual([0, 2, 3, 4])
+    expect([...axisWeekdays(6, 4)].sort()).toEqual([0, 2, 4])
   })
 })
 
@@ -104,6 +106,10 @@ describe("ActivityHeatmap", () => {
 
   it("draws days as rounded squares, not circles", () => {
     heatmap("2026-10-29")
+    // A weekday's name takes no height, so a row is exactly a cell high.
+    for (const header of screen.getAllByRole("rowheader")) {
+      expect(header.className).toContain("h-0")
+    }
     for (const cell of document.querySelectorAll('[role="gridcell"]')) {
       expect(cell.className).toContain("rounded-sm")
       expect(cell.className).not.toMatch(/rounded(-full|-lg)?( |$)/)
@@ -120,9 +126,10 @@ describe("ActivityHeatmap", () => {
       expect(placeholder.hasAttribute("data-day")).toBe(false)
       expect(placeholder.hasAttribute("aria-label")).toBe(false)
       expect(placeholder.tabIndex).toBe(-1)
-      // Striped, with no outline and no fill.
+      // Striped inside a thin solid border, with no fill.
       expect(placeholder.style.backgroundImage).toContain("repeating-linear-gradient")
-      expect(placeholder.className).not.toContain("border")
+      expect(placeholder.className).toContain("border border-border-secondary")
+      expect(placeholder.className).not.toContain("border-dashed")
       expect(placeholder.className).not.toContain("bg-")
     }
     // Every day is drawn once; only the two logged days count as entries.
@@ -154,7 +161,8 @@ describe("ActivityHeatmap", () => {
     expect(namedTracks()).toEqual(dividers.map((divider) => divider.style.gridColumn))
     for (const label of document.querySelectorAll<HTMLElement>("[data-month-label]")) {
       expect(label.style.gridRow).toBe("1")
-      expect(label.className).toContain("justify-center")
+      // From the track's left edge, so the first letter is over the line.
+      expect(label.className).not.toContain("justify-center")
       // A little smaller than the text around it.
       expect(label.className).toContain("text-[11px]")
     }
