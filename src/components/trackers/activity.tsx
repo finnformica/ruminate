@@ -21,15 +21,19 @@ import { ColourDot, colourVar } from "./month-grid"
 import { fitMonthLabels } from "./month-labels"
 
 /**
- * The tracker at a glance (docs/trackers.md, Finn 2026-10-29): a summary
- * line of active days, a heatmap of the last weeks, and the newest entries.
+ * The tracker at a glance (docs/trackers.md, Finn 2026-10-29): a row of
+ * stats, a heatmap of the last weeks, and the newest entries.
  * A day is active when any series has something on it (`isLogged`); every
  * number is computed here from the series the page already holds.
  */
 
-/** The summary line at the top of the page: the streak as a pill, then the
- * active days in the last 7, the last 28 and all time. */
-export function ActivitySummary({
+/**
+ * The stats row at the top of the page (Finn, 2026-11-02): the streak, the
+ * active days in the last 7 and the last 28, and all time, each a label over
+ * its value. It takes the place of the summary line and its streak badge,
+ * with the same numbers (`activeSummary`).
+ */
+export function TrackerStats({
   series,
   today,
 }: {
@@ -37,21 +41,39 @@ export function ActivitySummary({
   today: DayString
 }) {
   const summary = React.useMemo(() => activeSummary(series, today), [series, today])
+  const days = (n: number) => (n === 1 ? "day" : "days")
+  const stats: { label: string; value: string; unit?: string; title: string }[] = [
+    {
+      label: "Streak",
+      value: String(summary.streak),
+      unit: days(summary.streak),
+      title: "Active days in a row",
+    },
+    { label: "Last 7 days", value: `${summary.lastWeek}/7`, title: "Active days in the last 7" },
+    {
+      label: "Last 28 days",
+      value: `${summary.lastFourWeeks}/28`,
+      title: `Active days in the last 28: ${Math.round((summary.lastFourWeeks / 28) * 100)}%`,
+    },
+    {
+      label: "All time",
+      value: String(summary.allTime),
+      unit: days(summary.allTime),
+      title: "Active days up to today",
+    },
+  ]
   return (
-    <p
-      data-testid="activity-summary"
-      className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-text-secondary tabular-nums"
-    >
-      {summary.streak > 0 ? (
-        <span className="inline-flex h-6 items-center rounded-full border border-border px-2 text-text">
-          {summary.streak}-day streak
-        </span>
-      ) : null}
-      <span>
-        {summary.lastWeek} of the last 7 days · {summary.lastFourWeeks} of the last 28 ·{" "}
-        {summary.allTime} all time
-      </span>
-    </p>
+    <dl data-testid="tracker-stats" className="flex flex-wrap gap-x-6 gap-y-2 sm:gap-x-8">
+      {stats.map(({ label, value, unit, title }) => (
+        <div key={label} title={title} className="flex flex-col gap-1">
+          <dt className="whitespace-nowrap text-sm leading-4 text-text-secondary">{label}</dt>
+          <dd className="whitespace-nowrap text-lg font-bold leading-6">
+            {value}
+            {unit ? <span className="text-sm font-normal text-text-secondary"> {unit}</span> : null}
+          </dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 
@@ -84,7 +106,7 @@ const WEEKDAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const
  * is wider, so month names that fit here fit a phone too. */
 const HEATMAP_MIN_WIDTH = 262
 
-/** The gap between columns and between rows (`gap-1`). */
+/** The gap between columns and between rows, the one value for both. */
 const HEATMAP_GAP = 4
 
 /** A month's short name at its widest ("Sept", four letters at 11 px) and
@@ -98,10 +120,10 @@ const AXIS_LABEL_PITCH = 12
 
 /** The weekdays the day axis names, 0 for Monday: all seven when a row is
  * tall enough for each name, else Mon, Wed and Fri, as a paper calendar's
- * margin does; today's always. `rowHeight` is a cell's measured height, or
+ * margin does; today's always. `cellSize` is a cell's measured side, or
  * null before it is measured. */
-export function axisWeekdays(rowHeight: number | null, todayWeekday: number): Set<number> {
-  const all = rowHeight === null || rowHeight + HEATMAP_GAP >= AXIS_LABEL_PITCH
+export function axisWeekdays(cellSize: number | null, todayWeekday: number): Set<number> {
+  const all = cellSize === null || cellSize + HEATMAP_GAP >= AXIS_LABEL_PITCH
   const shown = new Set(all ? [0, 1, 2, 3, 4, 5, 6] : [0, 2, 4])
   if (todayWeekday >= 0) shown.add(todayWeekday)
   return shown
@@ -217,17 +239,21 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
   }, [starts, columns, track, dividers, today])
   const todayWeekday = weekdayFromMonday(today)
 
-  // A cell's height, to tell whether every weekday's name fits beside it.
+  // A cell's width, which the columns set: each weekday's row is made as
+  // tall, so the gap down is the gap across and the cells are square in any
+  // engine (Finn, 2026-11-02). A row left to an `aspect-square` cell alone
+  // can come out taller in WebKit. The width also tells whether every
+  // weekday's name fits beside a row.
   const grid = React.useRef<HTMLDivElement>(null)
-  const [rowHeight, setRowHeight] = React.useState<number | null>(null)
+  const [cellSize, setCellSize] = React.useState<number | null>(null)
   React.useLayoutEffect(() => {
     const cell = grid.current?.querySelector<HTMLElement>("[data-day]")
     if (!cell || typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver(() => setRowHeight(cell.offsetHeight))
+    const observer = new ResizeObserver(() => setCellSize(cell.getBoundingClientRect().width))
     observer.observe(cell)
     return () => observer.disconnect()
   }, [columns])
-  const weekdays = axisWeekdays(rowHeight, todayWeekday)
+  const weekdays = axisWeekdays(cellSize, todayWeekday)
 
   // Every item has its place: rows are the names (1), Monday to Sunday (2
   // to 8) and today's dot (9).
@@ -242,8 +268,12 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
         role="grid"
         aria-label="Active days, by week"
         data-testid="activity-heatmap"
-        className="grid items-center gap-1"
-        style={{ gridTemplateColumns: template }}
+        className="grid items-center"
+        style={{
+          gap: HEATMAP_GAP,
+          gridTemplateColumns: template,
+          gridTemplateRows: cellSize === null ? undefined : `auto repeat(7, ${cellSize}px) auto`,
+        }}
       >
         {/* The names: over its divider for a month that starts in the
             heatmap, over the first column for the month it opens on. */}
@@ -384,51 +414,66 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
   )
 }
 
-/** How many rows the Recent list shows at first, and how many more each
+/** How many days the Recent list shows at first, and how many more each
  * **Show more** adds. */
-const RECENT_ROWS = 5
-const MORE_ROWS = 10
+const RECENT_DAYS = 5
+const MORE_DAYS = 10
 
 /**
- * The newest entries (`recentEntries`), a row each: the day, the series and
- * the entry's text after the day (muted, wrapping), newest first. Five rows,
- * and **Show more** for the rest.
+ * The newest entries (`recentEntries`), newest first, a group a day (Finn,
+ * 2026-11-02): the day named once at the left, then a line per series
+ * logged on it, with the entry's text after the day (muted, wrapping). A
+ * divider runs between two days, never inside one. Five days, and **Show
+ * more** for the rest.
  */
 function RecentEntries({ series, today }: { series: readonly SeriesState[]; today: DayString }) {
-  const entries = React.useMemo(() => recentEntries(series, today), [series, today])
-  const [shown, setShown] = React.useState(RECENT_ROWS)
+  const days = React.useMemo(() => {
+    const groups: { day: DayString; entries: ReturnType<typeof recentEntries> }[] = []
+    for (const item of recentEntries(series, today)) {
+      const last = groups[groups.length - 1]
+      if (last?.day === item.entry.date) last.entries.push(item)
+      else groups.push({ day: item.entry.date, entries: [item] })
+    }
+    return groups
+  }, [series, today])
+  const [shown, setShown] = React.useState(RECENT_DAYS)
   return (
     <section className="flex flex-col gap-2" aria-labelledby="tracker-recent">
       <h2 id="tracker-recent" className="font-bold leading-4">
         Recent
       </h2>
-      {entries.length === 0 ? (
+      {days.length === 0 ? (
         <p className="text-sm text-text-secondary">Nothing logged yet.</p>
       ) : (
         <ul data-testid="recent-entries" className="flex flex-col">
-          {entries.slice(0, shown).map(({ series: s, entry }) => (
+          {days.slice(0, shown).map(({ day, entries }) => (
             <li
-              key={entry.id}
+              key={day}
+              data-recent-day={day}
               className="flex gap-3 border-t border-border-secondary py-2 first:border-t-0"
             >
               <span className="w-14 shrink-0 text-text-secondary tabular-nums">
-                {shortDayLabel(entry.date)}
+                {shortDayLabel(day)}
               </span>
-              <p className="min-w-0 flex-1 break-words">
-                <span className="inline-flex items-center gap-2 align-baseline">
-                  <ColourDot colour={s.colour} />
-                  {s.name.trim() || "Untitled"}
-                </span>
-                {entry.detail ? (
-                  <span className="text-text-secondary"> · {entry.detail}</span>
-                ) : null}
-              </p>
+              <ul aria-label={dayLabel(day)} className="flex min-w-0 flex-1 flex-col gap-1">
+                {entries.map(({ series: s, entry }) => (
+                  <li key={entry.id} className="break-words">
+                    <span className="inline-flex items-center gap-2 align-baseline">
+                      <ColourDot colour={s.colour} />
+                      {s.name.trim() || "Untitled"}
+                    </span>
+                    {entry.detail ? (
+                      <span className="text-text-secondary"> · {entry.detail}</span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
             </li>
           ))}
         </ul>
       )}
-      {entries.length > shown ? (
-        <Button size="small" className="self-start" onClick={() => setShown(shown + MORE_ROWS)}>
+      {days.length > shown ? (
+        <Button size="small" className="self-start" onClick={() => setShown(shown + MORE_DAYS)}>
           Show more
         </Button>
       ) : null}

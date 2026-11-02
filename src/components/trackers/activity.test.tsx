@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import { cleanup, render, screen, within } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { heatmapWeeks, type Series, type SeriesState } from "../../data/tracker"
-import { ActivityCard, axisWeekdays, heatmapColumns } from "./activity"
+import { ActivityCard, TrackerStats, axisWeekdays, heatmapColumns } from "./activity"
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
 
 const READ: SeriesState = {
   series: {
@@ -226,5 +230,72 @@ describe("ActivityHeatmap", () => {
     expect(marks[0].dataset.column).toBe("13")
     expect(marks[0].style.gridColumn).toBe("17")
     expect(marks[0].style.gridRow).toBe("9")
+  })
+})
+
+describe("the heatmap's rows", () => {
+  it("makes each weekday's row as tall as a cell is wide, with one gap both ways", () => {
+    // jsdom draws nothing: give every cell a 20 px side, and run the
+    // observer's callback as soon as it observes.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 20,
+      height: 20,
+    } as DOMRect)
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(private callback: () => void) {}
+        observe() {
+          this.callback()
+        }
+        disconnect() {}
+      },
+    )
+    heatmap("2026-10-29")
+    const grid = screen.getByTestId("activity-heatmap")
+    expect(grid.style.gridTemplateRows).toBe("auto repeat(7, 20px) auto")
+    expect(grid.style.gap).toBe("4px")
+  })
+})
+
+const SWIM: SeriesState = {
+  series: { ...READ.series, id: "s2", name: "Swim", kind: "number", colour: "blue", unit: "min" },
+  entries: new Map([
+    ["2026-10-28", { id: "e3", date: "2026-10-28", value: 30, detail: "30 min" }],
+    ["2026-10-27", { id: "e4", date: "2026-10-27", value: 20 }],
+  ]),
+}
+
+describe("the Recent list", () => {
+  it("groups the series logged on one day under one date, between one pair of dividers", () => {
+    render(<ActivityCard series={[READ, SWIM]} today="2026-10-29" />)
+    const days = [...document.querySelectorAll<HTMLElement>("[data-recent-day]")]
+    expect(days.map((day) => day.dataset.recentDay)).toEqual([
+      "2026-10-28",
+      "2026-10-27",
+      "2026-09-30",
+    ])
+    // The 28th: one date label, then Read and Swim, in the series's order.
+    expect(within(days[0]).getAllByText("28 Oct")).toHaveLength(1)
+    const lines = within(days[0]).getAllByRole("listitem")
+    expect(lines.map((line) => line.textContent)).toEqual(["Read", "Swim · 30 min"])
+    // The divider is the group's top border: none inside a day.
+    for (const line of lines) expect(line.className).not.toContain("border-t")
+  })
+})
+
+describe("TrackerStats", () => {
+  it("shows the streak, the last 7 and 28 days, and all time", () => {
+    render(<TrackerStats series={[READ, SWIM]} today="2026-10-29" />)
+    const stats = screen.getByTestId("tracker-stats")
+    const pairs = [...stats.querySelectorAll("dt")].map(
+      (dt) => `${dt.textContent}: ${dt.nextElementSibling?.textContent}`,
+    )
+    expect(pairs).toEqual([
+      "Streak: 2 days",
+      "Last 7 days: 2/7",
+      "Last 28 days: 2/28",
+      "All time: 3 days",
+    ])
   })
 })

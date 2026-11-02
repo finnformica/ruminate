@@ -1,6 +1,6 @@
 import React from "react"
 import { addDays, type Entry, type Series, type SeriesState } from "../../data/tracker"
-import { ActivityCard, ActivitySummary } from "./activity"
+import { ActivityCard, TrackerStats } from "./activity"
 
 /** A Thursday, so the heatmap's last column has days still to come. */
 const TODAY = "2026-10-29"
@@ -66,7 +66,7 @@ const SERIES: SeriesState[] = [
 function Activity({ series, width }: { series: SeriesState[]; width: number }) {
   return (
     <div className="flex flex-col gap-4 bg-bg p-4" style={{ width }}>
-      <ActivitySummary series={series} today={TODAY} />
+      <TrackerStats series={series} today={TODAY} />
       <ActivityCard series={series} today={TODAY} />
     </div>
   )
