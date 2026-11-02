@@ -143,18 +143,6 @@ export function heatmapColumns(weeks: readonly DayString[][]): HeatmapColumn[] {
  * edge has its first letter over the line. */
 const DIVIDER_TRACK = 6
 
-/** Dashed diagonal stripes for a placeholder: a day of the other month in a
- * split week, shown as no day at all, inside a thin dashed border that gives
- * it its shape. A mask at right angles to the stripes cuts each into 2 px
- * dashes; it is on an inner box, so the border is not cut too. */
-const DASH_MASK = "repeating-linear-gradient(45deg, #000 0 2px, transparent 2px 4px)"
-const STRIPES: React.CSSProperties = {
-  backgroundImage:
-    "repeating-linear-gradient(135deg, var(--color-border-secondary) 0 1px, transparent 1px 4px)",
-  maskImage: DASH_MASK,
-  WebkitMaskImage: DASH_MASK,
-}
-
 /**
  * The heatmap: one column a week, one row a weekday from Monday, the week
  * today is in at the right edge (`heatmapWeeks`). A cell is a rounded
@@ -162,7 +150,7 @@ const STRIPES: React.CSSProperties = {
  * bands when there is more than one. Today has a ring, its weekday is named
  * in bold and a dot sits under its column; the days of this week still to
  * come have a dashed outline. A week that runs into a new month is split in
- * two columns (`heatmapColumns`), the other month's days drawn as striped
+ * two columns (`heatmapColumns`), the other month's days drawn as faded
  * placeholders (no data), so one straight line divides the months: a
  * single element in a narrow track of its own between the two months, from
  * the Monday row down to Sunday, with the month's name above it. A month
@@ -287,18 +275,20 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
             {columns.map((column, c) => {
               const day = column.days[d]
               if (day === null) {
-                // Another month's day, in a split week: holds the place.
+                // Another month's day, in a split week: holds the place as
+                // a ghost of a day, the empty day's grey at 40 %, with no
+                // border and no texture. At 12-14 px, stripes and dashes
+                // read as noise; the divider already tells the months apart
+                // (Finn, 2026-11-02).
                 return (
                   <div
                     key={`${c}-${d}`}
                     role="gridcell"
                     aria-hidden
                     data-placeholder
-                    className="relative aspect-square overflow-hidden rounded-sm border border-dashed border-border-secondary"
+                    className="aspect-square rounded-sm bg-bg-secondary opacity-40"
                     style={at(track[c], d + 2)}
-                  >
-                    <span data-stripes className="absolute inset-0" style={STRIPES} />
-                  </div>
+                  />
                 )
               }
               const on = seriesOnDay(series, day)

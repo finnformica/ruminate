@@ -126,13 +126,12 @@ describe("ActivityHeatmap", () => {
       expect(placeholder.hasAttribute("data-day")).toBe(false)
       expect(placeholder.hasAttribute("aria-label")).toBe(false)
       expect(placeholder.tabIndex).toBe(-1)
-      // Dashed stripes inside a thin dashed border, with no fill. The
-      // stripes are on an inner box, so their mask does not cut the border.
-      expect(placeholder.className).toContain("border border-dashed border-border-secondary")
-      expect(placeholder.className).not.toContain("bg-")
+      // A ghost of a day: the empty day's grey, faded, with no border and
+      // no texture.
+      expect(placeholder.className).toContain("bg-bg-secondary opacity-40")
+      expect(placeholder.className).not.toContain("border")
       expect(placeholder.style.backgroundImage).toBe("")
-      const stripes = placeholder.querySelector<HTMLElement>("[data-stripes]")!
-      expect(stripes.style.backgroundImage).toContain("repeating-linear-gradient")
+      expect(placeholder.children).toHaveLength(0)
     }
     // Every day is drawn once; only the two logged days count as entries.
     expect(document.querySelectorAll("[data-day]")).toHaveLength(84)
