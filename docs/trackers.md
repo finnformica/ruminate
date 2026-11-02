@@ -189,13 +189,18 @@ has no keys to validate.
   column a week from Monday with this week at the right edge, a cell in the
   colour of each series logged that day (`seriesOnDay`; split into diagonal
   bands when there is more than one), today with a ring and the rest of
-  this week dashed. A stepped line in the gaps between cells divides the
-  months; each month's short name ("Oct") sits over the week it starts in,
+  this week dashed. A week that runs into a new month is split into two
+  columns (`heatmapColumns`), the other month's days drawn as placeholders
+  (a dashed outline on a grey fill, no data, not tappable), so a straight
+  line divides the months: one element per boundary, the grid's full
+  height. Each month's short name ("Oct") sits over its first column,
   every month when the names fit, else this month and every second or third
   (`fitMonthLabels` in `month-labels.ts`, at the narrowest column: the
-  desktop card). The day axis names Mon, Wed and Fri, and today's weekday
-  in bold; a dot under the last week marks today's (Finn, 2026-11-02). A
-  legend of the series is below it; then **Recent**
+  desktop card). The day axis names all seven weekdays when a row is tall
+  enough for each name, else Mon, Wed and Fri (`axisWeekdays`, from the
+  measured cell height), and today's weekday in bold; a dot under today's
+  column marks it (Finn, 2026-11-02). A legend of the series is below it;
+  then **Recent**
   (`recentEntries`): the newest entries up to today as rows of day, series
   and the entry's text after the day (`Entry.detail`, read only), five at
   first and ten more for each **Show more**. The heatmap is for reading; the

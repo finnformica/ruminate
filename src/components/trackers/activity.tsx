@@ -8,6 +8,7 @@ import {
   recentEntries,
   seriesOnDay,
   shortDayLabel,
+  weekdayFromMonday,
   type DayString,
   type MonthString,
   type SeriesState,
@@ -78,31 +79,61 @@ const WEEKDAY_NAMES = [
 
 const WEEKDAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const
 
-/** The weekdays named on the day axis, as a paper calendar's margin does;
- * today's is named too. */
-const AXIS_WEEKDAYS = new Set([0, 2, 4])
+/** The width the week columns share at their narrowest: the card beside the
+ * range on a desktop (`lg:w-80`), less the day axis. At 390 px wide the card
+ * is wider, so month names that fit here fit a phone too. */
+const HEATMAP_MIN_WIDTH = 262
 
-/** The narrowest a week's column is, with the gap after it: the card beside
- * the range on a desktop (`lg:w-80`), less the day axis. At 390 px wide the
- * card is wider (25 px), so names that fit here fit a phone too. */
-const HEATMAP_MIN_PITCH = 21
+/** The gap between columns and between rows (`gap-1`). */
+const HEATMAP_GAP = 4
 
 /** A month's short name at its widest ("Sept", four letters of text-xs)
  * and the space after it. */
 const HEATMAP_LABEL_WIDTH = 34
 
-/** Each month in the heatmap and the week column its name starts over: the
- * week its first day falls in, or the first column for the month the
- * heatmap opens in. */
-function heatmapMonths(weeks: readonly DayString[][]): { month: MonthString; column: number }[] {
-  const months = [{ month: monthOf(weeks[0][0]), column: 0 }]
-  weeks.forEach((week, w) => {
-    for (const day of week) {
-      if (day.endsWith("-01") && day !== weeks[0][0])
-        months.push({ month: monthOf(day), column: w })
+/** A weekday's name on the day axis: a 12 px line (`text-[10px]
+ * leading-3`) and 4 px clear of the next. */
+const AXIS_LABEL_PITCH = 16
+
+/** The weekdays the day axis names, 0 for Monday: all seven when a row is
+ * tall enough for each name, else Mon, Wed and Fri, as a paper calendar's
+ * margin does; today's always. `rowHeight` is a cell's measured height, or
+ * null before it is measured. */
+export function axisWeekdays(rowHeight: number | null, todayWeekday: number): Set<number> {
+  const all = rowHeight === null || rowHeight + HEATMAP_GAP >= AXIS_LABEL_PITCH
+  const shown = new Set(all ? [0, 1, 2, 3, 4, 5, 6] : [0, 2, 4])
+  if (todayWeekday >= 0) shown.add(todayWeekday)
+  return shown
+}
+
+/** A heatmap column: a week, or the part of a week in one month. A day of
+ * the other month is null, drawn as a placeholder. */
+type HeatmapColumn = { month: MonthString; days: (DayString | null)[] }
+
+/**
+ * The heatmap's columns (Finn, 2026-11-02): a column a week, but a week that
+ * runs into a new month is split in two, its old month's days on the left
+ * and its new month's on the right, each with placeholders for the other's
+ * days. The line between two months is then straight.
+ */
+export function heatmapColumns(weeks: readonly DayString[][]): HeatmapColumn[] {
+  const columns: HeatmapColumn[] = []
+  for (const week of weeks) {
+    const split = week.findIndex((day, d) => d > 0 && monthOf(day) !== monthOf(week[d - 1]))
+    if (split < 0) {
+      columns.push({ month: monthOf(week[0]), days: [...week] })
+      continue
     }
-  })
-  return months
+    columns.push({
+      month: monthOf(week[0]),
+      days: week.map((day, d) => (d < split ? day : null)),
+    })
+    columns.push({
+      month: monthOf(week[split]),
+      days: week.map((day, d) => (d >= split ? day : null)),
+    })
+  }
+  return columns
 }
 
 /**
@@ -110,50 +141,77 @@ function heatmapMonths(weeks: readonly DayString[][]): { month: MonthString; col
  * today is in at the right edge (`heatmapWeeks`). A cell is filled in the
  * colour of the series logged that day, split into bands when there is more
  * than one. Today has a ring, its weekday is named in bold and a dot sits
- * under its week; the days of this week still to come have a dashed
- * outline. A stepped line in the gaps between cells divides the months, and
- * each month is named over the week it starts in: every month when the
- * names fit, else this month and every second or third (month-labels.ts,
- * as the Grid's year does; Finn, 2026-11-02). Mon, Wed and Fri are named on
- * the day axis. The columns share the width, so twelve weeks fit a phone
- * with no sideways scroll. It is for reading: the Today strip and the range
- * view log. Below it, a legend of the series.
+ * under its column; the days of this week still to come have a dashed
+ * outline. A week that runs into a new month is split in two columns
+ * (`heatmapColumns`), the other month's days drawn as placeholders (a
+ * dashed outline on a grey fill, no data), so one straight line, a single
+ * element the grid's full height, divides the months. Each month is named
+ * over its first column: every month when the names fit, else this month
+ * and every second or third (month-labels.ts, as the Grid's year does;
+ * Finn, 2026-11-02). The day axis names every weekday when a row is tall
+ * enough, else Mon, Wed and Fri (`axisWeekdays`). The columns share the
+ * width, so twelve weeks fit a phone with no sideways scroll. It is for
+ * reading: the Today strip and the range view log. Below it, a legend of
+ * the series.
  */
 function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; today: DayString }) {
-  const weeks = React.useMemo(() => heatmapWeeks(today), [today])
-  const months = React.useMemo(() => {
-    const all = heatmapMonths(weeks)
-    const labelled = fitMonthLabels(
-      all.map(({ month, column }) => ({ month, start: column * HEATMAP_MIN_PITCH })),
+  const columns = React.useMemo(() => heatmapColumns(heatmapWeeks(today)), [today])
+  // Each month and the column it starts in.
+  const starts = React.useMemo(
+    () =>
+      columns.flatMap((column, c) =>
+        c === 0 || column.month !== columns[c - 1].month
+          ? [{ month: column.month, column: c }]
+          : [],
+      ),
+    [columns],
+  )
+  const named = React.useMemo(() => {
+    const pitch = (HEATMAP_MIN_WIDTH + HEATMAP_GAP) / columns.length
+    return fitMonthLabels(
+      starts.map(({ month, column }) => ({ month, start: column * pitch })),
       monthOf(today),
       HEATMAP_LABEL_WIDTH,
     )
-    return all.filter(({ month }) => labelled.has(month))
-  }, [weeks, today])
-  const todayWeekday = weeks[weeks.length - 1].indexOf(today)
-  const columns = `auto repeat(${weeks.length}, minmax(0, 1fr))`
+  }, [starts, columns.length, today])
+  const todayWeekday = weekdayFromMonday(today)
+
+  // A cell's height, to tell whether every weekday's name fits beside it.
+  const grid = React.useRef<HTMLDivElement>(null)
+  const [rowHeight, setRowHeight] = React.useState<number | null>(null)
+  React.useLayoutEffect(() => {
+    const cell = grid.current?.querySelector<HTMLElement>("[data-day]")
+    if (!cell || typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(() => setRowHeight(cell.offsetHeight))
+    observer.observe(cell)
+    return () => observer.disconnect()
+  }, [columns])
+  const weekdays = axisWeekdays(rowHeight, todayWeekday)
+
   return (
     <div className="flex flex-col gap-3">
       <div
+        ref={grid}
         role="grid"
         aria-label="Active days, by week"
         data-testid="activity-heatmap"
-        className="grid items-center gap-1"
-        style={{ gridTemplateColumns: columns }}
+        className="relative grid items-center gap-1"
+        style={{ gridTemplateColumns: `auto repeat(${columns.length}, minmax(0, 1fr))` }}
       >
         <div role="row" className="contents">
           <div aria-hidden />
-          {weeks.map((_, w) => {
-            const named = months.find((entry) => entry.column === w)
+          {columns.map((column, c) => {
+            const month = starts.find((entry) => entry.column === c)?.month
+            const label = month && named.has(month) ? monthShortLabel(month) : null
             return (
               <div
-                key={w}
+                key={c}
                 role="columnheader"
-                aria-label={named ? monthShortLabel(named.month) : undefined}
-                data-month-label={named?.month}
+                aria-label={label ?? undefined}
+                data-month-label={label ? month : undefined}
                 className="overflow-visible whitespace-nowrap text-xs leading-4 text-text-secondary"
               >
-                {named ? monthShortLabel(named.month) : null}
+                {label}
               </div>
             )
           })}
@@ -165,14 +223,26 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
               aria-label={weekday}
               data-weekday={d}
               className={cx(
-                "pr-1 text-[10px] leading-none tabular-nums",
+                "pr-1 text-[10px] leading-3 tabular-nums",
                 d === todayWeekday ? "font-bold text-text" : "text-text-secondary",
               )}
             >
-              {AXIS_WEEKDAYS.has(d) || d === todayWeekday ? WEEKDAY_SHORT[d] : null}
+              {weekdays.has(d) ? WEEKDAY_SHORT[d] : null}
             </div>
-            {weeks.map((week, w) => {
-              const day = week[d]
+            {columns.map((column, c) => {
+              const day = column.days[d]
+              if (day === null) {
+                // Another month's day, in a split week: holds the place.
+                return (
+                  <div
+                    key={`${c}-${d}`}
+                    role="gridcell"
+                    aria-hidden
+                    data-placeholder
+                    className="aspect-square rounded border border-dashed border-border bg-bg-secondary opacity-60"
+                  />
+                )
+              }
               const on = seriesOnDay(series, day)
               const future = day > today
               const label = `${dayLabel(day)}: ${
@@ -180,11 +250,6 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
                   ? "to come"
                   : on.map((s) => s.name.trim() || "Untitled").join(", ") || "nothing"
               }`
-              // A month starts here: its line runs in the gap to the left
-              // (the week before has the old month on this weekday) and
-              // above (the day before, in this column, was the old month).
-              const left = w > 0 && monthOf(weeks[w - 1][d]) !== monthOf(day)
-              const top = d > 0 && monthOf(week[d - 1]) !== monthOf(day)
               return (
                 <div
                   key={day}
@@ -194,15 +259,10 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
                   title={label}
                   data-day={day}
                   data-series={on.length}
-                  data-divider={left && top ? "both" : left ? "left" : top ? "top" : undefined}
                   className={cx(
-                    "relative aspect-square rounded",
+                    "aspect-square rounded",
                     future ? "border border-dashed border-border" : "bg-bg-secondary",
                     day === today && "ring-2 ring-text-secondary",
-                    left &&
-                      "before:absolute before:-bottom-[3px] before:-left-[3px] before:-top-[3px] before:w-px before:bg-border",
-                    top &&
-                      "after:absolute after:-left-[3px] after:-right-[3px] after:-top-[3px] after:h-px after:bg-border",
                   )}
                   style={future ? undefined : cellFill(on.map((s) => s.colour))}
                 />
@@ -210,12 +270,12 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
             })}
           </div>
         ))}
-        {/* Under today's week, a dot: where you are. */}
+        {/* Under today's column, a dot: where you are. */}
         <div aria-hidden className="contents">
           <div />
-          {weeks.map((week, w) => (
-            <div key={w} className="flex h-1.5 justify-center">
-              {week.includes(today) ? (
+          {columns.map((column, c) => (
+            <div key={c} className="flex h-1.5 justify-center">
+              {column.days.includes(today) ? (
                 <span
                   data-testid="heatmap-today-mark"
                   className="size-1.5 rounded-full bg-text-secondary"
@@ -224,6 +284,18 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
             </div>
           ))}
         </div>
+        {/* A line between two months: one element down the gap before the
+            new month's first column, from the names to the last weekday.
+            Placed by its grid area, it takes no cell of its own. */}
+        {starts.slice(1).map(({ month, column }) => (
+          <div
+            key={month}
+            aria-hidden
+            data-month-divider={month}
+            className="pointer-events-none absolute inset-y-0 -left-[3px] w-px bg-border"
+            style={{ gridColumn: `${column + 2} / span 1`, gridRow: "1 / 9" }}
+          />
+        ))}
       </div>
       {series.length > 0 ? (
         <ul
