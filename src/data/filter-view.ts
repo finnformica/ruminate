@@ -104,6 +104,7 @@ export function filteredView(
     pivots,
     reach,
     exclude,
+    withhold,
   }: {
     /** The fold rule the rows are drawn by — the narrowed view's own
      * (`useFoldRule` with the narrowing, src/data/view-state.ts). Absent,
@@ -128,6 +129,8 @@ export function filteredView(
     /** Notes the Root frame does not list: the ones other people shared
      * (`rootChildIds`). Read only for the Root frame. */
     exclude?: ReadonlySet<string>
+    /** Hold every row's children back (`WalkOptions.withhold`). */
+    withhold?: boolean
   } = {},
 ): FilteredView | null {
   const { matched, compare } = narrowing
@@ -140,15 +143,22 @@ export function filteredView(
       }
     : undefined
   const focused = focusBlockId
-    ? blockView(focusBlockId, graph, expanded, pivots, walk && { ...walk, keepRoots: true })
+    ? blockView(
+        focusBlockId,
+        graph,
+        expanded,
+        pivots,
+        walk && { ...walk, keepRoots: true },
+        withhold,
+      )
     : null
   // The Root frame (src/data/root-frame.ts) is the walk of the corpus root,
   // narrowed the same way: its rows are notes, and the filter runs over them all.
   const view =
     focused ??
     (noteId === CORPUS_ROOT_ID
-      ? rootView(graph, expanded, pivots, walk, exclude)
-      : noteView(noteId, graph, expanded, pivots, walk))
+      ? rootView(graph, expanded, pivots, walk, exclude, withhold)
+      : noteView(noteId, graph, expanded, pivots, walk, withhold))
   if (!view) return null
   if (matched === null) return { ...view, context: NO_CONTEXT, matches: null }
   // Every row the walk kept is a match, a kept row, or context.

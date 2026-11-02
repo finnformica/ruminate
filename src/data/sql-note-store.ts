@@ -21,7 +21,6 @@ import {
 } from "./key-events"
 import type { NoteStore } from "./note-store"
 import type { SqlDriver, SqlStatement, SqlValue } from "./sql-driver"
-import { createLazyReads } from "./sql-lazy-reads"
 
 /**
  * The SQL implementation of `NoteStore` — the store the app runs on: the
@@ -186,8 +185,6 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<NoteStore> {
         { sql: "DELETE FROM events_log" },
       ])
     },
-
-    lazy: createLazyReads(driver),
 
     getMeta: async (key) => {
       const rows = await driver.exec("SELECT value FROM meta WHERE key = ?", [key])

@@ -382,17 +382,6 @@ export interface GraphSnapshot {
   /** Child links per source, sorted by sort key (destination id tiebreak). */
   childLinks: Map<string, LinkRow[]>
   /**
-   * The ids whose child links are COMPLETE, when the graph is a lazily
-   * loaded part of the corpus (docs/events-log-cache.md, "The client"): at
-   * boot the notes' order and one preview child per note, then each note's
-   * subtree as it is opened (`src/data/database-mode.ts`, `ensureNote`). A
-   * walk that opens a row not in it says so (`GraphView.unloaded`), and a
-   * save never reconciles the children of such a parent (`partsToOps`).
-   * Absent on a whole graph: the sample graph, a shared slice, the MCP
-   * server's views.
-   */
-  loaded?: ReadonlySet<string>
-  /**
    * The same links per destination, sorted by source id: who holds a node.
    * The reverse index is a by-product of building the snapshot, never
    * computed by scanning it — `buildGraphSnapshot` fills both directions from
@@ -495,15 +484,13 @@ export function parseProps(props: string | null): BlockProps | null {
 }
 
 /** A walk's result: the doc, and the keys the fold rule closed — the rows
- * drawn with a chevron and nothing beneath them. `unloaded` is the open
- * rows whose children the graph does not hold yet (`GraphSnapshot.loaded`):
- * drawn with nothing beneath them and a loading mark, never the part the
- * graph happens to hold, and what the runtime loads next, on a lazily
- * loaded graph; empty otherwise. */
+ * drawn with a chevron and nothing beneath them. `withheld` is the open
+ * rows whose children were held back (`WalkOptions.withhold`): drawn with
+ * a loading mark and nothing beneath them; empty otherwise. */
 export interface GraphView {
   doc: BlockDoc
   collapsed: Set<string>
-  unloaded: Set<string>
+  withheld: Set<string>
 }
 
 /** Every occurrence open: the eager walk (export, search, the basket). */
@@ -530,6 +517,11 @@ export interface WalkOptions {
   /** Narrow and sort the rows as the walk goes (docs/graph-walk.md, 4.5).
    * Absent = every row, in the graph's order. */
   narrowing?: WalkNarrowing
+  /** Hold every open row's children back and report the row (`withheld`):
+   * a fresh device between its first screen and its snapshot
+   * (`DatabaseModeStatus.partial`), when the graph holds one preview child
+   * per note and the list beneath a row is not the list. */
+  withhold?: boolean
 }
 
 /**
@@ -688,13 +680,13 @@ export function walkGraph(
     pivots = NO_PIVOTS,
     rootId,
     narrowing,
+    withhold = false,
   }: WalkOptions = {},
 ): GraphView {
   const rule: WalkRule = { pivots, expanded }
   const blocks: Record<string, Block> = {}
   const collapsed = new Set<string>()
-  const unloaded = new Set<string>()
-  const loaded = graph.loaded
+  const withheld = new Set<string>()
   const path = new Set<string>()
   if (rootId) path.add(rootId)
 
@@ -821,11 +813,7 @@ export function walkGraph(
       : (block.upstream ?? []).filter((parentId) =>
           direction === "down" ? !skip(parentId) : parentId !== rootId,
         )
-    // An open row whose children the graph does not hold in full (a lazily
-    // loaded graph) — a row it holds no children of at all among them: the
-    // load says whether it is a leaf.
-    const partial = loaded !== undefined && followsDown && !loaded.has(id)
-    if (beneathDown.length === 0 && beneathUp.length === 0 && !partial) return true
+    if (beneathDown.length === 0 && beneathUp.length === 0) return true
     const row = { key, id, level, type: block.type }
     // A closed row is not walked: under the filter, the index has said a
     // held row is beneath it.
@@ -833,12 +821,10 @@ export function walkGraph(
       collapsed.add(key)
       return true
     }
-    // Reported for loading, and drawn with nothing beneath it until they
-    // land — never the part the graph holds, which is not the list. The
-    // fold rule still decides whether the row is open; the row keeps its
-    // chevron through `BlockEditor.loading`.
-    if (partial) {
-      unloaded.add(id)
+    // Children not in hand yet: the row stands, open, with nothing beneath
+    // it and a loading mark (`BlockEditor.loading`), never a partial list.
+    if (withhold && followsDown) {
+      withheld.add(id)
       block.children = []
       return true
     }
@@ -887,12 +873,7 @@ export function walkGraph(
       visit(parentId, null, startLevel, "up", rootQuery, rootId, "up"),
     )
   }
-  // The view's own root (a note) is walked through its children: when the
-  // graph holds them only in part, the note itself is what to load.
-  if (loaded !== undefined && rootId !== undefined && rootQuery === "down" && !loaded.has(rootId)) {
-    unloaded.add(rootId)
-  }
-  return { doc, collapsed, unloaded }
+  return { doc, collapsed, withheld }
 }
 
 /** The eager walk: everything `rootIds` reach, every occurrence open. */
@@ -922,19 +903,30 @@ export function noteView(
   expanded?: ExpandedRule,
   pivots?: LinkPivots,
   narrowing?: WalkNarrowing,
+  withhold?: boolean,
 ): GraphView | null {
   const note = graph.nodes.get(noteId)
   if (!note || !isNoteType(note.type)) return null
   const entries = noteEntries(note.props)
   const title = emittedNoteTitle(note.id, note.text)
   const props = title !== null ? { title, ...(entries ?? {}) } : entries
-  const { doc, collapsed, unloaded } = walkGraph(childIdsOf(graph, noteId), graph, {
+  // Held back whole: the note's own rows are not in hand either (a fresh
+  // device before its snapshot holds one preview child), so the page shows
+  // a skeleton for the note, never that one child as its outline.
+  if (withhold) {
+    return {
+      doc: { props, rootBlockIds: [], blocks: {} },
+      collapsed: new Set(),
+      withheld: new Set([noteId]),
+    }
+  }
+  const { doc, collapsed, withheld } = walkGraph(childIdsOf(graph, noteId), graph, {
     expanded,
     pivots,
     rootId: noteId,
     narrowing,
   })
-  return { doc: { ...doc, props }, collapsed, unloaded }
+  return { doc: { ...doc, props }, collapsed, withheld }
 }
 
 /**
@@ -979,12 +971,14 @@ export function rootView(
   pivots?: LinkPivots,
   narrowing?: WalkNarrowing,
   exclude?: ReadonlySet<string>,
+  withhold?: boolean,
 ): GraphView {
   return walkGraph(rootChildIds(graph, exclude), graph, {
     expanded,
     pivots,
     rootId: CORPUS_ROOT_ID,
     narrowing,
+    withhold,
   })
 }
 
@@ -1001,10 +995,11 @@ export function blockView(
   expanded?: ExpandedRule,
   pivots?: LinkPivots,
   narrowing?: WalkNarrowing,
+  withhold?: boolean,
 ): GraphView | null {
   const node = graph.nodes.get(blockId)
   if (!node || isNoteType(node.type)) return null
-  return walkGraph([blockId], graph, { expanded, startLevel: 0, pivots, narrowing })
+  return walkGraph([blockId], graph, { expanded, startLevel: 0, pivots, narrowing, withhold })
 }
 
 /**

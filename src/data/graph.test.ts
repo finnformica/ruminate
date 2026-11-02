@@ -5,20 +5,19 @@ import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
 import { sampleGraph } from "./sample-graph"
 import {
-  BOARD_TYPE,
-  TRACKER_TYPE,
-  CORPUS_ROOT_ID,
-  NOTE_TYPE,
-  NOTE_TYPES,
   ancestorClosure,
   blockRollup,
   blockView,
+  BOARD_TYPE,
   buildGraphSnapshot,
+  CORPUS_ROOT_ID,
   docFromGraph,
   docToGraph,
   docToParts,
   isLegacyBoard,
   isNoteType,
+  NOTE_TYPE,
+  NOTE_TYPES,
   noteDoc,
   noteView,
   parentIdsOf,
@@ -29,6 +28,7 @@ import {
   rootView,
   sectionReach,
   sortKeyBetween,
+  TRACKER_TYPE,
   walkGraph,
 } from "./graph"
 
@@ -88,6 +88,44 @@ const types = (markdown: string) => {
   const { nodes } = docToGraph("note", canonical(markdown), 0)
   return nodes.filter((node) => node.type !== "note").map((node) => `${node.type}:${node.text}`)
 }
+
+describe("a walk with its children held back (a fresh device before its snapshot)", () => {
+  it("a root row stands open with nothing beneath it and is reported; a note page is held whole", () => {
+    const node = (id: string, type = "text"): NodeRow => ({
+      id,
+      type,
+      text: id,
+      props: null,
+      updated_at: 1,
+    })
+    const link = (source: string, destination: string, sortKey: string): LinkRow => ({
+      source_id: source,
+      destination_id: destination,
+      kind: "child",
+      sort_key: sortKey,
+      updated_at: 1,
+    })
+    const graph = buildGraphSnapshot(
+      [node("corpus_root", "note"), node("n", "note"), node("a"), node("a1")],
+      [link("corpus_root", "n", "a0"), link("n", "a", "a0"), link("a", "a1", "a0")],
+    )
+    // The notes page: the note row stands, open, with nothing beneath it,
+    // and is reported for a loading mark.
+    const rows = walkGraph(["n"], graph, { rootId: "corpus_root", withhold: true })
+    expect(rows.doc.rootBlockIds).toEqual(["n"])
+    expect(rows.doc.blocks.n.children).toEqual([])
+    expect([...rows.withheld]).toEqual(["n"])
+    // Without the hold, the walk is as it always was.
+    const plain = walkGraph(["n"], graph, { rootId: "corpus_root" })
+    expect(plain.doc.blocks.n.children).toEqual(["a"])
+    expect(plain.withheld.size).toBe(0)
+    // The note's own page: held whole, the note itself reported.
+    const page = noteView("n", graph, undefined, undefined, undefined, true)
+    expect(page?.doc.rootBlockIds).toEqual([])
+    expect([...(page?.withheld ?? [])]).toEqual(["n"])
+    expect(noteView("n", graph)?.doc.rootBlockIds).toEqual(["a"])
+  })
+})
 
 describe("rollup equivalence (named cases)", () => {
   it("covers every marker in the type registry", () => {

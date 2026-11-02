@@ -13,7 +13,7 @@ import {
   type LoggedKeyEvent,
 } from "./key-events"
 import { buildGraphSnapshot, isNoteType, type GraphSnapshot } from "./graph"
-import { emptyLazyGraph, mergeFragment, patchSnapshot, type GraphFragment } from "./graph-patch"
+import { patchSnapshot } from "./graph-patch"
 import { decodeHlc, encodeHlc, receiveHlc, tickHlc, type Hlc } from "./hlc"
 import { applyOps, notesTouchedBy, type Op } from "./ops"
 import { mintWriterId, writerDevice, writerTimezone } from "./writer-identity"
@@ -60,14 +60,11 @@ import {
  * and each page of pulled events updates it in the same transaction as its
  * append. This module publishes the cache's live graph as
  * `databaseGraphAtom`, served as `graphSnapshotAtom` whenever a user is
- * signed in (see global-state.ts). The graph is loaded LAZILY (`loadGraph`,
- * `GraphSnapshot.loaded`): boot reads the first screen — the notes, their
- * order, one preview child each, the pinned nodes — so its cost grows with
- * the notes, not the blocks; a note is read whole when it is opened
- * (`databaseEnsureNote`), a subtree when a row is expanded
- * (`databaseEnsureBlocks`), and the whole corpus only when something asks
- * for all of it (`databaseEnsureAll`: search, the calendar). After a batch
- * only the entities it touched are read again and patched into the graph
+ * signed in (see global-state.ts). Boot reads the whole graph from the
+ * cache in one grouped statement (`NoteStore.getGraph`), as the build
+ * before read it from `nodes` and `link`; the lazy part is the editor's
+ * walk, by the reader's folds, as it always was. After a batch only the
+ * entities it touched are read again and patched into the graph
  * (`patchGraph`), never the whole. Everything above reads that graph: the
  * note page walks its doc out of it, and note metadata and search are
  * derived from it (`src/data/note-meta.ts`). The fold check compares each
@@ -253,6 +250,11 @@ export interface DatabaseModeStatus {
    * What other people shared (shared-mode.ts) arrives on its own and never
    * counts. */
   seeded: boolean
+  /** The cache holds the first screen only — the notes, one preview child
+   * each — and the snapshot of everything else is on its way: the page
+   * holds every row's children back (`GraphView.withheld`) rather than
+   * show the one child it has. False once the snapshot has landed. */
+  partial: boolean
   /** First-ever boot without a reachable replica: nothing local, nothing
    * pulled — the UI shows an explanatory empty state. */
   emptyOffline: boolean
@@ -265,6 +267,7 @@ const OFF_STATUS: DatabaseModeStatus = {
   lastPullError: null,
   emptyOffline: false,
   seeded: false,
+  partial: false,
 }
 
 export const databaseModeStatusAtom = atom<DatabaseModeStatus>(OFF_STATUS)
@@ -324,14 +327,6 @@ interface DatabaseModeRuntime {
   foldCheckTimer: ReturnType<typeof setTimeout> | null
   /** The entities batches and pulls touched since the last fold check. */
   foldCheckKeys: { blocks: Set<string>; links: Set<string> }
-  /** The notes the graph holds whole (`LazyReads.noteView`): opened once,
-   * read again after a snapshot or a repair. */
-  loadedNotes: Set<string>
-  /** The whole corpus is in the graph (`databaseEnsureAll`): every read is
-   * the whole graph from here on. */
-  allLoaded: boolean
-  /** Loads in flight, by what they load, so a second ask joins the first. */
-  loading: Map<string, Promise<void>>
 }
 
 let runtime: DatabaseModeRuntime | null = null
@@ -429,9 +424,6 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     logBehind: false,
     foldCheckTimer: null,
     foldCheckKeys: noKeys(),
-    loadedNotes: new Set(),
-    allLoaded: false,
-    loading: new Map(),
   }
   runtime = activation
   // Backgrounding the tab must not strand a coalescing run of ops.
@@ -735,132 +727,15 @@ async function flushOps(activation: DatabaseModeRuntime) {
   }
 }
 
-/**
- * The graph as the runtime holds it (docs/events-log-cache.md, "The
- * client"): the first screen (`rootView`) plus every note opened so far,
- * read whole again — or, once something asked for all of it, the whole
- * corpus in one grouped read, with every node loaded.
- */
-async function loadGraph(
-  activation: DatabaseModeRuntime,
-  store: NoteStore,
-): Promise<GraphSnapshot> {
-  if (activation.allLoaded) {
-    const graph = await store.getGraph()
-    return { ...graph, loaded: new Set(graph.nodes.keys()) }
-  }
-  let graph = mergeFragment(emptyLazyGraph(), await store.lazy.rootView())
-  for (const id of activation.loadedNotes) {
-    graph = mergeFragment(graph, await store.lazy.noteView(id))
-  }
-  return graph
-}
-
 /** Re-read the graph atom from the cache (at boot, after a snapshot or a
  * repair), with any ops that arrived meanwhile re-applied on top — they are
  * applied on screen already and will land in the cache on their own flush.
  * After a batch, `patchGraph` instead. */
 async function refreshGraph(activation: DatabaseModeRuntime) {
   if (runtime !== activation || !activation.store) return
-  const graph = await loadGraph(activation, activation.store)
+  const graph = await activation.store.getGraph()
   if (runtime !== activation) return
   jotai().set(databaseGraphAtom, applyOps(graph, activation.pendingOps, Date.now()))
-}
-
-/** Merge a fragment into the graph atom, the pending ops re-applied on top
- * (a list the fragment holds whole may not know a link still coalescing). */
-function mergeIntoGraph(activation: DatabaseModeRuntime, fragment: GraphFragment) {
-  const store = jotai()
-  const merged = mergeFragment(store.get(databaseGraphAtom), fragment)
-  store.set(databaseGraphAtom, applyOps(merged, activation.pendingOps, Date.now()))
-}
-
-/** One load at a time per key: a second ask while one is in flight waits
- * for it rather than reading again. Runs on the queue, after the ops still
- * coalescing have landed, so the fragment is read from a cache the screen
- * is not ahead of. */
-function loadOnce(activation: DatabaseModeRuntime, key: string, load: () => Promise<void>) {
-  const held = activation.loading.get(key)
-  if (held) return held
-  const task = enqueue(async () => {
-    if (runtime !== activation || !activation.store) return
-    await flushOps(activation)
-    if (runtime !== activation) return
-    await load()
-  }).finally(() => activation.loading.delete(key))
-  activation.loading.set(key, task)
-  return task
-}
-
-/**
- * Load a note whole — its subtree, the blocks written in it and their
- * subtrees, and what else reaches any of them (`LazyReads.noteView`) — the
- * moment it is opened, so its page, its basket, a delete and a place count
- * read exactly. Nothing when the note is loaded already, the corpus is, or
- * the runtime is down. Resolves once the graph holds it.
- */
-export function databaseEnsureNote(noteId: NoteId): Promise<void> {
-  const activation = runtime
-  if (!activation || activation.allLoaded || activation.loadedNotes.has(noteId)) {
-    return Promise.resolve()
-  }
-  return loadOnce(activation, `note ${noteId}`, async () => {
-    if (!activation.store || activation.allLoaded || activation.loadedNotes.has(noteId)) return
-    const fragment = await activation.store.lazy.noteView(noteId)
-    if (runtime !== activation) return
-    activation.loadedNotes.add(noteId)
-    mergeIntoGraph(activation, fragment)
-  })
-}
-
-/**
- * Load the subtrees beneath these blocks: the rows a walk opened whose
- * children the graph held only in part (`GraphView.unloaded`). Ids the
- * graph holds whole already are skipped.
- */
-export function databaseEnsureBlocks(ids: readonly string[]): Promise<void> {
-  const activation = runtime
-  if (!activation || activation.allLoaded) return Promise.resolve()
-  const loaded = jotai().get(databaseGraphAtom).loaded
-  const wanted = [...new Set(ids)].filter((id) => !(loaded?.has(id) ?? true)).sort()
-  if (wanted.length === 0) return Promise.resolve()
-  return loadOnce(activation, `blocks ${wanted.join(" ")}`, async () => {
-    if (!activation.store || activation.allLoaded) return
-    const fragment = await activation.store.lazy.subtreeView(wanted)
-    if (runtime !== activation) return
-    mergeIntoGraph(activation, fragment)
-  })
-}
-
-/** Load just these nodes (a recent block, a pinned one the list names),
- * nothing beneath them. Ids the graph holds are skipped. */
-export function databaseEnsureNodes(ids: readonly string[]): Promise<void> {
-  const activation = runtime
-  if (!activation || activation.allLoaded) return Promise.resolve()
-  const nodes = jotai().get(databaseGraphAtom).nodes
-  const wanted = [...new Set(ids)].filter((id) => !nodes.has(id)).sort()
-  if (wanted.length === 0) return Promise.resolve()
-  return loadOnce(activation, `nodes ${wanted.join(" ")}`, async () => {
-    if (!activation.store || activation.allLoaded) return
-    const fragment = await activation.store.lazy.nodesView(wanted)
-    if (runtime !== activation) return
-    mergeIntoGraph(activation, fragment)
-  })
-}
-
-/**
- * Load the whole corpus, once: what search, the calendar's date mentions
- * and anything else that asks a question of every block need. From then
- * on every read of the graph is the whole graph.
- */
-export function databaseEnsureAll(): Promise<void> {
-  const activation = runtime
-  if (!activation || activation.allLoaded) return Promise.resolve()
-  return loadOnce(activation, "all", async () => {
-    if (!activation.store || activation.allLoaded) return
-    activation.allLoaded = true
-    await refreshGraph(activation)
-  })
 }
 
 /**
@@ -874,28 +749,9 @@ export function databaseEnsureAll(): Promise<void> {
 async function patchGraph(activation: DatabaseModeRuntime, keys: EntityKeys) {
   if (runtime !== activation || !activation.store) return
   if (keys.blocks.size + keys.links.size === 0) return
-  let rows = await activation.store.liveEntitiesOf(keys)
+  const rows = await activation.store.liveEntitiesOf(keys)
   if (runtime !== activation) return
   const store = jotai()
-  // The far ends the graph does not hold: read too, so a touched block's
-  // child list is whole and the patch can call it loaded (a pulled edit
-  // to a note the Root frame holds by its preview child alone, a child
-  // created in a later page of the log than its parent, a block moved in
-  // from a note not opened). Their own children stay unloaded: the walk
-  // reports them when they open.
-  const held = store.get(databaseGraphAtom).nodes
-  const answered = new Set(rows.nodes.map((row) => row.id))
-  const missing = new Set<string>()
-  for (const link of rows.links) {
-    for (const id of [link.source_id, link.destination_id]) {
-      if (!answered.has(id) && !held.has(id)) missing.add(id)
-    }
-  }
-  if (missing.size > 0) {
-    const far = await activation.store.lazy.nodesView([...missing])
-    if (runtime !== activation) return
-    rows = { nodes: [...rows.nodes, ...far.nodes], links: rows.links }
-  }
   const patched = patchSnapshot(store.get(databaseGraphAtom), keys, rows)
   store.set(databaseGraphAtom, applyOps(patched, activation.pendingOps, Date.now()))
 }
@@ -1143,8 +999,7 @@ async function adoptReplica(
     // owner change wipes it.
     await store.clear()
     await resetCursors(store)
-    activation.loadedNotes.clear()
-    patchStatus({ seeded: false })
+    patchStatus({ seeded: false, partial: false })
   }
   // The id is recorded either way, so the next page is this database's.
   if (typeof seen === "string" && seen.length > 0) await store.setMeta(REPLICA_ID_KEY, seen)
@@ -1171,7 +1026,7 @@ async function pullFirstScreen(activation: DatabaseModeRuntime, store: NoteStore
   await store.applyUnpushedToCache()
   await refreshGraph(activation)
   if (runtime !== activation) return
-  patchStatus({ seeded: true })
+  patchStatus({ seeded: true, partial: true })
 }
 
 /**
@@ -1203,7 +1058,7 @@ async function pullCacheSnapshot(activation: DatabaseModeRuntime, store: NoteSto
   await store.setMeta(CACHE_SEEDED_KEY, String(Date.now()))
   await refreshGraph(activation)
   if (runtime !== activation) return
-  patchStatus({ seeded: true })
+  patchStatus({ seeded: true, partial: false })
 }
 
 /**

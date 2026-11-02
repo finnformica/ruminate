@@ -359,6 +359,7 @@ describe("isBootingAtom", () => {
     lastPullError: null,
     emptyOffline: false,
     seeded: false,
+    partial: false,
     ...patch,
   })
 

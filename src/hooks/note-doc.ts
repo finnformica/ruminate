@@ -1,5 +1,5 @@
 import { useAtomValue, useStore } from "jotai"
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useCallback, useMemo, useRef } from "react"
 import { isEmptyDoc } from "../blocks/ops"
 import type { LinkPivots } from "../blocks/query"
 import { asBlockType, type BlockDoc, type ChangeHint } from "../blocks/types"
@@ -7,7 +7,7 @@ import type { ExpandedRule } from "../blocks/view"
 import { titlesFocus } from "../blocks/markers"
 import { basketDoc, basketToOps } from "../data/basket"
 import { filteredView, filterReach, type FilteredView } from "../data/filter-view"
-import { databaseEnsureBlocks, databaseEnsureNote } from "../data/database-mode"
+import { databaseModeStatusAtom } from "../data/database-mode"
 import { CORPUS_ROOT_ID, isNoteType } from "../data/graph"
 import { notePropsOps } from "../data/note-meta"
 import { docToOps } from "../data/ops"
@@ -19,7 +19,7 @@ import type { NoteId } from "../schema"
 import { rootToOps } from "./results-doc"
 
 const NOTHING_COLLAPSED: ReadonlySet<string> = new Set()
-const NOTHING_LOADING: ReadonlySet<string> = new Set()
+const NOTHING_WITHHELD: ReadonlySet<string> = new Set()
 const NO_CONTEXT: ReadonlySet<string> = new Set()
 const NO_PIVOTS: LinkPivots = new Map()
 
@@ -99,15 +99,11 @@ export function useNoteDoc({
   // The notes other people shared are listed apart, not as Root's rows.
   const shared = useAtomValue(sharedOriginAtom)
   const exclude = useMemo(() => (shared.size > 0 ? new Set(shared.keys()) : undefined), [shared])
-
-  // The graph is loaded lazily (docs/events-log-cache.md, "The client"): a
-  // note is read whole the moment its page opens, and a row the walk opened
-  // whose children the graph held only in part is read next. A shared note
-  // is held whole in memory already.
-  useEffect(() => {
-    if (noteId === undefined || noteId === CORPUS_ROOT_ID || shared.has(noteId)) return
-    void databaseEnsureNote(noteId)
-  }, [noteId, shared])
+  // A fresh device between its first screen and its snapshot: the graph
+  // holds one preview child per note, which is not the list, so every
+  // row's children are held back and marked loading until the snapshot
+  // lands (`DatabaseModeStatus.partial`).
+  const partial = useAtomValue(databaseModeStatusAtom).partial
 
   // What the filter and the sort come to, answered by the SEARCH engine —
   // one vocabulary and one comparator for the header's menus and the query
@@ -147,11 +143,9 @@ export function useNoteDoc({
       pivots,
       reach,
       exclude,
+      withhold: partial,
     })
-  }, [noteId, focusBlockId, snapshot, expanded, pivots, narrowing, keep, reach, exclude])
-  useEffect(() => {
-    if (view && view.unloaded.size > 0) void databaseEnsureBlocks([...view.unloaded])
-  }, [view])
+  }, [noteId, focusBlockId, snapshot, expanded, pivots, narrowing, keep, reach, exclude, partial])
   // Whether the doc is rooted at the focused block (the note node is then not
   // this doc's to write).
   const rootId = focusBlockId && view?.doc.rootBlockIds[0] === focusBlockId ? focusBlockId : null
@@ -213,9 +207,9 @@ export function useNoteDoc({
   return {
     doc: view?.doc ?? defaultDoc,
     collapsed: view?.collapsed ?? NOTHING_COLLAPSED,
-    /** The open rows whose children are on their way (`GraphView.unloaded`):
-     * drawn with a loading mark and nothing beneath them until they land. */
-    loading: view?.unloaded ?? NOTHING_LOADING,
+    /** The open rows whose children are held back (`GraphView.withheld`):
+     * drawn with a loading mark and nothing beneath them. */
+    loading: view?.withheld ?? NOTHING_WITHHELD,
     /** The rows kept only as context by the filter — drawn dimmed. */
     context: view?.context ?? NO_CONTEXT,
     /** How many rows the filter matched; null when nothing is filtered. */

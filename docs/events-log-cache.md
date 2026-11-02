@@ -343,61 +343,38 @@ The device's store (`src/data/sql-note-store.ts`, OPFS) holds `events_log`
 `user_id`) and `meta`. `nodes`, `link`, `views`, `delta_mat_values` and the
 old `events` table go (schema step v17).
 
-### Boot: the first screen, not the corpus
+### Boot: the whole graph, as on main (Finn, 2026-11-02)
 
-Finn, 2026-10-30: the boot must be O(notes), not O(blocks). So the graph
-atom is a lazily loaded PART of the corpus, and `GraphSnapshot.loaded` says
-which ids it holds whole (their child links complete). The reads are
-`LazyReads` (`src/data/sql-lazy-reads.ts`), each a bounded part of the
-cache by index, merged into the atom (`mergeFragment`,
-`src/data/graph-patch.ts`); they mirror the MCP server's loaders and keep
-their invariants (a hop follows a child link only between two live nodes;
-a note's view is closed under the questions the app asks of it).
+The client keeps main's design and only switches its data source. Boot
+reads the whole graph from the cache in one grouped statement
+(`NoteStore.getGraph`: `GROUP BY entity, entity_id` with
+`json_group_object`, assembled by `src/data/cache-rows.ts`), as the build
+before read `nodes` and `link`. The editor's walk is the lazy part — it
+descends only where the reader's folds open a row — as it always was.
+Nothing in memory is partial after boot: an expand, a focus and the way
+back read the same children.
 
-| when                                       | read                                                                                                                                                                                                        | loaded afterwards                  |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| boot (`rootView`)                          | every live note (`type` index), the corpus root and its order, one preview child per note (a window over the first hop; what an untitled note is named by), the pinned nodes (`props.pinned_at` index)      | the root                           |
-| a note opens (`noteView`)                  | its subtree, the blocks written in it with their subtrees (the basket's candidates), and the upward closure of all of them (what else reaches a block: a delete, a place count and the basket read exactly) | the note and everything beneath it |
-| a row opens whose children are partial     | the subtrees beneath it (`subtreeView`); the walk reports such rows (`GraphView.unloaded`) and the note page loads them                                                                                     | those subtrees                     |
-| a recent block is listed                   | just its node (`nodesView`)                                                                                                                                                                                 | nothing more                       |
-| search, the calendar (`databaseEnsureAll`) | the whole corpus, once: one grouped read (`getGraph`); every read is the whole graph from then on                                                                                                           | everything                         |
+The lazy data load of 2026-10-30 (`GraphSnapshot.loaded`, the first
+screen read by index, a note read when it opened, a subtree when a row
+opened) is withdrawn: in two days it produced three distinct partial-graph
+defects on three paths (a pulled edit to a note held by its preview child,
+a child created in a later log page than its parent, a far end never
+read), each needing its own repair, and Finn's test of the preview still
+found children missing. Its cost was the whole of the client-side diff
+beyond the data source. The whole-graph boot costs about four times the
+two-table read of main on the same engine (section 9: 43–74 ms against 13
+ms at 1x on `node:sqlite`; about 200 ms against 53 ms in the browser),
+which is what a lazy graph is worth revisiting for, in its own step, if a
+corpus ever makes it felt.
 
-On a fresh device the same first screen comes from the server first
-(`pullFirstScreen`, section 4), so the list is on screen in one small
-request; the snapshot and the log follow behind it. The skeleton of the
-notes page and the sidebar waits for exactly that — the user's own notes
-in the device's cache (`seeded`) — and never for the whole snapshot, the
-log, or what the shares brought.
-
-The rules that keep a partial graph honest:
-
-- **A save never reconciles the children of a parent the graph holds in
-  part** (`partsToOps`): the rows an unloaded parent did not show stay
-  where they are. A created node is loaded (it has no children but the
-  batch's).
-- **The patch after a batch reads the far ends it lacks** (`patchGraph`,
-  one `nodesView` read), so a touched block's child list is whole and the
-  block is loaded after the patch; the far ends land as nodes, unloaded.
-  A touched block is called loaded only when every live child link the
-  store found at it reaches a node the graph holds (`patchSnapshot`); one
-  whose children are not in hand stays unloaded and keeps what it showed.
-  Finn, 2026-11-02: a pulled edit to a note the Root frame held by its
-  preview child alone marked it loaded with that one child, and expanding
-  it showed the preview alone. A change inside a note not opened this
-  session reaches the graph when the note is opened, or the row when it
-  is expanded.
-- **An open row whose children are not in hand shows a loading mark and
-  nothing beneath it** (`GraphView.unloaded`, `BlockEditor.loading`),
-  never the part the graph holds, until the subtree lands. A row the
-  graph holds no children of is reported too: the load says whether it
-  is a leaf.
-- **A delete of a note reads it whole first** (`useDeleteNote`): what only
-  it reaches is a question of its subtree and of what else reaches each
-  block. A block delete and a place count happen in the open note, whose
-  upward closure is loaded.
-- **A shared slice is whole**; merged, its nodes are loaded.
-
-The boot read was measured against total blocks (section 9): flat.
+One window remains partial by design: a fresh device between its first
+screen and its snapshot (section 4, step 0), when the cache holds the
+notes and one preview child each. The runtime says so
+(`DatabaseModeStatus.partial`), and the walk holds every open row's
+children back and reports the row (`WalkOptions.withhold`,
+`GraphView.withheld`); the editor draws a loading mark under it
+(`BlockEditor.loading`), never the one child in hand. The snapshot lands,
+the flag clears, the rows fill.
 
 The whole-graph read stays for `databaseEnsureAll` and was measured both
 ways (`node:sqlite`, Finn's tenant, median of 7; the browser's OPFS is
@@ -514,7 +491,7 @@ rows-read alarm except the snapshot and verify; the 1x boot stays under
 today's 3 s cold-start trigger with room to spare; at 10x the boot number
 decides the open question on lazy reads.
 
-### The boot against total blocks (2026-10-30)
+### The boot against total blocks (2026-10-30; superseded by the whole-graph boot, section 8)
 
 The lazy boot (`rootView`) against the whole-graph read, over `node:sqlite`
 with the owner's cache rows: the production copy (1x: 8 notes, 2,075 live
@@ -729,14 +706,13 @@ one.
 2. **A new device and the log.** The whole log, behind the screen. A new
    device takes the snapshot of the cache, draws, then pulls the log from
    0 in pages for history.
-3. **The boot is O(notes), not O(blocks).** "Why does the time taken to
-   load increase to 2 s with 10x the data? If we're using the cache
-   properly and lazy loading everything it should be O(num_notes)." So
-   there is no whole-graph boot: the first screen reads the notes, the
-   root's order, one preview child per note and the pinned nodes; a note
-   is read whole when it is opened; search, the calendar and recents read
-   what they need on demand (section 8). Measured flat with total blocks
-   in section 9.
+3. **The boot is O(notes), not O(blocks)** — withdrawn on 2026-11-02.
+   "Why does the time taken to load increase to 2 s with 10x the data? If
+   we're using the cache properly and lazy loading everything it should
+   be O(num_notes)." Built as a lazy data load on 2026-10-30; after three
+   partial-graph defects Finn asked for main's design back: the whole
+   graph in memory, the walk lazy by the folds, the data source the only
+   change (section 8). The boot is O(blocks) again, measured in section 9.
 4. **No compatibility window.** The row endpoints are not served from the
    cache; `MIN_REPLICA_PROTOCOL` rises to 3 in the same deploy, so every
    open tab of the build before reloads. Section 10's week is gone.
@@ -761,10 +737,11 @@ one.
     the history come after the first paint.
 12. **An expanded row never shows a partial child list** (Finn,
     2026-11-02, the same test: some expanded notes showed some children,
-    and a focus showed them all). The patch after a pulled or local edit
-    no longer marks a touched block loaded unless its children are in
-    hand (section 8), and the walk draws a loading mark under an open row
-    whose children are on their way.
+    and a focus showed them all; and again after a repair). The lazy data
+    load is withdrawn (item 3, section 8): the graph is the whole cache,
+    so nothing is partial after boot. The one window left — a fresh
+    device before its snapshot — holds every row's children back behind a
+    loading mark.
 
 ## Decisions in one list
 
@@ -787,8 +764,9 @@ one.
 - The old tables stay unwritten for a week, with a hand-run rollback
   script, and are dropped in a third deploy after `MIN_REPLICA_PROTOCOL`
   rises.
-- The client boots from one `GROUP BY` statement and patches only the
-  touched entities after each batch.
+- The client boots from one `GROUP BY` statement — the whole graph, as on
+  main — and patches only the touched entities after each batch. No lazy
+  data load (Finn, 2026-11-02).
 - A block delete keeps writing an explicit `unlink` per link plus the
   `delete` (`deleteBlockOps`, as today). No dangling-link rule (Finn,
   2026-10-28).

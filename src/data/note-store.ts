@@ -3,7 +3,6 @@ import type { CacheRow } from "./cache-rows"
 import type { EntityKeys } from "./events"
 import type { GraphSnapshot } from "./graph"
 import type { KeyEvent, LoggedKeyEvent } from "./key-events"
-import type { LazyReads } from "./sql-lazy-reads"
 
 /**
  * The storage contract behind the `src/data` seam: the device's log and the
@@ -98,11 +97,6 @@ export interface NoteStore {
    * replicates — and an event not yet pushed goes with it, as an unpushed
    * row always did. */
   clear(): Promise<void>
-  /** The lazy reads of the graph (`src/data/sql-lazy-reads.ts`): the first
-   * screen at boot, a note when it is opened, a subtree when a row is
-   * expanded, nodes by id. `getGraph` is the whole corpus, for what asks
-   * for all of it. */
-  lazy: LazyReads
   /** Read a `meta` key (e.g. the events cursor), or null when unset. */
   getMeta(key: string): Promise<string | null>
   /** Write a `meta` key. Kept in the same database as the rows it describes,

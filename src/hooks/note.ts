@@ -5,7 +5,6 @@ import { NOTE_TYPE, isNoteType, propsJson } from "../data/graph"
 import { notePropsOps } from "../data/note-meta"
 import { deleteNoteOps, type Op } from "../data/ops"
 import { emittedNoteTitle } from "../data/note-identity"
-import { databaseEnsureNote } from "../data/database-mode"
 import { useApplyOps } from "../data/store"
 import { dateMentionsAtom, graphSnapshotAtom, notesAtom } from "../global-state"
 import type { NoteId } from "../schema"
@@ -122,18 +121,13 @@ export function useCreateNote() {
   )
 }
 
-/** Delete a note and everything only it held (`deleteNoteOps`). The note
- * is read whole first (`databaseEnsureNote`): what only it reaches is a
- * question of its subtree and of what else reaches each block. */
+/** Delete a note and everything only it held (`deleteNoteOps`). */
 export function useDeleteNote() {
   const store = useStore()
   const apply = useApplyOps()
 
   return React.useCallback(
-    async (id: NoteId) => {
-      await databaseEnsureNote(id)
-      apply(deleteNoteOps(id, store.get(graphSnapshotAtom)))
-    },
+    (id: NoteId) => apply(deleteNoteOps(id, store.get(graphSnapshotAtom))),
     [store, apply],
   )
 }

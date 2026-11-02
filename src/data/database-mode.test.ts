@@ -20,8 +20,6 @@ import {
   databaseGraphAtom,
   databaseModeStatusAtom,
   databaseApplyOps,
-  databaseEnsureAll,
-  databaseEnsureBlocks,
   databaseEventLog,
   eventLogVersionAtom,
   flushDatabaseMode,
@@ -453,60 +451,40 @@ describe("database mode boot", () => {
     expect(calls.cache).toHaveLength(1)
     expect(await store.getMeta("cache_seeded")).not.toBeNull()
     expect(await notesOf(store)).toEqual({ "note-a": deep, "note-b": NOTE_B })
-    await databaseEnsureAll()
     expect(graph().nodes.get("blk_a000000001")?.text).toBe("A child")
   })
 
-  it("a note expanded before its children are loaded shows the full list, in order", async () => {
-    // Finn, 2026-11-02: on a fresh device, some expanded notes showed only
-    // some children; a focus on the note showed them all. The graph held
-    // the note's preview child alone (the first screen), a pulled edit to
-    // the note touched it, and the patch marked it loaded with the one
-    // child it had. Here the device has its snapshot, the pull brings one
-    // edit to the note, and the note is still reported for loading; the
-    // load brings every child in sibling order, and nothing beneath it is
-    // drawn before that.
+  it("the graph holds every note whole: an expand, a focus and the way back read the same children", async () => {
+    // Finn, 2026-11-02, from the preview of PR #310: expanding some notes
+    // showed some children; a focus showed them all. The build before
+    // loaded the graph lazily — a note by its preview child alone until a
+    // row opened — and three paths each left a note partial. The graph is
+    // the whole cache now, as on main: nothing is partial after boot, on a
+    // fresh device (after its snapshot) and on a reload alike, and an edit
+    // pulled or made here patches the note without a child lost.
     const outline =
       "- first\n  id:: blk_c000000001\n- second\n  id:: blk_c000000002\n" +
       "  - nested\n    id:: blk_c000000003\n- third\n  id:: blk_c000000004\n"
+    const whole = ["blk_c000000001", "blk_c000000002", "blk_c000000004"]
+    // A reload: the device has its snapshot and the log.
     const seeded = await seededStore({ "note-c": outline }, "500")
     const { source } = stubSource({ events: [placed(501, "note-c", "note-c, edited")] })
     await boot({ store: seeded, source })
-    // The edit has landed and touched the note: its direct children are
-    // read whole (the far ends the graph lacked), so the list is complete
-    // and the note loaded; the children's own lists are not in hand, and
-    // the walk says so for each open one, drawing nothing beneath it.
-    expect(graph().loaded?.has("note-c")).toBe(true)
-    expect(childIdsOf(graph(), "note-c")).toEqual([
-      "blk_c000000001",
-      "blk_c000000002",
-      "blk_c000000004",
-    ])
-    expect(childIdsOf(graph(), "blk_c000000002")).toEqual([])
-    const before = noteView("note-c", graph())
-    expect([...(before?.unloaded ?? [])].sort()).toEqual([
-      "blk_c000000001",
-      "blk_c000000002",
-      "blk_c000000004",
-    ])
-    expect(before?.doc.blocks.blk_c000000002.children).toEqual([])
-    // The expand loads the subtrees whole.
-    await databaseEnsureBlocks([...(before?.unloaded ?? [])])
+    expect(childIdsOf(graph(), "note-c")).toEqual(whole)
     expect(childIdsOf(graph(), "blk_c000000002")).toEqual(["blk_c000000003"])
-    const after = noteView("note-c", graph())
-    expect(after?.unloaded.size).toBe(0)
-    expect(after?.doc.rootBlockIds).toEqual(["blk_c000000001", "blk_c000000002", "blk_c000000004"])
-    expect(after?.doc.blocks.blk_c000000002.children).toEqual(["blk_c000000003"])
-    // A rename of the note on this device (the Root frame's row) touches
-    // it too, and leaves the list whole.
+    expect(noteView("note-c", graph())?.doc.rootBlockIds).toEqual(whole)
+    // The pulled edit touched the note; a rename here touches it too.
     databaseApplyOps([{ op: "setText", id: "note-c", text: "note-c, renamed" }])
     await flushDatabaseMode()
-    expect(graph().loaded?.has("note-c")).toBe(true)
-    expect(childIdsOf(graph(), "note-c")).toEqual([
-      "blk_c000000001",
-      "blk_c000000002",
-      "blk_c000000004",
-    ])
+    expect(childIdsOf(graph(), "note-c")).toEqual(whole)
+    stopDatabaseMode()
+    await flushDatabaseMode()
+    // A fresh device: the first screen, the snapshot, then the log.
+    const fresh = stubSource({ rows: remoteCorpus({ "note-c": outline }) })
+    await boot({ source: fresh.source })
+    expect(status()).toMatchObject({ seeded: true, partial: false })
+    expect(childIdsOf(graph(), "note-c")).toEqual(whole)
+    expect(childIdsOf(graph(), "blk_c000000002")).toEqual(["blk_c000000003"])
   })
 
   it("later boots serve local contents and pull only the log past the stored cursor", async () => {
@@ -878,10 +856,8 @@ describe("database mode reads the fold", () => {
     const { source } = stubSource({})
     await boot({ store, source, foldCheckMs: 0 })
     expect(files()).toEqual({ "note-a.md": NOTE_A, "note-b.md": NOTE_B })
-    // A block no note reaches is not on the first screen: it is in the
-    // graph once the whole corpus is asked for.
-    expect(graph().nodes.has("blk_x")).toBe(false)
-    await databaseEnsureAll()
+    // A block no note reaches is in the graph too: the graph is the whole
+    // cache.
     expect(graph().nodes.has("blk_x")).toBe(true)
 
     // Nothing was touched, so no check ran, and nothing is reported.

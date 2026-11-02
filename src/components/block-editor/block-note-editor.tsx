@@ -7,6 +7,7 @@ import type { BlockDoc, ChangeHint } from "../../blocks/types"
 import type { Direction } from "../../blocks/view"
 import { imagesEnabled, uploadImage } from "../../data/images"
 import { fetchLinkPreview } from "../../data/link-previews"
+import { PageSkeleton } from "../ui/skeleton"
 import { CORPUS_ROOT_ID, childIdsOf, isNoteType } from "../../data/graph"
 import { deleteBlockOps, deleteSubtreeOps, linkBlockOps, parentCount } from "../../data/ops"
 import { sharedOriginAtom } from "../../data/shared-mode"
@@ -407,6 +408,10 @@ export function BlockNoteEditor({
     onChange(ensured)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusBlockId, readOnly])
+
+  // The note's own rows are held back (`GraphView.withheld`: a fresh device
+  // before its snapshot): a skeleton, never one child as the outline.
+  if (noteId !== undefined && loading?.has(noteId)) return <PageSkeleton />
 
   return (
     <BlockEditor
