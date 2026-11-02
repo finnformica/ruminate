@@ -143,11 +143,14 @@ export function heatmapColumns(weeks: readonly DayString[][]): HeatmapColumn[] {
  * edge has its first letter over the line. */
 const DIVIDER_TRACK = 6
 
-/** A placeholder's stripes: thin solid diagonals in the lighter border
- * colour, so they read as a quiet texture inside the square's outline. */
+/** A placeholder's lines: its outline and its stripes, both 0.5 px in one
+ * solid colour (Finn, 2026-11-02). Solid, not one of the theme's alpha
+ * borders: an alpha colour drawn where a stripe meets the outline adds up
+ * and shows a brighter spot. */
+const PLACEHOLDER_LINE = "var(--neutral-6)"
 const STRIPES: React.CSSProperties = {
-  backgroundImage:
-    "repeating-linear-gradient(135deg, var(--color-border-secondary) 0 1px, transparent 1px 4px)",
+  borderColor: PLACEHOLDER_LINE,
+  backgroundImage: `repeating-linear-gradient(135deg, ${PLACEHOLDER_LINE} 0 0.5px, transparent 0.5px 4px)`,
 }
 
 /**
@@ -283,17 +286,16 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
               const day = column.days[d]
               if (day === null) {
                 // Another month's day, in a split week: holds the place as a
-                // hollow square, a thin solid outline in the border colour
-                // with faint stripes inside and no fill (Finn, 2026-11-02).
-                // The outline is the stronger of the two, so the shape
-                // reads first and the stripes stay a texture.
+                // hollow square, a hairline outline with hairline stripes
+                // inside in the same solid colour, and no fill (Finn,
+                // 2026-11-02).
                 return (
                   <div
                     key={`${c}-${d}`}
                     role="gridcell"
                     aria-hidden
                     data-placeholder
-                    className="aspect-square rounded-sm border border-border"
+                    className="aspect-square rounded-sm border-[0.5px]"
                     style={{ ...at(track[c], d + 2), ...STRIPES }}
                   />
                 )

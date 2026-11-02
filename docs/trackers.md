@@ -190,7 +190,7 @@ has no keys to validate.
   colour of each series logged that day (`seriesOnDay`; split into diagonal
   bands when there is more than one), today with a ring and the rest of
   this week dashed. A week that runs into a new month is split into two
-  columns (`heatmapColumns`), the other month's days drawn as hollow placeholders, a thin solid outline with faint stripes inside and no fill (no data, not tappable), so a straight line divides the
+  columns (`heatmapColumns`), the other month's days drawn as hollow placeholders, a 0.5 px outline and 0.5 px stripes in one solid colour (`--neutral-6`) and no fill (no data, not tappable), so a straight line divides the
   months: one element per boundary, in a narrow track of its own with a gap
   each side, from the Monday row down to Sunday. A cell is a rounded square
   (`rounded-sm`: the theme's `rounded` is 8 px, a circle at this size).

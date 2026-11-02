@@ -126,12 +126,16 @@ describe("ActivityHeatmap", () => {
       expect(placeholder.hasAttribute("data-day")).toBe(false)
       expect(placeholder.hasAttribute("aria-label")).toBe(false)
       expect(placeholder.tabIndex).toBe(-1)
-      // A hollow square: a thin solid outline, stripes inside, no fill.
-      expect(placeholder.className).toContain("border border-border")
+      // A hollow square: a 0.5 px solid outline and 0.5 px stripes in one
+      // solid colour (not an alpha border colour), and no fill.
+      expect(placeholder.className).toContain("border-[0.5px]")
       expect(placeholder.className).not.toContain("border-dashed")
       expect(placeholder.className).not.toContain("bg-")
       expect(placeholder.className).not.toContain("opacity")
       expect(placeholder.style.backgroundImage).toContain("repeating-linear-gradient")
+      expect(placeholder.style.backgroundImage).toContain("var(--neutral-6) 0 0.5px")
+      expect(placeholder.style.backgroundImage).not.toContain("--color-border")
+      expect(placeholder.getAttribute("style")).toContain("border-color: var(--neutral-6)")
     }
     // Every day is drawn once; only the two logged days count as entries.
     expect(document.querySelectorAll("[data-day]")).toHaveLength(84)
