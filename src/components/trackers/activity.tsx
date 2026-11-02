@@ -143,6 +143,13 @@ export function heatmapColumns(weeks: readonly DayString[][]): HeatmapColumn[] {
  * edge has its first letter over the line. */
 const DIVIDER_TRACK = 6
 
+/** A placeholder's stripes: thin solid diagonals in the lighter border
+ * colour, so they read as a quiet texture inside the square's outline. */
+const STRIPES: React.CSSProperties = {
+  backgroundImage:
+    "repeating-linear-gradient(135deg, var(--color-border-secondary) 0 1px, transparent 1px 4px)",
+}
+
 /**
  * The heatmap: one column a week, one row a weekday from Monday, the week
  * today is in at the right edge (`heatmapWeeks`). A cell is a rounded
@@ -150,8 +157,8 @@ const DIVIDER_TRACK = 6
  * bands when there is more than one. Today has a ring, its weekday is named
  * in bold and a dot sits under its column; the days of this week still to
  * come have a dashed outline. A week that runs into a new month is split in
- * two columns (`heatmapColumns`), the other month's days drawn as faded
- * placeholders (no data), so one straight line divides the months: a
+ * two columns (`heatmapColumns`), the other month's days drawn as hollow
+ * striped placeholders (no data), so one straight line divides the months: a
  * single element in a narrow track of its own between the two months, from
  * the Monday row down to Sunday, with the month's name above it. A month
  * whose first day is in the heatmap is named; the month the heatmap opens
@@ -275,19 +282,19 @@ function ActivityHeatmap({ series, today }: { series: readonly SeriesState[]; to
             {columns.map((column, c) => {
               const day = column.days[d]
               if (day === null) {
-                // Another month's day, in a split week: holds the place as
-                // a ghost of a day, the empty day's grey at 40 %, with no
-                // border and no texture. At 12-14 px, stripes and dashes
-                // read as noise; the divider already tells the months apart
-                // (Finn, 2026-11-02).
+                // Another month's day, in a split week: holds the place as a
+                // hollow square, a thin solid outline in the border colour
+                // with faint stripes inside and no fill (Finn, 2026-11-02).
+                // The outline is the stronger of the two, so the shape
+                // reads first and the stripes stay a texture.
                 return (
                   <div
                     key={`${c}-${d}`}
                     role="gridcell"
                     aria-hidden
                     data-placeholder
-                    className="aspect-square rounded-sm bg-bg-secondary opacity-40"
-                    style={at(track[c], d + 2)}
+                    className="aspect-square rounded-sm border border-border"
+                    style={{ ...at(track[c], d + 2), ...STRIPES }}
                   />
                 )
               }
