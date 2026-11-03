@@ -456,7 +456,7 @@ describe("a day with more than one series", () => {
     const dots = cell("2026-10-28").querySelector<HTMLElement>("[data-dots]")!
     const box = dots.firstElementChild as HTMLElement
     expect(box.style.padding).toBe("10cqw")
-    expect(box.style.gap).toBe("6cqw")
+    expect(box.style.gap).toBe("max(6cqw, 1px)")
     const rows = [...box.children] as HTMLElement[]
     expect(rows.map((row) => row.children.length)).toEqual([2, 1])
     expect(rows[1].firstElementChild!.className).toContain("flex-1")

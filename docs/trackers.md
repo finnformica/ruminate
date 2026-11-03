@@ -182,7 +182,7 @@ has no keys to validate.
   grey tile with a small square in the colour of each series logged that
   day (`seriesOnDay`, `DayDots`), the same design for one series and for
   many (Finn, 2026-11-03: squares, not dots). The squares sit in rows inside
-  a 10 % margin (`DOT_MARGIN`), with a 6 % gap between them (`DOT_GAP`) and
+  a 10 % margin (`DOT_MARGIN`), with a 6 % gap between them, at least 1 px (`DOT_GAP`) and
   a small corner radius (20 % of the shorter side), and fill the space: one
   series fills it, 2 to 4 are rows of 2, 5 to 9 rows of 3, and a short last
   row's squares widen to the full width (3 is two over one, 7 three, three

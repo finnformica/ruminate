@@ -103,6 +103,10 @@ export function dotRows(count: number): number[] {
   return rows
 }
 
+/** The gap as CSS: never under one pixel, or a phone's 14 px day (0.84 px
+ * of gap) can round it away and join two squares. */
+const dotGap = `max(${DOT_GAP}cqw, 1px)`
+
 /** A cell's side along a line of `parts` cells, in hundredths of the tile. */
 const cellSide = (parts: number) => (100 - 2 * DOT_MARGIN - (parts - 1) * DOT_GAP) / parts
 
@@ -131,12 +135,12 @@ export function DayDots({ dots, faint = false }: { dots: readonly DayDot[]; fain
     >
       <span
         className="flex size-full flex-col"
-        style={{ padding: `${DOT_MARGIN}cqw`, gap: `${DOT_GAP}cqw` }}
+        style={{ padding: `${DOT_MARGIN}cqw`, gap: dotGap }}
       >
         {rows.map((parts, r) => {
           const radius = `${Math.min(cellSide(parts), height) * SQUARE_RADIUS}cqw`
           return (
-            <span key={r} className="flex min-h-0 flex-1" style={{ gap: `${DOT_GAP}cqw` }}>
+            <span key={r} className="flex min-h-0 flex-1" style={{ gap: dotGap }}>
               {Array.from({ length: parts }, () => {
                 const at = i++
                 const more = at === 8 && dots.length > 9
