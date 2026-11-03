@@ -144,7 +144,7 @@ export function dotLayout(count: number, width = 100, height = width, snap = fal
   if (count <= 0) return []
   const rows = rowsOf(count)
   const ys = split(height, rows.length, snap)
-  const places = rows.flatMap((parts, r) =>
+  const places: DotPlace[] = rows.flatMap((parts, r) =>
     split(width, parts, snap).map(([x, w]) => ({ x, y: ys[r][0], w, h: ys[r][1] })),
   )
   if (count > 9) places[8] = { ...places[8], more: true }
