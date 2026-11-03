@@ -85,8 +85,10 @@ import { noteFromNode } from "../../src/data/note-meta"
 import { opsToRows } from "../../src/data/ops-rows"
 import { noteIds, parentsIndex, reachableFrom, type Op } from "../../src/data/ops"
 import type { Note } from "../../src/schema"
-import { toLinkRow, toNodeRow, type LinkRow, type NodeRow } from "../handlers/replica-payload"
-import { NODE_PROPS, writeRows } from "../handlers/event-log"
+import { rowsOfEntities } from "../../src/data/cache-rows"
+import { readAllEntities } from "../handlers/cache-reads"
+import type { LinkRow, NodeRow } from "../handlers/replica-payload"
+import { writeRows } from "../handlers/event-log"
 import type { TenantDb } from "../tenancy-db"
 import {
   linksAbove,
@@ -106,17 +108,8 @@ import type { Grant } from "./grant"
  * snapshot that never held a deleted row cannot leak one.
  */
 export async function loadSnapshot(tenant: TenantDb): Promise<GraphSnapshot> {
-  const [nodeRows, linkRows] = await Promise.all([
-    tenant.exec(
-      `SELECT id, type, text, ${NODE_PROPS("nodes.id")} AS props, updated_at, notes_id ` +
-        "FROM nodes WHERE user_id = :tenant AND deleted_at IS NULL",
-    ),
-    tenant.exec(
-      "SELECT source_id, destination_id, kind, sort_key, updated_at FROM link " +
-        "WHERE user_id = :tenant AND deleted_at IS NULL",
-    ),
-  ])
-  return buildGraphSnapshot(nodeRows.map(toNodeRow), linkRows.map(toLinkRow))
+  const { nodes, links } = rowsOfEntities(await readAllEntities(tenant), { live: true })
+  return buildGraphSnapshot(nodes, links)
 }
 
 /**

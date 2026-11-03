@@ -15,18 +15,20 @@
 //
 // ## The rules
 //
-// A statement that touches `nodes`, `link`, or `meta` must:
+// A statement that touches `nodes`, `link`, `events_log_cache` or `meta` must:
 //
 // 1. **Name its tenant** — contain `user_id` and the `:tenant` token that only
 //    `TenantDb` can bind. (Skipped in `"single"` mode: the browser corpus is
 //    one user per browser profile and has no `user_id` column.)
 // 2. **Say what it means about tombstones** —
 //    - `SELECT`/`WITH`/`UPDATE` on `nodes`/`link` needs a `deleted_at`
-//      predicate (a CTE is a read, and a recursive one traverses),
+//      predicate (a CTE is a read, and a recursive one traverses); on
+//      `events_log_cache` (docs/events-log-cache.md), where liveness is the
+//      `deleted` key, it needs to name that key (`'deleted'`, `$.deleted`),
 //    - `INSERT` on `nodes`/`link` needs `deleted_at` among its columns,
-//    - `DELETE` from `nodes`/`link` is refused outright: nothing is
+//    - `DELETE` from any of the three is refused outright: nothing is
 //      hard-deleted by the app.
-//    `meta` has no `deleted_at` column and is exempt from this rule.
+//    `meta` has no liveness and is exempt from this rule.
 //
 // ## The two escape hatches, both greppable
 //
@@ -61,19 +63,19 @@ const RULE_MESSAGE: Record<GuardRule, string> = {
     "statement touches a corpus table without `user_id` + `:tenant` — every corpus " +
     "statement must name its tenant (add the predicate, or `-- tenant-exempt: <reason>`)",
   "missing-deleted-at-predicate":
-    "statement reads or updates nodes/link without a `deleted_at` predicate — say " +
-    "whether tombstones are included (`deleted_at IS NULL`, `.includingDeleted()`, " +
-    "or `-- includes-deleted: <reason>`)",
+    "statement reads or updates nodes/link/events_log_cache without a liveness predicate — " +
+    "say whether tombstones are included (`deleted_at IS NULL`, the `deleted` key, " +
+    "`.includingDeleted()`, or `-- includes-deleted: <reason>`)",
   "missing-deleted-at-column":
     "INSERT into nodes/link without a `deleted_at` column — a write must state the " +
     "row's tombstone state explicitly",
   "hard-delete":
-    "DELETE from nodes/link — nothing is hard-deleted by the app; stamp `deleted_at` " +
-    "instead (or `-- tenant-exempt: <reason>` for a genuine wipe/purge)",
+    "DELETE from nodes/link/events_log_cache — nothing is hard-deleted by the app; " +
+    "stamp the tombstone instead (or `-- tenant-exempt: <reason>` for a genuine wipe/purge)",
 }
 
 /** The corpus tables the rules apply to. */
-const CORPUS_TABLES = ["nodes", "link", "meta"] as const
+const CORPUS_TABLES = ["nodes", "link", "events_log_cache", "meta"] as const
 type CorpusTable = (typeof CORPUS_TABLES)[number]
 
 const TABLE_REFERENCE = /\b(?:FROM|INTO|JOIN|UPDATE)\s+([A-Za-z_][A-Za-z0-9_]*)/gi
@@ -85,6 +87,9 @@ const DDL = /^\s*(CREATE|DROP|ALTER|PRAGMA|BEGIN|COMMIT|ROLLBACK)\b/i
 
 /** Does the text carry a `deleted_at` PREDICATE (not merely the column name)? */
 const DELETED_AT_PREDICATE = /\bdeleted_at\s*(?:IS\s+(?:NOT\s+)?NULL|[<>=!])/i
+/** Does the text name the cache's liveness key (`deleted`): as a key
+ * (`key = 'deleted'`) or a path into a grouped entity (`$.deleted`)? */
+const LIVENESS_KEY_PREDICATE = /'deleted'|\$\.deleted\b/
 
 const TENANT_TOKEN = /:tenant\b/
 const USER_ID = /\buser_id\b/
@@ -142,17 +147,21 @@ export function checkStatement(sql: string, options: GuardOptions, annotations =
     violations.push("missing-tenant-predicate")
   }
 
-  const touchesRows = tables.includes("nodes") || tables.includes("link")
-  if (touchesRows) {
+  const touchesTables = tables.includes("nodes") || tables.includes("link")
+  const touchesCache = tables.includes("events_log_cache")
+  if (touchesTables || touchesCache) {
     const kind = statementKind(sql)
     if (kind === "delete") {
       violations.push("hard-delete")
     } else if (kind === "insert") {
-      if (!DELETED_AT.test(sql)) violations.push("missing-deleted-at-column")
+      // A cache row names its register; only the row tables have a column
+      // a write must state.
+      if (touchesTables && !DELETED_AT.test(sql)) violations.push("missing-deleted-at-column")
     } else if (kind === "select" || kind === "update") {
       const declared =
         options.includingDeleted === true || INCLUDES_DELETED_ANNOTATION.test(context)
-      if (!declared && !DELETED_AT_PREDICATE.test(sql)) {
+      const predicate = touchesCache ? LIVENESS_KEY_PREDICATE : DELETED_AT_PREDICATE
+      if (!declared && !predicate.test(sql)) {
         violations.push("missing-deleted-at-predicate")
       }
     }

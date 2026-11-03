@@ -49,9 +49,9 @@ const TENANCY_MODULE = "worker/tenancy-db.ts"
 /**
  * The one module allowed to WRITE the projections (docs/event-sourcing.md).
  *
- * `nodes`, `link` and `views` are what folding the event log yields, and they
- * stay that only while every write to them is the log's own
- * (`planEventAppend`). A handler that upserts a row directly still works, and
+ * `events_log_cache` (and `nodes`, `link` and `views` before it) is what
+ * folding the event log yields, and it stays that only while every write to
+ * it is the log's own (`planKeyAppend`). A handler that upserts a row directly still works, and
  * still replicates — and silently makes the log a lie about that row from
  * then on. So it is refused here, in the Worker, where the log lives. (The
  * browser's store under `src/data` holds the same table names as a CACHE of
@@ -59,7 +59,7 @@ const TENANCY_MODULE = "worker/tenancy-db.ts"
  */
 const EVENT_LOG_MODULE = "worker/handlers/event-log.ts"
 const PROJECTION_WRITE =
-  /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(nodes|link|views)\b/i
+  /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(nodes|link|views|events_log_cache)\b/i
 const isTest = (path: string) => /\.test\.tsx?$/.test(path) || path.endsWith("test-support.ts")
 
 function* walk(dir: string): Generator<string> {

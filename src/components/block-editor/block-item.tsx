@@ -24,6 +24,7 @@ import { clipboardBlocksToMarkdown, extractClipboardBlocks } from "../../utils/r
 import { imageFilesOf } from "../../data/images"
 import { blurLeavesWindow } from "../../utils/window-blur"
 import { IconButton } from "../ui/icon-button"
+import { Skeleton } from "../ui/skeleton"
 import { BlockContent } from "./block-content"
 import type { DiffMark, FoldPosition } from "../../data/day-changes"
 import { LISTED_HEADING_DEPTH, headingScale, kindOf, type RowContext, slotOf } from "./block-kinds"
@@ -100,6 +101,13 @@ export interface BlockEditorApi {
    * nothing is filtered.
    */
   context?: ReadonlySet<string>
+  /**
+   * Open rows whose children the graph does not hold yet (a lazily loaded
+   * graph, `GraphView.unloaded`): the row keeps its chevron, open, and
+   * draws a loading mark beneath it instead of a partial list. Empty or
+   * absent when everything shown is in hand.
+   */
+  loading?: ReadonlySet<string>
   /**
    * The outline is a DIFF (`src/data/day-changes.ts`, the calendar): what a
    * period did to each row, drawn as a coloured sign in a gutter of the
@@ -347,7 +355,10 @@ export function BlockItem({
   // they are simply above it — greyed and inert, with the reason in its
   // tooltip (focus on it to go round again).
   const looped = !!occurrence.looped
-  const hasToggle = hasChildren || looped
+  // Children on their way (`BlockEditorApi.loading`): the row is a parent
+  // whose list is not drawn yet, so it keeps its chevron, open.
+  const loading = api.loading?.has(block.id) ?? false
+  const hasToggle = hasChildren || looped || loading
   const rowContext: RowContext = { block, occurrence, api, depth, editing, listed }
   // The key slot this row draws, for a type whose slot depends on whether
   // the row is listed (a board: a favicon among the results, the empty
@@ -1420,6 +1431,17 @@ export function BlockItem({
           {kind.wrap ? kind.wrap(content, rowContext) : content}
           {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}
         </div>
+        {loading ? (
+          <div
+            data-testid="children-loading"
+            role="status"
+            aria-label="Loading"
+            className="py-1"
+            style={{ paddingLeft: indent }}
+          >
+            <Skeleton className="h-3 w-32" />
+          </div>
+        ) : null}
         {api.debug?.showMetadata ? (
           <BlockDebugMeta
             block={block}

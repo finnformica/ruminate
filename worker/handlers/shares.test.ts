@@ -8,6 +8,7 @@ import migration0020 from "../../migrations/0020_share_revoked_by.sql?raw"
 import migration0031 from "../../migrations/0031_drop_views.sql?raw"
 import { createMcpTestEnv, type McpTestEnv } from "../mcp/test-support"
 import type { SharesListBody, SliceBody } from "../shares/wire"
+import { rowsOfGrouped } from "../../src/data/cache-rows"
 import { buildGraphSnapshot, noteDoc } from "../../src/data/graph"
 import { deleteBlockOps, docToOps } from "../../src/data/ops"
 import { opsToRows } from "../../src/data/ops-rows"
@@ -140,15 +141,17 @@ const push = async (id: string, body: unknown, session = "grantee") =>
 
 const sliceIds = (body: SliceBody) => body.nodes.map((row) => row.id).sort()
 
+/** The owner's block as the cache holds it (docs/events-log-cache.md),
+ * tombstone too: `deleted_at` null while live. */
 async function ownerNode(id: string): Promise<Record<string, unknown> | undefined> {
   const rows = await harness.control.exec(
-    "SELECT id, type, text, (SELECT NULLIF(json_group_object(b.key, json(b.value)), '{}') " +
-      "FROM delta_mat_values b WHERE b.user_id = ?1 AND b.block_id = nodes.id " +
-      "AND b.value IS NOT NULL) AS props, notes_id, updated_at, deleted_at FROM nodes " +
-      "WHERE user_id = ?1 AND id = ?2",
+    "SELECT entity, entity_id, json_group_object(key, json(value)) AS fields, MAX(seq) AS seq, " +
+      "MAX(updated_at) AS updated_at FROM events_log_cache WHERE user_id = ?1 AND entity = 'block' " +
+      "AND entity_id = ?2 AND value IS NOT NULL GROUP BY entity, entity_id",
     [OWNER, id],
   )
-  return rows[0]
+  const [row] = rowsOfGrouped(rows).nodes
+  return row === undefined ? undefined : { ...row, deleted_at: row.deleted_at ?? null }
 }
 
 beforeEach(async () => {
@@ -557,7 +560,7 @@ describe("write", () => {
     expect((await ownerNode(A2))?.text).toBe("changed")
     // And it is the owner's row, not a copy in the grantee's partition.
     const theirs = await harness.control.exec(
-      "SELECT COUNT(*) AS n FROM nodes WHERE user_id = ?1",
+      "SELECT COUNT(*) AS n FROM events_log_cache WHERE user_id = ?1",
       [GRANTEE],
     )
     expect(Number(theirs[0].n)).toBe(0)

@@ -1,7 +1,7 @@
 // tenant-guard: exempt — the raw reads below prove what a pushed view wrote.
 import { describe, expect, it } from "vitest"
 import { ensureTenantMeta, forTenant } from "../tenancy-db"
-import { corpusPullFull, corpusPullSince, corpusPut } from "./replica-corpus"
+import { corpusCachePage, corpusPut } from "./replica-corpus"
 import type { ViewRow } from "./replica-payload"
 import { createTenantTestDriver } from "./sqlite-test-driver"
 
@@ -46,15 +46,19 @@ describe("views, removed", () => {
       "SELECT entity FROM events_log WHERE user_id = 111 AND entity = 'view'",
     )
     expect(log).toEqual([])
-    const [row] = await driver.exec("SELECT text FROM nodes WHERE user_id = 111 AND id = 'blk_a'")
+    const [row] = await driver.exec(
+      "SELECT json_extract(value, '$') AS text FROM events_log_cache WHERE user_id = 111 " +
+        "AND entity = 'block' AND entity_id = 'blk_a' AND key = 'text'",
+    )
     expect(row.text).toBe("A")
   })
 
-  it("answers every pull with an empty views list", async () => {
+  it("caches nothing for a view: a snapshot holds blocks and links alone", async () => {
     const { tenant } = await open()
     const node = { id: "blk_a", type: "note", text: "A", props: null, updated_at: 1 }
     await corpusPut(tenant, { nodes: [node], links: [], views: [view] })
-    expect((await corpusPullFull(tenant)).views).toEqual([])
-    expect((await corpusPullSince(tenant, 0)).views).toEqual([])
+    const page = await corpusCachePage(tenant, null, 100)
+    expect(page.rows.length).toBeGreaterThan(0)
+    expect(new Set(page.rows.map((row) => row.entity))).toEqual(new Set(["block"]))
   })
 })

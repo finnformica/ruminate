@@ -1,30 +1,19 @@
 import { atom, getDefaultStore } from "jotai"
-import {
-  LEGACY_TIMESTAMP_CURSOR_FLOOR,
-  type LinkRow,
-  type NodeRow,
-  type ReplicaChangesBody,
-} from "../../worker/handlers/replica-payload"
+import type { CachePageCursor } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import { SessionExpiredError } from "../utils/github-token"
 import { createD1NoteSource, type D1NoteSource } from "./d1-note-source"
-import {
-  linkEntityId,
-  readOutEntities,
-  type Entity,
-  type EntityKeys,
-  type EventContext,
-} from "./events"
-import { deltaMatValueDifferences, foldCheckKey, foldDifferences } from "./fold-check"
+import type { EntityKeys, EventContext } from "./events"
+import { cacheDifferences } from "./fold-check"
 import {
   coalesceTypingKeys,
   keyEventStamp,
   opsToKeyEvents,
-  type DeltaMatValueRow,
   type KeyEvent,
   type LoggedKeyEvent,
 } from "./key-events"
 import { buildGraphSnapshot, isNoteType, type GraphSnapshot } from "./graph"
+import { patchSnapshot } from "./graph-patch"
 import { decodeHlc, encodeHlc, receiveHlc, tickHlc, type Hlc } from "./hlc"
 import { applyOps, notesTouchedBy, type Op } from "./ops"
 import { mintWriterId, writerDevice, writerTimezone } from "./writer-identity"
@@ -49,8 +38,11 @@ import {
  * is the rollup.
  *
  *   boot   open SQL store → discard it if its cache generation or its owner is
- *          not this one → serve local contents immediately → pull from D1
- *          (full on first boot, since-cursor after) → apply rows into the store
+ *          not this one → serve local contents immediately → a device whose
+ *          cache is empty takes the first screen of the replica's
+ *          (`pullFirstScreen`: the notes, drawn at once) and then a snapshot
+ *          of the whole of it (`pullCacheSnapshot`) → pull the log past the
+ *          events cursor (`pullEventLog`)
  *   edits  the editor's ops (src/data/ops.ts) apply to the graph atom at
  *          once and become the EVENTS they amount to (`opsToEvents`,
  *          docs/event-sourcing.md); those coalesce for a moment, then land in
@@ -63,18 +55,22 @@ import {
  *          browser says it is offline neither pulls nor pushes are attempted
  *          — they wait for the `online` event, and nothing is an error
  *
- * **How the UI is fed.** The store's tables are a cache of the fold of the
- * device's log (docs/event-only-sync.md, "The cache"): each batch of this
- * device's events and each page of pulled events updates them in the same
- * transaction as its append. This module publishes the cache's live graph
- * as `databaseGraphAtom`, served as `graphSnapshotAtom` whenever a user is
- * signed in (see global-state.ts). Boot reads it; there is no load step.
- * Everything above reads that graph: the note page walks its doc out of it,
- * and note metadata and search are derived from it (`src/data/note-meta.ts`).
- * Rows are still pulled, but they no longer write the cache: the fold check
- * compares them with it, and compares each touched cache row with the fold
- * of its entity's events (`fold-check.ts`), and reports a difference with
- * `console.error`.
+ * **How the UI is fed.** The store's cache is the fold of the device's log,
+ * key by key (docs/events-log-cache.md): each batch of this device's events
+ * and each page of pulled events updates it in the same transaction as its
+ * append. This module publishes the cache's live graph as
+ * `databaseGraphAtom`, served as `graphSnapshotAtom` whenever a user is
+ * signed in (see global-state.ts). Boot reads the whole graph from the
+ * cache in one grouped statement (`NoteStore.getGraph`), as the build
+ * before read it from `nodes` and `link`; the lazy part is the editor's
+ * walk, by the reader's folds, as it always was. After a batch only the
+ * entities it touched are read again and patched into the graph
+ * (`patchGraph`), never the whole. Everything above reads that graph: the
+ * note page walks its doc out of it, and note metadata and search are
+ * derived from it (`src/data/note-meta.ts`). The fold check compares each
+ * touched cache row with the fold of its entity's events (`fold-check.ts`)
+ * and reports a difference with `console.error`. Sync is the log and
+ * nothing else: no rows are pulled or pushed.
  *
  * **Conflicts are last-writer-wins per row**, decided by push order at the
  * replica. Pulls never touch rows of notes with queued/in-flight local pushes
@@ -86,11 +82,16 @@ import {
  * are updated optimistically on write so the UI never waits on the database.
  */
 
-const PULL_CURSOR_KEY = "d1_pull_cursor"
 /** The last `seq` of the tenant's log this device has pulled into its own
- * (`NoteStore.eventLog`, docs/event-sourcing.md). Reset wherever the pull
- * cursor is: the log goes with the rows it describes. */
+ * (`NoteStore.eventLog`, docs/event-sourcing.md). */
 const EVENTS_CURSOR_KEY = "events_pull_cursor"
+/** Set once the device has taken a snapshot of the replica's cache
+ * (`pullCacheSnapshot`); cleared with the cursor, so a wiped cache takes
+ * one again before it pulls the log. */
+const CACHE_SEEDED_KEY = "cache_seeded"
+/** How many rows one page of the snapshot asks for (the replica's own
+ * bound, `MAX_CACHE_PAGE`). */
+const CACHE_PAGE = 20_000
 /** How many events one page of the events pull asks for, and how many pages
  * one pull reads before leaving the rest to the next: a bound on a first
  * pull of a long log, never a limit on what arrives eventually. */
@@ -180,7 +181,7 @@ const OWNER_KEY = "store_owner"
  * when the tab hides, so the window is small — but it is real, and it is why
  * this is bumped deliberately rather than routinely.
  */
-export const CACHE_GENERATION = "10"
+export const CACHE_GENERATION = "11"
 /**
  * The database the local copy was last pulled from — `"production"`, or a
  * preview clone's id — as the replica reports it (`replica_id` on every pull,
@@ -242,6 +243,18 @@ export interface DatabaseModeStatus {
   pull: "idle" | "pulling" | "error"
   lastPullAt: number | null
   lastPullError: string | null
+  /** Does the device's cache hold this user's own notes — the first screen
+   * (`pullFirstScreen`) or the whole snapshot? False on a fresh device until
+   * its first request lands, and after a wipe, so the notes page shows its
+   * skeleton rather than a list that is still on its way (`isBootingAtom`).
+   * What other people shared (shared-mode.ts) arrives on its own and never
+   * counts. */
+  seeded: boolean
+  /** The cache holds the first screen only — the notes, one preview child
+   * each — and the snapshot of everything else is on its way: the page
+   * holds every row's children back (`GraphView.withheld`) rather than
+   * show the one child it has. False once the snapshot has landed. */
+  partial: boolean
   /** First-ever boot without a reachable replica: nothing local, nothing
    * pulled — the UI shows an explanatory empty state. */
   emptyOffline: boolean
@@ -253,6 +266,8 @@ const OFF_STATUS: DatabaseModeStatus = {
   lastPullAt: null,
   lastPullError: null,
   emptyOffline: false,
+  seeded: false,
+  partial: false,
 }
 
 export const databaseModeStatusAtom = atom<DatabaseModeStatus>(OFF_STATUS)
@@ -271,10 +286,7 @@ export interface DatabaseModeOptions {
   }>
   /** Injectable for tests; defaults to the real replica push loop. Return
    * null to run without pushing. */
-  openReplicaSync?: (
-    getNoteCount: () => number,
-    store: ReplicaStoreAccess,
-  ) => Promise<ReplicaSyncHandle | null>
+  openReplicaSync?: (store: ReplicaStoreAccess) => Promise<ReplicaSyncHandle | null>
   /** Injectable for tests; defaults to the real authed fetch source. */
   source?: D1NoteSource
   pullRetryMs?: number
@@ -283,8 +295,8 @@ export interface DatabaseModeOptions {
 }
 
 /** What the push loop reads and writes of the store: the queue of unpushed
- * events, their acknowledgement, and every row for a full push. */
-type ReplicaStoreAccess = Pick<NoteStore, "getAllRows" | "unpushedEvents" | "markEventsPushed">
+ * events, and their acknowledgement. */
+type ReplicaStoreAccess = Pick<NoteStore, "unpushedEvents" | "markEventsPushed">
 
 interface DatabaseModeRuntime {
   options: DatabaseModeOptions
@@ -315,12 +327,6 @@ interface DatabaseModeRuntime {
   foldCheckTimer: ReturnType<typeof setTimeout> | null
   /** The entities batches and pulls touched since the last fold check. */
   foldCheckKeys: { blocks: Set<string>; links: Set<string> }
-  /** The replica's rows the pulls brought since the last fold check, by key
-   * (`foldCheckKey`): the check compares each with its cache row. */
-  replicaRows: { nodes: NodeRow[]; links: LinkRow[] }
-  /** The replica's `delta_mat_values` rows the pulls brought since the last
-   * fold check: compared with the cache's. */
-  replicaValues: DeltaMatValueRow[]
 }
 
 let runtime: DatabaseModeRuntime | null = null
@@ -351,9 +357,10 @@ function recordWriteError(error: unknown) {
   console.error("[ruminate] store write failed:", error)
 }
 
-/** A wiped cache pulls everything again: the rows, and the log. */
+/** A wiped cache takes a snapshot again, and pulls the log again from the
+ * start. */
 async function resetCursors(store: NoteStore) {
-  await store.setMeta(PULL_CURSOR_KEY, "")
+  await store.setMeta(CACHE_SEEDED_KEY, "")
   await store.setMeta(EVENTS_CURSOR_KEY, "")
 }
 
@@ -378,13 +385,11 @@ async function defaultOpenStore() {
   return { store, persistence: driver.persistence, persistenceReason: driver.persistenceReason }
 }
 
-async function defaultOpenReplicaSync(getNoteCount: () => number, store: ReplicaStoreAccess) {
+async function defaultOpenReplicaSync(store: ReplicaStoreAccess) {
   const { startReplicaSync } = await import("./replica-sync")
-  // Every tab pushes its own writes; concurrent tabs converge by per-row
-  // last-writer-wins at the replica.
+  // Every tab pushes its own writes; concurrent tabs converge per key by
+  // stamp at the replica.
   return startReplicaSync({
-    getNoteCount,
-    getAllRows: () => store.getAllRows(),
     getUnpushedEvents: () => store.unpushedEvents(),
     markEventsPushed: (seqs) => store.markEventsPushed(seqs),
   })
@@ -419,8 +424,6 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     logBehind: false,
     foldCheckTimer: null,
     foldCheckKeys: noKeys(),
-    replicaValues: [],
-    replicaRows: noRows(),
   }
   runtime = activation
   // Backgrounding the tab must not strand a coalescing run of ops.
@@ -447,11 +450,12 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
       // show every note before any network work.
 
       // Cache generation: a copy left by an older generation is thrown away
-      // wholesale — cursor included, so the next pull is a full one — rather
-      // than migrated in place. Same wipe as the owner mismatch below; a store
-      // that has never held anything loses nothing by it.
+      // — the cache, and the cursor with it, so the device takes a snapshot
+      // again — rather than migrated in place. The log stays: its unpushed
+      // events are still this device's to push, and the snapshot replays
+      // them on top (`pullCacheSnapshot`).
       if ((await opened.store.getMeta(CACHE_GENERATION_KEY)) !== CACHE_GENERATION) {
-        await opened.store.clear()
+        await opened.store.clearCache()
         await resetCursors(opened.store)
         await opened.store.setMeta(CACHE_GENERATION_KEY, CACHE_GENERATION)
       }
@@ -478,24 +482,21 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
       const saved = decodeHlc((await opened.store.getMeta(HLC_KEY)) ?? "")
       if (saved !== null) activation.lastStamp = receiveHlc(activation.lastStamp, saved)
 
-      // The cache is the state: boot reads it, with nothing to fold.
+      // The cache is the state: boot reads it, with nothing to fold. A
+      // cache that took its snapshot holds the notes; a fresh one holds
+      // nothing yet, and the page keeps its skeleton until the first
+      // screen lands (`pullFirstScreen`).
       await refreshGraph(activation)
       if (runtime !== activation) return
-      patchStatus({ status: "ready" })
+      patchStatus({ status: "ready", seeded: await cacheSeeded(opened.store) })
 
       // Start the push loop before the first pull, so the pull can consult
       // `pendingNoteIds` (edits made while the pull is in flight are safe).
       try {
-        const replica = await (options.openReplicaSync ?? defaultOpenReplicaSync)(
-          () => noteCount(jotai().get(databaseGraphAtom)),
-          {
-            getAllRows: () =>
-              activation.store?.getAllRows() ?? Promise.resolve({ nodes: [], links: [] }),
-            unpushedEvents: () => activation.store?.unpushedEvents() ?? Promise.resolve([]),
-            markEventsPushed: (seqs) =>
-              activation.store?.markEventsPushed(seqs) ?? Promise.resolve(),
-          },
-        )
+        const replica = await (options.openReplicaSync ?? defaultOpenReplicaSync)({
+          unpushedEvents: () => activation.store?.unpushedEvents() ?? Promise.resolve([]),
+          markEventsPushed: (seqs) => activation.store?.markEventsPushed(seqs) ?? Promise.resolve(),
+        })
         if (runtime !== activation) {
           replica?.stop()
           return
@@ -512,7 +513,7 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     }
   })
 
-  // The initial pull (full on first boot, since-cursor after).
+  // The initial pull: a snapshot of the cache on first boot, then the log.
   runPull(activation)
 }
 
@@ -710,6 +711,10 @@ async function flushOps(activation: DatabaseModeRuntime) {
         frozen: activation.replica?.inFlightEventIds?.() ?? new Set(),
       })
       await saveStamp(activation, activation.store)
+      // The screen has the ops already (`databaseApplyOps`); the patch
+      // reconciles it with the cache, where a pulled event with a higher
+      // stamp may have landed on the same key meanwhile.
+      await patchGraph(activation, keysOf(events))
     }
     if (events.length > 0) {
       activation.replica?.notifyChange(notes)
@@ -722,9 +727,10 @@ async function flushOps(activation: DatabaseModeRuntime) {
   }
 }
 
-/** Re-read the graph atom from the cache (at boot, after a pull or
- * a repair), with any ops that arrived meanwhile re-applied on top — they are
- * applied on screen already and will land in the cache on their own flush. */
+/** Re-read the graph atom from the cache (at boot, after a snapshot or a
+ * repair), with any ops that arrived meanwhile re-applied on top — they are
+ * applied on screen already and will land in the cache on their own flush.
+ * After a batch, `patchGraph` instead. */
 async function refreshGraph(activation: DatabaseModeRuntime) {
   if (runtime !== activation || !activation.store) return
   const graph = await activation.store.getGraph()
@@ -732,26 +738,42 @@ async function refreshGraph(activation: DatabaseModeRuntime) {
   jotai().set(databaseGraphAtom, applyOps(graph, activation.pendingOps, Date.now()))
 }
 
-const noRows = () => ({ nodes: [] as NodeRow[], links: [] as LinkRow[] })
+/**
+ * Patch the graph atom with the entities a batch touched
+ * (docs/events-log-cache.md, "Each new event"): their live rows and the
+ * live links adjacent to them are read again (`liveEntitiesOf`), and only
+ * they are replaced (`patchSnapshot`); any ops that arrived meanwhile are
+ * re-applied on top, as `refreshGraph` does. Nothing is rebuilt from every
+ * row.
+ */
+async function patchGraph(activation: DatabaseModeRuntime, keys: EntityKeys) {
+  if (runtime !== activation || !activation.store) return
+  if (keys.blocks.size + keys.links.size === 0) return
+  const rows = await activation.store.liveEntitiesOf(keys)
+  if (runtime !== activation) return
+  const store = jotai()
+  const patched = patchSnapshot(store.get(databaseGraphAtom), keys, rows)
+  store.set(databaseGraphAtom, applyOps(patched, activation.pendingOps, Date.now()))
+}
 
 const noKeys = () => ({ blocks: new Set<string>(), links: new Set<string>() })
 
-/** Note the entities a batch of events names, for the next fold check. A
- * view event is history only (docs/removing-views.md) and is not checked. */
-function touchEvents(activation: DatabaseModeRuntime, events: readonly KeyEvent[]) {
-  const keys = activation.foldCheckKeys
+/** The cached entities a batch of events names. A view event is history
+ * only (docs/removing-views.md): no cache row, nothing to check or patch. */
+function keysOf(events: readonly KeyEvent[]): { blocks: Set<string>; links: Set<string> } {
+  const keys = noKeys()
   for (const event of events) {
     if (event.entity === "block") keys.blocks.add(event.entity_id)
     else if (event.entity === "link") keys.links.add(event.entity_id)
   }
+  return keys
 }
 
-/** Keep the rows a pull brought, for the next fold check to compare. */
-function holdReplicaRows(activation: DatabaseModeRuntime, body: ReplicaChangesBody) {
-  const held = activation.replicaRows
-  held.nodes.push(...body.nodes)
-  held.links.push(...body.links)
-  activation.replicaValues.push(...(body.delta_mat_values ?? []))
+/** Note the entities a batch of events names, for the next fold check. */
+function touchEvents(activation: DatabaseModeRuntime, events: readonly KeyEvent[]) {
+  const keys = keysOf(events)
+  for (const id of keys.blocks) activation.foldCheckKeys.blocks.add(id)
+  for (const id of keys.links) activation.foldCheckKeys.links.add(id)
 }
 
 /** Queue a fold check of what batches touched, at most one per
@@ -766,19 +788,13 @@ function scheduleFoldCheck(activation: DatabaseModeRuntime) {
 
 /**
  * The fold check (`fold-check.ts`): find where the cache differs from the
- * truth, and report it with `console.error`, one line per entity with its
- * id. There is no reporting path to the Worker, so the report stays in the
- * browser's console. Runs on the queue, so no write lands between its
- * reads, and reads only what batches touched since the last check:
- *
- * - **The log.** Each entity batches touched: its cache row against the
- *   fold of its events in the log (`foldOfLog`, by the `events_entity`
- *   index).
- * - **The replica.** Each row the pulls brought: against its cache row,
- *   tombstones too. It leaves out an entity with an unpushed event (the
- *   replica has not seen it yet) and one the cache holds past the row
- *   cursor (the events pull runs after the row pull, so another device's
- *   write can reach the cache first; the next pull brings its row).
+ * truth, and report it with `console.error`, one line per register with its
+ * entity's id. There is no reporting path to the Worker, so the report
+ * stays in the browser's console; the replica's own check is
+ * `GET /api/replica/verify`. Runs on the queue, so no write lands between
+ * its reads, and reads only what batches touched since the last check:
+ * each touched entity's cache rows against the fold of its events in the
+ * log (`foldOfLog`, by the `events_log_entity` index).
  *
  * While the events pull is behind, there is no check: what it needs waits.
  */
@@ -787,71 +803,11 @@ async function checkFold(activation: DatabaseModeRuntime) {
   if (activation.logBehind) return
   const store = activation.store
   const keys: EntityKeys = activation.foldCheckKeys
-  const pulled = activation.replicaRows
-  const pulledValues = activation.replicaValues
   activation.foldCheckKeys = noKeys()
-  activation.replicaRows = noRows()
-  activation.replicaValues = []
-  const touched = keys.blocks.size + keys.links.size
-  const brought = pulled.nodes.length + pulled.links.length + pulledValues.length
-  if (touched + brought === 0) return
+  if (keys.blocks.size + keys.links.size === 0) return
   try {
-    const found: string[] = []
-
-    // The log against the cache.
-    if (touched > 0) {
-      const fold = await store.foldOfLog(keys)
-      const differences = foldDifferences(
-        readOutEntities(fold, keys),
-        await store.getLiveRows(keys),
-        LOG_SIDES,
-      )
-      found.push(...differences.values())
-    }
-
-    // The replica's rows against the cache.
-    if (brought > 0) {
-      const replicaKeys: EntityKeys = {
-        blocks: new Set([
-          ...pulled.nodes.map((row) => row.id),
-          ...pulledValues.map((row) => row.block_id),
-        ]),
-        links: new Set(
-          pulled.links.map((row) => linkEntityId(row.source_id, row.destination_id, row.kind)),
-        ),
-      }
-      const [cached, cachedValues, unpushed, cursor] = await Promise.all([
-        store.getRowsOf(replicaKeys),
-        store.getDeltaMatValuesOf([...new Set(pulledValues.map((row) => row.block_id))]),
-        store.unpushedEvents(),
-        store.getMeta(PULL_CURSOR_KEY),
-      ])
-      const waiting = new Set(unpushed.map((event) => foldCheckKey(event.entity, event.entity_id)))
-      const pulledTo = cursor !== null && /^\d+$/.test(cursor) ? Number(cursor) : Infinity
-      const seqOf = new Map<string, number>()
-      for (const row of cached.nodes) seqOf.set(foldCheckKey("block", row.id), row.seq ?? 0)
-      for (const row of cached.links) {
-        const id = linkEntityId(row.source_id, row.destination_id, row.kind)
-        seqOf.set(foldCheckKey("link", id), row.seq ?? 0)
-      }
-      const skip = (entity: Entity, id: string) => {
-        const key = foldCheckKey(entity, id)
-        return waiting.has(key) || (seqOf.get(key) ?? 0) > pulledTo
-      }
-      const differences = foldDifferences(cached, pulled, REPLICA_SIDES, skip)
-      found.push(...[...differences.values()].map((line) => `replica ${line}`))
-      // The replica's key rows against the cache's, for the blocks it brought.
-      const broughtBlocks = new Set(pulledValues.map((row) => row.block_id))
-      const valueDifferences = deltaMatValueDifferences(
-        cachedValues.filter((row) => broughtBlocks.has(row.block_id)),
-        pulledValues,
-        REPLICA_SIDES,
-        skip,
-      )
-      found.push(...[...valueDifferences.values()].map((line) => `replica ${line}`))
-    }
+    const found = cacheDifferences(await store.foldOfLog(keys), await store.cacheRowsOf(keys))
     if (runtime !== activation) return
-
     if (found.length > 0) {
       console.error("[ruminate] fold check: the cache differs from the truth:", found)
     }
@@ -860,38 +816,19 @@ async function checkFold(activation: DatabaseModeRuntime) {
   }
 }
 
-const LOG_SIDES = ["the log", "the cache"] as const
-const REPLICA_SIDES = ["the cache", "the replica"] as const
-
-/** After a SQL-side failure, rebuild the store from the graph atom (the
- * authoritative in-memory copy), cooldown-guarded, then push the full corpus
- * so the replica converges on the repaired rows. */
+/** After a SQL-side failure, rebuild the cache from the device's own log
+ * (the truth it holds), cooldown-guarded. The ops still coalescing are
+ * written again first; the unpushed tail stays queued for the push loop. */
 function scheduleRepair(activation: DatabaseModeRuntime) {
   const now = Date.now()
   if (now - activation.lastRepairAt < REPAIR_COOLDOWN_MS) return
   activation.lastRepairAt = now
   enqueue(async () => {
     if (runtime !== activation || !activation.store) return
-    // The graph atom is the authoritative in-memory copy: rebuild from its
-    // rows (the pending ops are in it already, so they are dropped here and
-    // land through the rebuild).
-    activation.pendingOps = []
-    activation.pendingEvents = []
-    activation.pendingNoteIds = new Set()
-    const graph = jotai().get(databaseGraphAtom)
-    await activation.store.clear()
-    await activation.store.applyPull({
-      nodes: [...graph.nodes.values()],
-      links: [...graph.childLinks.values()].flat(),
-      views: [],
-      deleteNodes: [],
-      deleteLinks: [],
-    })
-    // The wipe took the log as well. The fold here still holds it, and the
-    // next pull brings it back from the start, so the next boot has it.
-    await activation.store.setMeta(EVENTS_CURSOR_KEY, "")
+    await flushOps(activation)
+    if (runtime !== activation || !activation.store) return
+    await activation.store.rebuildCacheFromLog()
     await refreshGraph(activation)
-    activation.replica?.requestFullPush()
   })
 }
 
@@ -988,47 +925,22 @@ function runPull(activation: DatabaseModeRuntime) {
     patchStatus({ pull: "pulling" })
     try {
       await flushOps(activation)
-      const cursor = await store.getMeta(PULL_CURSOR_KEY)
-      // An unusable cursor — never pulled, malformed, or a retired
-      // pre-0005 timestamp — degrades to a full pull: always correct, just
-      // bigger, and it comes back with a sequence cursor. Both pulls answer
-      // in the same shape; a full pull is simply "everything changed".
-      const useSince =
-        cursor !== null && /^\d+$/.test(cursor) && Number(cursor) < LEGACY_TIMESTAMP_CURSOR_FLOOR
-      let full = !useSince
-      let body: ReplicaChangesBody = useSince
-        ? await activation.source.pullSince(cursor)
-        : await activation.source.pullFull()
-      if (runtime !== activation) return
-
-      // A different database behind the same URL (a rebuilt preview clone):
-      // the rows AND the cursor belong to the old one. Same wipe as a stale
-      // cache generation, then the full corpus of the new one.
-      if (replicaIdentityChanged(await store.getMeta(REPLICA_ID_KEY), body.replica_id)) {
-        await store.clear()
-        await resetCursors(store)
-        if (useSince) {
-          body = await activation.source.pullFull()
-          full = true
+      // A device whose cache is empty — a fresh profile, a wiped cache —
+      // takes the first screen of the replica's first, so the notes show
+      // now, then a snapshot of the whole of it, and the log catches up
+      // behind both. A different database behind the URL wipes everything
+      // and starts the pull over, once.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (!(await cacheSeeded(store))) {
+          await pullFirstScreen(activation, store)
+          if (runtime !== activation) return
+          await pullCacheSnapshot(activation, store)
+          if (runtime !== activation) return
         }
+        const startOver = await pullEventLog(activation, store)
         if (runtime !== activation) return
+        if (!startOver) break
       }
-      if (typeof body.replica_id === "string" && body.replica_id.length > 0) {
-        await store.setMeta(REPLICA_ID_KEY, body.replica_id)
-      }
-
-      // The rows no longer write the cache: the events pull below brings the
-      // same changes, and the fold check compares the two. The one exception
-      // is the first screen of a device whose log has not begun (a fresh
-      // profile, a wiped cache): its full pull seeds the cache, so every note
-      // shows now, and the log catches up behind it (`seedCache`).
-      holdReplicaRows(activation, body)
-      if (body.cursor !== null) await store.setMeta(PULL_CURSOR_KEY, body.cursor)
-      if (full && (await logNotBegun(store))) {
-        await seedCache(activation, store, body)
-        if (runtime !== activation) return
-      }
-      await pullEventLog(activation, store)
 
       patchStatus({
         pull: "idle",
@@ -1063,68 +975,118 @@ function runPull(activation: DatabaseModeRuntime) {
   })
 }
 
-/** Has this device pulled no page of the log yet? True on a fresh profile
- * and after a wipe (`resetCursors`), never once a page has landed. */
-async function logNotBegun(store: NoteStore): Promise<boolean> {
-  const held = await store.getMeta(EVENTS_CURSOR_KEY)
-  return held === null || held === ""
+/** Has this device taken a snapshot of the replica's cache? False on a
+ * fresh profile and after a wipe (`resetCursors`). */
+async function cacheSeeded(store: NoteStore): Promise<boolean> {
+  const held = await store.getMeta(CACHE_SEEDED_KEY)
+  return held !== null && held !== ""
 }
 
 /**
- * The first screen of a device whose log has not begun: the rows a full pull
- * brought, written to the cache as they are — each with the stamps its last
- * event derives, as the stamp fill gives a row — and drawn at once. The log
- * then catches up in pages behind the screen (`pullEventLog`): an event the
- * row already holds changes nothing (its stamp does not beat the row's), a
- * later one lands as it would on any cache row.
- *
- * Without this a fresh device drew nothing until the whole log had folded
- * (27 pages of 2,000 rows for a corpus of 50,000, Finn's report of
- * 2026-10-28), though the rows it needed had come with the first request.
+ * A different database behind the same URL (a rebuilt preview clone): the
+ * rows AND the cursors belong to the old one. Same wipe as a stale cache
+ * generation; the caller starts the pull over. Records the id otherwise.
  */
-async function seedCache(
+async function adoptReplica(
   activation: DatabaseModeRuntime,
   store: NoteStore,
-  body: ReplicaChangesBody,
-) {
-  await store.applyPull(
-    {
-      nodes: body.nodes,
-      links: body.links,
-      views: [],
-      deleteNodes: [],
-      deleteLinks: [],
-    },
-    // The replica's key rows (`delta_mat_values`, migrations/0029), each
-    // with the stamp the replica holds for it: the fold check compares
-    // these stamps, and the log's replay beats only what they do not hold.
-    body.delta_mat_values ?? [],
-  )
+  seen: string | undefined,
+): Promise<boolean> {
+  const changed = replicaIdentityChanged(await store.getMeta(REPLICA_ID_KEY), seen)
+  if (changed) {
+    // The cache, the log AND the cursors belong to the old database: its
+    // placed events are not this one's history, so all of it goes, as an
+    // owner change wipes it.
+    await store.clear()
+    await resetCursors(store)
+    patchStatus({ seeded: false, partial: false })
+  }
+  // The id is recorded either way, so the next page is this database's.
+  if (typeof seen === "string" && seen.length > 0) await store.setMeta(REPLICA_ID_KEY, seen)
+  return changed
+}
+
+/**
+ * The first screen of a device whose cache is empty, before the snapshot:
+ * the rows of the notes, the root's order, one preview child each and the
+ * pinned nodes (`pullFirstScreen`, one small request — the notes, not the
+ * blocks), written as they are, this device's unpushed events replayed on
+ * top by stamp, and the graph drawn from them at once. The page's skeleton
+ * ends here (`seeded`): the list it shows is this user's own notes, whole.
+ * The snapshot of everything else follows behind it (`pullCacheSnapshot`);
+ * a note opened meanwhile reads after it, on the same queue.
+ */
+async function pullFirstScreen(activation: DatabaseModeRuntime, store: NoteStore) {
+  const screen = await activation.source.pullFirstScreen()
+  if (runtime !== activation) return
+  // A different database answered: the wipe clears what the old one left,
+  // and the rows in hand are the new one's, so they land after it.
+  await adoptReplica(activation, store, screen.replica_id)
+  await store.importCacheRows(screen.rows)
+  await store.applyUnpushedToCache()
   await refreshGraph(activation)
+  if (runtime !== activation) return
+  patchStatus({ seeded: true, partial: true })
+}
+
+/**
+ * The whole cache of a device whose cache is empty, behind the first
+ * screen: the replica's cache, page by page (`pullCache`, keyset-paged),
+ * written as it is — every row at the stamp the replica holds for it —
+ * then this device's unpushed events replayed on top by stamp, so a local
+ * edit not yet pushed still wins where it should, and the graph read
+ * again. The log then catches up in pages behind the screen
+ * (`pullEventLog`): an event the cache already holds changes nothing (its
+ * stamp does not beat the row's), a later one lands as on any cache row
+ * (docs/events-log-cache.md, "Sync is the log").
+ */
+async function pullCacheSnapshot(activation: DatabaseModeRuntime, store: NoteStore) {
+  let after: CachePageCursor | null = null
+  for (;;) {
+    const page = await activation.source.pullCache(after, CACHE_PAGE)
+    if (runtime !== activation) return
+    if (after === null && (await adoptReplica(activation, store, page.replica_id))) {
+      // The cache was wiped under us: start the snapshot over, on the new
+      // database's rows.
+      continue
+    }
+    await store.importCacheRows(page.rows)
+    if (page.cursor === null) break
+    after = page.cursor
+  }
+  await store.applyUnpushedToCache()
+  await store.setMeta(CACHE_SEEDED_KEY, String(Date.now()))
+  await refreshGraph(activation)
+  if (runtime !== activation) return
+  patchStatus({ seeded: true, partial: false })
 }
 
 /**
  * Bring the device's log up to the replica's: every event past the events
- * cursor, in pages, into the store's log and cache (`applyPulledEvents`) — this
- * device's own among them, placed. Only the log is written; the rows came
- * with the pull of rows just before. A long log (a first pull) is read a
- * bounded number of pages at a time, and the next run queued at once
- * (`logBehind`) until it is caught up.
+ * cursor, in pages, into the store's log and cache (`applyPulledEvents`) —
+ * this device's own among them, placed. A long log (a first pull) is read
+ * a bounded number of pages at a time, and the next run queued at once
+ * (`logBehind`) until it is caught up. On a device that just took a
+ * snapshot the log starts from 0: the pages up to the snapshot change
+ * nothing in the cache (their stamps do not beat the rows'), and the log
+ * is pulled whole for history, which the calendar folds a day from.
  *
- * The screen is refreshed after **each page** that brought events. The
- * cache is the screen's only source since the rows stopped writing it, so a
- * refresh only at the end of a run left a fresh device blank until a whole
- * run of pages was folded, and each reload showed a little more (Finn's
- * report, 2026-10-23).
+ * The graph is patched after **each page** that brought events, with the
+ * entities the page touched (`patchGraph`), never rebuilt whole.
  */
-async function pullEventLog(activation: DatabaseModeRuntime, store: NoteStore) {
+async function pullEventLog(activation: DatabaseModeRuntime, store: NoteStore): Promise<boolean> {
   const held = await store.getMeta(EVENTS_CURSOR_KEY)
   let since = held !== null && /^\d+$/.test(held) ? Number(held) : 0
   let changed = false
   let behind = false
   for (let page = 0; page < EVENTS_PAGES_PER_PULL; page += 1) {
-    const { events, cursor } = await activation.source.pullEvents(since, EVENTS_PAGE)
-    if (runtime !== activation) return
+    const { events, cursor, replica_id } = await activation.source.pullEvents(since, EVENTS_PAGE)
+    if (runtime !== activation) return false
+    if (page === 0 && (await adoptReplica(activation, store, replica_id))) {
+      // A different database answered: everything was wiped, and the pull
+      // starts over — a snapshot of this one's, and its log from the start.
+      return true
+    }
     if (events.length > 0) {
       await store.applyPulledEvents(events)
       touchEvents(activation, events)
@@ -1135,8 +1097,8 @@ async function pullEventLog(activation: DatabaseModeRuntime, store: NoteStore) {
         if (stamp !== null) activation.lastStamp = receiveHlc(activation.lastStamp, stamp)
       }
       await saveStamp(activation, store)
-      await refreshGraph(activation)
-      if (runtime !== activation) return
+      await patchGraph(activation, keysOf(events))
+      if (runtime !== activation) return false
       changed = true
     }
     if (cursor === null || cursor <= since) break
@@ -1158,6 +1120,7 @@ async function pullEventLog(activation: DatabaseModeRuntime, store: NoteStore) {
       if (!activation.logBehind) scheduleFoldCheck(activation)
     })
   }
+  return false
 }
 
 /** Flush coalescing ops and wait for all queued work — tests only. */

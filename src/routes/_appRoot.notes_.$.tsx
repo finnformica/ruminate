@@ -557,6 +557,7 @@ function NotePage({
   const {
     doc: editorDoc,
     collapsed,
+    loading,
     context,
     exists: noteExists,
     setDoc,
@@ -1004,6 +1005,7 @@ function NotePage({
                   onOpenBeside={onOpenBeside}
                   noteTitle={isRoot ? ROOT_LABEL : (note?.displayName ?? "")}
                   context={context}
+                  loading={loading}
                   onEditingChange={setEditingBlockId}
                   pivots={pivots}
                   onPivot={setPivot}

@@ -5,7 +5,7 @@ import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
 import { buildGraphSnapshot, docToGraph, noteDoc, rollup } from "./data/graph"
 import { serialize } from "./blocks/serialize"
 import { applyOps } from "./data/ops"
-import { receivedSharesAtom, sharedOriginAtom } from "./data/shared-mode"
+import { receivedSharesAtom, sharedGraphAtom, sharedOriginAtom } from "./data/shared-mode"
 import { pinOps } from "./data/pins"
 import {
   blockIndexAtom,
@@ -358,10 +358,12 @@ describe("isBootingAtom", () => {
     lastPullAt: null,
     lastPullError: null,
     emptyOffline: false,
+    seeded: false,
+    partial: false,
     ...patch,
   })
 
-  it("is true only while the notes are still on their way", () => {
+  it("is true only while the user's own notes are still on their way", () => {
     const store = createStore()
     // Identity unresolved: booting.
     expect(store.get(isBootingAtom)).toBe(true)
@@ -376,18 +378,35 @@ describe("isBootingAtom", () => {
     // Ready with nothing local while the first pull is in flight: booting.
     store.set(databaseModeStatusAtom, status({ pull: "pulling" }))
     expect(store.get(isBootingAtom)).toBe(true)
-    // …until notes land.
-    store.set(databaseGraphAtom, graphOf({ "a.md": md("# A", "hello") }))
+    // …until the device's own first screen lands (`seeded`), even while the
+    // snapshot and the log are still on their way.
+    store.set(databaseModeStatusAtom, status({ pull: "pulling", seeded: true }))
     expect(store.get(isBootingAtom)).toBe(false)
     // A device that has pulled before shows what it has, even while pulling.
     store.set(databaseGraphAtom, graphOf({}))
-    store.set(databaseModeStatusAtom, status({ pull: "pulling", lastPullAt: 1 }))
+    store.set(databaseModeStatusAtom, status({ pull: "pulling", lastPullAt: 1, seeded: true }))
     expect(store.get(isBootingAtom)).toBe(false)
     // A failed store, or a first pull that could not reach the replica, says
     // what it is rather than waiting.
     store.set(databaseModeStatusAtom, status({ status: "error" }))
     expect(store.get(isBootingAtom)).toBe(false)
     store.set(databaseModeStatusAtom, status({ pull: "error", emptyOffline: true }))
+    expect(store.get(isBootingAtom)).toBe(false)
+    store.set(databaseModeStatusAtom, status({ pull: "error", lastPullError: "500" }))
+    expect(store.get(isBootingAtom)).toBe(false)
+  })
+
+  it("is not ended by the notes other people shared (Finn, 2026-11-02)", () => {
+    // A fresh device: the shares arrive on their own, fast, while the user's
+    // own notes are still on their way. A list of the shared notes alone
+    // looks complete and is wrong, so the skeleton stays until `seeded`.
+    const store = createStore()
+    store.set(signInAtom, { token: "t", login: "finn", name: "Finn", email: "finn@example.com" })
+    store.set(databaseModeStatusAtom, status({ pull: "pulling" }))
+    store.set(sharedGraphAtom, graphOf({ "theirs.md": md("# Theirs", "shared with me") }))
+    expect(store.get(notesAtom).size).toBe(1)
+    expect(store.get(isBootingAtom)).toBe(true)
+    store.set(databaseModeStatusAtom, status({ pull: "pulling", seeded: true }))
     expect(store.get(isBootingAtom)).toBe(false)
   })
 })

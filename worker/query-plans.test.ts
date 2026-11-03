@@ -2,7 +2,6 @@
 // it writes by hand is the bad shape it exists to recognise.
 import { beforeAll, describe, expect, it } from "vitest"
 import type { SqlDriver, SqlValue } from "../src/data/sql-driver"
-import { corpusPullSince } from "./handlers/replica-corpus"
 import {
   linksAbove,
   linksBelow,
@@ -13,13 +12,15 @@ import {
   scopeNodeIds,
 } from "./mcp/graph-load"
 import { createMcpTestEnv, type McpTestEnv } from "./mcp/test-support"
+import { readFirstScreenRows } from "./handlers/cache-reads"
 import { shareFromRow } from "./shares/grant"
 import { sliceRows } from "./shares/slice"
 import { forTenant, type TenantDb } from "./tenancy-db"
 
 /**
- * Every statement a bounded read issues must reach `nodes` and `link` through
- * an index that narrows on something MORE than the tenant.
+ * Every statement a bounded read issues must reach `events_log_cache` (the
+ * cache of the log, docs/events-log-cache.md) through an index that narrows
+ * on something MORE than the tenant.
  *
  * This is the guard the row-count tests cannot be. `harness.measure` counts
  * the rows a statement RETURNS, and D1 bills the rows it SCANS; for a walk
@@ -44,7 +45,8 @@ const USER = 21
 const OWNER = 22
 
 /** The corpus tables the rule applies to, and how their aliases are declared. */
-const CORPUS_TABLE = /\b(?:FROM|JOIN)\s+(nodes|link)\b(?:\s+(?:AS\s+)?([A-Za-z_]\w*))?/gi
+const CORPUS_TABLE =
+  /\b(?:FROM|JOIN)\s+(events_log_cache|nodes|link)\b(?:\s+(?:AS\s+)?([A-Za-z_]\w*))?/gi
 const NOT_AN_ALIAS = new Set(["WHERE", "ON", "JOIN", "CROSS", "LEFT", "INNER", "SET", "USING"])
 
 /** Which names in `sql` (table or alias) stand for `nodes` or `link`. */
@@ -198,10 +200,31 @@ describe("the MCP loaders", () => {
   })
 })
 
-describe("the replica pull", () => {
-  it("reads only the rows past the cursor", async () => {
+describe("the first screen", () => {
+  it("reads the notes, the root's order, the previews and the pins by index", async () => {
+    // What a fresh device takes before the snapshot: the notes by type, the
+    // root's child links and each note's first by source, the pinned nodes
+    // by their key — never a scan of the tenant's blocks.
     const tenant = recordingTenant(USER)
-    expect(await scansOf(() => corpusPullSince(tenant, 5))).toEqual([])
+    const read = () => readFirstScreenRows(tenant, ["note", "board", "tracker"], "corpus_root")
+    expect(await scansOf(read)).toEqual([])
+    const rows = await read()
+    // The three notes and one preview child each (the first row, "one"),
+    // not the outline beneath: six blocks, three of them notes.
+    const blocks = new Set(rows.filter((row) => row.entity === "block").map((row) => row.entity_id))
+    expect(blocks.size).toBe(6)
+    expect(
+      rows
+        .filter((row) => row.entity === "block" && row.key === "text")
+        .map((r) => r.value)
+        .sort(),
+    ).toEqual(['"blk_n1"', '"blk_n2"', '"blk_n3"', '"one"', '"one"', '"one"'])
+    expect(
+      rows
+        .filter((row) => row.entity === "link" && row.key === "source_id")
+        .map((r) => r.value)
+        .sort(),
+    ).toEqual(['"blk_n1"', '"blk_n2"', '"blk_n3"'])
   })
 })
 

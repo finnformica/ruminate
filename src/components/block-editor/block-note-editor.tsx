@@ -7,6 +7,7 @@ import type { BlockDoc, ChangeHint } from "../../blocks/types"
 import type { Direction } from "../../blocks/view"
 import { imagesEnabled, uploadImage } from "../../data/images"
 import { fetchLinkPreview } from "../../data/link-previews"
+import { PageSkeleton } from "../ui/skeleton"
 import { CORPUS_ROOT_ID, childIdsOf, isNoteType } from "../../data/graph"
 import { deleteBlockOps, deleteSubtreeOps, linkBlockOps, parentCount } from "../../data/ops"
 import { sharedOriginAtom } from "../../data/shared-mode"
@@ -108,6 +109,7 @@ export function BlockNoteEditor({
   starter = true,
   rowRemoval = "unlink",
   context,
+  loading,
   onEditingChange,
   pivots,
   onPivot,
@@ -187,6 +189,8 @@ export function BlockNoteEditor({
   /** Rows the view keeps only as context — a filter's unmatched ancestors
    * (`src/data/filter-view.ts`), drawn dimmed. */
   context?: ReadonlySet<string>
+  /** Open rows whose children are on their way (`BlockEditor.loading`). */
+  loading?: ReadonlySet<string>
   /** Told which block is being edited as it changes (`BlockEditor`). */
   onEditingChange?: (id: string | null) => void
   /** The frame's link pivots and the way to set one (`BlockEditor`). */
@@ -405,6 +409,10 @@ export function BlockNoteEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusBlockId, readOnly])
 
+  // The note's own rows are held back (`GraphView.withheld`: a fresh device
+  // before its snapshot): a skeleton, never one child as the outline.
+  if (noteId !== undefined && loading?.has(noteId)) return <PageSkeleton />
+
   return (
     <BlockEditor
       doc={doc}
@@ -446,6 +454,7 @@ export function BlockNoteEditor({
       // basket) the last row may go, and the basket goes with it.
       emptyable={!starter}
       context={context}
+      loading={loading}
       onEditingChange={onEditingChange}
       fixedRoots={fixedRoots}
       movableRoots={movableRoots}

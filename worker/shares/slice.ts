@@ -24,15 +24,14 @@
 //    `buildGraphSnapshot` applies at read time, restated in SQL, so the walk
 //    over rows and the walk over a snapshot cross the same edges. `UNION`
 //    (not `UNION ALL`) is what makes it terminate on a graph with a loop.
+//
+// The rows are the cache of the log (docs/events-log-cache.md): an entity
+// is the group of its rows, and liveness is its `deleted` row.
 
-import {
-  toLinkRow,
-  toNodeRow,
-  type LinkRow,
-  type NodeRow,
-  type ReplicaPutPayload,
-} from "../handlers/replica-payload"
-import { NODE_PROPS, writeRows } from "../handlers/event-log"
+import { GROUPED_COLUMNS, groupedEntity, rowsOfGrouped } from "../../src/data/cache-rows"
+import { derivedProps } from "../../src/data/key-events"
+import type { LinkRow, NodeRow, ReplicaPutPayload } from "../handlers/replica-payload"
+import { writeRows } from "../handlers/event-log"
 import type { TenantDb } from "../tenancy-db"
 import { shareAllows, type Permission, type ShareGrant } from "./grant"
 import type { ShareView } from "./wire"
@@ -40,6 +39,25 @@ import type { ShareView } from "./wire"
 /** `?1, ?2, …` for `count` parameters. */
 const holes = (count: number): string =>
   Array.from({ length: count }, (_, at) => `?${at + 1}`).join(", ")
+
+/** The grouped read of an entity's rows (docs/events-log-cache.md). */
+const GROUPED = GROUPED_COLUMNS("c")
+
+/**
+ * One hop DOWN from the rows of `v` (a column `id`), over the cache: the
+ * live child links out of each (`s`, the link's `source_id` row) and the
+ * live node at the far end (`d`, its `destination_id` row). Four
+ * primary-key seeks per child; the same hop the MCP loaders take.
+ */
+const HOP_DOWN =
+  "CROSS JOIN events_log_cache s ON s.user_id = :tenant AND s.key = 'source_id' " +
+  "AND s.value = json_quote(v.id) AND s.entity_id GLOB '*|child' " +
+  "CROSS JOIN events_log_cache ld ON ld.user_id = :tenant AND ld.entity = 'link' " +
+  "AND ld.entity_id = s.entity_id AND ld.key = 'deleted' AND ld.value = 'null' " +
+  "CROSS JOIN events_log_cache d ON d.user_id = :tenant AND d.entity = 'link' " +
+  "AND d.entity_id = s.entity_id AND d.key = 'destination_id' " +
+  "CROSS JOIN events_log_cache fd ON fd.user_id = :tenant AND fd.entity = 'block' " +
+  "AND fd.entity_id = json_extract(d.value, '$') AND fd.key = 'deleted' AND fd.value = 'null' "
 
 /**
  * The recursive walk, as a CTE prefix every slice statement shares:
@@ -49,18 +67,11 @@ const holes = (count: number): string =>
  * root is `?1`.
  */
 const closureCte =
-  `WITH RECURSIVE granted (id) AS ( ` +
-  `SELECT n.id FROM nodes n ` +
-  `WHERE n.user_id = :tenant AND n.deleted_at IS NULL ` +
-  `AND n.id = ?1 ), ` +
-  `visible (id) AS ( ` +
-  `SELECT id FROM granted ` +
-  `UNION ` +
-  `SELECT l.destination_id FROM visible v ` +
-  `CROSS JOIN link l ON l.user_id = :tenant AND l.source_id = v.id ` +
-  `AND l.kind = 'child' AND l.deleted_at IS NULL ` +
-  `JOIN nodes c ON c.user_id = :tenant AND c.id = l.destination_id ` +
-  `AND c.deleted_at IS NULL ) `
+  "WITH RECURSIVE granted (id) AS ( " +
+  "SELECT g.entity_id FROM events_log_cache g WHERE g.user_id = :tenant " +
+  "AND g.entity = 'block' AND g.entity_id = ?1 AND g.key = 'deleted' AND g.value = 'null' ), " +
+  "visible (id) AS ( SELECT id FROM granted UNION " +
+  `SELECT json_extract(d.value, '$') FROM visible v ${HOP_DOWN}) `
 
 /**
  * What one share is of: its root, by the id the grant names, with no filter
@@ -88,22 +99,22 @@ export async function closureIds(
   if (view === null) return { nodes: new Map(), roots: new Set() }
   const rows = await owner.exec(
     closureCte +
-      `SELECT v.id AS id, n.notes_id, ${NODE_PROPS("n.id")} AS props, ` +
-      `(g.id IS NOT NULL) AS is_root ` +
-      `FROM visible v ` +
-      `JOIN nodes n ON n.user_id = :tenant AND n.id = v.id AND n.deleted_at IS NULL ` +
-      `LEFT JOIN granted g ON g.id = v.id`,
+      `SELECT ${GROUPED} FROM visible v CROSS JOIN events_log_cache c ` +
+      "ON c.user_id = :tenant AND c.entity = 'block' AND c.entity_id = v.id " +
+      "WHERE c.value IS NOT NULL GROUP BY c.entity, c.entity_id " +
+      "/* includes-deleted: the closure holds live nodes only; the group reads each one's " +
+      "rows whole, its deleted row among them */",
     [view.rootId],
   )
   const nodes = new Map<string, SliceNode>()
   const liveRoots = new Set<string>()
-  for (const row of rows) {
-    const id = String(row.id)
-    nodes.set(id, {
-      notes_id: row.notes_id === null || row.notes_id === undefined ? null : String(row.notes_id),
-      props: row.props === null || row.props === undefined ? null : String(row.props),
+  for (const row of rows.map(groupedEntity)) {
+    nodes.set(row.entity_id, {
+      notes_id: typeof row.fields.notes_id === "string" ? row.fields.notes_id : null,
+      props: derivedProps(row.fields),
     })
-    if (Number(row.is_root) === 1) liveRoots.add(id)
+    // `granted` is the root when it is live, and `visible` starts from it.
+    if (row.entity_id === view.rootId) liveRoots.add(row.entity_id)
   }
   return { nodes, roots: liveRoots }
 }
@@ -118,29 +129,37 @@ export async function sliceRows(
   const view = shareViewOf(grant)
   if (view === null) return null
   const params = [view.rootId]
-  const nodes = (
-    await owner.exec(
-      closureCte +
-        // `notes_id` names where a block was born, which can be a note outside
-        // the share (a block the owner mirrored in from elsewhere). An id
-        // outside the closure is never serialized, so it is blanked here.
-        `SELECT n.id, n.type, n.text, ${NODE_PROPS("n.id")} AS props, n.updated_at, ` +
-        `CASE WHEN n.notes_id IN (SELECT id FROM visible) THEN n.notes_id END AS notes_id ` +
-        `FROM visible v CROSS JOIN nodes n ON n.id = v.id ` +
-        `WHERE n.user_id = :tenant AND n.deleted_at IS NULL`,
-      params,
-    )
-  ).map(toNodeRow)
-  const links = (
-    await owner.exec(
-      closureCte +
-        `SELECT l.source_id, l.destination_id, l.kind, l.sort_key, l.updated_at ` +
-        `FROM visible a CROSS JOIN link l ON l.source_id = a.id ` +
-        `JOIN visible b ON b.id = l.destination_id ` +
-        `WHERE l.user_id = :tenant AND l.deleted_at IS NULL AND l.kind = 'child'`,
-      params,
-    )
-  ).map(toLinkRow)
+  const nodeRows = await owner.exec(
+    closureCte +
+      `SELECT ${GROUPED} FROM visible v CROSS JOIN events_log_cache c ` +
+      "ON c.user_id = :tenant AND c.entity = 'block' AND c.entity_id = v.id " +
+      "WHERE c.value IS NOT NULL GROUP BY c.entity, c.entity_id " +
+      "/* includes-deleted: the closure holds live nodes only; the group reads each one's " +
+      "rows whole, its deleted row among them */",
+    params,
+  )
+  const inside = new Set(nodeRows.map((row) => String(row.entity_id)))
+  // `notes_id` names where a block was born, which can be a note outside
+  // the share (a block the owner mirrored in from elsewhere). An id
+  // outside the closure is never serialized, so it is blanked here.
+  // A slice row carries no `seq`: the owner's cursor is the owner's.
+  const nodes = rowsOfGrouped(nodeRows, { live: true }).nodes.map(({ seq: _seq, ...row }) => {
+    if (row.notes_id === undefined || inside.has(row.notes_id)) return row
+    const { notes_id: _outside, ...rest } = row
+    return rest
+  })
+  const linkRows = await owner.exec(
+    closureCte +
+      `SELECT ${GROUPED} FROM visible v ${HOP_DOWN}` +
+      "JOIN visible b ON b.id = json_extract(d.value, '$') " +
+      "CROSS JOIN events_log_cache c ON c.user_id = :tenant AND c.entity = 'link' " +
+      "AND c.entity_id = s.entity_id WHERE c.value IS NOT NULL " +
+      "GROUP BY c.entity, c.entity_id " +
+      "/* includes-deleted: the hop crossed live links only; the group reads each one's " +
+      "rows whole, its deleted row among them */",
+    params,
+  )
+  const links = rowsOfGrouped(linkRows, { live: true }).links.map(({ seq: _seq, ...row }) => row)
   return { nodes, links, view }
 }
 
@@ -153,7 +172,8 @@ export async function takenIds(owner: TenantDb, ids: string[]): Promise<Set<stri
   for (let at = 0; at < ids.length; at += 80) {
     const batch = ids.slice(at, at + 80)
     const rows = await all.exec(
-      `SELECT id FROM nodes WHERE user_id = :tenant AND id IN (${holes(batch.length)}) ` +
+      "SELECT entity_id AS id FROM events_log_cache WHERE user_id = :tenant " +
+        `AND entity = 'block' AND key = 'deleted' AND entity_id IN (${holes(batch.length)}) ` +
         `/* includes-deleted: a tombstoned id is still taken */`,
       batch,
     )

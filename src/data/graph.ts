@@ -484,10 +484,13 @@ export function parseProps(props: string | null): BlockProps | null {
 }
 
 /** A walk's result: the doc, and the keys the fold rule closed — the rows
- * drawn with a chevron and nothing beneath them. */
+ * drawn with a chevron and nothing beneath them. `withheld` is the open
+ * rows whose children were held back (`WalkOptions.withhold`): drawn with
+ * a loading mark and nothing beneath them; empty otherwise. */
 export interface GraphView {
   doc: BlockDoc
   collapsed: Set<string>
+  withheld: Set<string>
 }
 
 /** Every occurrence open: the eager walk (export, search, the basket). */
@@ -514,6 +517,11 @@ export interface WalkOptions {
   /** Narrow and sort the rows as the walk goes (docs/graph-walk.md, 4.5).
    * Absent = every row, in the graph's order. */
   narrowing?: WalkNarrowing
+  /** Hold every open row's children back and report the row (`withheld`):
+   * a fresh device between its first screen and its snapshot
+   * (`DatabaseModeStatus.partial`), when the graph holds one preview child
+   * per note and the list beneath a row is not the list. */
+  withhold?: boolean
 }
 
 /**
@@ -672,11 +680,13 @@ export function walkGraph(
     pivots = NO_PIVOTS,
     rootId,
     narrowing,
+    withhold = false,
   }: WalkOptions = {},
 ): GraphView {
   const rule: WalkRule = { pivots, expanded }
   const blocks: Record<string, Block> = {}
   const collapsed = new Set<string>()
+  const withheld = new Set<string>()
   const path = new Set<string>()
   if (rootId) path.add(rootId)
 
@@ -811,6 +821,13 @@ export function walkGraph(
       collapsed.add(key)
       return true
     }
+    // Children not in hand yet: the row stands, open, with nothing beneath
+    // it and a loading mark (`BlockEditor.loading`), never a partial list.
+    if (withhold && followsDown) {
+      withheld.add(id)
+      block.children = []
+      return true
+    }
     const next = levelBeneath(rule, row)
     path.add(id)
     const shown = beneathDown.filter((childId) => visit(childId, key, next, "down", query, id, own))
@@ -856,7 +873,7 @@ export function walkGraph(
       visit(parentId, null, startLevel, "up", rootQuery, rootId, "up"),
     )
   }
-  return { doc, collapsed }
+  return { doc, collapsed, withheld }
 }
 
 /** The eager walk: everything `rootIds` reach, every occurrence open. */
@@ -886,19 +903,30 @@ export function noteView(
   expanded?: ExpandedRule,
   pivots?: LinkPivots,
   narrowing?: WalkNarrowing,
+  withhold?: boolean,
 ): GraphView | null {
   const note = graph.nodes.get(noteId)
   if (!note || !isNoteType(note.type)) return null
   const entries = noteEntries(note.props)
   const title = emittedNoteTitle(note.id, note.text)
   const props = title !== null ? { title, ...(entries ?? {}) } : entries
-  const { doc, collapsed } = walkGraph(childIdsOf(graph, noteId), graph, {
+  // Held back whole: the note's own rows are not in hand either (a fresh
+  // device before its snapshot holds one preview child), so the page shows
+  // a skeleton for the note, never that one child as its outline.
+  if (withhold) {
+    return {
+      doc: { props, rootBlockIds: [], blocks: {} },
+      collapsed: new Set(),
+      withheld: new Set([noteId]),
+    }
+  }
+  const { doc, collapsed, withheld } = walkGraph(childIdsOf(graph, noteId), graph, {
     expanded,
     pivots,
     rootId: noteId,
     narrowing,
   })
-  return { doc: { ...doc, props }, collapsed }
+  return { doc: { ...doc, props }, collapsed, withheld }
 }
 
 /**
@@ -943,12 +971,14 @@ export function rootView(
   pivots?: LinkPivots,
   narrowing?: WalkNarrowing,
   exclude?: ReadonlySet<string>,
+  withhold?: boolean,
 ): GraphView {
   return walkGraph(rootChildIds(graph, exclude), graph, {
     expanded,
     pivots,
     rootId: CORPUS_ROOT_ID,
     narrowing,
+    withhold,
   })
 }
 
@@ -965,10 +995,11 @@ export function blockView(
   expanded?: ExpandedRule,
   pivots?: LinkPivots,
   narrowing?: WalkNarrowing,
+  withhold?: boolean,
 ): GraphView | null {
   const node = graph.nodes.get(blockId)
   if (!node || isNoteType(node.type)) return null
-  return walkGraph([blockId], graph, { expanded, startLevel: 0, pivots, narrowing })
+  return walkGraph([blockId], graph, { expanded, startLevel: 0, pivots, narrowing, withhold })
 }
 
 /**

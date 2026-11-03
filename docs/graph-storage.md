@@ -9,13 +9,16 @@ app runs on it.
 
 ## The architecture: database-authoritative, blocks-first
 
-**Decided 2026-10-20: event-only sync.** Once it lands, the browser pushes
-and pulls events only. The log is the truth, and the browser's `nodes`,
-`link` and `views` become an indexed cache of its fold, updated in the same
-transaction as each batch and read lazily by index (revised 2026-10-21). A conflict resolves by a hybrid
-logical clock stamp, and `seq` is only the sync cursor. The server keeps
-its tables as projections for MCP, search and shares. This section
-describes the app until then. See [event-only-sync.md](./event-only-sync.md).
+**Built 2026-10-30: the cache of the log** ([events-log-cache.md](./events-log-cache.md)).
+The browser pushes and pulls events only. The log is the truth, and the
+one projection on the server and on every device is `events_log_cache`:
+one row per key of every block and link, updated in the same transaction
+as each batch and each pulled page. A conflict resolves per key by a
+hybrid logical clock stamp, and `seq` is only the sync cursor. A new device
+takes one snapshot of the replica's cache, then the log. The `nodes` and
+`link` tables this document describes stay in D1, unwritten, until a later
+migration drops them; the row endpoints are served from the cache to the
+builds before this one. See also [event-only-sync.md](./event-only-sync.md).
 
 **Database storage is THE app.** After GitHub sign-in — which is identity for
 the Worker API and, since the multi-tenant cutover, names the tenant — data

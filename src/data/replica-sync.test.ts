@@ -1,33 +1,24 @@
 // @vitest-environment jsdom
 import { getDefaultStore } from "jotai"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import {
-  parseReplicaPayload,
-  type LinkRow,
-  type NodeRow,
-} from "../../worker/handlers/replica-payload"
-import { linkEntityId } from "./events"
+import type { NodeRow } from "../../worker/handlers/replica-payload"
 import {
   KEY_EVENT_VERSION,
   parseKeyEventsPayload,
   type KeyEvent,
   type KeyEventsPutResult,
 } from "./key-events"
-import {
-  isReplicaDrasticallyBehind,
-  startReplicaSync,
-  type ReplicaSyncHandle,
-} from "./replica-sync"
+import { startReplicaSync, type ReplicaSyncHandle } from "./replica-sync"
 import { storageDiagnosticsAtom } from "./storage-diagnostics"
 
 /**
  * Unit tests for the D1 replication loop. The fake Worker below takes events
- * (`PUT /api/replica/events`) and rows (`PUT /api/replica/notes`, the full
- * push), folds what it is sent into a row map so `/api/replica/status`
- * returns live-ish counts, and validates every body with the real parsers
- * from the Worker — the payloads the client builds must be the payloads the
- * Worker accepts. The fake store below is the queue: events it holds without
- * a `seq` are unpushed, and an acknowledgement stamps them.
+ * (`PUT /api/replica/events`), the one door there is (docs/events-log-
+ * cache.md: no rows are pushed), folds what it is sent into a row map, and
+ * validates every body with the real parser from the Worker — the payloads
+ * the client builds must be the payloads the Worker accepts. The fake store
+ * below is the queue: events it holds without a `seq` are unpushed, and an
+ * acknowledgement stamps them.
  */
 
 interface RecordedRequest {
@@ -35,7 +26,6 @@ interface RecordedRequest {
   method: string
   authorization: string | null
   keepalive: boolean
-  rows: ReturnType<typeof parseReplicaPayload> | null
   events: ReturnType<typeof parseKeyEventsPayload> | null
 }
 
@@ -74,21 +64,11 @@ const node = (id: string, text = id): NodeRow => ({
   props: null,
   updated_at: 1,
 })
-const link = (source: string, destination: string, sortKey = "a0"): LinkRow => ({
-  source_id: source,
-  destination_id: destination,
-  kind: "child",
-  sort_key: sortKey,
-  updated_at: 1,
-})
-
 function createTestServer() {
   const requests: RecordedRequest[] = []
   const remoteNodes = new Map<string, NodeRow>()
-  const remoteLinks = new Map<string, LinkRow>()
   /** The log: every event id the fake has taken, with its seq. */
   const log = new Map<string, number>()
-  let remoteCursor: string | null = null
   /** Next PUT responses to force (status codes); empty → succeed. */
   const failNext: (number | "network")[] = []
 
@@ -101,7 +81,6 @@ function createTestServer() {
       method,
       authorization: headers["Authorization"] ?? null,
       keepalive: (init as { keepalive?: boolean } | undefined)?.keepalive === true,
-      rows: null,
       events: null,
     }
 
@@ -131,7 +110,6 @@ function createTestServer() {
           updated_at: event.at,
         } as NodeRow)
       }
-      if (payload.cursor !== undefined) remoteCursor = payload.cursor
       const result: KeyEventsPutResult = {
         ok: true,
         appended,
@@ -142,49 +120,6 @@ function createTestServer() {
       return new Response(JSON.stringify(result), { status: 200 })
     }
 
-    if (url === "/api/replica/notes" && method === "PUT") {
-      const failure = failNext.shift()
-      if (failure === "network") {
-        requests.push(record)
-        throw new TypeError("Failed to fetch")
-      }
-      const payload = parseReplicaPayload(JSON.parse(String(init?.body)))
-      record.rows = payload
-      requests.push(record)
-      if (failure !== undefined) return new Response("{}", { status: failure })
-      if (!payload) return new Response("{}", { status: 400 })
-      for (const row of payload.nodes) remoteNodes.set(row.id, row)
-      for (const row of payload.links) {
-        remoteLinks.set(linkEntityId(row.source_id, row.destination_id, row.kind), row)
-      }
-      if (payload.cursor !== undefined) remoteCursor = payload.cursor
-      // The real Worker echoes the cursor the batch committed — that is how
-      // the client confirms it without a second request.
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          nodes: payload.nodes.length,
-          links: payload.links.length,
-          deletes: 0,
-          cursor: payload.cursor ?? null,
-        }),
-        { status: 200 },
-      )
-    }
-
-    if (url === "/api/replica/status" && method === "GET") {
-      requests.push(record)
-      const pages = [...remoteNodes.values()].filter((row) => row.type === "note").length
-      return new Response(
-        JSON.stringify({
-          counts: { nodes: remoteNodes.size, links: remoteLinks.size, pages },
-          schema_version: "2",
-          replica_cursor: remoteCursor,
-        }),
-        { status: 200 },
-      )
-    }
-
     throw new Error(`Unexpected request: ${method} ${url}`)
   }) as typeof fetch
 
@@ -192,12 +127,9 @@ function createTestServer() {
     fetchImpl,
     requests,
     remoteNodes,
-    remoteLinks,
     log,
     failNext,
     puts: () => requests.filter((r) => r.url === "/api/replica/events"),
-    rowPuts: () => requests.filter((r) => r.url === "/api/replica/notes"),
-    statuses: () => requests.filter((r) => r.url === "/api/replica/status"),
   }
 }
 
@@ -248,18 +180,11 @@ function createTestStore() {
 
 const DEBOUNCE = 2_000
 
-function createTestSync(
-  initialFiles: Record<string, string>,
-  allRows: { nodes: NodeRow[]; links: LinkRow[] } = { nodes: [], links: [] },
-  overrides: Partial<Parameters<typeof startReplicaSync>[0]> = {},
-) {
+function createTestSync(overrides: Partial<Parameters<typeof startReplicaSync>[0]> = {}) {
   const server = createTestServer()
   const auth = createTestAuth()
   const store = createTestStore()
-  let files = { ...initialFiles }
   const handle = startReplicaSync({
-    getNoteCount: () => Object.keys(files).length,
-    getAllRows: async () => allRows,
     getUnpushedEvents: store.getUnpushedEvents,
     markEventsPushed: store.markEventsPushed,
     fetchImpl: server.fetchImpl,
@@ -272,16 +197,7 @@ function createTestSync(
     store.add(...events)
     handle.notifyChange(noteIds)
   }
-  return {
-    handle,
-    server,
-    auth,
-    store,
-    save,
-    setFiles: (next: Record<string, string>) => {
-      files = { ...next }
-    },
-  }
+  return { handle, server, auth, store, save }
 }
 
 const replicaDiagnostics = () => getDefaultStore().get(storageDiagnosticsAtom).replica!
@@ -316,7 +232,7 @@ const sent = (request: RecordedRequest) => request.events?.events.map((event) =>
 
 describe("replica sync queue", () => {
   it("pushes everything unpushed in one debounced request, in the order made, and stamps what landed", async () => {
-    const { handle, server, store, save } = createTestSync({ "a.md": "A\n", "b.md": "B\n" })
+    const { handle, server, store, save } = createTestSync()
     const [a, a1, b, a1v2] = [
       create("a"),
       create("blk_a1", "v1"),
@@ -331,7 +247,6 @@ describe("replica sync queue", () => {
     await advance(handle, DEBOUNCE)
 
     expect(server.puts()).toHaveLength(1)
-    expect(server.statuses()).toHaveLength(1)
     expect(sent(server.puts()[0])).toEqual([a.id, a1.id, b.id, a1v2.id])
     expect(server.remoteNodes.get("blk_a1")?.text).toBe("v2")
     // Acknowledged: the store stamped each with the replica's seq.
@@ -347,11 +262,10 @@ describe("replica sync queue", () => {
     expect(diag.lastPushAt).not.toBeNull()
     expect(diag.lastPushNotes).toBe(2)
     expect(diag.cursorConfirmed).toBe(true)
-    expect(diag.remote?.pages).toBe(2)
   })
 
   it("pushes what a previous session left unpushed, with nothing to prompt it", async () => {
-    const { handle, server, store } = createTestSync({ "a.md": "A\n" })
+    const { handle, server, store } = createTestSync()
     store.add(create("a"))
     await advance(handle, DEBOUNCE)
     expect(server.puts()).toHaveLength(1)
@@ -361,47 +275,17 @@ describe("replica sync queue", () => {
     expect(server.puts()).toHaveLength(1)
   })
 
-  it("reads the status endpoint once per session, not once per save", async () => {
-    // `GET /api/replica/status` scans the tenant's rows; running it after
-    // every push is what burned through the D1 read budget. The cursor is
-    // confirmed by the push's own response instead.
-    const { handle, server, save } = createTestSync({ "a.md": "A\n", "b.md": "B\n" })
-    save(["a"], [create("a")])
-    await advance(handle, DEBOUNCE)
-    expect(server.statuses()).toHaveLength(1)
-
-    for (const id of ["b", "c", "d"]) {
-      save([id], [create(id)])
-      await advance(handle, DEBOUNCE)
-    }
-
-    expect(server.puts()).toHaveLength(4)
-    expect(server.statuses()).toHaveLength(1)
-    // Every push still knows its cursor landed.
-    expect(replicaDiagnostics().cursorConfirmed).toBe(true)
-  })
-
   it("a push whose cursor the replica did not commit is not marked confirmed", async () => {
     // A replica that answers 200 without committing the cursor (an older
     // Worker, a proxy) must not be reported as confirmed.
     const server = createTestServer()
     const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const response = await server.fetchImpl(input, init)
-      if ((init?.method ?? "GET") !== "PUT") {
-        // Its status does not name the cursor either.
-        if (!String(input).includes("/api/replica/status")) return response
-        const status = (await response.json()) as Record<string, unknown>
-        return new Response(JSON.stringify({ ...status, replica_cursor: null }), { status: 200 })
-      }
-      // Either door: the answer carries no cursor.
+      // The answer carries no cursor.
       const body = (await response.json()) as KeyEventsPutResult
       return new Response(JSON.stringify({ ...body, cursor: null }), { status: 200 })
     }) as typeof fetch
-    const { handle, save } = createTestSync(
-      { "a.md": "A\n" },
-      { nodes: [], links: [] },
-      { fetchImpl },
-    )
+    const { handle, save } = createTestSync({ fetchImpl })
 
     save(["a"], [create("a")])
     await advance(handle, DEBOUNCE)
@@ -411,11 +295,7 @@ describe("replica sync queue", () => {
   })
 
   it("a long queue goes out in runs, in order, with the cursor on the last", async () => {
-    const { handle, server, store, save } = createTestSync(
-      { "a.md": "A\n" },
-      { nodes: [], links: [] },
-      { chunkRows: 2 },
-    )
+    const { handle, server, store, save } = createTestSync({ chunkEvents: 2 })
     const events = Array.from({ length: 5 }, (_, i) => create(`note-${i}`))
     save(["a"], events)
     await advance(handle, DEBOUNCE)
@@ -428,26 +308,8 @@ describe("replica sync queue", () => {
     expect(replicaDiagnostics().cursorConfirmed).toBe(true)
   })
 
-  it("a full push sends every row, nodes before links, in chunks, cursor on the last", async () => {
-    const rows = {
-      nodes: Array.from({ length: 5 }, (_, i) => node(`note-${i}`)),
-      links: [link("note-0", "note-1")], // shape only — content irrelevant
-    }
-    const { handle, server } = createTestSync({ "a.md": "A\n" }, rows, { chunkRows: 2 })
-    handle.requestFullPush()
-    await advance(handle, DEBOUNCE)
-
-    const puts = server.rowPuts()
-    // 5 nodes + 1 link in chunks of 2 rows → 3 payloads, links after all nodes.
-    expect(puts.map((p) => p.rows?.nodes.length)).toEqual([2, 2, 1])
-    expect(puts.map((p) => p.rows?.links.length)).toEqual([0, 0, 1])
-    expect(puts.map((p) => p.rows?.cursor !== undefined)).toEqual([false, false, true])
-    expect(server.remoteNodes.size).toBe(5)
-    expect(server.puts()).toHaveLength(0)
-  })
-
   it("refreshes the session and retries once on a 401", async () => {
-    const { handle, server, auth, save } = createTestSync({ "a.md": "A\n" })
+    const { handle, server, auth, save } = createTestSync()
     server.failNext.push(401)
     save(["a"], [create("a")])
     await advance(handle, DEBOUNCE)
@@ -462,11 +324,10 @@ describe("replica sync queue", () => {
   })
 
   it("keeps failed pushes queued and retries with exponential backoff", async () => {
-    const { handle, server, store, save } = createTestSync(
-      { "a.md": "A\n" },
-      { nodes: [], links: [] },
-      { backoffStartMs: 1_000, backoffMaxMs: 4_000 },
-    )
+    const { handle, server, store, save } = createTestSync({
+      backoffStartMs: 1_000,
+      backoffMaxMs: 4_000,
+    })
     server.failNext.push("network", 500, "network", "network", "network")
     const a = create("a")
     save(["a"], [a])
@@ -502,7 +363,7 @@ describe("replica sync queue", () => {
     // push would only fail and read as "Sync failed" in the sidebar. Skip it:
     // the events stay queued (the status reads "Offline"), no error is
     // recorded, and `online` pushes them at once.
-    const { handle, server, save } = createTestSync({ "a.md": "A\n" })
+    const { handle, server, save } = createTestSync()
     setOnline(false)
     save(["a"], [create("a")])
 
@@ -524,7 +385,7 @@ describe("replica sync queue", () => {
   })
 
   it("after a failed push, the retry carries the old events and the new ones, in order", async () => {
-    const { handle, server, save } = createTestSync({ "a.md": "A\n" })
+    const { handle, server, save } = createTestSync()
     server.failNext.push("network")
     const old = edit("blk_a1", "old")
     save(["a"], [old])
@@ -547,7 +408,7 @@ describe("replica sync queue", () => {
       if ((init?.method ?? "GET") === "PUT") seen.push(handle!.inFlightEventIds!())
       return inner.fetchImpl(input, init)
     }) as typeof fetch
-    const sync = createTestSync({ "a.md": "A\n" }, { nodes: [], links: [] }, { fetchImpl })
+    const sync = createTestSync({ fetchImpl })
     handle = sync.handle
     const a = create("a")
     sync.save(["a"], [a])
@@ -560,29 +421,8 @@ describe("replica sync queue", () => {
     expect(handle.inFlightEventIds!()).toEqual(new Set())
   })
 
-  it("auto-requests a full push when status shows the replica drastically behind", async () => {
-    const files = Object.fromEntries(
-      Array.from({ length: 20 }, (_, i) => [`note-${i}.md`, `Note ${i}\n`]),
-    )
-    const rows = {
-      nodes: Array.from({ length: 20 }, (_, i) => node(`note-${i}`)),
-      links: [],
-    }
-    const { handle, server, save } = createTestSync(files, rows)
-
-    // The first push spends the session's one status check: the remote holds
-    // one note, so it is drastically behind.
-    save(["note-0"], [create("note-0")])
-    await advance(handle, DEBOUNCE)
-    expect(replicaDiagnostics().fullPushPending).toBe(true)
-
-    await advance(handle, DEBOUNCE)
-    expect(server.remoteNodes.size).toBe(20)
-    expect(replicaDiagnostics().fullPushPending).toBe(false)
-  })
-
   it("flushes immediately with keepalive when the tab is hidden", async () => {
-    const { handle, server, save } = createTestSync({ "a.md": "A\n" })
+    const { handle, server, save } = createTestSync()
     save(["a"], [create("a")])
     expect(server.puts()).toHaveLength(0)
 
@@ -596,25 +436,12 @@ describe("replica sync queue", () => {
   })
 
   it("does nothing after stop", async () => {
-    const { handle, server, save } = createTestSync({ "a.md": "A\n" })
+    const { handle, server, save } = createTestSync()
     save(["a"], [create("a")])
     handle.stop()
     await advance(handle, DEBOUNCE)
     save(["a"], [create("a")])
     await advance(handle, DEBOUNCE)
     expect(server.requests).toHaveLength(0)
-  })
-})
-
-describe("isReplicaDrasticallyBehind", () => {
-  it("flags an empty or badly lagging replica, tolerates write-behind lag", () => {
-    expect(isReplicaDrasticallyBehind(0, 0)).toBe(false)
-    expect(isReplicaDrasticallyBehind(1, 0)).toBe(true)
-    expect(isReplicaDrasticallyBehind(20, 0)).toBe(true)
-    expect(isReplicaDrasticallyBehind(20, 17)).toBe(false) // small lag is normal
-    expect(isReplicaDrasticallyBehind(20, 16)).toBe(true)
-    expect(isReplicaDrasticallyBehind(1000, 900)).toBe(false)
-    expect(isReplicaDrasticallyBehind(1000, 899)).toBe(true)
-    expect(isReplicaDrasticallyBehind(10, 15)).toBe(false) // ahead ≠ behind
   })
 })

@@ -226,7 +226,8 @@ function parseCreateBody(raw: unknown): ParsedCreate | string {
 /** Is this id a live node — a note or a block — in the caller's own corpus? */
 async function ownsNode(tenant: ReturnType<typeof forTenant>, id: string): Promise<boolean> {
   const rows = await tenant.exec(
-    `SELECT id FROM nodes WHERE user_id = :tenant AND deleted_at IS NULL AND id = ?1`,
+    "SELECT entity_id FROM events_log_cache WHERE user_id = :tenant AND entity = 'block' " +
+      "AND entity_id = ?1 AND key = 'deleted' AND value = 'null'",
     [id],
   )
   return rows.length > 0

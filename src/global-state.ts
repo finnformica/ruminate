@@ -229,25 +229,27 @@ export const dateMentionsAtom = atom((get) => {
 })
 
 /**
- * Are the notes still on their way? True while the identity is being resolved
- * at boot, while the signed-in store is opening, and on a device with nothing
- * local yet, while the first pull is in flight — the moments the page and the
- * sidebar show skeletons instead of an empty corpus that is about to fill
+ * Are the user's own notes still on their way? True while the identity is
+ * being resolved at boot, while the signed-in store is opening, and on a
+ * device with nothing local yet, until its first screen has landed
+ * (`DatabaseModeStatus.seeded`) — the moments the page and the sidebar show
+ * skeletons instead of an empty corpus that is about to fill
  * (docs/design-principles.md, "Loading"). Never true signed out (the sample
- * notes are always there), after a first pull has landed, or once the store
- * has failed — those states say what they are.
+ * notes are always there), once the cache holds the notes, or once the store
+ * or the first pull has failed — those states say what they are.
  */
 export const isBootingAtom = atom((get) => {
   if (get(githubUserStateAtom) === undefined) return true
   if (!get(isDatabaseModeAtom)) return false
   const status = get(databaseModeStatusAtom)
   if (status.status === "off" || status.status === "opening") return true
-  return (
-    status.pull === "pulling" &&
-    status.lastPullAt === null &&
-    !status.emptyOffline &&
-    get(notesAtom).size === 0
-  )
+  if (status.status === "error") return false
+  // The user's OWN notes are what the page waits for (`seeded`: the first
+  // screen, or the snapshot, has landed in the device's cache). The notes
+  // other people shared arrive on their own and are not the page: a list of
+  // them alone would look complete and be wrong (Finn, 2026-11-02). A fresh
+  // device that cannot reach the replica shows its empty state instead.
+  return !status.seeded && status.pull !== "error" && !status.emptyOffline
 })
 
 /** A–Z by the name on the row, with the opaque id breaking an exact tie so

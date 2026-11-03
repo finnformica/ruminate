@@ -1,17 +1,22 @@
 # Event sourcing
 
 Every change to a block, a link or a view is stored as an **event**, in one
-append-only log per tenant. The log is the truth; `nodes`, `link` and `views`
-are what folding it yields, kept current in the same transaction as every
-append. The browser makes the events itself — each batch of the editor's ops
+append-only log per tenant. The log is the truth; `events_log_cache` — one
+row per key of every block and link, the same shape on the server and on
+every device ([events-log-cache.md](./events-log-cache.md), 2026-10-30) — is
+what folding it yields, kept current in the same transaction as every
+append. Where this document says `nodes`, `link` or `delta_mat_values`, it
+describes the projections before the cache; they stay in D1, unwritten,
+until a later migration drops them. The browser makes the events itself — each batch of the editor's ops
 becomes the events it amounts to, kept in a log of the device's own and pushed
 from there — and the replica takes them in as made. Code: `src/data/events.ts`
 (the vocabulary, the fold, ops → events, the wire's validation),
 `worker/handlers/event-log.ts` (append, reading the past),
 `src/data/sql-note-store.ts` (the device's log and its projection),
 `src/data/replica-sync.ts` (the push), `src/data/hlc.ts` (the stamp),
-`src/data/fold-cache.ts` (the client's tables as a cache of the fold),
-`migrations/0023_events.sql`, `migrations/0024_event_hlc.sql`. Since
+`src/data/cache-rows.ts` (the cache's rows, and the row shapes assembled
+from them), `migrations/0023_events.sql`, `migrations/0024_event_hlc.sql`,
+`migrations/0032_events_log_cache.sql`. Since
 2026-10-27 the log is per key ("Per-key events", below; `src/data/key-events.ts`,
 `migrations/0028_events_log.sql`).
 
@@ -583,6 +588,12 @@ most 128 long (`props.` and 128 for a props register) — or `""` on a
 liveness row. The same pattern is a CHECK on `delta_mat_values.key`.
 
 ### The read model
+
+**Superseded 2026-10-30** by `events_log_cache`
+([events-log-cache.md](./events-log-cache.md)): every register of a block
+and a link is a row of one table, `delta_mat_values` widened; the mirror
+column, the `stamps` column and `nodePropsSql` are gone. The paragraphs
+below describe the step before it.
 
 `delta_mat_values (user_id, block_id, key, value, hlc, seq, updated_at)`,
 primary key `(user_id, block_id, key)`: one row per key of a block's props

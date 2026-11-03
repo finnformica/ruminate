@@ -87,7 +87,7 @@ export interface CorpusMigrations {
 /** Which v3 shape the ladder should produce (see the module header). */
 export type CorpusTenancy = "single" | "columns"
 
-const CORPUS_SCHEMA_VERSION = 17
+const CORPUS_SCHEMA_VERSION = 18
 
 /**
  * The single-tenant v5 step: the `views` table (migrations/0015) — the
@@ -352,6 +352,39 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '17');
 `
 
 /**
+ * The single-tenant v18 step: the cache of the log (docs/events-log-cache.md;
+ * migrations/0032 on D1), one row per key of every block and link, in place
+ * of `nodes`, `link` and `delta_mat_values` — and the old `events` table,
+ * unread since v15. No backfill: the device takes a snapshot of the
+ * replica's cache (`CACHE_GENERATION`, database-mode.ts) and keeps its log.
+ */
+const LOCAL_V18_SQL = `
+CREATE TABLE events_log_cache (
+  entity     TEXT NOT NULL CHECK (entity IN ('block', 'link')),
+  entity_id  TEXT NOT NULL,
+  key        TEXT NOT NULL CHECK (
+               key GLOB '[A-Za-z_]*'
+               AND key NOT GLOB '*[^A-Za-z0-9_.:-]*'
+               AND length(key) <= 134),
+  value      TEXT CHECK (value IS NULL OR json_valid(value)),
+  hlc        TEXT NOT NULL,
+  seq        INTEGER,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (entity, entity_id, key)
+);
+CREATE INDEX events_log_cache_source ON events_log_cache (value) WHERE key = 'source_id';
+CREATE INDEX events_log_cache_destination ON events_log_cache (value) WHERE key = 'destination_id';
+CREATE INDEX events_log_cache_notes ON events_log_cache (value) WHERE key = 'notes_id';
+CREATE INDEX events_log_cache_type ON events_log_cache (value) WHERE key = 'type';
+CREATE INDEX events_log_cache_pinned ON events_log_cache (value) WHERE key = 'props.pinned_at';
+DROP TABLE IF EXISTS delta_mat_values;
+DROP TABLE IF EXISTS link;
+DROP TABLE IF EXISTS nodes;
+DROP TABLE IF EXISTS events;
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '18');
+`
+
+/**
  * The single-tenant v4 step: `notes_id` on nodes (migrations/0006) and nothing
  * else — no backfill, because the local store is a cache and re-pulls the
  * note ids the replica computed (`CACHE_GENERATION`, database-mode.ts).
@@ -375,6 +408,7 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '3');
 /** Drop everything either migration creates, so an incompatible schema can be
  * rebuilt from scratch — safe because a corpus can be re-pulled/re-pushed. */
 const RESET_SQL = `
+DROP TABLE IF EXISTS events_log_cache;
 DROP TABLE IF EXISTS delta_mat_values;
 DROP TABLE IF EXISTS events_log;
 DROP TABLE IF EXISTS snapshots;
@@ -586,6 +620,12 @@ async function applyV17(driver: SqlDriver, tenancy: CorpusTenancy): Promise<void
   if (tenancy === "single") await driver.execScript(LOCAL_V17_SQL)
 }
 
+/** The v18 step: the local cache of the log. On D1 (`"columns"`) it is
+ * migrations/0032, a data step with a backfill, outside this ladder. */
+async function applyV18(driver: SqlDriver, tenancy: CorpusTenancy): Promise<void> {
+  if (tenancy === "single") await driver.execScript(LOCAL_V18_SQL)
+}
+
 /**
  * Every local step that has shipped, by the version it leaves behind — for
  * `corpus-schema.test.ts`, which pins a hash of each. A step that has reached
@@ -608,6 +648,7 @@ export const SHIPPED_LOCAL_STEPS: Readonly<Record<number, string>> = {
   15: LOCAL_V15_SQL,
   16: LOCAL_V16_SQL,
   17: LOCAL_V17_SQL,
+  18: LOCAL_V18_SQL,
 }
 
 type Step = (
@@ -635,6 +676,7 @@ const STEPS: readonly [number, Step][] = [
   [15, applyV15],
   [16, (driver, _migrations, tenancy) => applyV16(driver, tenancy)],
   [17, (driver, _migrations, tenancy) => applyV17(driver, tenancy)],
+  [18, (driver, _migrations, tenancy) => applyV18(driver, tenancy)],
 ]
 
 /**
