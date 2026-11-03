@@ -25,7 +25,7 @@ import { Surface } from "../ui/surface"
 const LEVEL_STEPS = [0, 5, 7, 8, 9] as const
 
 /** A series's colour at a theme step, as CSS. */
-export const colourVar = (colour: TrackerColour, step: number) => `var(--${colour}-${step})`
+const colourVar = (colour: TrackerColour, step: number) => `var(--${colour}-${step})`
 
 /** The one place a series's colour shows outside its cells: a small dot
  * beside its name, in the strip, the cards and the Series editor. */
@@ -74,17 +74,142 @@ export const DAY_RADIUS = 0.25
 /** The radius as CSS: a percentage of the square's own side. */
 export const dayRadius = `${DAY_RADIUS * 100}%`
 
+/** A series logged on a day, as one dot: its colour, and whether it is a
+ * slip on a series to avoid. */
+export type DayDot = { colour: TrackerColour; slip?: boolean }
+
+/** A dot's place and size, in hundredths of the day's side. `more` is the
+ * grey ring that stands for the series not shown. */
+export type DotPlace = { x: number; y: number; d: number; more?: boolean }
+
+/** The margin round the dots, and how much of a grid step a dot takes, in
+ * hundredths of the side. */
+const DOT_MARGIN = 16
+const DOT_SHARE = 0.78
+
+/** Where the dots of 1 to 4 series go in a 2×2 grid: one in the centre,
+ * two side by side, two over one, four in the corners. */
+const SMALL_GRID: Record<number, readonly (readonly [number, number])[]> = {
+  1: [[0.5, 0.5]],
+  2: [
+    [0, 0.5],
+    [1, 0.5],
+  ],
+  3: [
+    [0, 0],
+    [1, 0],
+    [0.5, 1],
+  ],
+  4: [
+    [0, 0],
+    [1, 0],
+    [0, 1],
+    [1, 1],
+  ],
+}
+
 /**
- * A day's fill for its colours (CSS colours): one is flat, more are a pie of
- * equal slices from the top, clockwise, one a series (Finn, 2026-11-03), so
- * two, three or four series each read as a share of the day.
+ * The dots of a day with `count` series (Finn, 2026-11-03: "grow the grid").
+ * 1 to 4: medium dots in a 2×2 grid, never larger, so one series is not a
+ * large dot. 5 to 9: smaller dots in a 3×3 grid, row by row. More than 9:
+ * eight dots and a grey ring for the rest; the day editor lists them all.
  */
-export function pieFill(colours: readonly string[]): React.CSSProperties | undefined {
-  if (colours.length === 0) return undefined
-  if (colours.length === 1) return { backgroundColor: colours[0] }
-  const slice = 100 / colours.length
-  const stops = colours.map((colour, i) => `${colour} ${i * slice}% ${(i + 1) * slice}%`)
-  return { backgroundImage: `conic-gradient(${stops.join(", ")})` }
+export function dotLayout(count: number): DotPlace[] {
+  if (count <= 0) return []
+  const k = count <= 4 ? 2 : 3
+  const step = (100 - 2 * DOT_MARGIN) / k
+  const d = step * DOT_SHARE
+  const at = (c: number, r: number): DotPlace => ({
+    x: DOT_MARGIN + step * (c + 0.5),
+    y: DOT_MARGIN + step * (r + 0.5),
+    d,
+  })
+  if (count <= 4) return SMALL_GRID[count].map(([c, r]) => at(c, r))
+  const places = Array.from({ length: Math.min(count, 9) }, (_, i) => at(i % 3, Math.floor(i / 3)))
+  if (count > 9) places[8] = { ...places[8], more: true }
+  return places
+}
+
+/** Under this size, in px, a cross on a dot does not read: a slip is then a
+ * ring in its colour. */
+const SLIP_RING_BELOW = 6
+
+/**
+ * A day's series as dots on the day's tile (`dotLayout`), in their colours:
+ * the one look for a day with one series and with many. A slip on a series
+ * to avoid is its dot with a white cross, or a ring when the dot is small.
+ * `side` is the day's measured side, if known; `faint` draws the dots of a
+ * placeholder. Its parent is `relative`.
+ */
+export function DayDots({
+  dots,
+  side,
+  faint = false,
+}: {
+  dots: readonly DayDot[]
+  side: number | null
+  faint?: boolean
+}) {
+  const places = dotLayout(dots.length)
+  return (
+    <svg
+      aria-hidden
+      data-dots={dots.length}
+      viewBox="0 0 100 100"
+      className={cx("pointer-events-none absolute inset-0 size-full", faint && "opacity-40")}
+    >
+      {places.map(({ x, y, d, more }, i) => {
+        const r = d / 2
+        if (more) {
+          return (
+            <circle
+              key={i}
+              data-more
+              cx={x}
+              cy={y}
+              r={r - 1}
+              fill="none"
+              stroke="var(--neutral-9)"
+              strokeWidth={1.2}
+              vectorEffect="non-scaling-stroke"
+            />
+          )
+        }
+        const { colour, slip } = dots[i]
+        const fill = colourVar(colour, 9)
+        if (slip && side !== null && (d / 100) * side < SLIP_RING_BELOW) {
+          return (
+            <circle
+              key={i}
+              data-dot={colour}
+              data-slip
+              cx={x}
+              cy={y}
+              r={r - 1}
+              fill="none"
+              stroke={fill}
+              strokeWidth={1.2}
+              vectorEffect="non-scaling-stroke"
+            />
+          )
+        }
+        const c = r * 0.45
+        return (
+          <g key={i} data-dot={colour} data-slip={slip || undefined}>
+            <circle cx={x} cy={y} r={r} fill={fill} />
+            {slip ? (
+              <path
+                d={`M${x - c} ${y - c}L${x + c} ${y + c}M${x + c} ${y - c}L${x - c} ${y + c}`}
+                stroke="white"
+                strokeWidth={d * 0.12}
+                strokeLinecap="round"
+              />
+            ) : null}
+          </g>
+        )
+      })}
+    </svg>
+  )
 }
 
 /** A day still to come in the Heatmap: half the empty tile's grey, under
@@ -93,22 +218,24 @@ const TO_COME_FILL = "color-mix(in srgb, var(--color-bg-secondary) 50%, transpar
 
 /**
  * A day as a square, the one look for the cards and the Heatmap: the focus
- * ring, the radius, the fill in the day's colours (`colours`, `pieFill`) or
- * the empty tile with a hover tint, the ring on today and the cross on a
- * slip. A day to come is a faint tile on a card (`toCome: "faint"`) and a
- * fainter grey with an outline of its own in the Heatmap (`toCome:
- * "outline"`, the outline drawn as `children`). It fills its grid cell.
+ * ring, the radius, the tile, the ring on today and the cross on a slip. A
+ * card's day is filled in its series's shade for the amount (`fill`); a
+ * Heatmap day is the tile with its series as dots (`DayDots`, as
+ * `children`), and an empty tile takes a hover tint. A day to come is a
+ * faint tile on a card (`toCome: "faint"`) and a fainter grey with an
+ * outline of its own in the Heatmap (`toCome: "outline"`, the outline drawn
+ * as `children`). It fills its grid cell.
  */
 export function DaySquare({
-  colours = [],
+  fill,
   today,
   toCome,
   slip,
   children,
   ...button
 }: Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "className" | "style" | "type"> & {
-  /** The day's colours, as CSS; none for a day with nothing logged. */
-  colours?: readonly string[]
+  /** The day's fill, as a CSS colour; none for the tile. */
+  fill?: string
   today: boolean
   toCome?: "faint" | "outline"
   /** The colour of a series to avoid that was logged on the day. */
@@ -123,12 +250,12 @@ export function DaySquare({
         "focus-ring relative block size-full cursor-pointer disabled:cursor-default",
         toCome !== "outline" && "bg-bg-secondary",
         toCome === "faint" && "opacity-50",
-        colours.length === 0 && !toCome && "enabled:hover:bg-bg-hover",
+        !fill && !toCome && "enabled:hover:bg-bg-hover",
         today && "ring-2 ring-border",
       )}
       style={{
         borderRadius: dayRadius,
-        ...(toCome === "outline" ? { backgroundColor: TO_COME_FILL } : pieFill(colours)),
+        backgroundColor: toCome === "outline" ? TO_COME_FILL : fill,
       }}
     >
       {children}
@@ -391,7 +518,7 @@ function DayCell({
         onClick={() => onOpenDay(day)}
         today={day === today}
         toCome={future ? "faint" : undefined}
-        colours={level > 0 ? [colourVar(series.colour, LEVEL_STEPS[level])] : []}
+        fill={level > 0 ? colourVar(series.colour, LEVEL_STEPS[level]) : undefined}
         slip={slip ? series.colour : undefined}
       />
     </div>

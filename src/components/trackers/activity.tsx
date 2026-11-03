@@ -15,8 +15,8 @@ import {
   type ActiveSummary,
   type DayString,
   type MonthString,
+  type Series,
   type SeriesState,
-  type TrackerColour,
 } from "../../data/tracker"
 import { cx } from "../../utils/cx"
 import { Button } from "../ui/button"
@@ -25,10 +25,10 @@ import {
   AvoidTag,
   ColourDot,
   DAY_RADIUS,
+  DayDots,
   DaySquare,
-  colourVar,
+  type DayDot,
   dayRadius,
-  pieFill,
 } from "./month-grid"
 import { fitMonthLabels } from "./month-labels"
 
@@ -153,10 +153,6 @@ function StatList({ summary, avoiding }: { summary: ActiveSummary; avoiding: str
     </dl>
   )
 }
-
-/** How strongly a placeholder takes the colours of its day: a faint wash,
- * so the real day beside it still stands out. */
-const PLACEHOLDER_TINT = 22
 
 const WEEKDAY_NAMES = [
   "Monday",
@@ -299,24 +295,18 @@ function stripes(scale: number): string {
   return `repeating-linear-gradient(135deg, ${PLACEHOLDER_LINE} 0 ${line}px, transparent ${line}px ${period}px)`
 }
 
-/**
- * A placeholder's look: the outline and the stripes over a faint wash of
- * the colours of the day it holds the place of (Finn, 2026-11-03), so what
- * was logged on a split week's days reads across the month's divider. One
- * colour is a flat wash; more are a pie, as a day's own fill is (`pieFill`).
- */
-function placeholderStyle(colours: readonly TrackerColour[], scale: number): React.CSSProperties {
-  const lines = stripes(scale)
-  const tint = pieFill(
-    colours.map(
-      (colour) => `color-mix(in srgb, ${colourVar(colour, 9)} ${PLACEHOLDER_TINT}%, transparent)`,
-    ),
-  )
-  return {
-    borderColor: PLACEHOLDER_LINE,
-    backgroundColor: tint?.backgroundColor,
-    backgroundImage: tint?.backgroundImage ? `${lines}, ${tint.backgroundImage}` : lines,
-  }
+/** The dots for the series on a day: a slip on a series to avoid wears a
+ * cross on its own dot. */
+function dayDots(on: readonly Series[]): DayDot[] {
+  return on.map((s) => ({ colour: s.colour, slip: s.goal === "avoid" }))
+}
+
+/** A placeholder's look: the outline and the stripes. The dots of the day
+ * it holds the place of are drawn faint over them (`DayDots`), so what was
+ * logged on a split week's days reads across the month's divider (Finn,
+ * 2026-11-03). */
+function placeholderStyle(scale: number): React.CSSProperties {
+  return { borderColor: PLACEHOLDER_LINE, backgroundImage: stripes(scale) }
 }
 
 /** A day still to come: a dashed outline, 1 px wide, inside the day
@@ -349,8 +339,9 @@ function FutureOutline({ cellSize }: { cellSize: number | null }) {
 /**
  * The heatmap: one column a week, one row a weekday from Monday, the week
  * today is in at the right edge (`heatmapWeeks`). A cell is a rounded
- * square filled in the colour of the series logged that day, a pie of
- * equal slices when there is more than one (`pieFill`). Today has a ring,
+ * tile with a dot in the colour of each series logged that day, the same
+ * for one series and for many: up to 4 in a 2×2 grid, 5 to 9 smaller in a
+ * 3×3 (`DayDots`, `dotLayout`). Today has a ring,
  * its weekday and its month are named in bold and a dot sits under its
  * column; the days of this week still to come have a faint grey fill and a
  * dashed outline. A week that runs into a new month is split in
@@ -368,7 +359,7 @@ function FutureOutline({ cellSize }: { cellSize: number | null }) {
  * desktop the cells grow to fill the card. A tap on a day up to today opens
  * the day editor on it (`onOpenDay`, Finn 2026-11-03); the arrow keys move
  * between days, one tab stop for the grid. A slip on a series to avoid
- * wears a cross. Below it, a legend of the series.
+ * wears a cross on its dot. Below it, a legend of the series.
  */
 function ActivityHeatmap({
   series,
@@ -534,29 +525,29 @@ function ActivityHeatmap({
               if (day === null) {
                 // Another month's day, in a split week: holds the place as a
                 // hollow square, a hairline outline with hairline stripes
-                // inside in the same solid colour (Finn, 2026-11-02), over a
-                // faint wash of the colours of the day it stands for (Finn,
-                // 2026-11-03).
+                // inside in the same solid colour (Finn, 2026-11-02), under
+                // the faint dots of the day it stands for (Finn, 2026-11-03).
                 const held = column.week[d]
-                const colours = held > today ? [] : seriesOnDay(series, held).map((s) => s.colour)
+                const dots = held > today ? [] : dayDots(seriesOnDay(series, held))
                 return (
                   <div
                     key={`${c}-${d}`}
                     role="gridcell"
                     aria-hidden
                     data-placeholder
-                    data-tint={colours.length}
-                    className="aspect-square border-[0.5px]"
+                    data-tint={dots.length}
+                    className="relative aspect-square border-[0.5px]"
                     style={{
                       ...at(track[c], d + 2),
                       borderRadius: dayRadius,
-                      ...placeholderStyle(colours, cellScale(cellSize)),
+                      ...placeholderStyle(cellScale(cellSize)),
                     }}
-                  />
+                  >
+                    {dots.length > 0 ? <DayDots dots={dots} side={cellSize} faint /> : null}
+                  </div>
                 )
               }
               const on = seriesOnDay(series, day)
-              const slip = on.find((s) => s.goal === "avoid")
               const future = day > today
               const label = `${dayLabel(day)}: ${
                 future
@@ -587,10 +578,11 @@ function ActivityHeatmap({
                     onFocus={() => setFocusDay(day)}
                     today={day === today}
                     toCome={future ? "outline" : undefined}
-                    colours={future ? [] : on.map((s) => colourVar(s.colour, 9))}
-                    slip={slip?.colour}
                   >
                     {future ? <FutureOutline cellSize={cellSize} /> : null}
+                    {!future && on.length > 0 ? (
+                      <DayDots dots={dayDots(on)} side={cellSize} />
+                    ) : null}
                   </DaySquare>
                 </div>
               )

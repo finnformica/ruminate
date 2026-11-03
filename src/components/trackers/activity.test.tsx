@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { heatmapWeeks, type Series, type SeriesState } from "../../data/tracker"
 import { ActivityCard, TrackerStats, axisWeekdays, heatmapColumns } from "./activity"
-import { MonthGrid, pieFill } from "./month-grid"
+import { MonthGrid, dotLayout } from "./month-grid"
 
 afterEach(() => {
   cleanup()
@@ -153,12 +153,17 @@ describe("ActivityHeatmap", () => {
       (day) => day.dataset.series !== "0",
     )
     expect(logged.map((day) => day.dataset.day)).toEqual(["2026-09-30", "2026-10-28"])
-    // A placeholder takes a faint wash of its day's colours: Read was on
-    // Wednesday 30 September, held in October's half of its week, and on
-    // Wednesday 28 October, held in November's.
+    // A placeholder shows its day's dots, faint: Read was on Wednesday 30
+    // September, held in October's half of its week, and on Wednesday 28
+    // October, held in November's.
     const tinted = placeholders.filter((placeholder) => placeholder.dataset.tint !== "0")
     expect(tinted.map((placeholder) => placeholder.style.gridColumn)).toEqual(["13", "19"])
-    for (const placeholder of tinted) expect(placeholder.style.gridRow).toBe("4")
+    for (const placeholder of tinted) {
+      expect(placeholder.style.gridRow).toBe("4")
+      const dots = placeholder.querySelector("svg[data-dots]")!
+      expect(dots.getAttribute("class")).toContain("opacity-40")
+      expect(dots.querySelector("[data-dot]")!.getAttribute("data-dot")).toBe("green")
+    }
     // With nowhere to open a day, no day can be tapped.
     for (const day of document.querySelectorAll<HTMLButtonElement>("button[data-day]")) {
       expect(day.disabled).toBe(true)
@@ -323,12 +328,16 @@ describe("one day square for the heatmap and the cards", () => {
     const [cardToday, heatToday] = pair("2026-10-29")
     expect(heatToday.className).toBe(cardToday.className)
     expect(heatToday.className).toContain("ring-2 ring-border")
-    // An empty day, with its hover tint, and a logged day.
-    for (const day of ["2026-10-27", "2026-10-28"]) {
-      const [card, heatDay] = pair(day)
-      expect(heatDay.className).toBe(card.className)
-      expect(heatDay.style.borderRadius).toBe(card.style.borderRadius)
-    }
+    // An empty day, with its hover tint.
+    const [cardEmpty, heatEmpty] = pair("2026-10-27")
+    expect(heatEmpty.className).toBe(cardEmpty.className)
+    // A logged day: the same square and radius. A card fills it in the
+    // series's shade; the heatmap draws the series as a dot on the tile.
+    const [cardLogged, heatLogged] = pair("2026-10-28")
+    expect(heatLogged.style.borderRadius).toBe(cardLogged.style.borderRadius)
+    expect(cardLogged.style.backgroundColor).toContain("--green-")
+    expect(heatLogged.style.backgroundColor).toBe("")
+    expect(heatLogged.querySelector("svg[data-dots]")!.getAttribute("data-dots")).toBe("1")
   })
 })
 
@@ -429,26 +438,44 @@ const RUN: SeriesState = {
 }
 
 describe("a day with more than one series", () => {
-  it("is a pie of equal slices, one a series, from the top", () => {
-    expect(pieFill([])).toBeUndefined()
-    expect(pieFill(["red"])).toEqual({ backgroundColor: "red" })
-    expect(pieFill(["red", "blue"])).toEqual({
-      backgroundImage: "conic-gradient(red 0% 50%, blue 50% 100%)",
-    })
-    const three = pieFill(["red", "blue", "green"])!.backgroundImage as string
-    expect(three).toMatch(/^conic-gradient\(red 0% 33\.3+\d*%, blue 33\.3+\d*% 66\.6+\d*%, green/)
-    expect(pieFill(["a", "b", "c", "d"])).toEqual({
-      backgroundImage: "conic-gradient(a 0% 25%, b 25% 50%, c 50% 75%, d 75% 100%)",
-    })
+  it("grows the grid: medium dots in a 2×2 up to 4, smaller in a 3×3 from 5", () => {
+    expect(dotLayout(0)).toEqual([])
+    const size = (n: number) => new Set(dotLayout(n).map((place) => place.d.toFixed(2)))
+    // 1 to 4: one medium size, never a large dot.
+    for (const n of [1, 2, 3, 4]) {
+      expect(dotLayout(n)).toHaveLength(n)
+      expect([...size(n)]).toEqual([size(1).values().next().value])
+    }
+    const medium = dotLayout(1)[0].d
+    expect(medium).toBeLessThan(30)
+    // One in the centre; two side by side; two over one; four corners.
+    expect(dotLayout(1)[0]).toMatchObject({ x: 50, y: 50 })
+    expect(dotLayout(2).map((place) => place.y)).toEqual([50, 50])
+    const three = dotLayout(3)
+    expect(three[0].y).toBe(three[1].y)
+    expect(three[2].x).toBe(50)
+    // 5 to 9: smaller dots, row by row in a 3×3.
+    for (const n of [5, 6, 7, 8, 9]) {
+      expect(dotLayout(n)).toHaveLength(n)
+      expect(dotLayout(n)[0].d).toBeLessThan(medium)
+      expect(dotLayout(n).some((place) => place.more)).toBe(false)
+    }
+    expect(new Set(dotLayout(9).map((place) => place.x)).size).toBe(3)
+    // More than 9: eight dots and a ring for the rest.
+    const twelve = dotLayout(12)
+    expect(twelve).toHaveLength(9)
+    expect(twelve.filter((place) => place.more)).toEqual([twelve[8]])
   })
 
-  it("draws the pie in the heatmap, and the legend has no item for it", () => {
+  it("draws a dot a series in the heatmap, and the legend has no item for a mix", () => {
     render(<ActivityCard series={[READ, SWIM, RUN]} today="2026-10-29" />)
-    // Read, Swim and Run on the 28th: three slices in their colours.
+    // Read, Swim and Run on the 28th: three dots in their colours, on the tile.
     expect(cell("2026-10-28").dataset.series).toBe("3")
-    const fill = cell("2026-10-28").style.backgroundImage
-    expect(fill).toContain("conic-gradient")
-    for (const colour of ["green", "blue", "orange"]) expect(fill).toContain(`--${colour}-9`)
+    const dots = [...cell("2026-10-28").querySelectorAll("[data-dot]")]
+    expect(dots.map((dot) => dot.getAttribute("data-dot"))).toEqual(["green", "blue", "orange"])
+    expect(cell("2026-10-28").style.backgroundImage).toBe("")
+    // One series is a dot too, the same size as each of the three.
+    expect(cell("2026-10-27").querySelectorAll("[data-dot]")).toHaveLength(1)
     const legend = screen.getByRole("list", { name: "Series" })
     expect(within(legend).queryByText("More than one")).toBeNull()
     expect(within(legend).getAllByRole("listitem")).toHaveLength(3)
@@ -501,6 +528,22 @@ describe("a series to avoid", () => {
     expect(document.querySelectorAll("[data-day] [data-slip]")).toHaveLength(1)
     const legend = screen.getByRole("list", { name: "Series" })
     expect(within(legend).getByText("Avoid")).toBeTruthy()
+  })
+
+  it("draws a slip as a dot with a cross, or a ring when the dot is too small", () => {
+    // A desktop day: a 40 px tile, a dot of about 10 px with a white cross.
+    measureCells(40)
+    render(<ActivityCard series={[READ, SMOKE]} today="2026-10-29" />)
+    const large = cell("2026-10-27").querySelector("[data-slip]")!
+    expect(large.querySelector("path")!.getAttribute("stroke")).toBe("white")
+    cleanup()
+    // A phone day: a 14 px tile, a dot under 6 px: a ring in the colour.
+    measureCells(14)
+    render(<ActivityCard series={[READ, SMOKE]} today="2026-10-29" />)
+    const small = cell("2026-10-27").querySelector("[data-slip]")!
+    expect(small.tagName.toLowerCase()).toBe("circle")
+    expect(small.getAttribute("fill")).toBe("none")
+    expect(small.getAttribute("stroke")).toContain("--red-9")
   })
 
   it("has a stats group of its own, in clean days, and stays out of the active days", () => {
