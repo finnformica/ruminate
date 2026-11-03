@@ -251,12 +251,27 @@ export function heatmapColumns(weeks: readonly DayString[][]): HeatmapColumn[] {
  * edge has its first letter over the line. */
 const DIVIDER_TRACK = 6
 
-/** A placeholder's lines: its outline and its stripes, both 0.5 px in one
- * solid colour (Finn, 2026-11-02). Solid, not one of the theme's alpha
- * borders: an alpha colour drawn where a stripe meets the outline adds up
- * and shows a brighter spot. */
+/** A cell's side on a phone, where the dashes and stripes were first drawn:
+ * at this size or smaller they keep that look, and on a larger cell they
+ * grow with it, so a desktop cell does not look dense (Finn, 2026-11-03). */
+const PHONE_CELL = 16
+
+/** How much larger than a phone's a cell is, never less than 1. */
+function cellScale(cellSize: number | null): number {
+  return cellSize === null ? 1 : Math.max(1, cellSize / PHONE_CELL)
+}
+
+/** A placeholder's lines: its outline and its stripes, in one solid colour
+ * (Finn, 2026-11-02). Solid, not one of the theme's alpha borders: an alpha
+ * colour drawn where a stripe meets the outline adds up and shows a
+ * brighter spot. The outline stays a 0.5 px hairline; the stripes, 0.5 px
+ * every 4 px on a phone, grow with the cell (`cellScale`). */
 const PLACEHOLDER_LINE = "var(--neutral-6)"
-const STRIPES = `repeating-linear-gradient(135deg, ${PLACEHOLDER_LINE} 0 0.5px, transparent 0.5px 4px)`
+function stripes(scale: number): string {
+  const line = 0.5 * scale
+  const period = 4 * scale
+  return `repeating-linear-gradient(135deg, ${PLACEHOLDER_LINE} 0 ${line}px, transparent ${line}px ${period}px)`
+}
 
 /**
  * A placeholder's look: the outline and the stripes over a faint wash of
@@ -264,14 +279,15 @@ const STRIPES = `repeating-linear-gradient(135deg, ${PLACEHOLDER_LINE} 0 0.5px, 
  * was logged on a split week's days reads across the month's divider. One
  * colour is a flat wash; more are bands, as a day's own fill is.
  */
-function placeholderStyle(colours: readonly TrackerColour[]): React.CSSProperties {
+function placeholderStyle(colours: readonly TrackerColour[], scale: number): React.CSSProperties {
   const tint = (colour: TrackerColour) =>
     `color-mix(in srgb, ${colourVar(colour, 9)} ${PLACEHOLDER_TINT}%, transparent)`
-  if (colours.length === 0) return { borderColor: PLACEHOLDER_LINE, backgroundImage: STRIPES }
+  const lines = stripes(scale)
+  if (colours.length === 0) return { borderColor: PLACEHOLDER_LINE, backgroundImage: lines }
   if (colours.length === 1) {
     return {
       borderColor: PLACEHOLDER_LINE,
-      backgroundImage: STRIPES,
+      backgroundImage: lines,
       backgroundColor: tint(colours[0]),
     }
   }
@@ -279,8 +295,36 @@ function placeholderStyle(colours: readonly TrackerColour[]): React.CSSPropertie
   const stops = colours.map((colour, i) => `${tint(colour)} ${i * band}% ${(i + 1) * band}%`)
   return {
     borderColor: PLACEHOLDER_LINE,
-    backgroundImage: `${STRIPES}, linear-gradient(135deg, ${stops.join(", ")})`,
+    backgroundImage: `${lines}, linear-gradient(135deg, ${stops.join(", ")})`,
   }
+}
+
+/** A day still to come: a dashed outline, 1 px wide, inside the cell's
+ * rounded corners. A CSS dashed border has dashes of a fixed length, so the
+ * outline is an SVG rect, its dashes and gaps 3 px on a phone and grown
+ * with the cell (`cellScale`). The count is rounded so they go evenly round
+ * the square, with no short dash where the line meets its start. */
+const FUTURE_DASH = 3
+const CELL_RADIUS = 4
+function FutureOutline({ cellSize }: { cellSize: number | null }) {
+  const side = (cellSize ?? PHONE_CELL) - 1
+  const dash = FUTURE_DASH * cellScale(cellSize)
+  const dashes = Math.max(4, Math.round((4 * side) / (2 * dash)))
+  return (
+    <svg aria-hidden data-future-outline className="pointer-events-none absolute inset-0 size-full">
+      <rect
+        x={0.5}
+        y={0.5}
+        width={side}
+        height={side}
+        rx={CELL_RADIUS - 0.5}
+        pathLength={2 * dashes}
+        strokeDasharray="1 1"
+        className="fill-none stroke-border"
+        strokeWidth={1}
+      />
+    </svg>
+  )
 }
 
 /**
@@ -469,7 +513,10 @@ function ActivityHeatmap({
                     data-placeholder
                     data-tint={colours.length}
                     className="aspect-square rounded-sm border-[0.5px]"
-                    style={{ ...at(track[c], d + 2), ...placeholderStyle(colours) }}
+                    style={{
+                      ...at(track[c], d + 2),
+                      ...placeholderStyle(colours, cellScale(cellSize)),
+                    }}
                   />
                 )
               }
@@ -507,12 +554,13 @@ function ActivityHeatmap({
                     onFocus={() => setFocusDay(day)}
                     className={cx(
                       "focus-ring relative block size-full rounded-sm disabled:cursor-default",
-                      future ? "border border-dashed border-border" : "bg-bg-secondary",
+                      !future && "bg-bg-secondary",
                       !future && on.length === 0 && "enabled:hover:bg-bg-hover",
                       day === today && "ring-2 ring-text-secondary",
                     )}
                     style={future ? undefined : cellFill(on.map((s) => s.colour))}
                   >
+                    {future ? <FutureOutline cellSize={cellSize} /> : null}
                     {slip ? <SlipMark colour={slip.colour} /> : null}
                   </button>
                 </div>

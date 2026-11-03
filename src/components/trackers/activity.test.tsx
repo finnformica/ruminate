@@ -268,28 +268,66 @@ describe("ActivityHeatmap", () => {
   })
 })
 
+/** jsdom draws nothing: give every cell a side of `size` px, and run the
+ * observer's callback as soon as it observes. */
+function measureCells(size: number) {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    width: size,
+    height: size,
+  } as DOMRect)
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(private callback: () => void) {}
+      observe() {
+        this.callback()
+      }
+      disconnect() {}
+    },
+  )
+}
+
 describe("the heatmap's rows", () => {
   it("makes each weekday's row as tall as a cell is wide, with one gap both ways", () => {
-    // jsdom draws nothing: give every cell a 20 px side, and run the
-    // observer's callback as soon as it observes.
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      width: 20,
-      height: 20,
-    } as DOMRect)
-    vi.stubGlobal(
-      "ResizeObserver",
-      class {
-        constructor(private callback: () => void) {}
-        observe() {
-          this.callback()
-        }
-        disconnect() {}
-      },
-    )
+    measureCells(20)
     heatmap("2026-10-29")
     const grid = screen.getByTestId("activity-heatmap")
     expect(grid.style.gridTemplateRows).toBe("auto repeat(7, 20px) auto")
     expect(grid.style.gap).toBe("4px")
+  })
+})
+
+describe("the heatmap's dashes and stripes", () => {
+  const firstPlaceholder = () => document.querySelector<HTMLElement>("[data-placeholder]")!
+  // Friday 30 October, a day to come: its outline's dashes.
+  const futureDashes = () => {
+    const rect = cell("2026-10-30").querySelector("[data-future-outline] rect")!
+    return Number(rect.getAttribute("pathLength")) / 2
+  }
+
+  it("keeps a phone's look on a phone-sized cell", () => {
+    measureCells(16)
+    heatmap("2026-10-29")
+    expect(firstPlaceholder().style.backgroundImage).toContain(
+      "var(--neutral-6) 0 0.5px, transparent 0.5px 4px",
+    )
+    // A 15 px square, 60 px round, in 3 px dashes and 3 px gaps.
+    expect(futureDashes()).toBe(10)
+    // The outline is the SVG's, not a CSS dashed border.
+    expect(cell("2026-10-30").className).not.toContain("border-dashed")
+  })
+
+  it("grows the stripes and the dashes with a larger desktop cell", () => {
+    measureCells(40)
+    heatmap("2026-10-29")
+    // 2.5 times a phone's cell: a 1.25 px stripe every 10 px, so fewer.
+    expect(firstPlaceholder().style.backgroundImage).toContain(
+      "var(--neutral-6) 0 1.25px, transparent 1.25px 10px",
+    )
+    // The outline stays a hairline.
+    expect(firstPlaceholder().className).toContain("border-[0.5px]")
+    // A 39 px square, 156 px round, in 7.5 px dashes and gaps: about ten.
+    expect(futureDashes()).toBe(10)
   })
 })
 
