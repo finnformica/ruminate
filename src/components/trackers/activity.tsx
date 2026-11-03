@@ -342,8 +342,8 @@ function FutureOutline({ cellSize }: { cellSize: number | null }) {
  * tile with a dot in the colour of each series logged that day, the same
  * for one series and for many: up to 4 in a 2×2 grid, 5 to 9 smaller in a
  * 3×3 (`DayDots`, `dotLayout`). Today has a ring,
- * its weekday and its month are named in bold and a dot sits under its
- * column; the days of this week still to come have a faint grey fill and a
+ * its weekday and its month are named in bold (Finn, 2026-11-03: no dot
+ * under its column); the days of this week still to come have a faint grey fill and a
  * dashed outline. A week that runs into a new month is split in
  * two columns (`heatmapColumns`), the other month's days drawn as hollow
  * striped placeholders (no data), so one straight line divides the months: a
@@ -453,8 +453,8 @@ function ActivityHeatmap({
 
   const weekdays = axisWeekdays(cellSize, todayWeekday)
 
-  // Every item has its place: rows are the names (1), Monday to Sunday (2
-  // to 8) and today's dot (9).
+  // Every item has its place: rows are the names (1) and Monday to Sunday
+  // (2 to 8).
   const at = (column: number, row: number | string): React.CSSProperties => ({
     gridColumn: column,
     gridRow: row,
@@ -474,7 +474,7 @@ function ActivityHeatmap({
         style={{
           gap: HEATMAP_GAP,
           gridTemplateColumns: template,
-          gridTemplateRows: cellSize === null ? undefined : `auto repeat(7, ${cellSize}px) auto`,
+          gridTemplateRows: cellSize === null ? undefined : `auto repeat(7, ${cellSize}px)`,
         }}
       >
         {/* The names: over its divider for a month that starts in the
@@ -600,21 +600,6 @@ function ActivityHeatmap({
             style={at(track[column] - 1, "2 / 9")}
           />
         ))}
-        {/* Under today's column, a dot: where you are. */}
-        {columns.map((column, c) =>
-          column.days.includes(today) ? (
-            <div
-              key={c}
-              aria-hidden
-              data-testid="heatmap-today-mark"
-              data-column={c}
-              className="flex h-1.5 justify-center"
-              style={at(track[c], 9)}
-            >
-              <span className="size-1.5 rounded-full bg-text-secondary" />
-            </div>
-          ) : null,
-        )}
       </div>
       {series.length > 0 ? (
         <ul

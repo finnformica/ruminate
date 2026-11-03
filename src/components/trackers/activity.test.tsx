@@ -268,13 +268,9 @@ describe("ActivityHeatmap", () => {
     const current = document.querySelectorAll('[aria-current="date"]')
     expect([...current].map((day) => day.getAttribute("data-day"))).toEqual(["2026-10-29"])
     expect(cell("2026-10-29").className).toContain("ring-2")
-    // One dot, under October's half of the last week: the column today is
-    // in (the 14th of 15), past the day axis and three divider tracks.
-    const marks = screen.getAllByTestId("heatmap-today-mark")
-    expect(marks).toHaveLength(1)
-    expect(marks[0].dataset.column).toBe("13")
-    expect(marks[0].style.gridColumn).toBe("17")
-    expect(marks[0].style.gridRow).toBe("9")
+    // No dot under today's column (Finn, 2026-11-03): the ring and the
+    // bold weekday mark today, and the grid ends at Sunday's row.
+    expect(screen.queryByTestId("heatmap-today-mark")).toBeNull()
   })
 })
 
@@ -305,7 +301,7 @@ describe("the heatmap's rows", () => {
     measureCells(20)
     heatmap("2026-10-29")
     const grid = screen.getByTestId("activity-heatmap")
-    expect(grid.style.gridTemplateRows).toBe("auto repeat(7, 20px) auto")
+    expect(grid.style.gridTemplateRows).toBe("auto repeat(7, 20px)")
     expect(grid.style.gap).toBe("4px")
   })
 })

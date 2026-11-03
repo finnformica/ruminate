@@ -206,8 +206,8 @@ has no keys to validate.
   (`fitMonthLabels` in `month-labels.ts`, at the measured column pitch, or
   the narrowest card's before a cell is measured). The day axis names all seven weekdays when a row is tall
   enough for each name, else Mon, Wed and Fri (`axisWeekdays`, from the
-  measured cell size), and today's weekday and the current month's name in bold; a dot under today's
-  column marks it (Finn, 2026-11-02). A legend of the series is below it,
+  measured cell size), and today's weekday and the current month's name in bold; today has
+  no dot under its column (Finn, 2026-11-03). A legend of the series is below it,
   one item a series (no item for a mixed day). The month names and the
   legend's names are trimmed to their capitals and baseline
   (`text-box: trim-both cap alphabetic`), so the card's padding is the space
