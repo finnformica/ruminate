@@ -181,18 +181,18 @@ has no keys to validate.
   column a week from Monday with this week at the right edge, a cell is the
   grey tile with a small square in the colour of each series logged that
   day (`seriesOnDay`, `DayDots`), the same design for one series and for
-  many (Finn, 2026-11-03: squares, not dots). The squares sit in rows inside
-  a 10 % margin (`DOT_MARGIN`), with a 6 % gap between them, at least 1 px (`DOT_GAP`) and
-  a small corner radius (20 % of the shorter side), and fill the space: one
-  series fills it, 2 to 4 are rows of 2, 5 to 9 rows of 3, and a short last
-  row's squares widen to the full width (3 is two over one, 7 three, three
-  and one), so no cell is left empty. Past 9, eight squares and a grey
-  outline for the rest (`dotRows`, Finn 2026-11-03: "grow the grid", "fill
-  the space"). A slip on a series to avoid is a plain square: the Heatmap
-  has no slip mark (Finn, 2026-11-03). The squares are plain CSS layout,
-  with no measure: the tile is a size container padded by the margin, and
-  each row a flex row of squares with the gap between (lengths in `cqw`), so
-  the browser centres them in the tile. Today
+  many (Finn, 2026-11-03: squares, not dots). Every mark is a true square,
+  in a fixed grid inside a 10 % margin (`DOT_MARGIN`), with a 6 % gap, at
+  least 1 px (`DOT_GAP`), and a corner radius of 20 % of its side: one
+  series is one square, 2 to 4 a 2×2, 5 to 9 a 3×3, filled in reading order,
+  the other cells left empty (`dotGrid`, Finn 2026-11-03: "grow the grid",
+  then "prefer using the square shape"). Past 9, eight squares and a grey
+  outline for the rest. A slip on a series to avoid is a plain square: the
+  Heatmap has no slip mark (Finn, 2026-11-03). The squares are plain CSS
+  layout, with no measure: the tile is a size container, and the squares a
+  CSS grid centred in it, its tracks and gap each a whole pixel (CSS
+  `round()`, lengths in `cqw`), so every edge snaps the same way and no
+  square is a pixel wider than another. Today
   with a ring and the rest of this week dashed over a faint grey. A tap on a day up to today opens the day editor on it;
   the grid is one tab stop, and the arrow keys move a day (up, down) or a
   week (left, right). A week that runs into a new month is split into two

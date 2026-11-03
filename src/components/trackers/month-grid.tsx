@@ -84,83 +84,81 @@ export type DayDot = { colour: TrackerColour }
 const DOT_MARGIN = 10
 const DOT_GAP = 6
 
-/** A square's corner radius, as a share of its shorter side. */
+/** A square's corner radius, as a share of its side. */
 const SQUARE_RADIUS = 0.2
 
 /**
- * The squares in each row of a day with `count` series (Finn, 2026-11-03:
- * "grow the grid", and fill the space): one row of one for 1 series, full
- * rows of 2 up to 4 series and of 3 up to 9, then the rest. A short last
- * row's squares widen to fill the width (3 is two over one), so no cell is
- * left empty. More than 9 is 9 cells, the last a grey outline for the rest;
- * the day editor lists them all.
+ * The side of a day's fixed grid of squares for `count` series (Finn,
+ * 2026-11-03: true squares, the grid of the dots): 1 for one series, 2 (a
+ * 2×2) for 2 to 4, 3 (a 3×3) for 5 to 9. The squares fill the cells in
+ * reading order and the other cells stay empty. More than 9 is a 3×3, the
+ * last cell a grey outline for the rest; the day editor lists them all.
  */
-export function dotRows(count: number): number[] {
-  const n = Math.min(count, 9)
-  const k = n <= 1 ? 1 : n <= 4 ? 2 : 3
-  const rows: number[] = []
-  for (let left = n; left > 0; left -= k) rows.push(Math.min(k, left))
-  return rows
+export function dotGrid(count: number): number {
+  return count <= 0 ? 0 : count === 1 ? 1 : count <= 4 ? 2 : 3
 }
 
-/** The gap as CSS: never under one pixel, or a phone's 14 px day (0.84 px
- * of gap) can round it away and join two squares. */
-const dotGap = `max(${DOT_GAP}cqw, 1px)`
+/** The gap as CSS, in whole pixels and never under one: a phone's 14 px day
+ * has 0.84 px of gap, which can round away and join two squares. */
+const DOT_GAP_CSS = `max(1px, round(${DOT_GAP}cqw, 1px))`
 
-/** A cell's side along a line of `parts` cells, in hundredths of the tile. */
-const cellSide = (parts: number) => (100 - 2 * DOT_MARGIN - (parts - 1) * DOT_GAP) / parts
+/** A square's side as CSS for a grid of `k`: its share of the room inside
+ * the margin, rounded down to a whole pixel. Every square and gap is whole
+ * pixels, so all edges sit at the same fraction of a pixel and snap the
+ * same way: no square is a pixel wider than another. */
+const dotSideCss = (k: number) =>
+  `round(down, (${100 - 2 * DOT_MARGIN}cqw - ${k - 1} * var(--dot-gap)) / ${k}, 1px)`
 
 /**
  * A day's series as squares on the day's tile, in their colours: the one
  * look for a day with one series and with many. Plain CSS layout: the tile
- * is a size container, its box padded by the margin, and the squares are
- * rows of flex items with the gap between them (`dotRows`), so the browser
- * centres them and puts them on pixels. Lengths are in `cqw`, hundredths of
- * the tile's side. A slip on a series to avoid is a plain square: the
- * Heatmap has no slip mark (Finn, 2026-11-03). `faint` draws the squares of
- * a placeholder. Its parent is `relative`.
+ * is a size container, and the squares a fixed k×k grid (`dotGrid`) of equal
+ * whole-pixel tracks with the gap between, centred in it by the browser
+ * (lengths in `cqw`, hundredths of the tile's side). A slip on a series to
+ * avoid is a plain square: the Heatmap has no slip mark (Finn, 2026-11-03).
+ * `faint` draws the squares of a placeholder. Its parent is `relative`.
  */
 export function DayDots({ dots, faint = false }: { dots: readonly DayDot[]; faint?: boolean }) {
-  const rows = dotRows(dots.length)
-  const height = cellSide(rows.length)
-  let i = 0
+  const k = dotGrid(dots.length)
+  const cells = Math.min(dots.length, k * k)
   return (
     <span
       aria-hidden
       data-dots={dots.length}
       className={cx(
-        "pointer-events-none absolute inset-0 [container-type:size]",
+        "pointer-events-none absolute inset-0 grid place-items-center [container-type:size]",
         faint && "opacity-40",
       )}
     >
       <span
-        className="flex size-full flex-col"
-        style={{ padding: `${DOT_MARGIN}cqw`, gap: dotGap }}
+        data-dot-grid={k}
+        className="grid"
+        style={
+          {
+            "--dot-gap": DOT_GAP_CSS,
+            "--dot": dotSideCss(k),
+            gridTemplateColumns: `repeat(${k}, var(--dot))`,
+            gridTemplateRows: `repeat(${k}, var(--dot))`,
+            gap: "var(--dot-gap)",
+          } as React.CSSProperties
+        }
       >
-        {rows.map((parts, r) => {
-          const radius = `${Math.min(cellSide(parts), height) * SQUARE_RADIUS}cqw`
-          return (
-            <span key={r} className="flex min-h-0 flex-1" style={{ gap: dotGap }}>
-              {Array.from({ length: parts }, () => {
-                const at = i++
-                const more = at === 8 && dots.length > 9
-                return more ? (
-                  <span
-                    key={at}
-                    data-more
-                    className="min-w-0 flex-1 border"
-                    style={{ borderRadius: radius, borderColor: "var(--neutral-9)" }}
-                  />
-                ) : (
-                  <span
-                    key={at}
-                    data-dot={dots[at].colour}
-                    className="min-w-0 flex-1"
-                    style={{ borderRadius: radius, backgroundColor: colourVar(dots[at].colour, 9) }}
-                  />
-                )
-              })}
-            </span>
+        {Array.from({ length: cells }, (_, at) => {
+          const more = at === 8 && dots.length > 9
+          const radius = `calc(var(--dot) * ${SQUARE_RADIUS})`
+          return more ? (
+            <span
+              key={at}
+              data-more
+              className="border"
+              style={{ borderRadius: radius, borderColor: "var(--neutral-9)" }}
+            />
+          ) : (
+            <span
+              key={at}
+              data-dot={dots[at].colour}
+              style={{ borderRadius: radius, backgroundColor: colourVar(dots[at].colour, 9) }}
+            />
           )
         })}
       </span>

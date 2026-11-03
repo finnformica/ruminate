@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { heatmapWeeks, type Series, type SeriesState } from "../../data/tracker"
 import { ActivityCard, TrackerStats, axisWeekdays, heatmapColumns } from "./activity"
-import { MonthGrid, dotRows } from "./month-grid"
+import { MonthGrid, dotGrid } from "./month-grid"
 
 afterEach(() => {
   cleanup()
@@ -434,32 +434,29 @@ const RUN: SeriesState = {
 }
 
 describe("a day with more than one series", () => {
-  it("fills the space: rows of 2 up to 4, rows of 3 from 5, no empty cell", () => {
-    expect(dotRows(0)).toEqual([])
-    expect(dotRows(1)).toEqual([1])
-    expect(dotRows(2)).toEqual([2])
-    // Three: two over one, the one the full width.
-    expect(dotRows(3)).toEqual([2, 1])
-    expect(dotRows(4)).toEqual([2, 2])
-    expect(dotRows(5)).toEqual([3, 2])
-    expect(dotRows(6)).toEqual([3, 3])
-    expect(dotRows(7)).toEqual([3, 3, 1])
-    expect(dotRows(8)).toEqual([3, 3, 2])
-    expect(dotRows(9)).toEqual([3, 3, 3])
-    // More than 9: nine cells, the last an outline for the rest.
-    expect(dotRows(12)).toEqual([3, 3, 3])
+  it("grows the grid: one square, a 2×2 up to 4, a 3×3 from 5", () => {
+    expect(dotGrid(0)).toBe(0)
+    expect(dotGrid(1)).toBe(1)
+    for (const n of [2, 3, 4]) expect(dotGrid(n)).toBe(2)
+    for (const n of [5, 6, 7, 8, 9, 12]) expect(dotGrid(n)).toBe(3)
   })
 
-  it("lays the squares out with CSS: a padded box of rows, no measure", () => {
+  it("lays the squares out as a fixed grid of equal whole-pixel squares, with CSS", () => {
     render(<ActivityCard series={[READ, SWIM, RUN]} today="2026-10-29" />)
-    // Read, Swim and Run on the 28th: a row of 2 over a row of 1.
+    // Read, Swim and Run on the 28th: a 2×2, filled in reading order, the
+    // last cell empty.
     const dots = cell("2026-10-28").querySelector<HTMLElement>("[data-dots]")!
-    const box = dots.firstElementChild as HTMLElement
-    expect(box.style.padding).toBe("10cqw")
-    expect(box.style.gap).toBe("max(6cqw, 1px)")
-    const rows = [...box.children] as HTMLElement[]
-    expect(rows.map((row) => row.children.length)).toEqual([2, 1])
-    expect(rows[1].firstElementChild!.className).toContain("flex-1")
+    expect(dots.className).toContain("place-items-center")
+    const grid = dots.querySelector<HTMLElement>("[data-dot-grid]")!
+    expect(grid.dataset.dotGrid).toBe("2")
+    expect(grid.children).toHaveLength(3)
+    // Both tracks are the one whole-pixel side, so the squares are equal.
+    expect(grid.style.gridTemplateColumns).toBe("repeat(2, var(--dot))")
+    expect(grid.style.gridTemplateRows).toBe("repeat(2, var(--dot))")
+    expect(grid.style.getPropertyValue("--dot")).toBe(
+      "round(down, (80cqw - 1 * var(--dot-gap)) / 2, 1px)",
+    )
+    expect(grid.style.getPropertyValue("--dot-gap")).toBe("max(1px, round(6cqw, 1px))")
     expect(dots.querySelector("svg")).toBeNull()
   })
 
