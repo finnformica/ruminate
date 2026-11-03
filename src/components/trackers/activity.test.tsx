@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { heatmapWeeks, type Series, type SeriesState } from "../../data/tracker"
 import { ActivityCard, TrackerStats, axisWeekdays, heatmapColumns } from "./activity"
@@ -23,6 +23,7 @@ const READ: SeriesState = {
     target: null,
     period: "day",
     rollup: "sum",
+    goal: "do",
   } satisfies Series,
   entries: new Map([
     ["2026-09-30", { id: "e1", date: "2026-09-30", value: true }],
@@ -147,10 +148,44 @@ describe("ActivityHeatmap", () => {
       (day) => day.dataset.series !== "0",
     )
     expect(logged.map((day) => day.dataset.day)).toEqual(["2026-09-30", "2026-10-28"])
-    // Nothing in the heatmap can be tapped.
-    expect(
-      screen.getByTestId("activity-heatmap").querySelectorAll("button, [tabindex]"),
-    ).toHaveLength(0)
+    // A placeholder takes a faint wash of its day's colours: Read was on
+    // Wednesday 30 September, held in October's half of its week, and on
+    // Wednesday 28 October, held in November's.
+    const tinted = placeholders.filter((placeholder) => placeholder.dataset.tint !== "0")
+    expect(tinted.map((placeholder) => placeholder.style.gridColumn)).toEqual(["13", "19"])
+    for (const placeholder of tinted) expect(placeholder.style.gridRow).toBe("4")
+    // With nowhere to open a day, no day can be tapped.
+    for (const day of document.querySelectorAll<HTMLButtonElement>("button[data-day]")) {
+      expect(day.disabled).toBe(true)
+    }
+  })
+
+  it("opens a day up to today on a tap, never a day to come", () => {
+    const onOpenDay = vi.fn()
+    render(<ActivityCard series={[READ]} today="2026-10-29" onOpenDay={onOpenDay} />)
+    fireEvent.click(cell("2026-10-28"))
+    expect(onOpenDay).toHaveBeenLastCalledWith("2026-10-28")
+    fireEvent.click(cell("2026-08-10"))
+    expect(onOpenDay).toHaveBeenLastCalledWith("2026-08-10")
+    expect((cell("2026-10-30") as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(cell("2026-10-30"))
+    expect(onOpenDay).toHaveBeenCalledTimes(2)
+  })
+
+  it("has one tab stop, today, and moves by day and week with the arrows", () => {
+    render(<ActivityCard series={[READ]} today="2026-10-29" onOpenDay={() => {}} />)
+    const stops = document.querySelectorAll<HTMLElement>('button[data-day][tabindex="0"]')
+    expect([...stops].map((stop) => stop.dataset.day)).toEqual(["2026-10-29"])
+    cell("2026-10-29").focus()
+    fireEvent.keyDown(cell("2026-10-29"), { key: "ArrowUp" })
+    expect(document.activeElement).toBe(cell("2026-10-28"))
+    fireEvent.keyDown(cell("2026-10-28"), { key: "ArrowLeft" })
+    expect(document.activeElement).toBe(cell("2026-10-21"))
+    expect(cell("2026-10-21").tabIndex).toBe(0)
+    // Not past today.
+    fireEvent.keyDown(cell("2026-10-21"), { key: "ArrowRight" })
+    fireEvent.keyDown(cell("2026-10-28"), { key: "ArrowRight" })
+    expect(document.activeElement).toBe(cell("2026-10-28"))
   })
 
   // The tracks the names stand in: a divider's for a month that starts in
@@ -281,6 +316,51 @@ describe("the Recent list", () => {
     expect(lines.map((line) => line.textContent)).toEqual(["Read", "Swim · 30 min"])
     // The divider is the group's top border: none inside a day.
     for (const line of lines) expect(line.className).not.toContain("border-t")
+  })
+})
+
+const SMOKE: SeriesState = {
+  series: { ...READ.series, id: "s3", name: "Smoke", colour: "red", goal: "avoid" },
+  entries: new Map([["2026-10-27", { id: "e5", date: "2026-10-27", value: true }]]),
+}
+
+describe("a series to avoid", () => {
+  it("marks a slip in the heatmap with a cross, and names the series in the legend", () => {
+    render(<ActivityCard series={[READ, SMOKE]} today="2026-10-29" />)
+    expect(cell("2026-10-27").querySelector("[data-slip]")).toBeTruthy()
+    expect(cell("2026-10-27").getAttribute("aria-label")).toBe("Tue 27 Oct: Smoke (avoid)")
+    expect(cell("2026-10-28").querySelector("[data-slip]")).toBeNull()
+    expect(document.querySelectorAll("[data-day] [data-slip]")).toHaveLength(1)
+    const legend = screen.getByRole("list", { name: "Series" })
+    expect(within(legend).getByText("Avoid")).toBeTruthy()
+  })
+
+  it("has a stats group of its own, in clean days, and stays out of the active days", () => {
+    render(<TrackerStats series={[READ, SWIM, SMOKE]} today="2026-10-29" />)
+    const groups = [...document.querySelectorAll<HTMLElement>("[data-stats-group]")]
+    expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual([
+      "Active days",
+      "Smoke, avoid",
+    ])
+    const pairs = (group: HTMLElement) =>
+      [...group.querySelectorAll("dt")].map(
+        (dt) => `${dt.textContent}: ${dt.nextElementSibling?.textContent}`,
+      )
+    // The same as without Smoke.
+    expect(pairs(groups[0])).toEqual([
+      "Streak: 2 days",
+      "Last 7 days: 2/7",
+      "Last 28 days: 2/28",
+      "All time: 3 days",
+    ])
+    // From the first entry, 30 September: 30 days, one of them a slip.
+    expect(within(groups[1]).getByText("Avoid")).toBeTruthy()
+    expect(pairs(groups[1])).toEqual([
+      "Streak: 2 days clean",
+      "Last 7 days: 6/7 clean",
+      "Last 28 days: 27/28 clean",
+      "All time: 29 days clean",
+    ])
   })
 })
 

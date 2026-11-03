@@ -16,6 +16,7 @@ import {
   entryOf,
   entryText,
   activeSummary,
+  cleanSummary,
   formatAmount,
   heatmapWeeks,
   isLogged,
@@ -42,6 +43,7 @@ import {
   targetProgress,
   trackerSeries,
   trackerSeriesKeys,
+  trackingStart,
   updateSeriesOps,
   weekStart,
   weekdayFromMonday,
@@ -67,6 +69,7 @@ const SERIES: Series = {
   target: null,
   period: "day",
   rollup: "sum",
+  goal: "do",
 }
 
 /** A series with its entries, from `day → value`. */
@@ -384,6 +387,7 @@ describe("reading blocks", () => {
       target: null,
       period: "day",
       rollup: "sum",
+      goal: "do",
     })
     const odd = seriesOf({
       id: "b",
@@ -401,6 +405,11 @@ describe("reading blocks", () => {
     })
     expect(odd).toMatchObject({ colour: "green", unit: "", step: 1, target: null, period: "day" })
     expect(odd).toMatchObject({ rollup: "avg", max: 10 })
+    // A habit to avoid; any other goal reads as one to keep.
+    const goal = (value: unknown) =>
+      seriesOf({ id: "b", text: "x", props: JSON.stringify({ kind: "check", goal: value }) })?.goal
+    expect(goal("avoid")).toBe("avoid")
+    expect(goal("quit")).toBe("do")
     expect(seriesOf({ id: "b", text: "Plain", props: null })).toBeNull()
     expect(seriesOf({ id: "b", text: "x", props: JSON.stringify({ kind: "other" }) })).toBeNull()
   })
@@ -683,6 +692,52 @@ describe("the key schemas", () => {
     expect(trackerSeriesKeys.safeParse({ rollup: "max" }).success).toBe(false)
     expect(trackerSeriesKeys.safeParse({ step: 0 }).success).toBe(false)
     expect(trackerSeriesKeys.safeParse({ target: "5" }).success).toBe(false)
+    expect(trackerSeriesKeys.safeParse({ goal: "avoid" }).success).toBe(true)
+    expect(trackerSeriesKeys.safeParse({ goal: "quit" }).success).toBe(false)
+  })
+})
+
+describe("cleanSummary", () => {
+  const today = "2026-10-29"
+  const smoke = (logged: Record<string, boolean | number>) =>
+    stateOf({ id: "s3", kind: "check", goal: "avoid" }, logged)
+
+  it("counts the clean days from the tracker's first entry", () => {
+    const read = stateOf({ id: "s1", kind: "check" }, { [addDays(today, -40)]: true })
+    const avoid = smoke({ [addDays(today, -3)]: true, [addDays(today, -10)]: true })
+    const series = [read, avoid]
+    expect(trackingStart(series)).toBe(addDays(today, -40))
+    expect(cleanSummary(avoid, trackingStart(series), today)).toEqual({
+      // Two days clean since the slip three days ago, and today.
+      streak: 3,
+      lastWeek: 6,
+      lastFourWeeks: 26,
+      // 41 days tracked, two of them slips.
+      allTime: 39,
+    })
+  })
+
+  it("ends the streak on a slip today, and does not count an open to-do", () => {
+    expect(cleanSummary(smoke({ [today]: true }), addDays(today, -5), today).streak).toBe(0)
+    expect(cleanSummary(smoke({ [today]: false }), addDays(today, -5), today).streak).toBe(6)
+  })
+
+  it("counts no day before the start, and starts today with no entry at all", () => {
+    expect(cleanSummary(smoke({}), addDays(today, -2), today)).toEqual({
+      streak: 3,
+      lastWeek: 3,
+      lastFourWeeks: 3,
+      allTime: 3,
+    })
+    expect(trackingStart([smoke({})])).toBeNull()
+    expect(cleanSummary(smoke({}), null, today)).toEqual({
+      streak: 1,
+      lastWeek: 1,
+      lastFourWeeks: 1,
+      allTime: 1,
+    })
+    // A slip after today does not count.
+    expect(cleanSummary(smoke({ [addDays(today, 1)]: true }), today, today).streak).toBe(1)
   })
 })
 
@@ -702,6 +757,19 @@ describe("activeSummary", () => {
       lastWeek: 3,
       lastFourWeeks: 3,
       allTime: 3,
+    })
+  })
+
+  it("leaves out a series to avoid", () => {
+    const series = [
+      read({ "2026-10-28": true }),
+      stateOf({ id: "s3", kind: "check", goal: "avoid" }, { "2026-10-29": true }),
+    ]
+    expect(activeSummary(series, "2026-10-29")).toEqual({
+      streak: 1,
+      lastWeek: 1,
+      lastFourWeeks: 1,
+      allTime: 1,
     })
   })
 

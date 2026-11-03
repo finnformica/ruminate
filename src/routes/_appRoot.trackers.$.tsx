@@ -11,6 +11,7 @@ import { Notice } from "../components/notice"
 import { PageLayout } from "../components/page-layout"
 import { RootLink } from "../components/root-link"
 import { ActivityCard, TrackerStats } from "../components/trackers/activity"
+import { DayDialog } from "../components/trackers/day-dialog"
 import { DisplayGroups, type TrackerView } from "../components/trackers/display-groups"
 import { MonthGrid } from "../components/trackers/month-grid"
 import { SeriesDialog } from "../components/trackers/series-dialog"
@@ -33,11 +34,12 @@ import { cx } from "../utils/cx"
  *
  * Over it all, a row of stats; under the Today strip, the activity card (a
  * heatmap of the last twelve weeks and the newest entries, activity.tsx)
- * beside the month as cards, one per series (month-grid.tsx). A phone or a
+ * over the month as cards, one per series (month-grid.tsx). A phone or a
  * narrow window has room for one of the two: the heatmap until the menu's
  * display options pick **Cards** (Finn, 2026-11-02). A wide window shows
  * both, and the menu has no display options. Nothing about the display is
- * saved: every visit opens on the heatmap.
+ * saved: every visit opens on the heatmap. A tap on a day in either opens
+ * the day editor on it (day-dialog.tsx, Finn 2026-11-03).
  */
 
 /** The month the cards show. */
@@ -96,9 +98,12 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
   // The first day of the month shown: the one today is in until the arrows
   // say otherwise.
   const [start, setStart] = React.useState(() => rangeStart(RANGE, today))
-  // The day the strip logs: today, or a day picked on a number series's grid.
+  // The day the strip logs: today, or a day its arrows or **Yesterday** pick.
   const [pickedDay, setPickedDay] = React.useState<DayString | null>(null)
-  const day = pickedDay ?? today
+  const day = pickedDay !== null && pickedDay < today ? pickedDay : today
+  const pickDay = (next: DayString) => setPickedDay(next >= today ? null : next)
+  // The day open in the day editor, from a tap in the heatmap or the cards.
+  const [openDay, setOpenDay] = React.useState<DayString | null>(null)
   const current = rangeStart(RANGE, today)
   const [seriesOpen, setSeriesOpen] = React.useState(false)
   const [narrowView, setNarrowView] = React.useState<TrackerView>("heatmap")
@@ -154,7 +159,7 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
               day={day}
               today={today}
               onSetEntry={writes.setEntry}
-              onBackToToday={() => setPickedDay(null)}
+              onDayChange={pickDay}
             />
             {series.length === 0 ? (
               <div className="flex flex-col items-center gap-3 py-12 text-center text-text-secondary">
@@ -164,11 +169,12 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
                 </Button>
               </div>
             ) : (
-              <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start">
+              <div className="flex min-w-0 flex-col gap-4">
                 <ActivityCard
                   series={series}
                   today={today}
-                  className={cx("lg:w-80 lg:shrink-0", narrowView === "cards" && "max-lg:hidden")}
+                  onOpenDay={setOpenDay}
+                  className={cx(narrowView === "cards" && "max-lg:hidden")}
                 />
                 <div
                   data-testid="tracker-range"
@@ -200,19 +206,18 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
                       </PillButton>
                     ) : null}
                   </div>
-                  <MonthGrid
-                    series={series}
-                    start={start}
-                    today={today}
-                    selectedDay={day}
-                    onToggle={(seriesId, cellDay, done) =>
-                      writes.setEntry(seriesId, cellDay, done ? true : null)
-                    }
-                    onPickDay={(cellDay) => setPickedDay(cellDay === today ? null : cellDay)}
-                  />
+                  <MonthGrid series={series} start={start} today={today} onOpenDay={setOpenDay} />
                 </div>
               </div>
             )}
+            <DayDialog
+              series={series}
+              day={openDay}
+              today={today}
+              onSetEntry={writes.setEntry}
+              onDayChange={setOpenDay}
+              onClose={() => setOpenDay(null)}
+            />
             <SeriesDialog
               open={seriesOpen && exists}
               series={series}

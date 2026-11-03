@@ -17,6 +17,7 @@ const BASE: Series = {
   target: null,
   period: "day",
   rollup: "sum",
+  goal: "do",
 }
 
 function stateOf(series: Partial<Series>, logged: Record<string, boolean | number>): SeriesState {
@@ -96,16 +97,14 @@ function Tracker({ series: initial, width }: { series: SeriesState[]; width: num
         day={day}
         today={TODAY}
         onSetEntry={setEntry}
-        onBackToToday={() => setDay(TODAY)}
+        onDayChange={setDay}
       />
       <h2 className="font-bold">{rangeLabel("month", TODAY)}</h2>
       <MonthGrid
         series={series}
         start={TODAY}
         today={TODAY}
-        selectedDay={day}
-        onToggle={(seriesId, cellDay, done) => setEntry(seriesId, cellDay, done ? true : null)}
-        onPickDay={(cellDay) => setDay(cellDay)}
+        onOpenDay={(cellDay) => setDay(cellDay)}
       />
     </div>
   )

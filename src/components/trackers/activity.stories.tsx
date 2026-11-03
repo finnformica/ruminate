@@ -17,6 +17,7 @@ const BASE: Series = {
   target: null,
   period: "day",
   rollup: "sum",
+  goal: "do",
 }
 
 /** A series with entries `ago` days before today, each with its value and

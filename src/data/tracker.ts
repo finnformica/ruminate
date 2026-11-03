@@ -68,6 +68,12 @@ export type SeriesPeriod = (typeof SERIES_PERIODS)[number]
 export const SERIES_ROLLUPS = ["sum", "avg"] as const
 export type SeriesRollup = (typeof SERIES_ROLLUPS)[number]
 
+/** What a series is for (Finn, 2026-11-03): a habit to keep (`do`, the
+ * default) or one to keep away from (`avoid`), whose stats count the days
+ * without it. */
+export const SERIES_GOALS = ["do", "avoid"] as const
+export type SeriesGoal = (typeof SERIES_GOALS)[number]
+
 /** A local calendar day, `YYYY-MM-DD`. */
 export type DayString = string
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -85,6 +91,7 @@ export const trackerSeriesKeys = z.object({
   target: z.number().optional(),
   period: z.enum(SERIES_PERIODS).optional(),
   rollup: z.enum(SERIES_ROLLUPS).optional(),
+  goal: z.enum(SERIES_GOALS).optional(),
 })
 
 export interface Series {
@@ -102,6 +109,9 @@ export interface Series {
   target: number | null
   period: SeriesPeriod
   rollup: SeriesRollup
+  /** `avoid` for a habit to keep away from: a logged day is a slip, and
+   * the stats count the clean days. */
+  goal: SeriesGoal
 }
 
 export interface Entry {
@@ -176,6 +186,7 @@ export function seriesOf(block: { id: string; text: string; props: string | null
       ? (period as SeriesPeriod)
       : "day",
     rollup: rollup === "avg" ? "avg" : "sum",
+    goal: props?.goal === "avoid" ? "avoid" : "do",
   }
 }
 
@@ -345,6 +356,7 @@ export type SeriesPatch = Partial<{
   target: number | null
   period: SeriesPeriod | null
   rollup: SeriesRollup | null
+  goal: SeriesGoal | null
 }>
 
 /** The props a patch writes over the ones a series block holds: a key set to
@@ -364,6 +376,7 @@ function patchedSeriesProps(
     "target",
     "period",
     "rollup",
+    "goal",
   ]) {
     if (!(key in patch)) continue
     const value = patch[key as keyof SeriesPatch]
@@ -816,10 +829,13 @@ export function isLogged(state: SeriesState, day: DayString): boolean {
   return amountOn(state, day) > 0
 }
 
-/** The days any series has something on (`isLogged`). */
+/** The days any series to keep has something on (`isLogged`). A series to
+ * avoid has its own count of clean days (`cleanSummary`): a slip is not an
+ * active day. */
 function activeDays(series: readonly SeriesState[]): Set<DayString> {
   const days = new Set<DayString>()
   for (const state of series) {
+    if (state.series.goal === "avoid") continue
     for (const day of state.entries.keys()) if (isLogged(state, day)) days.add(day)
   }
   return days
@@ -838,8 +854,8 @@ export interface ActiveSummary {
 }
 
 /**
- * The summary line over the heatmap (Finn, 2026-10-29): a day is active
- * when any series has something on it. The windows end on today and step
+ * The stats row (Finn, 2026-10-29): a day is active when any series to
+ * keep (`goal: do`) has something on it. The windows end on today and step
  * in whole days (`addDays`), so a daylight-saving change moves nothing.
  */
 export function activeSummary(series: readonly SeriesState[], today: DayString): ActiveSummary {
@@ -861,6 +877,56 @@ export function activeSummary(series: readonly SeriesState[], today: DayString):
     if (ago < 7) lastWeek += 1
   }
   return { streak: run, lastWeek, lastFourWeeks, allTime }
+}
+
+/**
+ * The first day the tracker has any entry on, in any series: where a series
+ * to avoid starts to count clean days. A block holds no date of its own, so
+ * this is the nearest day the tracker can say it was in use. Null when
+ * nothing has been logged.
+ */
+export function trackingStart(series: readonly SeriesState[]): DayString | null {
+  let first: DayString | null = null
+  for (const state of series) {
+    for (const day of state.entries.keys()) if (first === null || day < first) first = day
+  }
+  return first
+}
+
+/**
+ * A series to avoid (`goal: avoid`, Finn 2026-11-03), counted the other way
+ * round: a day is **clean** when the series has nothing on it
+ * (`isLogged`). The streak is the clean days in a row up to today, today
+ * one of them until something is logged on it; the windows count the clean
+ * days among the last 7 and 28, and all time the clean days from `start`
+ * (`trackingStart`) to today. No day before `start` counts, and with no
+ * start the count begins today.
+ */
+export function cleanSummary(
+  state: SeriesState,
+  start: DayString | null,
+  today: DayString,
+): ActiveSummary {
+  const from = start === null || start > today ? today : start
+  const tracked = daysBetween(from, today) + 1
+  let lastSlip: DayString | null = null
+  let slipsWeek = 0
+  let slipsFourWeeks = 0
+  let slips = 0
+  for (const day of state.entries.keys()) {
+    if (!isLogged(state, day) || day > today || day < from) continue
+    if (lastSlip === null || day > lastSlip) lastSlip = day
+    const ago = daysBetween(day, today)
+    slips += 1
+    if (ago < 28) slipsFourWeeks += 1
+    if (ago < 7) slipsWeek += 1
+  }
+  return {
+    streak: lastSlip === null ? tracked : daysBetween(lastSlip, today),
+    lastWeek: Math.min(7, tracked) - slipsWeek,
+    lastFourWeeks: Math.min(28, tracked) - slipsFourWeeks,
+    allTime: tracked - slips,
+  }
 }
 
 /** How many weeks the heatmap shows: about three months, which fits a phone
