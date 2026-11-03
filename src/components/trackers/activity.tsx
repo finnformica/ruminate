@@ -21,7 +21,7 @@ import {
 import { cx } from "../../utils/cx"
 import { Button } from "../ui/button"
 import { Surface } from "../ui/surface"
-import { AvoidTag, ColourDot, SlipMark, colourVar } from "./month-grid"
+import { AvoidTag, ColourDot, DAY_RADIUS, DaySquare, colourVar, dayRadius } from "./month-grid"
 import { fitMonthLabels } from "./month-labels"
 
 /**
@@ -183,10 +183,34 @@ const HEATMAP_MIN_WIDTH = 262
 /** The gap between columns and between rows, the one value for both. */
 const HEATMAP_GAP = 4
 
-/** A month's short name at its widest ("Sept", four letters at 11 px) and
- * room to spare: two names, each centred over its divider, at least this
- * far apart never touch. */
-const HEATMAP_LABEL_WIDTH = 34
+/** From this width of the grid up, the heatmap is drawn for a large
+ * screen, not as a phone's grown larger (Finn, 2026-11-03): its text at the
+ * cards' sizes and a thicker line between months. The grid's width, not a
+ * cell's: the names' size sets the day axis's width and so a cell's, never
+ * the grid's. A phone's grid is about 330 px wide, a desktop's about 680. */
+const LARGE_GRID = 480
+
+/**
+ * The heatmap's text and lines at each size. `labelWidth` is a month's short
+ * name at its widest ("Sept", four letters) and room to spare: two names,
+ * each centred over its divider, at least this far apart never touch.
+ */
+const HEATMAP_SIZES = {
+  small: {
+    month: "text-[11px] leading-4",
+    weekday: "pr-1 text-[10px]",
+    legend: "text-sm",
+    divider: "w-px",
+    labelWidth: 34,
+  },
+  large: {
+    month: "text-sm leading-5",
+    weekday: "pr-2 text-sm",
+    legend: "text-base",
+    divider: "w-0.5",
+    labelWidth: 44,
+  },
+} as const
 
 /** A weekday's name on the day axis: 10 px of text (`text-[10px]
  * leading-none`) and 2 px clear of the next. */
@@ -251,12 +275,27 @@ export function heatmapColumns(weeks: readonly DayString[][]): HeatmapColumn[] {
  * edge has its first letter over the line. */
 const DIVIDER_TRACK = 6
 
-/** A placeholder's lines: its outline and its stripes, both 0.5 px in one
- * solid colour (Finn, 2026-11-02). Solid, not one of the theme's alpha
- * borders: an alpha colour drawn where a stripe meets the outline adds up
- * and shows a brighter spot. */
+/** A cell's side on a phone, where the dashes and stripes were first drawn:
+ * at this size or smaller they keep that look, and on a larger cell they
+ * grow with it, so a desktop cell does not look dense (Finn, 2026-11-03). */
+const PHONE_CELL = 16
+
+/** How much larger than a phone's a cell is, never less than 1. */
+function cellScale(cellSize: number | null): number {
+  return cellSize === null ? 1 : Math.max(1, cellSize / PHONE_CELL)
+}
+
+/** A placeholder's lines: its outline and its stripes, in one solid colour
+ * (Finn, 2026-11-02). Solid, not one of the theme's alpha borders: an alpha
+ * colour drawn where a stripe meets the outline adds up and shows a
+ * brighter spot. The outline stays a 0.5 px hairline; the stripes, 0.5 px
+ * every 4 px on a phone, grow with the cell (`cellScale`). */
 const PLACEHOLDER_LINE = "var(--neutral-6)"
-const STRIPES = `repeating-linear-gradient(135deg, ${PLACEHOLDER_LINE} 0 0.5px, transparent 0.5px 4px)`
+function stripes(scale: number): string {
+  const line = 0.5 * scale
+  const period = 4 * scale
+  return `repeating-linear-gradient(135deg, ${PLACEHOLDER_LINE} 0 ${line}px, transparent ${line}px ${period}px)`
+}
 
 /**
  * A placeholder's look: the outline and the stripes over a faint wash of
@@ -264,14 +303,15 @@ const STRIPES = `repeating-linear-gradient(135deg, ${PLACEHOLDER_LINE} 0 0.5px, 
  * was logged on a split week's days reads across the month's divider. One
  * colour is a flat wash; more are bands, as a day's own fill is.
  */
-function placeholderStyle(colours: readonly TrackerColour[]): React.CSSProperties {
+function placeholderStyle(colours: readonly TrackerColour[], scale: number): React.CSSProperties {
   const tint = (colour: TrackerColour) =>
     `color-mix(in srgb, ${colourVar(colour, 9)} ${PLACEHOLDER_TINT}%, transparent)`
-  if (colours.length === 0) return { borderColor: PLACEHOLDER_LINE, backgroundImage: STRIPES }
+  const lines = stripes(scale)
+  if (colours.length === 0) return { borderColor: PLACEHOLDER_LINE, backgroundImage: lines }
   if (colours.length === 1) {
     return {
       borderColor: PLACEHOLDER_LINE,
-      backgroundImage: STRIPES,
+      backgroundImage: lines,
       backgroundColor: tint(colours[0]),
     }
   }
@@ -279,8 +319,35 @@ function placeholderStyle(colours: readonly TrackerColour[]): React.CSSPropertie
   const stops = colours.map((colour, i) => `${tint(colour)} ${i * band}% ${(i + 1) * band}%`)
   return {
     borderColor: PLACEHOLDER_LINE,
-    backgroundImage: `${STRIPES}, linear-gradient(135deg, ${stops.join(", ")})`,
+    backgroundImage: `${lines}, linear-gradient(135deg, ${stops.join(", ")})`,
   }
+}
+
+/** A day still to come: a dashed outline, 1 px wide, inside the day
+ * square's rounded corners (`DAY_RADIUS`). A CSS dashed border has dashes of a fixed length, so the
+ * outline is an SVG rect, its dashes and gaps 3 px on a phone and grown
+ * with the cell (`cellScale`). The count is rounded so they go evenly round
+ * the square, with no short dash where the line meets its start. */
+const FUTURE_DASH = 3
+function FutureOutline({ cellSize }: { cellSize: number | null }) {
+  const side = (cellSize ?? PHONE_CELL) - 1
+  const dash = FUTURE_DASH * cellScale(cellSize)
+  const dashes = Math.max(4, Math.round((4 * side) / (2 * dash)))
+  return (
+    <svg aria-hidden data-future-outline className="pointer-events-none absolute inset-0 size-full">
+      <rect
+        x={0.5}
+        y={0.5}
+        width={side}
+        height={side}
+        rx={DAY_RADIUS * (side + 1) - 0.5}
+        pathLength={2 * dashes}
+        strokeDasharray="1 1"
+        className="fill-none stroke-border"
+        strokeWidth={1}
+      />
+    </svg>
+  )
 }
 
 /**
@@ -346,13 +413,20 @@ function ActivityHeatmap({
   // weekday's name fits beside a row.
   const grid = React.useRef<HTMLDivElement>(null)
   const [cellSize, setCellSize] = React.useState<number | null>(null)
+  const [gridWidth, setGridWidth] = React.useState<number | null>(null)
   React.useLayoutEffect(() => {
     const cell = grid.current?.querySelector<HTMLElement>("[data-day]")
-    if (!cell || typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver(() => setCellSize(cell.getBoundingClientRect().width))
+    if (!grid.current || !cell || typeof ResizeObserver === "undefined") return
+    const whole = grid.current
+    const observer = new ResizeObserver(() => {
+      setCellSize(cell.getBoundingClientRect().width)
+      setGridWidth(whole.getBoundingClientRect().width)
+    })
     observer.observe(cell)
+    observer.observe(whole)
     return () => observer.disconnect()
   }, [columns])
+  const size = HEATMAP_SIZES[gridWidth !== null && gridWidth >= LARGE_GRID ? "large" : "small"]
   // The months named: those whose first day, and so whose divider, is in
   // the heatmap. The month the heatmap opens in is named only when it opens
   // on the 1st (Finn, 2026-11-02).
@@ -367,9 +441,9 @@ function ActivityHeatmap({
         start: column * pitch + (track[column] - 2 - column) * (DIVIDER_TRACK + HEATMAP_GAP),
       })),
       monthOf(today),
-      HEATMAP_LABEL_WIDTH,
+      size.labelWidth,
     )
-  }, [starts, columns, track, dividers, today, cellSize])
+  }, [starts, columns, track, dividers, today, cellSize, size])
   const todayWeekday = weekdayFromMonday(today)
 
   // One tab stop: the day last moved to, today at first. The arrows move a
@@ -404,6 +478,7 @@ function ActivityHeatmap({
         role="grid"
         aria-label="Active days, by week"
         data-testid="activity-heatmap"
+        data-size={size === HEATMAP_SIZES.large ? "large" : "small"}
         className="grid items-center"
         // Focusable for its keys, but not a tab stop: its days are.
         tabIndex={-1}
@@ -427,7 +502,7 @@ function ActivityHeatmap({
                 // Over a divider, the name starts at its track's left edge:
                 // the track is about a letter wide, so the first letter sits
                 // over the line, and the name reads on to the right.
-                className="overflow-visible whitespace-nowrap text-[11px] leading-4 text-text-secondary"
+                className={cx("overflow-visible whitespace-nowrap text-text-secondary", size.month)}
                 style={at(column > 0 ? track[column] - 1 : track[column], 1)}
               >
                 {monthShortLabel(month)}
@@ -444,7 +519,8 @@ function ActivityHeatmap({
               className={cx(
                 // No height of its own: the row is a cell high, so rows are
                 // as far apart as columns and the cells read as squares.
-                "flex h-0 items-center self-center pr-1 text-[10px] leading-none tabular-nums",
+                "flex h-0 items-center self-center leading-none tabular-nums",
+                size.weekday,
                 d === todayWeekday ? "font-bold text-text" : "text-text-secondary",
               )}
               style={at(1, d + 2)}
@@ -468,8 +544,12 @@ function ActivityHeatmap({
                     aria-hidden
                     data-placeholder
                     data-tint={colours.length}
-                    className="aspect-square rounded-sm border-[0.5px]"
-                    style={{ ...at(track[c], d + 2), ...placeholderStyle(colours) }}
+                    className="aspect-square border-[0.5px]"
+                    style={{
+                      ...at(track[c], d + 2),
+                      borderRadius: dayRadius,
+                      ...placeholderStyle(colours, cellScale(cellSize)),
+                    }}
                   />
                 )
               }
@@ -490,13 +570,11 @@ function ActivityHeatmap({
                 <div
                   key={day}
                   role="gridcell"
-                  className="aspect-square rounded-sm"
-                  style={at(track[c], d + 2)}
+                  className="aspect-square"
+                  style={{ ...at(track[c], d + 2), borderRadius: dayRadius }}
                 >
-                  <button
-                    type="button"
+                  <DaySquare
                     aria-label={label}
-                    aria-current={day === today ? "date" : undefined}
                     aria-haspopup="dialog"
                     title={label}
                     data-day={day}
@@ -505,16 +583,13 @@ function ActivityHeatmap({
                     tabIndex={day === tabDay ? 0 : -1}
                     onClick={() => onOpenDay?.(day)}
                     onFocus={() => setFocusDay(day)}
-                    className={cx(
-                      "focus-ring relative block size-full rounded-sm disabled:cursor-default",
-                      future ? "border border-dashed border-border" : "bg-bg-secondary",
-                      !future && on.length === 0 && "enabled:hover:bg-bg-hover",
-                      day === today && "ring-2 ring-text-secondary",
-                    )}
-                    style={future ? undefined : cellFill(on.map((s) => s.colour))}
+                    today={day === today}
+                    toCome={future ? "outline" : undefined}
+                    fill={future ? undefined : cellFill(on.map((s) => s.colour))}
+                    slip={slip?.colour}
                   >
-                    {slip ? <SlipMark colour={slip.colour} /> : null}
-                  </button>
+                    {future ? <FutureOutline cellSize={cellSize} /> : null}
+                  </DaySquare>
                 </div>
               )
             })}
@@ -527,7 +602,7 @@ function ActivityHeatmap({
             key={month}
             aria-hidden
             data-month-divider={month}
-            className="w-px self-stretch justify-self-center bg-border"
+            className={cx("self-stretch justify-self-center bg-border", size.divider)}
             style={at(track[column] - 1, "2 / 9")}
           />
         ))}
@@ -550,7 +625,7 @@ function ActivityHeatmap({
       {series.length > 0 ? (
         <ul
           aria-label="Series"
-          className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-text-secondary"
+          className={cx("flex flex-wrap gap-x-4 gap-y-1 text-text-secondary", size.legend)}
         >
           {series.map(({ series: s }) => (
             <li key={s.id} className="flex min-w-0 items-center gap-2">
