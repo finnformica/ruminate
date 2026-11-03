@@ -189,20 +189,23 @@ const LARGE_GRID = 480
 const TRIM_TEXT = "[text-box:trim-both_cap_alphabetic]"
 
 /**
- * The heatmap's text and lines at each size. `labelWidth` is a month's short
- * name at its widest ("Sept", four letters) and room to spare: two names,
- * each centred over its divider, at least this far apart never touch.
+ * The heatmap's text and lines at each size. A month's name has room under
+ * it, so it does not sit on the first row of days (Finn, 2026-11-03); the
+ * dividers start under the names, so each name still sits on its divider.
+ * `labelWidth` is a month's short name at its widest ("Sept", four letters)
+ * and room to spare: two names, each centred over its divider, at least this
+ * far apart never touch.
  */
 const HEATMAP_SIZES = {
   small: {
-    month: "text-[11px] leading-4",
+    month: "pb-1 text-[11px] leading-4",
     weekday: "pr-1 text-[10px]",
     legend: "text-sm",
     divider: "w-px",
     labelWidth: 34,
   },
   large: {
-    month: "text-sm leading-5",
+    month: "pb-1.5 text-sm leading-5",
     weekday: "pr-2 text-sm",
     legend: "text-base",
     divider: "w-0.5",
