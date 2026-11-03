@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { heatmapWeeks, type Series, type SeriesState } from "../../data/tracker"
 import { ActivityCard, TrackerStats, axisWeekdays, heatmapColumns } from "./activity"
-import { MonthGrid } from "./month-grid"
+import { MonthGrid, pieFill } from "./month-grid"
 
 afterEach(() => {
   cleanup()
@@ -420,6 +420,70 @@ describe("the Recent list", () => {
     expect(lines.map((line) => line.textContent)).toEqual(["Read", "Swim · 30 min"])
     // The divider is the group's top border: none inside a day.
     for (const line of lines) expect(line.className).not.toContain("border-t")
+  })
+})
+
+const RUN: SeriesState = {
+  series: { ...READ.series, id: "s4", name: "Run", colour: "orange" },
+  entries: new Map([["2026-10-28", { id: "e6", date: "2026-10-28", value: true }]]),
+}
+
+describe("a day with more than one series", () => {
+  it("is a pie of equal slices, one a series, from the top", () => {
+    expect(pieFill([])).toBeUndefined()
+    expect(pieFill(["red"])).toEqual({ backgroundColor: "red" })
+    expect(pieFill(["red", "blue"])).toEqual({
+      backgroundImage: "conic-gradient(red 0% 50%, blue 50% 100%)",
+    })
+    const three = pieFill(["red", "blue", "green"])!.backgroundImage as string
+    expect(three).toMatch(/^conic-gradient\(red 0% 33\.3+\d*%, blue 33\.3+\d*% 66\.6+\d*%, green/)
+    expect(pieFill(["a", "b", "c", "d"])).toEqual({
+      backgroundImage: "conic-gradient(a 0% 25%, b 25% 50%, c 50% 75%, d 75% 100%)",
+    })
+  })
+
+  it("draws the pie in the heatmap, and the legend has no item for it", () => {
+    render(<ActivityCard series={[READ, SWIM, RUN]} today="2026-10-29" />)
+    // Read, Swim and Run on the 28th: three slices in their colours.
+    expect(cell("2026-10-28").dataset.series).toBe("3")
+    const fill = cell("2026-10-28").style.backgroundImage
+    expect(fill).toContain("conic-gradient")
+    for (const colour of ["green", "blue", "orange"]) expect(fill).toContain(`--${colour}-9`)
+    const legend = screen.getByRole("list", { name: "Series" })
+    expect(within(legend).queryByText("More than one")).toBeNull()
+    expect(within(legend).getAllByRole("listitem")).toHaveLength(3)
+  })
+})
+
+describe("the heatmap's labels and days to come", () => {
+  it("names the current month in bold, as today's weekday", () => {
+    heatmap("2026-10-29")
+    const october = document.querySelector<HTMLElement>('[data-month-label="2026-10"]')!
+    expect(october.className).toContain("font-bold")
+    for (const month of ["2026-09", "2026-11"]) {
+      const label = document.querySelector<HTMLElement>(`[data-month-label="${month}"]`)!
+      expect(label.className).not.toContain("font-bold")
+    }
+  })
+
+  it("trims the month names and the legend to their capitals and baseline", () => {
+    heatmap("2026-10-29")
+    for (const label of document.querySelectorAll("[data-month-label]")) {
+      expect(label.className).toContain("[text-box:trim-both_cap_alphabetic]")
+    }
+    const legend = screen.getByRole("list", { name: "Series" })
+    expect(within(legend).getByText("Read").className).toContain(
+      "[text-box:trim-both_cap_alphabetic]",
+    )
+  })
+
+  it("gives a day to come a faint grey fill under its dashed outline", () => {
+    heatmap("2026-10-29")
+    const friday = cell("2026-10-30")
+    expect(friday.style.backgroundColor).toContain("--color-bg-secondary")
+    expect(friday.querySelector("[data-future-outline]")).toBeTruthy()
+    // Not the empty tile's full grey: no class fill of its own.
+    expect(friday.className).not.toContain("bg-bg-secondary")
   })
 })
 

@@ -75,23 +75,40 @@ export const DAY_RADIUS = 0.25
 export const dayRadius = `${DAY_RADIUS * 100}%`
 
 /**
+ * A day's fill for its colours (CSS colours): one is flat, more are a pie of
+ * equal slices from the top, clockwise, one a series (Finn, 2026-11-03), so
+ * two, three or four series each read as a share of the day.
+ */
+export function pieFill(colours: readonly string[]): React.CSSProperties | undefined {
+  if (colours.length === 0) return undefined
+  if (colours.length === 1) return { backgroundColor: colours[0] }
+  const slice = 100 / colours.length
+  const stops = colours.map((colour, i) => `${colour} ${i * slice}% ${(i + 1) * slice}%`)
+  return { backgroundImage: `conic-gradient(${stops.join(", ")})` }
+}
+
+/** A day still to come in the Heatmap: half the empty tile's grey, under
+ * its dashed outline (Finn, 2026-11-03). */
+const TO_COME_FILL = "color-mix(in srgb, var(--color-bg-secondary) 50%, transparent)"
+
+/**
  * A day as a square, the one look for the cards and the Heatmap: the focus
- * ring, the radius, the fill in the day's colours (`fill`) or the empty
- * tile with a hover tint, the ring on today and the cross on a slip. A day
- * to come is a faint tile on a card (`toCome: "faint"`) and an outline of
- * its own in the Heatmap (`toCome: "outline"`, drawn as `children`). It
- * fills its grid cell.
+ * ring, the radius, the fill in the day's colours (`colours`, `pieFill`) or
+ * the empty tile with a hover tint, the ring on today and the cross on a
+ * slip. A day to come is a faint tile on a card (`toCome: "faint"`) and a
+ * fainter grey with an outline of its own in the Heatmap (`toCome:
+ * "outline"`, the outline drawn as `children`). It fills its grid cell.
  */
 export function DaySquare({
-  fill,
+  colours = [],
   today,
   toCome,
   slip,
   children,
   ...button
 }: Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "className" | "style" | "type"> & {
-  /** The day's colours; none for a day with nothing logged. */
-  fill?: React.CSSProperties
+  /** The day's colours, as CSS; none for a day with nothing logged. */
+  colours?: readonly string[]
   today: boolean
   toCome?: "faint" | "outline"
   /** The colour of a series to avoid that was logged on the day. */
@@ -106,10 +123,13 @@ export function DaySquare({
         "focus-ring relative block size-full cursor-pointer disabled:cursor-default",
         toCome !== "outline" && "bg-bg-secondary",
         toCome === "faint" && "opacity-50",
-        !fill && !toCome && "enabled:hover:bg-bg-hover",
+        colours.length === 0 && !toCome && "enabled:hover:bg-bg-hover",
         today && "ring-2 ring-border",
       )}
-      style={{ borderRadius: dayRadius, ...fill }}
+      style={{
+        borderRadius: dayRadius,
+        ...(toCome === "outline" ? { backgroundColor: TO_COME_FILL } : pieFill(colours)),
+      }}
     >
       {children}
       {slip ? <SlipMark colour={slip} /> : null}
@@ -371,9 +391,7 @@ function DayCell({
         onClick={() => onOpenDay(day)}
         today={day === today}
         toCome={future ? "faint" : undefined}
-        fill={
-          level > 0 ? { backgroundColor: colourVar(series.colour, LEVEL_STEPS[level]) } : undefined
-        }
+        colours={level > 0 ? [colourVar(series.colour, LEVEL_STEPS[level])] : []}
         slip={slip ? series.colour : undefined}
       />
     </div>

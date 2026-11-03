@@ -21,7 +21,15 @@ import {
 import { cx } from "../../utils/cx"
 import { Button } from "../ui/button"
 import { Surface } from "../ui/surface"
-import { AvoidTag, ColourDot, DAY_RADIUS, DaySquare, colourVar, dayRadius } from "./month-grid"
+import {
+  AvoidTag,
+  ColourDot,
+  DAY_RADIUS,
+  DaySquare,
+  colourVar,
+  dayRadius,
+  pieFill,
+} from "./month-grid"
 import { fitMonthLabels } from "./month-labels"
 
 /**
@@ -146,18 +154,6 @@ function StatList({ summary, avoiding }: { summary: ActiveSummary; avoiding: str
   )
 }
 
-/** A cell's fill for the colours of the series on its day: the one colour,
- * or the colours side by side in diagonal bands. */
-function cellFill(colours: readonly TrackerColour[]): React.CSSProperties | undefined {
-  if (colours.length === 0) return undefined
-  if (colours.length === 1) return { backgroundColor: colourVar(colours[0], 9) }
-  const band = 100 / colours.length
-  const stops = colours.map(
-    (colour, i) => `${colourVar(colour, 9)} ${i * band}% ${(i + 1) * band}%`,
-  )
-  return { backgroundImage: `linear-gradient(135deg, ${stops.join(", ")})` }
-}
-
 /** How strongly a placeholder takes the colours of its day: a faint wash,
  * so the real day beside it still stands out. */
 const PLACEHOLDER_TINT = 22
@@ -189,6 +185,12 @@ const HEATMAP_GAP = 4
  * cell's: the names' size sets the day axis's width and so a cell's, never
  * the grid's. A phone's grid is about 330 px wide, a desktop's about 680. */
 const LARGE_GRID = 480
+
+/** A line of text trimmed to its capitals and its baseline, so the card's
+ * padding is the space seen above the month names and below the legend, as
+ * at the sides (Finn, 2026-11-03: the label rows "centre their text in tall
+ * containers"). An engine without `text-box` keeps the line's own height. */
+const TRIM_TEXT = "[text-box:trim-both_cap_alphabetic]"
 
 /**
  * The heatmap's text and lines at each size. `labelWidth` is a month's short
@@ -301,25 +303,19 @@ function stripes(scale: number): string {
  * A placeholder's look: the outline and the stripes over a faint wash of
  * the colours of the day it holds the place of (Finn, 2026-11-03), so what
  * was logged on a split week's days reads across the month's divider. One
- * colour is a flat wash; more are bands, as a day's own fill is.
+ * colour is a flat wash; more are a pie, as a day's own fill is (`pieFill`).
  */
 function placeholderStyle(colours: readonly TrackerColour[], scale: number): React.CSSProperties {
-  const tint = (colour: TrackerColour) =>
-    `color-mix(in srgb, ${colourVar(colour, 9)} ${PLACEHOLDER_TINT}%, transparent)`
   const lines = stripes(scale)
-  if (colours.length === 0) return { borderColor: PLACEHOLDER_LINE, backgroundImage: lines }
-  if (colours.length === 1) {
-    return {
-      borderColor: PLACEHOLDER_LINE,
-      backgroundImage: lines,
-      backgroundColor: tint(colours[0]),
-    }
-  }
-  const band = 100 / colours.length
-  const stops = colours.map((colour, i) => `${tint(colour)} ${i * band}% ${(i + 1) * band}%`)
+  const tint = pieFill(
+    colours.map(
+      (colour) => `color-mix(in srgb, ${colourVar(colour, 9)} ${PLACEHOLDER_TINT}%, transparent)`,
+    ),
+  )
   return {
     borderColor: PLACEHOLDER_LINE,
-    backgroundImage: `${lines}, linear-gradient(135deg, ${stops.join(", ")})`,
+    backgroundColor: tint?.backgroundColor,
+    backgroundImage: tint?.backgroundImage ? `${lines}, ${tint.backgroundImage}` : lines,
   }
 }
 
@@ -353,10 +349,11 @@ function FutureOutline({ cellSize }: { cellSize: number | null }) {
 /**
  * The heatmap: one column a week, one row a weekday from Monday, the week
  * today is in at the right edge (`heatmapWeeks`). A cell is a rounded
- * square filled in the colour of the series logged that day, split into
- * bands when there is more than one. Today has a ring, its weekday is named
- * in bold and a dot sits under its column; the days of this week still to
- * come have a dashed outline. A week that runs into a new month is split in
+ * square filled in the colour of the series logged that day, a pie of
+ * equal slices when there is more than one (`pieFill`). Today has a ring,
+ * its weekday and its month are named in bold and a dot sits under its
+ * column; the days of this week still to come have a faint grey fill and a
+ * dashed outline. A week that runs into a new month is split in
  * two columns (`heatmapColumns`), the other month's days drawn as hollow
  * striped placeholders (no data), so one straight line divides the months: a
  * single element in a narrow track of its own between the two months, from
@@ -502,7 +499,12 @@ function ActivityHeatmap({
                 // Over a divider, the name starts at its track's left edge:
                 // the track is about a letter wide, so the first letter sits
                 // over the line, and the name reads on to the right.
-                className={cx("overflow-visible whitespace-nowrap text-text-secondary", size.month)}
+                className={cx(
+                  "overflow-visible whitespace-nowrap",
+                  TRIM_TEXT,
+                  size.month,
+                  month === monthOf(today) ? "font-bold text-text" : "text-text-secondary",
+                )}
                 style={at(column > 0 ? track[column] - 1 : track[column], 1)}
               >
                 {monthShortLabel(month)}
@@ -585,7 +587,7 @@ function ActivityHeatmap({
                     onFocus={() => setFocusDay(day)}
                     today={day === today}
                     toCome={future ? "outline" : undefined}
-                    fill={future ? undefined : cellFill(on.map((s) => s.colour))}
+                    colours={future ? [] : on.map((s) => colourVar(s.colour, 9))}
                     slip={slip?.colour}
                   >
                     {future ? <FutureOutline cellSize={cellSize} /> : null}
@@ -625,25 +627,17 @@ function ActivityHeatmap({
       {series.length > 0 ? (
         <ul
           aria-label="Series"
-          className={cx("flex flex-wrap gap-x-4 gap-y-1 text-text-secondary", size.legend)}
+          className={cx("flex flex-wrap gap-x-4 gap-y-2 text-text-secondary", size.legend)}
         >
           {series.map(({ series: s }) => (
             <li key={s.id} className="flex min-w-0 items-center gap-2">
               <ColourDot colour={s.colour} />
-              <span className="truncate">{s.name.trim() || "Untitled"}</span>
+              <span className={cx("overflow-x-clip text-ellipsis whitespace-nowrap", TRIM_TEXT)}>
+                {s.name.trim() || "Untitled"}
+              </span>
               {s.goal === "avoid" ? <AvoidTag /> : null}
             </li>
           ))}
-          {series.length > 1 ? (
-            <li className="flex items-center gap-2">
-              <span
-                aria-hidden
-                className="size-2.5 shrink-0 rounded-full"
-                style={cellFill(series.slice(0, 2).map((s) => s.series.colour))}
-              />
-              <span>More than one</span>
-            </li>
-          ) : null}
         </ul>
       ) : null}
     </div>

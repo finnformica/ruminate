@@ -179,9 +179,9 @@ has no keys to validate.
   series to avoid has a group of its own after it, below. Under the Today strip, the activity card: a
   heatmap of the last twelve weeks (`heatmapWeeks`, `HEATMAP_WEEKS`), a
   column a week from Monday with this week at the right edge, a cell in the
-  colour of each series logged that day (`seriesOnDay`; split into diagonal
-  bands when there is more than one), today with a ring and the rest of
-  this week dashed. A tap on a day up to today opens the day editor on it;
+  colour of each series logged that day (`seriesOnDay`; a pie of equal slices, one a
+  series, when there is more than one: `pieFill`, Finn 2026-11-03), today
+  with a ring and the rest of this week dashed over a faint grey. A tap on a day up to today opens the day editor on it;
   the grid is one tab stop, and the arrow keys move a day (up, down) or a
   week (left, right). A week that runs into a new month is split into two
   columns (`heatmapColumns`), the other month's days drawn as hollow placeholders, a 0.5 px outline and 0.5 px stripes in one solid colour (`--neutral-6`) over a faint wash (22 %) of the colours of the day each holds the place of (Finn, 2026-11-03: so data reads across the divider; not tappable), so a straight line divides the
@@ -202,8 +202,12 @@ has no keys to validate.
   (`fitMonthLabels` in `month-labels.ts`, at the measured column pitch, or
   the narrowest card's before a cell is measured). The day axis names all seven weekdays when a row is tall
   enough for each name, else Mon, Wed and Fri (`axisWeekdays`, from the
-  measured cell size), and today's weekday in bold; a dot under today's
-  column marks it (Finn, 2026-11-02). A legend of the series is below it;
+  measured cell size), and today's weekday and the current month's name in bold; a dot under today's
+  column marks it (Finn, 2026-11-02). A legend of the series is below it,
+  one item a series (no item for a mixed day). The month names and the
+  legend's names are trimmed to their capitals and baseline
+  (`text-box: trim-both cap alphabetic`), so the card's padding is the space
+  seen on all four sides;
   then **Recent**
   (`recentEntries`): the newest entries up to today, a group a day (Finn,
   2026-11-02): the day named once, then a line per series logged on it,
