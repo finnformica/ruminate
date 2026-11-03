@@ -434,26 +434,31 @@ const RUN: SeriesState = {
 }
 
 describe("a day with more than one series", () => {
-  it("grows the grid: medium dots in a 2×2 up to 4, smaller in a 3×3 from 5", () => {
+  it("grows the grid: one larger dot, medium dots in a 2×2 up to 4, smaller in a 3×3 from 5", () => {
     expect(dotLayout(0)).toEqual([])
     const size = (n: number) => new Set(dotLayout(n).map((place) => place.d.toFixed(2)))
-    // 1 to 4: one medium size, never a large dot.
-    for (const n of [1, 2, 3, 4]) {
+    // One series: one dot in the centre, a little larger than a 2×2 dot.
+    expect(dotLayout(1)).toEqual([{ x: 50, y: 50, d: 34 }])
+    // 2 to 4: one medium size.
+    for (const n of [2, 3, 4]) {
       expect(dotLayout(n)).toHaveLength(n)
-      expect([...size(n)]).toEqual([size(1).values().next().value])
+      expect([...size(n)]).toEqual(["31.20"])
     }
-    const medium = dotLayout(1)[0].d
-    expect(medium).toBeLessThan(30)
-    // One in the centre; two side by side; two over one; four corners.
-    expect(dotLayout(1)[0]).toMatchObject({ x: 50, y: 50 })
+    const medium = dotLayout(2)[0].d
+    expect(dotLayout(1)[0].d).toBeGreaterThan(medium)
+    expect(dotLayout(1)[0].d).toBeLessThan(medium * 1.2)
+    // Two side by side; two over one; four corners, 10% clear of the edge.
     expect(dotLayout(2).map((place) => place.y)).toEqual([50, 50])
     const three = dotLayout(3)
     expect(three[0].y).toBe(three[1].y)
     expect(three[2].x).toBe(50)
+    const [first] = dotLayout(4)
+    expect(first.x).toBe(30)
+    expect(first.x - first.d / 2).toBeGreaterThan(10)
     // 5 to 9: smaller dots, row by row in a 3×3.
     for (const n of [5, 6, 7, 8, 9]) {
       expect(dotLayout(n)).toHaveLength(n)
-      expect(dotLayout(n)[0].d).toBeLessThan(medium)
+      expect(dotLayout(n)[0].d).toBeCloseTo(20.8)
       expect(dotLayout(n).some((place) => place.more)).toBe(false)
     }
     expect(new Set(dotLayout(9).map((place) => place.x)).size).toBe(3)
@@ -470,7 +475,7 @@ describe("a day with more than one series", () => {
     const dots = [...cell("2026-10-28").querySelectorAll("[data-dot]")]
     expect(dots.map((dot) => dot.getAttribute("data-dot"))).toEqual(["green", "blue", "orange"])
     expect(cell("2026-10-28").style.backgroundImage).toBe("")
-    // One series is a dot too, the same size as each of the three.
+    // One series is a dot too.
     expect(cell("2026-10-27").querySelectorAll("[data-dot]")).toHaveLength(1)
     const legend = screen.getByRole("list", { name: "Series" })
     expect(within(legend).queryByText("More than one")).toBeNull()
