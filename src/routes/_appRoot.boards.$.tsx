@@ -6,6 +6,7 @@ import { BoardFeaturesDialog } from "../components/boards/board-features-dialog"
 import { BoardInspector } from "../components/boards/board-inspector"
 import { BoardWall, type BoardImage } from "../components/boards/board-wall"
 import { BoardIcon16 } from "../components/icons"
+import { NewMenu } from "../components/new-menu"
 import { NoteActionsMenu } from "../components/note-actions-menu"
 import { Notice } from "../components/notice"
 import { RootLink } from "../components/root-link"
@@ -171,6 +172,8 @@ function BoardPage({ boardId }: { boardId: string }) {
       }
       actions={
         <div className="flex items-center">
+          {/* A phone's way to the New menu, as in a note's header. */}
+          <NewMenu on="phone" />
           <SortMenu sort={sort} onSortChange={(next) => setNarrowing({ sort: next })} />
           <FilterMenu
             filter={filter}
