@@ -345,7 +345,7 @@ function FutureOutline({ cellSize }: { cellSize: number | null }) {
  * tile with a square in the colour of each series logged that day, the
  * same for one series and for many: one fills the space, up to 4 are rows
  * of 2, 5 to 9 rows of 3, a short last row filling the width (`DayDots`,
- * `dotLayout`). Today has a ring,
+ * `dotRows`). Today has a ring,
  * its weekday and its month are named in bold (Finn, 2026-11-03: no dot
  * under its column); the days of this week still to come have a faint grey fill and a
  * dashed outline. A week that runs into a new month is split in

@@ -187,12 +187,12 @@ has no keys to validate.
   series fills it, 2 to 4 are rows of 2, 5 to 9 rows of 3, and a short last
   row's squares widen to the full width (3 is two over one, 7 three, three
   and one), so no cell is left empty. Past 9, eight squares and a grey
-  outline for the rest (`dotLayout`, Finn 2026-11-03: "grow the grid", "fill
+  outline for the rest (`dotRows`, Finn 2026-11-03: "grow the grid", "fill
   the space"). A slip on a series to avoid is a plain square: the Heatmap
-  has no slip mark (Finn, 2026-11-03). A tile is measured in device pixels
-  and its squares drawn on whole pixels, the margins equal each side: a
-  phone's 14 px tiles sit at fractions of a pixel, and an edge inside a
-  pixel showed one soft side and looked off centre. Today
+  has no slip mark (Finn, 2026-11-03). The squares are plain CSS layout,
+  with no measure: the tile is a size container padded by the margin, and
+  each row a flex row of squares with the gap between (lengths in `cqw`), so
+  the browser centres them in the tile. Today
   with a ring and the rest of this week dashed over a faint grey. A tap on a day up to today opens the day editor on it;
   the grid is one tab stop, and the arrow keys move a day (up, down) or a
   week (left, right). A week that runs into a new month is split into two

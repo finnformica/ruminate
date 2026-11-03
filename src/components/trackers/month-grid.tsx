@@ -79,177 +79,87 @@ export const dayRadius = `${DAY_RADIUS * 100}%`
  * 2026-11-03); the cards keep theirs. */
 export type DayDot = { colour: TrackerColour }
 
-/** A cell's top left corner and size, in the units `dotLayout` was given.
- * `more` is the grey outline that stands for the series not shown. */
-export type DotPlace = { x: number; y: number; w: number; h: number; more?: boolean }
+/** The margin round the squares and the gap between them, in hundredths of
+ * the tile's side (Finn, 2026-11-03: the 10 % margin of the dots). */
+const DOT_MARGIN = 10
+const DOT_GAP = 6
 
-/** The margin round the cells and the gap between them, as a share of the
- * side (Finn, 2026-11-03: the 10 % margin of the dots). */
-const DOT_MARGIN = 0.1
-const DOT_GAP = 0.06
-
-/** A cell's corner radius, as a share of its shorter side. */
+/** A square's corner radius, as a share of its shorter side. */
 const SQUARE_RADIUS = 0.2
 
-/** The cells in each row: full rows of 2 (up to 4 series) or 3 (5 to 9),
- * then the rest. One series is one row of one. */
-function rowsOf(count: number): number[] {
+/**
+ * The squares in each row of a day with `count` series (Finn, 2026-11-03:
+ * "grow the grid", and fill the space): one row of one for 1 series, full
+ * rows of 2 up to 4 series and of 3 up to 9, then the rest. A short last
+ * row's squares widen to fill the width (3 is two over one), so no cell is
+ * left empty. More than 9 is 9 cells, the last a grey outline for the rest;
+ * the day editor lists them all.
+ */
+export function dotRows(count: number): number[] {
   const n = Math.min(count, 9)
-  const k = n === 1 ? 1 : n <= 4 ? 2 : 3
+  const k = n <= 1 ? 1 : n <= 4 ? 2 : 3
   const rows: number[] = []
   for (let left = n; left > 0; left -= k) rows.push(Math.min(k, left))
   return rows
 }
 
-/** `length` split in `parts` cells, the margin each side and the gap between:
- * each cell's start and size. With `snap`, every value is a whole unit (a
- * device pixel) and the cells are placed so the margins stay equal: a spare
- * pixel goes to the middle cell, two go to the end cells, and with two cells
- * the gap takes one. */
-function split(length: number, parts: number, snap: boolean): [number, number][] {
-  const margin = snap ? Math.round(length * DOT_MARGIN) : length * DOT_MARGIN
-  let gap = parts === 1 ? 0 : snap ? Math.max(1, Math.round(length * DOT_GAP)) : length * DOT_GAP
-  let room = length - 2 * margin - (parts - 1) * gap
-  if (snap && parts === 2 && room % 2 === 1) {
-    gap += gap > 1 ? -1 : 1
-    room = length - 2 * margin - gap
-  }
-  const base = snap ? Math.floor(room / parts) : room / parts
-  const spare = room - base * parts
-  const sizes = Array.from({ length: parts }, () => base)
-  if (spare % 2 === 1) sizes[Math.floor(parts / 2)] += 1
-  for (let i = 0; i < Math.floor(spare / 2); i++) {
-    sizes[i] += 1
-    sizes[parts - 1 - i] += 1
-  }
-  let at = margin
-  return sizes.map((size) => {
-    const cell: [number, number] = [at, size]
-    at += size + gap
-    return cell
-  })
-}
+/** A cell's side along a line of `parts` cells, in hundredths of the tile. */
+const cellSide = (parts: number) => (100 - 2 * DOT_MARGIN - (parts - 1) * DOT_GAP) / parts
 
 /**
- * The cells of a day with `count` series, in a tile `width` by `height`
- * (Finn, 2026-11-03: "grow the grid", and fill the space). The cells sit in
- * rows inside the margin, with a gap between: 1 series fills the space, 2
- * to 4 are rows of 2, 5 to 9 rows of 3, and a short last row's cells widen
- * to fill the width (3 is two over one). No cell is left empty. More than 9:
- * eight cells and a grey outline for the rest; the day editor lists them
- * all. With `snap` the units are device pixels and every edge is on one, so
- * the cells are sharp and centred.
- */
-export function dotLayout(count: number, width = 100, height = width, snap = false): DotPlace[] {
-  if (count <= 0) return []
-  const rows = rowsOf(count)
-  const ys = split(height, rows.length, snap)
-  const places: DotPlace[] = rows.flatMap((parts, r) =>
-    split(width, parts, snap).map(([x, w]) => ({ x, y: ys[r][0], w, h: ys[r][1] })),
-  )
-  if (count > 9) places[8] = { ...places[8], more: true }
-  return places
-}
-
-/** A tile's size in device pixels, as painted (each edge on the nearest
- * pixel), and one device pixel in the tile's own CSS pixels. Null before it
- * is measured, and where nothing is laid out. It is measured after each
- * render, as the grid's tracks can move a tile without a change of size,
- * and again when the fonts are in. */
-type PixelBox = { w: number; h: number; unit: number }
-
-function usePixelBox(ref: React.RefObject<HTMLElement | null>) {
-  const [box, setBox] = React.useState<PixelBox | null>(null)
-  const measure = React.useCallback(() => {
-    const el = ref.current
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    const dpr = window.devicePixelRatio || 1
-    const w = Math.round(rect.right * dpr) - Math.round(rect.left * dpr)
-    const h = Math.round(rect.bottom * dpr) - Math.round(rect.top * dpr)
-    // The tile's scale on the page: more than 1 under a CSS zoom.
-    const scale = rect.width / parseFloat(getComputedStyle(el).width) || 1
-    const unit = 1 / (dpr * scale)
-    setBox((old) =>
-      !(w > 0 && h > 0)
-        ? null
-        : old && old.w === w && old.h === h && old.unit === unit
-          ? old
-          : { w, h, unit },
-    )
-  }, [ref])
-  React.useLayoutEffect(measure)
-  React.useEffect(() => {
-    let live = true
-    void document.fonts?.ready.then(() => live && measure())
-    return () => {
-      live = false
-    }
-  }, [measure])
-  return box
-}
-
-/**
- * A day's series as squares on the day's tile (`dotLayout`), in their
- * colours: the one look for a day with one series and with many. A tile of
- * a phone's Heatmap is a fraction of a pixel in size and place, and a cell
- * with an edge inside a pixel shows one soft side and looks off centre.
- * So the tile is measured in device pixels, the drawing is given that size
- * exactly (the browser puts its corner on a pixel, but scales its view box
- * to its CSS size), and every edge is on a whole pixel. `faint` draws the
- * squares of a placeholder. Its parent is `relative`.
+ * A day's series as squares on the day's tile, in their colours: the one
+ * look for a day with one series and with many. Plain CSS layout: the tile
+ * is a size container, its box padded by the margin, and the squares are
+ * rows of flex items with the gap between them (`dotRows`), so the browser
+ * centres them and puts them on pixels. Lengths are in `cqw`, hundredths of
+ * the tile's side. A slip on a series to avoid is a plain square: the
+ * Heatmap has no slip mark (Finn, 2026-11-03). `faint` draws the squares of
+ * a placeholder. Its parent is `relative`.
  */
 export function DayDots({ dots, faint = false }: { dots: readonly DayDot[]; faint?: boolean }) {
-  const ref = React.useRef<HTMLSpanElement>(null)
-  const box = usePixelBox(ref)
-  const width = box?.w ?? 100
-  const height = box?.h ?? 100
-  const places = dotLayout(dots.length, width, height, box !== null)
-  // The outline past 9: one CSS pixel, on whole device pixels when measured.
-  const stroke = box ? Math.max(1, Math.round(1 / box.unit)) : 1.2
+  const rows = dotRows(dots.length)
+  const height = cellSide(rows.length)
+  let i = 0
   return (
-    <span ref={ref} aria-hidden className="pointer-events-none absolute inset-0">
-      <svg
-        data-dots={dots.length}
-        viewBox={`0 0 ${width} ${height}`}
-        preserveAspectRatio="none"
-        className={cx("absolute top-0 left-0", !box && "size-full", faint && "opacity-40")}
-        style={box ? { width: box.w * box.unit, height: box.h * box.unit } : undefined}
+    <span
+      aria-hidden
+      data-dots={dots.length}
+      className={cx(
+        "pointer-events-none absolute inset-0 [container-type:size]",
+        faint && "opacity-40",
+      )}
+    >
+      <span
+        className="flex size-full flex-col"
+        style={{ padding: `${DOT_MARGIN}cqw`, gap: `${DOT_GAP}cqw` }}
       >
-        {places.map(({ x, y, w, h, more }, i) => {
-          if (more) {
-            const inset = box ? stroke / 2 : 1
-            return (
-              <rect
-                key={i}
-                data-more
-                x={x + inset}
-                y={y + inset}
-                width={w - 2 * inset}
-                height={h - 2 * inset}
-                rx={(Math.min(w, h) - 2 * inset) * SQUARE_RADIUS}
-                fill="none"
-                stroke="var(--neutral-9)"
-                strokeWidth={stroke}
-                vectorEffect={box ? undefined : "non-scaling-stroke"}
-              />
-            )
-          }
-          const { colour } = dots[i]
+        {rows.map((parts, r) => {
+          const radius = `${Math.min(cellSide(parts), height) * SQUARE_RADIUS}cqw`
           return (
-            <rect
-              key={i}
-              data-dot={colour}
-              x={x}
-              y={y}
-              width={w}
-              height={h}
-              rx={Math.min(w, h) * SQUARE_RADIUS}
-              fill={colourVar(colour, 9)}
-            />
+            <span key={r} className="flex min-h-0 flex-1" style={{ gap: `${DOT_GAP}cqw` }}>
+              {Array.from({ length: parts }, () => {
+                const at = i++
+                const more = at === 8 && dots.length > 9
+                return more ? (
+                  <span
+                    key={at}
+                    data-more
+                    className="min-w-0 flex-1 border"
+                    style={{ borderRadius: radius, borderColor: "var(--neutral-9)" }}
+                  />
+                ) : (
+                  <span
+                    key={at}
+                    data-dot={dots[at].colour}
+                    className="min-w-0 flex-1"
+                    style={{ borderRadius: radius, backgroundColor: colourVar(dots[at].colour, 9) }}
+                  />
+                )
+              })}
+            </span>
           )
         })}
-      </svg>
+      </span>
     </span>
   )
 }

@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { heatmapWeeks, type Series, type SeriesState } from "../../data/tracker"
 import { ActivityCard, TrackerStats, axisWeekdays, heatmapColumns } from "./activity"
-import { MonthGrid, dotLayout } from "./month-grid"
+import { MonthGrid, dotRows } from "./month-grid"
 
 afterEach(() => {
   cleanup()
@@ -160,7 +160,7 @@ describe("ActivityHeatmap", () => {
     expect(tinted.map((placeholder) => placeholder.style.gridColumn)).toEqual(["13", "19"])
     for (const placeholder of tinted) {
       expect(placeholder.style.gridRow).toBe("4")
-      const dots = placeholder.querySelector("svg[data-dots]")!
+      const dots = placeholder.querySelector("[data-dots]")!
       expect(dots.getAttribute("class")).toContain("opacity-40")
       expect(dots.querySelector("[data-dot]")!.getAttribute("data-dot")).toBe("green")
     }
@@ -333,7 +333,7 @@ describe("one day square for the heatmap and the cards", () => {
     expect(heatLogged.style.borderRadius).toBe(cardLogged.style.borderRadius)
     expect(cardLogged.style.backgroundColor).toContain("--green-")
     expect(heatLogged.style.backgroundColor).toBe("")
-    expect(heatLogged.querySelector("svg[data-dots]")!.getAttribute("data-dots")).toBe("1")
+    expect(heatLogged.querySelector("[data-dots]")!.getAttribute("data-dots")).toBe("1")
   })
 })
 
@@ -435,90 +435,43 @@ const RUN: SeriesState = {
 
 describe("a day with more than one series", () => {
   it("fills the space: rows of 2 up to 4, rows of 3 from 5, no empty cell", () => {
-    expect(dotLayout(0)).toEqual([])
-    // One series fills the space inside the 10% margin.
-    expect(dotLayout(1)).toEqual([{ x: 10, y: 10, w: 80, h: 80 }])
-    // Two side by side, each the full height.
-    expect(dotLayout(2)).toEqual([
-      { x: 10, y: 10, w: 37, h: 80 },
-      { x: 53, y: 10, w: 37, h: 80 },
-    ])
+    expect(dotRows(0)).toEqual([])
+    expect(dotRows(1)).toEqual([1])
+    expect(dotRows(2)).toEqual([2])
     // Three: two over one, the one the full width.
-    const three = dotLayout(3)
-    expect(three.map((place) => place.w)).toEqual([37, 37, 80])
-    expect(three[2].y).toBe(53)
-    // Each count fills the space: the cells of each row end at the margin.
-    for (const n of [2, 3, 4, 5, 6, 7, 8, 9]) {
-      const places = dotLayout(n)
-      expect(places).toHaveLength(n)
-      const bottom = Math.max(...places.map((place) => place.y + place.h))
-      expect(bottom).toBeCloseTo(90)
-      for (const y of new Set(places.map((place) => place.y))) {
-        const row = places.filter((place) => place.y === y)
-        expect(row[0].x).toBeCloseTo(10)
-        expect(row[row.length - 1].x + row[row.length - 1].w).toBeCloseTo(90)
-      }
-    }
-    // Rows of 3 from 5: 5 is three over two, 7 three, three and one.
-    expect(dotLayout(5).map((place) => place.w.toFixed(1))).toEqual([
-      "22.7",
-      "22.7",
-      "22.7",
-      "37.0",
-      "37.0",
-    ])
-    expect(dotLayout(7)[6].w).toBe(80)
-    // More than 9: eight cells and an outline for the rest.
-    const twelve = dotLayout(12)
-    expect(twelve).toHaveLength(9)
-    expect(twelve.filter((place) => place.more)).toEqual([twelve[8]])
+    expect(dotRows(3)).toEqual([2, 1])
+    expect(dotRows(4)).toEqual([2, 2])
+    expect(dotRows(5)).toEqual([3, 2])
+    expect(dotRows(6)).toEqual([3, 3])
+    expect(dotRows(7)).toEqual([3, 3, 1])
+    expect(dotRows(8)).toEqual([3, 3, 2])
+    expect(dotRows(9)).toEqual([3, 3, 3])
+    // More than 9: nine cells, the last an outline for the rest.
+    expect(dotRows(12)).toEqual([3, 3, 3])
   })
 
-  it("puts every edge on a device pixel and keeps the margins equal when snapped", () => {
-    for (const side of [13, 14, 15, 28, 29, 39, 42, 43, 117]) {
-      for (let n = 1; n <= 12; n++) {
-        const places = dotLayout(n, side, side, true)
-        for (const { x, y, w, h } of places) {
-          for (const v of [x, y, w, h]) expect(Number.isInteger(v)).toBe(true)
-        }
-        // Centred: the margin on the right is the margin on the left, the
-        // margin at the foot the margin at the top.
-        const left = Math.min(...places.map((place) => place.x))
-        const right = side - Math.max(...places.map((place) => place.x + place.w))
-        const top = Math.min(...places.map((place) => place.y))
-        const foot = side - Math.max(...places.map((place) => place.y + place.h))
-        expect([side, n, right]).toEqual([side, n, left])
-        expect([side, n, foot]).toEqual([side, n, top])
-      }
-    }
-    // A 14 px phone day: one 12 px square, 1 px clear of each edge.
-    expect(dotLayout(1, 14, 14, true)).toEqual([{ x: 1, y: 1, w: 12, h: 12 }])
+  it("lays the squares out with CSS: a padded box of rows, no measure", () => {
+    render(<ActivityCard series={[READ, SWIM, RUN]} today="2026-10-29" />)
+    // Read, Swim and Run on the 28th: a row of 2 over a row of 1.
+    const dots = cell("2026-10-28").querySelector<HTMLElement>("[data-dots]")!
+    const box = dots.firstElementChild as HTMLElement
+    expect(box.style.padding).toBe("10cqw")
+    expect(box.style.gap).toBe("6cqw")
+    const rows = [...box.children] as HTMLElement[]
+    expect(rows.map((row) => row.children.length)).toEqual([2, 1])
+    expect(rows[1].firstElementChild!.className).toContain("flex-1")
+    expect(dots.querySelector("svg")).toBeNull()
   })
 
-  it("draws the squares in the tile's device pixels, once measured", () => {
-    // A 14.3 px tile at a fractional place, at DPR 2: its edges paint on
-    // pixels 201 and 229, so the tile is 28 device pixels.
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      left: 100.4,
-      right: 114.7,
-      top: 50.2,
-      bottom: 64.5,
-      width: 14.3,
-      height: 14.3,
-    } as DOMRect)
-    vi.stubGlobal("devicePixelRatio", 2)
-    render(<ActivityCard series={[READ]} today="2026-10-29" />)
-    const svg = cell("2026-10-28").querySelector("svg")!
-    expect(svg.getAttribute("viewBox")).toBe("0 0 28 29")
-    // Drawn at that size, so one unit of the view box is one device pixel.
-    expect(svg.style.width).toBe("14px")
-    expect(svg.style.height).toBe("14.5px")
-    const square = svg.querySelector("[data-dot]")!
-    expect(square.getAttribute("x")).toBe("3")
-    expect(square.getAttribute("width")).toBe("22")
-    expect(square.getAttribute("y")).toBe("3")
-    expect(square.getAttribute("height")).toBe("23")
-    vi.unstubAllGlobals()
+  it("draws a grey outline past 9 series", () => {
+    const many: SeriesState[] = Array.from({ length: 12 }, (_, i) => ({
+      ...READ,
+      series: { ...READ.series, id: `m${i}` },
+    }))
+    render(<ActivityCard series={many} today="2026-10-29" />)
+    const day = cell("2026-10-28")
+    expect(day.querySelectorAll("[data-dot]")).toHaveLength(8)
+    expect(day.querySelectorAll("[data-more]")).toHaveLength(1)
   })
 
   it("draws a dot a series in the heatmap, and the legend has no item for a mix", () => {
@@ -580,8 +533,8 @@ describe("a series to avoid", () => {
     // series's colour. The label still names the series as one to avoid.
     const slip = cell("2026-10-27").querySelector("[data-dot]")!
     expect(slip.getAttribute("data-dot")).toBe("red")
-    expect(slip.getAttribute("fill")).toContain("--red-9")
-    expect(cell("2026-10-27").querySelector("path")).toBeNull()
+    expect((slip as HTMLElement).style.backgroundColor).toContain("--red-9")
+    expect(slip.childElementCount).toBe(0)
     expect(document.querySelectorAll("[data-day] [data-slip]")).toHaveLength(0)
     expect(cell("2026-10-27").getAttribute("aria-label")).toBe("Tue 27 Oct: Smoke (avoid)")
     const legend = screen.getByRole("list", { name: "Series" })
