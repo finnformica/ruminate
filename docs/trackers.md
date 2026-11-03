@@ -180,10 +180,12 @@ has no keys to validate.
   heatmap of the last twelve weeks (`heatmapWeeks`, `HEATMAP_WEEKS`), a
   column a week from Monday with this week at the right edge, a cell is the
   grey tile with a dot in the colour of each series logged that day
-  (`seriesOnDay`, `DayDots`), the same for one series and for many: 1 to 4
-  medium dots in a 2×2 grid, 5 to 9 smaller dots in a 3×3, and past 9 eight
-  dots and a grey ring for the rest (`dotLayout`, Finn 2026-11-03: "grow the
-  grid"; never a large dot). A slip on a series to avoid is its dot with a
+  (`seriesOnDay`, `DayDots`), the same for one series and for many: one
+  series is one dot in the centre, 34 % of the side (`DOT_SINGLE`), a little
+  larger than a 2×2 dot; 2 to 4 medium dots (31.2 %) in a 2×2 grid, 5 to 9
+  smaller dots (20.8 %) in a 3×3, and past 9 eight dots and a grey ring for
+  the rest (`dotLayout`, Finn 2026-11-03: "grow the grid"; never a large
+  dot). The grids keep a 10 % margin inside the tile (`DOT_MARGIN`). A slip on a series to avoid is its dot with a
   white cross, or a ring in its colour when the dot is under 6 px. Today
   with a ring and the rest of this week dashed over a faint grey. A tap on a day up to today opens the day editor on it;
   the grid is one tab stop, and the arrow keys move a day (up, down) or a
@@ -198,7 +200,8 @@ has no keys to validate.
   desktop) the text is at the cards' sizes and the month line is 2 px
   (`HEATMAP_SIZES`, Finn 2026-11-03).
   Each month's short name ("Oct", 11 px; 14 px on a large grid) sits above its divider, its first
-  letter over the line. A weekday's name takes no height, so each row is
+  letter over the line, with 4 px under it (6 px on a large grid) before the
+  first row of days (Finn, 2026-11-03). A weekday's name takes no height, so each row is
   exactly a cell high and the cells read as squares. Each weekday's row is
   set to the measured cell width, and one gap serves both ways, so the gap
   down is the gap across in any engine (Finn, 2026-11-02); the month the heatmap opens in is named only when

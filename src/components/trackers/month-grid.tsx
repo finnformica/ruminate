@@ -83,14 +83,17 @@ export type DayDot = { colour: TrackerColour; slip?: boolean }
 export type DotPlace = { x: number; y: number; d: number; more?: boolean }
 
 /** The margin round the dots, and how much of a grid step a dot takes, in
- * hundredths of the side. */
-const DOT_MARGIN = 16
+ * hundredths of the side (Finn, 2026-11-03: 10, so the dots have room). */
+const DOT_MARGIN = 10
 const DOT_SHARE = 0.78
 
-/** Where the dots of 1 to 4 series go in a 2×2 grid: one in the centre,
- * two side by side, two over one, four in the corners. */
+/** The one dot of a day with one series, in hundredths of the side: a
+ * little larger than a 2×2 dot (31.2), not a large dot (Finn, 2026-11-03). */
+const DOT_SINGLE = 34
+
+/** Where the dots of 2 to 4 series go in a 2×2 grid: two side by side, two
+ * over one, four in the corners. */
 const SMALL_GRID: Record<number, readonly (readonly [number, number])[]> = {
-  1: [[0.5, 0.5]],
   2: [
     [0, 0.5],
     [1, 0.5],
@@ -110,12 +113,14 @@ const SMALL_GRID: Record<number, readonly (readonly [number, number])[]> = {
 
 /**
  * The dots of a day with `count` series (Finn, 2026-11-03: "grow the grid").
- * 1 to 4: medium dots in a 2×2 grid, never larger, so one series is not a
- * large dot. 5 to 9: smaller dots in a 3×3 grid, row by row. More than 9:
- * eight dots and a grey ring for the rest; the day editor lists them all.
+ * 1: one dot in the centre, a little larger than a 2×2 dot (`DOT_SINGLE`).
+ * 2 to 4: medium dots in a 2×2 grid. 5 to 9: smaller dots in a 3×3 grid,
+ * row by row. More than 9: eight dots and a grey ring for the rest; the day
+ * editor lists them all.
  */
 export function dotLayout(count: number): DotPlace[] {
   if (count <= 0) return []
+  if (count === 1) return [{ x: 50, y: 50, d: DOT_SINGLE }]
   const k = count <= 4 ? 2 : 3
   const step = (100 - 2 * DOT_MARGIN) / k
   const d = step * DOT_SHARE
