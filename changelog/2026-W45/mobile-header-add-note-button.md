@@ -1,3 +1,3 @@
-### Changed
+### Added
 
-- The phone's **New** button, beside navigation at the bottom, now opens a menu for a note, a board or a tracker. It only added a note before.
+- A phone's note header now has a **New** button beside Sort and Filter, for a note, a board or a tracker. The bottom bar's own button still only adds a note.

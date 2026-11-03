@@ -1,19 +1,20 @@
-import { useRouter } from "@tanstack/react-router"
+import { useNavigate, useRouter } from "@tanstack/react-router"
 import { useAtomValue, useSetAtom } from "jotai"
 import { forwardRef, useState } from "react"
 import { appUpdateAtom } from "../hooks/app-update"
 import { cx } from "../utils/cx"
+import { generateNoteId } from "../utils/note-id"
 import { isCommandMenuOpenAtom } from "./palette"
 import { IconButton, IconButtonProps } from "./ui/icon-button"
 import { Sheet } from "./ui/sheet"
-import { ArrowLeftIcon16, ArrowRightIcon16, MenuIcon16, SearchIcon16 } from "./icons"
+import { ArrowLeftIcon16, ArrowRightIcon16, MenuIcon16, ComposeIcon16, SearchIcon16 } from "./icons"
 import { NavItems } from "./nav-items"
-import { NewMenu } from "./new-menu"
 import { SignInBanner } from "./sign-in-banner"
 import { useAttentionTone } from "./sync-status"
 
 export function NavBar() {
   const router = useRouter()
+  const navigate = useNavigate()
   const setIsCommandMenuOpen = useSetAtom(isCommandMenuOpenAtom)
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   // The drawer holds the sync status and the "Update Ruminate" item, so while
@@ -68,7 +69,6 @@ export function NavBar() {
             </div>
           </Sheet.Content>
         </Sheet>
-        <NewMenu />
         <NavButton aria-label="Go back" onClick={() => router.history.back()}>
           <ArrowLeftIcon16 />
         </NavButton>
@@ -77,6 +77,21 @@ export function NavBar() {
         </NavButton>
         <NavButton aria-label="Open command menu" onClick={() => setIsCommandMenuOpen(true)}>
           <SearchIcon16 />
+        </NavButton>
+        <NavButton
+          aria-label="New note"
+          shortcut={["⌘", "⇧", "O"]}
+          onClick={() =>
+            navigate({
+              to: "/notes/$",
+              params: { _splat: generateNoteId() },
+              search: {
+                query: undefined,
+              },
+            })
+          }
+        >
+          <ComposeIcon16 />
         </NavButton>
       </div>
     </div>

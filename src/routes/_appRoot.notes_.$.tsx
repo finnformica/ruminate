@@ -19,6 +19,7 @@ import { parse } from "../blocks/parse"
 import type { BlockDoc, ChangeHint } from "../blocks/types"
 import { BlockNoteEditor } from "../components/block-editor/block-note-editor"
 import { NoteTitle } from "../components/block-editor/note-title"
+import { NewMenu } from "../components/new-menu"
 import { NoteActionsMenu } from "../components/note-actions-menu"
 import { UnassignedBasket } from "../components/unassigned-basket"
 import { NoteFavicon } from "../components/note-favicon"
@@ -882,6 +883,13 @@ function NotePage({
             ) : null}
 
             <div className="flex items-center">
+              {/* On a phone the sidebar is away, and with it the New menu
+                  (`page-header.tsx`'s nav icons, `sm:flex`): this is a phone's
+                  only way to it, so it sits here too, beside Sort and
+                  Filter, from `sm` down. */}
+              <div className="sm:hidden">
+                <NewMenu />
+              </div>
               {/* Each pane's frame has its own filter and sort, Root's too. */}
               <SortMenu sort={sort} onSortChange={(next) => setNarrowing({ sort: next })} />
               <FilterMenu
