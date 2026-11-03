@@ -298,13 +298,13 @@ function stripes(scale: number): string {
   return `repeating-linear-gradient(135deg, ${PLACEHOLDER_LINE} 0 ${line}px, transparent ${line}px ${period}px)`
 }
 
-/** The dots for the series on a day: a slip on a series to avoid wears a
- * cross on its own dot. */
+/** The squares for the series on a day: a slip on a series to avoid wears
+ * a cross on its own square. */
 function dayDots(on: readonly Series[]): DayDot[] {
   return on.map((s) => ({ colour: s.colour, slip: s.goal === "avoid" }))
 }
 
-/** A placeholder's look: the outline and the stripes. The dots of the day
+/** A placeholder's look: the outline and the stripes. The squares of the day
  * it holds the place of are drawn faint over them (`DayDots`), so what was
  * logged on a split week's days reads across the month's divider (Finn,
  * 2026-11-03). */
@@ -342,9 +342,9 @@ function FutureOutline({ cellSize }: { cellSize: number | null }) {
 /**
  * The heatmap: one column a week, one row a weekday from Monday, the week
  * today is in at the right edge (`heatmapWeeks`). A cell is a rounded
- * tile with a dot in the colour of each series logged that day, the same
- * for one series and for many: up to 4 in a 2×2 grid, 5 to 9 smaller in a
- * 3×3 (`DayDots`, `dotLayout`). Today has a ring,
+ * tile with a square in the colour of each series logged that day, the
+ * same for one series and for many: one fills a 1×1 grid, up to 4 a 2×2,
+ * 5 to 9 a 3×3 (`DayDots`, `dotLayout`). Today has a ring,
  * its weekday and its month are named in bold (Finn, 2026-11-03: no dot
  * under its column); the days of this week still to come have a faint grey fill and a
  * dashed outline. A week that runs into a new month is split in
@@ -362,7 +362,7 @@ function FutureOutline({ cellSize }: { cellSize: number | null }) {
  * desktop the cells grow to fill the card. A tap on a day up to today opens
  * the day editor on it (`onOpenDay`, Finn 2026-11-03); the arrow keys move
  * between days, one tab stop for the grid. A slip on a series to avoid
- * wears a cross on its dot. Below it, a legend of the series.
+ * wears a cross on its square. Below it, a legend of the series.
  */
 function ActivityHeatmap({
   series,
@@ -529,7 +529,7 @@ function ActivityHeatmap({
                 // Another month's day, in a split week: holds the place as a
                 // hollow square, a hairline outline with hairline stripes
                 // inside in the same solid colour (Finn, 2026-11-02), under
-                // the faint dots of the day it stands for (Finn, 2026-11-03).
+                // the faint squares of the day it stands for (Finn, 2026-11-03).
                 const held = column.week[d]
                 const dots = held > today ? [] : dayDots(seriesOnDay(series, held))
                 return (

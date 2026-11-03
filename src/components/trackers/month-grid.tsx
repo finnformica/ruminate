@@ -74,25 +74,25 @@ export const DAY_RADIUS = 0.25
 /** The radius as CSS: a percentage of the square's own side. */
 export const dayRadius = `${DAY_RADIUS * 100}%`
 
-/** A series logged on a day, as one dot: its colour, and whether it is a
- * slip on a series to avoid. */
+/** A series logged on a day, as one square: its colour, and whether it is
+ * a slip on a series to avoid. */
 export type DayDot = { colour: TrackerColour; slip?: boolean }
 
-/** A dot's place and size, in hundredths of the day's side. `more` is the
- * grey ring that stands for the series not shown. */
+/** A square's centre and side, in hundredths of the day's side. `more` is
+ * the grey outline that stands for the series not shown. */
 export type DotPlace = { x: number; y: number; d: number; more?: boolean }
 
-/** The margin round the dots, and how much of a grid step a dot takes, in
- * hundredths of the side (Finn, 2026-11-03: 10, so the dots have room). */
+/** The margin round the squares and the gap between them, in hundredths of
+ * the side (Finn, 2026-11-03: the 10 margin of the dots). */
 const DOT_MARGIN = 10
-const DOT_SHARE = 0.78
+const DOT_GAP = 6
 
-/** The one dot of a day with one series, in hundredths of the side: a
- * little larger than a 2×2 dot (31.2), not a large dot (Finn, 2026-11-03). */
-const DOT_SINGLE = 34
+/** A square's corner radius, as a share of its side: small, so a square
+ * reads as a square. */
+const SQUARE_RADIUS = 0.2
 
-/** Where the dots of 2 to 4 series go in a 2×2 grid: two side by side, two
- * over one, four in the corners. */
+/** Where the squares of 2 to 4 series go in a 2×2 grid: two side by side,
+ * two over one, four in the corners. */
 const SMALL_GRID: Record<number, readonly (readonly [number, number])[]> = {
   2: [
     [0, 0.5],
@@ -112,39 +112,58 @@ const SMALL_GRID: Record<number, readonly (readonly [number, number])[]> = {
 }
 
 /**
- * The dots of a day with `count` series (Finn, 2026-11-03: "grow the grid").
- * 1: one dot in the centre, a little larger than a 2×2 dot (`DOT_SINGLE`).
- * 2 to 4: medium dots in a 2×2 grid. 5 to 9: smaller dots in a 3×3 grid,
- * row by row. More than 9: eight dots and a grey ring for the rest; the day
- * editor lists them all.
+ * The squares of a day with `count` series (Finn, 2026-11-03: "grow the
+ * grid"), each filling its cell of the space inside the margin, with a small
+ * gap between cells. 1: one square in a 1×1 grid, the same design as the
+ * others. 2 to 4: a 2×2 grid. 5 to 9: a 3×3 grid, row by row. More than 9:
+ * eight squares and a grey outline for the rest; the day editor lists them
+ * all.
  */
 export function dotLayout(count: number): DotPlace[] {
   if (count <= 0) return []
-  if (count === 1) return [{ x: 50, y: 50, d: DOT_SINGLE }]
-  const k = count <= 4 ? 2 : 3
-  const step = (100 - 2 * DOT_MARGIN) / k
-  const d = step * DOT_SHARE
+  const k = count === 1 ? 1 : count <= 4 ? 2 : 3
+  const step = (100 - 2 * DOT_MARGIN + DOT_GAP) / k
+  const d = step - DOT_GAP
   const at = (c: number, r: number): DotPlace => ({
-    x: DOT_MARGIN + step * (c + 0.5),
-    y: DOT_MARGIN + step * (r + 0.5),
+    x: DOT_MARGIN + step * c + d / 2,
+    y: DOT_MARGIN + step * r + d / 2,
     d,
   })
+  if (count === 1) return [at(0, 0)]
   if (count <= 4) return SMALL_GRID[count].map(([c, r]) => at(c, r))
   const places = Array.from({ length: Math.min(count, 9) }, (_, i) => at(i % 3, Math.floor(i / 3)))
   if (count > 9) places[8] = { ...places[8], more: true }
   return places
 }
 
-/** Under this size, in px, a cross on a dot does not read: a slip is then a
- * ring in its colour. */
+/** Under this size, in px, a cross on a square does not read: a slip is
+ * then an outline in its colour. */
 const SLIP_RING_BELOW = 6
 
+/** A square's outline, inset so the stroke stays inside its cell. */
+function SquareOutline({ x, y, d, stroke }: DotPlace & { stroke: string }) {
+  const side = d - 2
+  return (
+    <rect
+      x={x - side / 2}
+      y={y - side / 2}
+      width={side}
+      height={side}
+      rx={side * SQUARE_RADIUS}
+      fill="none"
+      stroke={stroke}
+      strokeWidth={1.2}
+      vectorEffect="non-scaling-stroke"
+    />
+  )
+}
+
 /**
- * A day's series as dots on the day's tile (`dotLayout`), in their colours:
- * the one look for a day with one series and with many. A slip on a series
- * to avoid is its dot with a white cross, or a ring when the dot is small.
- * `side` is the day's measured side, if known; `faint` draws the dots of a
- * placeholder. Its parent is `relative`.
+ * A day's series as squares on the day's tile (`dotLayout`), in their
+ * colours: the one look for a day with one series and with many. A slip on
+ * a series to avoid is its square with a white cross, or an outline when the
+ * square is small. `side` is the day's measured side, if known; `faint`
+ * draws the squares of a placeholder. Its parent is `relative`.
  */
 export function DayDots({
   dots,
@@ -163,50 +182,40 @@ export function DayDots({
       viewBox="0 0 100 100"
       className={cx("pointer-events-none absolute inset-0 size-full", faint && "opacity-40")}
     >
-      {places.map(({ x, y, d, more }, i) => {
-        const r = d / 2
+      {places.map((place, i) => {
+        const { x, y, d, more } = place
         if (more) {
           return (
-            <circle
-              key={i}
-              data-more
-              cx={x}
-              cy={y}
-              r={r - 1}
-              fill="none"
-              stroke="var(--neutral-9)"
-              strokeWidth={1.2}
-              vectorEffect="non-scaling-stroke"
-            />
+            <g key={i} data-more>
+              <SquareOutline {...place} stroke="var(--neutral-9)" />
+            </g>
           )
         }
         const { colour, slip } = dots[i]
         const fill = colourVar(colour, 9)
         if (slip && side !== null && (d / 100) * side < SLIP_RING_BELOW) {
           return (
-            <circle
-              key={i}
-              data-dot={colour}
-              data-slip
-              cx={x}
-              cy={y}
-              r={r - 1}
-              fill="none"
-              stroke={fill}
-              strokeWidth={1.2}
-              vectorEffect="non-scaling-stroke"
-            />
+            <g key={i} data-dot={colour} data-slip>
+              <SquareOutline {...place} stroke={fill} />
+            </g>
           )
         }
-        const c = r * 0.45
+        const c = Math.min(d * 0.22, 9)
         return (
           <g key={i} data-dot={colour} data-slip={slip || undefined}>
-            <circle cx={x} cy={y} r={r} fill={fill} />
+            <rect
+              x={x - d / 2}
+              y={y - d / 2}
+              width={d}
+              height={d}
+              rx={d * SQUARE_RADIUS}
+              fill={fill}
+            />
             {slip ? (
               <path
                 d={`M${x - c} ${y - c}L${x + c} ${y + c}M${x + c} ${y - c}L${x - c} ${y + c}`}
                 stroke="white"
-                strokeWidth={d * 0.12}
+                strokeWidth={Math.min(d * 0.12, 5)}
                 strokeLinecap="round"
               />
             ) : null}

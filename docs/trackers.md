@@ -179,18 +179,19 @@ has no keys to validate.
   series to avoid has a group of its own after it, below. Under the Today strip, the activity card: a
   heatmap of the last twelve weeks (`heatmapWeeks`, `HEATMAP_WEEKS`), a
   column a week from Monday with this week at the right edge, a cell is the
-  grey tile with a dot in the colour of each series logged that day
-  (`seriesOnDay`, `DayDots`), the same for one series and for many: one
-  series is one dot in the centre, 34 % of the side (`DOT_SINGLE`), a little
-  larger than a 2×2 dot; 2 to 4 medium dots (31.2 %) in a 2×2 grid, 5 to 9
-  smaller dots (20.8 %) in a 3×3, and past 9 eight dots and a grey ring for
-  the rest (`dotLayout`, Finn 2026-11-03: "grow the grid"; never a large
-  dot). The grids keep a 10 % margin inside the tile (`DOT_MARGIN`). A slip on a series to avoid is its dot with a
-  white cross, or a ring in its colour when the dot is under 6 px. Today
+  grey tile with a small square in the colour of each series logged that
+  day (`seriesOnDay`, `DayDots`), the same design for one series and for
+  many (Finn, 2026-11-03: squares, not dots). Each square fills its cell of
+  a grid inside a 10 % margin (`DOT_MARGIN`), with a 6 % gap between cells
+  (`DOT_GAP`) and a small corner radius (20 % of its side): one series is a
+  1×1 grid, 2 to 4 a 2×2, 5 to 9 a 3×3, and past 9 eight squares and a grey
+  outline for the rest (`dotLayout`, Finn 2026-11-03: "grow the grid"). A
+  slip on a series to avoid is its square with a white cross, or an outline
+  in its colour when the square is under 6 px. Today
   with a ring and the rest of this week dashed over a faint grey. A tap on a day up to today opens the day editor on it;
   the grid is one tab stop, and the arrow keys move a day (up, down) or a
   week (left, right). A week that runs into a new month is split into two
-  columns (`heatmapColumns`), the other month's days drawn as hollow placeholders, a 0.5 px outline and 0.5 px stripes in one solid colour (`--neutral-6`) under the faint dots (40 %) of the day each holds the place of (Finn, 2026-11-03: so data reads across the divider; not tappable), so a straight line divides the
+  columns (`heatmapColumns`), the other month's days drawn as hollow placeholders, a 0.5 px outline and 0.5 px stripes in one solid colour (`--neutral-6`) under the faint squares (40 %) of the day each holds the place of (Finn, 2026-11-03: so data reads across the divider; not tappable), so a straight line divides the
   months: one element per boundary, in a narrow track of its own with a gap
   each side, from the Monday row down to Sunday. A day is the cards' own
   square (`DaySquare` in `month-grid.tsx`: one radius, a quarter of the
@@ -273,7 +274,7 @@ to avoid, and `DayEditor` the day editor open on yesterday;
 `month-grid.stories.tsx` the cards at desktop and phone widths;
 `activity.stories.tsx` the stats row and the activity card;
 `activity.test.tsx` the heatmap's tracks, square rows and labels, the
-day taps and arrow keys, the dots and their layout, the placeholders' faint dots, the slips, the Recent
+day taps and arrow keys, the squares and their layout, the placeholders' faint squares, the slips, the Recent
 groups and the stats with a series to avoid; `day-dialog.test.tsx` the day
 editor as a dialog and as a sheet; `display-groups.test.tsx` the ⋯ menu's
 Heatmap and Cards rows.
