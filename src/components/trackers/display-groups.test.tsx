@@ -13,35 +13,24 @@ vi.mock("@tanstack/react-router", () => ({
 const { NoteActionsMenu } = await import("../note-actions-menu")
 
 /**
- * The tracker's display options in the note menu: on a narrow window the
- * Range group starts with Heatmap, ticked while the activity card is the
- * view; a wide window has no Heatmap row.
+ * The tracker's display options in the note menu: Heatmap and Cards, one
+ * of them ticked, and nothing else (Finn, 2026-11-02).
  */
 
 afterEach(cleanup)
 
-function renderMenu(heatmap: boolean | undefined) {
-  const onHeatmap = vi.fn()
-  const onRangeChange = vi.fn()
+function renderMenu(view: "heatmap" | "cards") {
+  const onViewChange = vi.fn()
   render(
     <Provider store={createStore()}>
       <NoteActionsMenu
         noteId="n1"
         surface="tracker"
-        groups={
-          <DisplayGroups
-            range="month"
-            layout="cards"
-            heatmap={heatmap}
-            onHeatmap={onHeatmap}
-            onRangeChange={onRangeChange}
-            onLayoutChange={vi.fn()}
-          />
-        }
+        groups={<DisplayGroups view={view} onViewChange={onViewChange} />}
       />
     </Provider>,
   )
-  return { onHeatmap, onRangeChange }
+  return { onViewChange }
 }
 
 async function openMenu() {
@@ -56,27 +45,21 @@ const rows = () =>
     .map((item) => `${item.textContent}${item.querySelector("svg") ? " ✓" : ""}`)
 
 describe("the tracker's display options", () => {
-  it("starts the Range group with Heatmap on a narrow window, ticked in the activity view", async () => {
-    const { onHeatmap } = renderMenu(true)
+  it("offers Heatmap and Cards, ticking the one shown", async () => {
+    const { onViewChange } = renderMenu("heatmap")
     await openMenu()
-    expect(rows().slice(0, 4)).toEqual(["Heatmap ✓", "Week", "Month", "Year"])
-    fireEvent.click(screen.getByRole("menuitem", { name: "Heatmap" }))
-    expect(onHeatmap).toHaveBeenCalled()
+    expect(rows().slice(0, 2)).toEqual(["Heatmap ✓", "Cards"])
+    fireEvent.click(screen.getByRole("menuitem", { name: "Cards" }))
+    expect(onViewChange).toHaveBeenCalledWith("cards")
     expect(screen.getByRole("menu")).toBeTruthy()
   })
 
-  it("ticks the range instead in the range view", async () => {
-    renderMenu(false)
+  it("has no week, month, year or grid rows", async () => {
+    renderMenu("cards")
     await openMenu()
-    expect(rows().slice(0, 4)).toEqual(["Heatmap", "Week", "Month ✓", "Year"])
-  })
-
-  it("has no Heatmap row on a wide window", async () => {
-    const { onRangeChange } = renderMenu(undefined)
-    await openMenu()
-    expect(screen.queryByRole("menuitem", { name: "Heatmap" })).toBeNull()
-    expect(rows().slice(0, 3)).toEqual(["Week", "Month ✓", "Year"])
-    fireEvent.click(screen.getByRole("menuitem", { name: "Year" }))
-    expect(onRangeChange).toHaveBeenCalledWith("year")
+    expect(rows().slice(0, 2)).toEqual(["Heatmap", "Cards ✓"])
+    for (const name of ["Week", "Month", "Year", "Grid"]) {
+      expect(screen.queryByRole("menuitem", { name })).toBeNull()
+    }
   })
 })

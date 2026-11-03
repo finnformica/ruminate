@@ -585,8 +585,7 @@ export function monthGrid(month: MonthString): (DayString | null)[][] {
 
 /** The run of days the page shows at once (Finn, 2026-10-28): a week from
  * Monday, a month, or a year. The cell is always one day. */
-export const TRACKER_RANGES = ["week", "month", "year"] as const
-export type TrackerRange = (typeof TRACKER_RANGES)[number]
+export type TrackerRange = "week" | "month" | "year"
 
 /** Every day of the year, in order: 365, or 366 in a leap year. */
 export function yearDays(year: number): DayString[] {

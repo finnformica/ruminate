@@ -9,7 +9,8 @@ the note's own ⋯ menu, which adds **Series** (the editor) and **Open note**
 (the outline beneath).
 
 Requested by Finn, 2026-10-27. The defaults are his: a month view (a week
-and a year, and the journal grid, were added 2026-10-28), a
+and a year, and the journal grid, were added 2026-10-28 and removed
+2026-11-02), a
 streak is days in a row, the week starts on Monday, an entry carries no
 note, nothing is imported from a journal, and a day is the viewer's local
 date. The grid fits a phone (375 px) with no sideways scroll. The design is
@@ -141,50 +142,26 @@ has no keys to validate.
   **Add series** writes a check series named "New series" with its name
   selected. Remove asks first (`ConfirmDialog`, danger): the entries go
   with it. On a phone the list is a sheet.
-- **The range and the layout** (Finn, 2026-10-28, a first cut to judge
-  from screenshots; moved into a menu and the grid turned on its side,
-  2026-10-29; moved into the note's ⋯ menu, the same on a phone and a
-  desktop, later that day): the ⋯ menu's first group, **Range**, shows a
-  **Week** (seven days from Monday), a **Month** or a **Year**
-  (`TRACKER_RANGES`, `rangeDays`, `rangeStart`, `shiftRange` in
-  `src/data/tracker.ts`); the cell is one day in each. Its second group
-  draws the range as **Cards**, one per series as above (a week as one row
-  of seven, a year as a heatmap of its weeks, `yearWeeks`, sized to the
-  card so a phone does not scroll sideways), or as the **Grid**
-  (`journal-grid.tsx`): one table, a row per day with its weekday and
-  number at the left ("Mon 2", today's number in a chip), a column per
-  series, as a bullet journal's habit page is drawn. Each month is a
-  group of rows (`grid-cols-subgrid`) that starts under a divider, with its
-  name ("November 2026") just below. The name is not pinned: it scrolls in
-  and out with its divider, and a month whose first day is before the range
-  (a week that starts mid-month) has no divider in view and no name. A year names the current month and
-  every second month from it (`month-labels.ts`: the step is 2, or 3 when
-  rows are too short to keep two names a name's height apart); the other
-  months have the divider alone. A thin line above each Monday starts a
-  week (Finn, 2026-11-02). A column is headed by its
-  series's colour alone: the Today strip's chips are the legend, and the
-  name is the column's `aria-label`. Every cell up to today logs in place:
-  a tap on a check series's cell ticks or clears the day, and on a number
-  series's cell opens the Today strip's field with − and + for that day in
-  a popover (`NumberControl`), so the entry is the one the strip writes.
-  The arrow keys move between cells, Enter or Space edits, and every cell
-  is at least 32 px for a finger. The grid's card fills the space left
-  under the Today strip and date row, down to the bottom of the screen, and
-  scrolls in its own box under the row of colours and beside the day
-  column, both of which stay put; the page itself does not scroll in this
-  layout (Finn, 2026-10-29). It opens scrolled to today's row. A phone
-  (390 px) shows six series
-  with no sideways scroll; more scroll sideways. A pick leaves the menu
-  open, so both can be set at once. The range and the layout are page
-  state: a reload shows this month as cards.
+- **Display** (Finn, 2026-11-02: "only have heat map and cards"): the
+  page shows the activity card (below) and the month as **Cards**. A
+  window narrower than `lg` has room for one of the two: it opens on the
+  heatmap, and the ⋯ menu's **Display** group picks **Heatmap** or
+  **Cards** (`display-groups.tsx`). A wider window shows both side by side,
+  so its menu has no display options. The week, the year and the journal
+  grid (a row per day, a column per series) were removed with their menu
+  rows; the range helpers in `src/data/tracker.ts` (`rangeDays`,
+  `rangeStart`, `shiftRange`, `rangeLabel`) are still there, used with
+  `"month"`. The choice is page state and nothing saves it, so no tracker
+  has a removed mode stored: a reload opens on the heatmap.
 - **Activity** (`activity.tsx`, Finn 2026-10-29, after a friend's habit
   tracker that reads well on a phone): a day is **active** when any series
   has something on it (`isLogged`: a ticked check, or a number above zero;
-  no target is asked). At the top of the page, the summary line
-  (`activeSummary`): the streak of active days as a pill (`6-day streak`,
+  no target is asked). At the top of the page, the stats row
+  (`TrackerStats`, from `activeSummary`; Finn, 2026-11-02, in place of the
+  summary line and its streak badge): **Streak** (active days in a row,
   counted from yesterday while today is still open, as a series's streak
-  is), then `N of the last 7 days · N of the last 28 · N all time`, each
-  window ending on today. Under the Today strip, the activity card: a
+  is), **Last 7 days** (`N/7`), **Last 28 days** (`N/28`) and **All time**,
+  each window ending on today, each a small label over a bold value. Under the Today strip, the activity card: a
   heatmap of the last twelve weeks (`heatmapWeeks`, `HEATMAP_WEEKS`), a
   column a week from Monday with this week at the right edge, a cell in the
   colour of each series logged that day (`seriesOnDay`; split into diagonal
@@ -196,26 +173,24 @@ has no keys to validate.
   (`rounded-sm`: the theme's `rounded` is 8 px, a circle at this size).
   Each month's short name ("Oct", 11 px) sits above its divider, its first
   letter over the line. A weekday's name takes no height, so each row is
-  exactly a cell high and the cells read as squares; the month the heatmap opens in is named only when
+  exactly a cell high and the cells read as squares. Each weekday's row is
+  set to the measured cell width, and one gap serves both ways, so the gap
+  down is the gap across in any engine (Finn, 2026-11-02); the month the heatmap opens in is named only when
   the heatmap opens on its 1st. Every month when the names fit, else this month and every second or third
   (`fitMonthLabels` in `month-labels.ts`, at the narrowest column: the
   desktop card). The day axis names all seven weekdays when a row is tall
   enough for each name, else Mon, Wed and Fri (`axisWeekdays`, from the
-  measured cell height), and today's weekday in bold; a dot under today's
+  measured cell size), and today's weekday in bold; a dot under today's
   column marks it (Finn, 2026-11-02). A legend of the series is below it;
   then **Recent**
-  (`recentEntries`): the newest entries up to today as rows of day, series
-  and the entry's text after the day (`Entry.detail`, read only), five at
-  first and ten more for each **Show more**. The heatmap is for reading; the
-  strip and the range log. On a phone, or a window narrower than `lg`, the
-  activity card is what the page opens to. The ⋯ menu's **Range** group
-  then starts with **Heatmap**, ticked while the card is shown; a pick of
-  a range or a layout shows the range instead (that range ticked), and
-  **Heatmap** comes back (`display-groups.tsx`). A wider window shows the
-  card as a column beside the range, so its menu has no **Heatmap** row.
-- The range shown moves with the arrows beside its name, by a week, a
-  month or a year; **This week**, **This month** or **This year** comes
-  back. The page refreshes its idea of today every minute, so a tab
+  (`recentEntries`): the newest entries up to today, a group a day (Finn,
+  2026-11-02): the day named once, then a line per series logged on it,
+  with the entry's text after the day (`Entry.detail`, read only). A
+  divider runs between two days, never inside one. Five days at first and
+  ten more for each **Show more**. The heatmap is for reading; the strip
+  and the cards log.
+- The month shown moves with the arrows beside its name; **This month**
+  comes back. The page refreshes its idea of today every minute, so a tab
   left open over midnight moves on.
 
 ### Colour
@@ -235,7 +210,10 @@ levels, the active days (streak, the 7- and 28-day windows, today with no
 entry, midnight and daylight-saving edges), the heatmap's weeks, the Recent
 order, the entry text in both shapes and the ops; `src/components/trackers/month-grid.test.tsx` renders
 the grid and the strip; `src/data/key-events.test.ts` pins the key
-validation. `month-grid.stories.tsx` shows the page at desktop and phone
-widths; `activity.stories.tsx` the summary line and the activity card;
-`display-groups.test.tsx` the ⋯ menu's Heatmap row on a narrow and a wide
-window.
+validation. `page.stories.tsx` shows the whole page body with sample data
+(the stats row, the strip, the activity card and the cards);
+`month-grid.stories.tsx` the cards at desktop and phone widths;
+`activity.stories.tsx` the stats row and the activity card;
+`activity.test.tsx` the heatmap's tracks, square rows and labels, the
+Recent groups and the stats; `display-groups.test.tsx` the ⋯ menu's
+Heatmap and Cards rows.

@@ -100,32 +100,20 @@ function CheckControl({
   )
 }
 
-/**
- * A number series's value on a day, with − and + by its `step`: the strip's
- * control, and the journal grid's editor for a cell (journal-grid.tsx), so
- * both write the same entry.
- */
-export function NumberControl({
+function NumberControl({
   state,
   day,
   onSetEntry,
-  inputRef,
-  onDone,
 }: {
   state: SeriesState
   day: DayString
   onSetEntry: (seriesId: string, day: DayString, value: boolean | number | null) => void
-  /** The field, for a popup to put the keyboard in. */
-  inputRef?: React.Ref<HTMLInputElement>
-  /** Enter was pressed in the field and its value written. */
-  onDone?: () => void
 }) {
   const { series } = state
   const entry = state.entries.get(day)
   const current = typeof entry?.value === "number" ? entry.value : 0
   const name = series.name.trim() || "Untitled"
-  // The strip and a grid cell's editor can show the same series at once.
-  const id = React.useId()
+  const id = `today-${series.id}`
   // What is typed, until it is committed on blur or Enter.
   const [draft, setDraft] = React.useState<string | null>(null)
   const commit = () => {
@@ -160,7 +148,6 @@ export function NumberControl({
           <MinusIcon16 />
         </IconButton>
         <TextInput
-          ref={inputRef}
           id={id}
           type="number"
           inputMode="decimal"
@@ -177,7 +164,6 @@ export function NumberControl({
               event.preventDefault()
               commit()
               event.currentTarget.blur()
-              onDone?.()
             }
           }}
         />
