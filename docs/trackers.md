@@ -63,11 +63,11 @@ change, still typed `text`, keeps reading as one — no migration, as there
 are no production trackers yet (the same reasoning behind the entry
 shape's own transition below).
 
-| on the page | in the graph                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| the tracker | a note whose root node is of type `tracker`                                                                                                                                                                                                                                                                                                                                                                           |
-| a series    | a direct child of the page whose props carry `kind`: `check` or `number`, whatever the block's type. Its text is its name; the block is its identity. Its settings are its other keys: `colour` (a palette name, below), `unit`, `min`, `max`, `step`, `target`, `period` (`day`, `week` or `month`: what the target is for) and `rollup` (`sum` or `avg`: how a number series adds up). A key not set is the default |
-| an entry    | a child of a series, one per day, in date order. Under a check series a to-do block whose text is the day (`YYYY-MM-DD`, the viewer's local day): ticked (`done`) is done, open (`todo`) is not, missing is not. Under a number series a plain block whose text is the day, a separator and the value with its unit (`2026-10-28 · 5 km`); the first number after the day is the value                                |
+| on the page | in the graph                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the tracker | a note whose root node is of type `tracker`                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| a series    | a direct child of the page whose props carry `kind`: `check` or `number`, whatever the block's type. Its text is its name; the block is its identity. Its settings are its other keys: `colour` (a palette name, below), `unit`, `min`, `max`, `step`, `target`, `period` (`day`, `week` or `month`: what the target is for) `rollup` (`sum` or `avg`: how a number series adds up) and `goal` (`do` or `avoid`: a habit to keep or to keep away from, below). A key not set is the default |
+| an entry    | a child of a series, one per day, in date order. Under a check series a to-do block whose text is the day (`YYYY-MM-DD`, the viewer's local day): ticked (`done`) is done, open (`todo`) is not, missing is not. Under a number series a plain block whose text is the day, a separator and the value with its unit (`2026-10-28 · 5 km`); the first number after the day is the value                                                                                                      |
 
 So a tracker's outline reads, with the series's keys shown as the
 outline's props:
@@ -106,7 +106,7 @@ are no production trackers, so there is no migration.
 The series's keys have a zod schema in the per-block-type validation
 (`validateProps`, `src/data/key-events.ts`): a series is a bullet block (or,
 from before this change, a text block), so a `ul` or `text` block's `kind`,
-`colour`, `period`, `rollup` and `step` are held to their shapes, and the
+`colour`, `period`, `rollup`, `goal` and `step` are held to their shapes, and the
 per-key `set` events are held to the same (`KNOWN_PROP_VALUES`). The replica
 refuses a push that breaks them, as PR 1 does for every known key. An entry
 has no keys to validate.
@@ -120,22 +120,29 @@ has no keys to validate.
   series is a pill that ticks and clears the day; a number series shows its
   value with − and + by its `step`, held within `min` and `max`, and the
   value itself is a field to type into (empty or `0` clears). The controls
-  wrap, so on a phone the strip grows down. The strip logs today unless a
-  number series's cell was tapped in the grid, which points it at that day,
-  named in the heading, with **Today** to come back.
+  wrap, so on a phone the strip grows down. The strip logs today only; a
+  past day is logged in the day editor (Finn, 2026-11-03, who asked for no
+  shortcut to yesterday: a tap on the day is the one way).
+- **The day editor** (`day-dialog.tsx`, Finn 2026-11-03): a tap on a day in
+  the heatmap or on a card opens that day, with the strip's controls for
+  every series (`DayControls`), so any past value can be added, changed or
+  cleared. It writes through the same `setEntry` as the strip: a clear is
+  `deleteBlockOps`, as above. Its header steps a day back or on; a day after
+  today cannot be opened. A dialog on a desktop, a sheet on a phone.
 - **The month grid** (`month-grid.tsx`): a card per series, in as many
   columns as fit (one on a phone), each a seven-column grid of the month's
   days from Monday (`monthGrid`), the cell filled in the series's colour at
   one of four steps (`cellLevel`: a check is on or off; a number is scaled
   against `max` when it has one, else against the month's best day). Today
-  has a ring; a day after today is faint and not loggable. A tap on a check
-  series's cell toggles that day; on a number series's cell it picks the day
-  for the strip. Above the grid, the streak (`streak`: days in a row up to
+  has a ring; a day after today is faint and not loggable. A tap on a cell
+  opens the day editor on that day (it toggled a check and pointed the strip
+  at a number's day until 2026-11-03). Above the grid, the streak (`streak`: days in a row up to
   today, counted from yesterday while today is still open), the month's
   rollup (`rollup`: ticks for a check, the sum or the average of the days
   with a value for a number) and, with a target, a bar of how far towards it
   in the target's period (`targetProgress`: the day, the week from Monday or
-  the month).
+  the month). A series to avoid is named **Avoid** beside its name, its
+  streak is its clean days in a row, and a slip wears a cross.
 - **Series** (`series-dialog.tsx`), from the ⋯ menu: one form per series —
   name, kind, colour, target and its period; for a number series unit, how
   it adds up, step, min and max. Every change is written as it is made.
@@ -146,8 +153,15 @@ has no keys to validate.
   page shows the activity card (below) and the month as **Cards**. A
   window narrower than `lg` has room for one of the two: it opens on the
   heatmap, and the ⋯ menu's **Display** group picks **Heatmap** or
-  **Cards** (`display-groups.tsx`). A wider window shows both side by side,
-  so its menu has no display options. The week, the year and the journal
+  **Cards** (`display-groups.tsx`). A wider window shows both, the activity
+  card across the page above the cards, with the heatmap two thirds of the
+  card and Recent beside it, so the heatmap's cells are large (Finn,
+  2026-11-03: "on desktop i think the heat map should be larger"; it was a
+  320 px column beside the cards). The heatmap sets the card's height:
+  Recent fills it and scrolls within it, with a fade at its foot. When the
+  list set the height, a longer list left 33 px under the heatmap's legend,
+  not the card's 16 (Finn, 2026-11-03: "too much vertical padding inside
+  the Heatmap container"). Its menu has no display options. The week, the year and the journal
   grid (a row per day, a column per series) were removed with their menu
   rows; the range helpers in `src/data/tracker.ts` (`rangeDays`,
   `rangeStart`, `shiftRange`, `rangeLabel`) are still there, used with
@@ -155,19 +169,22 @@ has no keys to validate.
   has a removed mode stored: a reload opens on the heatmap.
 - **Activity** (`activity.tsx`, Finn 2026-10-29, after a friend's habit
   tracker that reads well on a phone): a day is **active** when any series
-  has something on it (`isLogged`: a ticked check, or a number above zero;
+  to keep (not one to avoid, below) has something on it (`isLogged`: a ticked check, or a number above zero;
   no target is asked). At the top of the page, the stats row
   (`TrackerStats`, from `activeSummary`; Finn, 2026-11-02, in place of the
   summary line and its streak badge): **Streak** (active days in a row,
   counted from yesterday while today is still open, as a series's streak
   is), **Last 7 days** (`N/7`), **Last 28 days** (`N/28`) and **All time**,
-  each window ending on today, each a small label over a bold value. Under the Today strip, the activity card: a
+  each window ending on today, each a small label over a bold value. Each
+  series to avoid has a group of its own after it, below. Under the Today strip, the activity card: a
   heatmap of the last twelve weeks (`heatmapWeeks`, `HEATMAP_WEEKS`), a
   column a week from Monday with this week at the right edge, a cell in the
   colour of each series logged that day (`seriesOnDay`; split into diagonal
   bands when there is more than one), today with a ring and the rest of
-  this week dashed. A week that runs into a new month is split into two
-  columns (`heatmapColumns`), the other month's days drawn as hollow placeholders, a 0.5 px outline and 0.5 px stripes in one solid colour (`--neutral-6`) and no fill (no data, not tappable), so a straight line divides the
+  this week dashed. A tap on a day up to today opens the day editor on it;
+  the grid is one tab stop, and the arrow keys move a day (up, down) or a
+  week (left, right). A week that runs into a new month is split into two
+  columns (`heatmapColumns`), the other month's days drawn as hollow placeholders, a 0.5 px outline and 0.5 px stripes in one solid colour (`--neutral-6`) over a faint wash (22 %) of the colours of the day each holds the place of (Finn, 2026-11-03: so data reads across the divider; not tappable), so a straight line divides the
   months: one element per boundary, in a narrow track of its own with a gap
   each side, from the Monday row down to Sunday. A cell is a rounded square
   (`rounded-sm`: the theme's `rounded` is 8 px, a circle at this size).
@@ -177,8 +194,8 @@ has no keys to validate.
   set to the measured cell width, and one gap serves both ways, so the gap
   down is the gap across in any engine (Finn, 2026-11-02); the month the heatmap opens in is named only when
   the heatmap opens on its 1st. Every month when the names fit, else this month and every second or third
-  (`fitMonthLabels` in `month-labels.ts`, at the narrowest column: the
-  desktop card). The day axis names all seven weekdays when a row is tall
+  (`fitMonthLabels` in `month-labels.ts`, at the measured column pitch, or
+  the narrowest card's before a cell is measured). The day axis names all seven weekdays when a row is tall
   enough for each name, else Mon, Wed and Fri (`axisWeekdays`, from the
   measured cell size), and today's weekday in bold; a dot under today's
   column marks it (Finn, 2026-11-02). A legend of the series is below it;
@@ -187,11 +204,35 @@ has no keys to validate.
   2026-11-02): the day named once, then a line per series logged on it,
   with the entry's text after the day (`Entry.detail`, read only). A
   divider runs between two days, never inside one. Five days at first and
-  ten more for each **Show more**. The heatmap is for reading; the strip
-  and the cards log.
+  ten more for each **Show more**.
 - The month shown moves with the arrows beside its name; **This month**
   comes back. The page refreshes its idea of today every minute, so a tab
   left open over midnight moves on.
+
+### Habits to avoid
+
+Finn, 2026-11-03: "i am also tracking a negative activity which needs to be
+considered in the stats". A series whose `goal` is `avoid` (**Goal** in
+**Series**; `do`, the default, clears the key) is a habit to keep away
+from. Its entries are written as any series's are: a logged day is a
+**slip**. What changes is how it counts (`cleanSummary`):
+
+- It is left out of the active days, so a slip never lifts the page's
+  streak or windows.
+- It has its own group in the stats row, named with its dot and **Avoid**
+  (the active days' group is then named **Active days**): **Streak** is the
+  clean days in a row up to today, today one of them until a slip is logged
+  on it; **Last 7 days** and **Last 28 days** count the clean days in each
+  window; **All time** counts the clean days from the tracker's first entry
+  (`trackingStart`, over every series: a block holds no date of its own, so
+  that is where the tracker was first in use). No day before it counts.
+- Its card's streak is the clean streak.
+- In the heatmap and on its card a slip keeps the series's colour and wears
+  a cross (`SlipMark`), so it reads as a bad day. The other way, filling
+  every clean day, was not taken: an avoided habit is clean on most days,
+  and its colour on every cell would drown the habits to keep.
+
+A target on a series to avoid still reads as one to reach.
 
 ### Colour
 
@@ -211,9 +252,12 @@ entry, midnight and daylight-saving edges), the heatmap's weeks, the Recent
 order, the entry text in both shapes and the ops; `src/components/trackers/month-grid.test.tsx` renders
 the grid and the strip; `src/data/key-events.test.ts` pins the key
 validation. `page.stories.tsx` shows the whole page body with sample data
-(the stats row, the strip, the activity card and the cards);
+(the stats row, the strip, the activity card and the cards), with a series
+to avoid, and `DayEditor` the day editor open on yesterday;
 `month-grid.stories.tsx` the cards at desktop and phone widths;
 `activity.stories.tsx` the stats row and the activity card;
 `activity.test.tsx` the heatmap's tracks, square rows and labels, the
-Recent groups and the stats; `display-groups.test.tsx` the ⋯ menu's
+day taps and arrow keys, the placeholders' wash, the slips, the Recent
+groups and the stats with a series to avoid; `day-dialog.test.tsx` the day
+editor as a dialog and as a sheet; `display-groups.test.tsx` the ⋯ menu's
 Heatmap and Cards rows.

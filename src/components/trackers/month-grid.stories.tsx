@@ -17,6 +17,7 @@ const BASE: Series = {
   target: null,
   period: "day",
   rollup: "sum",
+  goal: "do",
 }
 
 function stateOf(series: Partial<Series>, logged: Record<string, boolean | number>): SeriesState {
@@ -78,7 +79,6 @@ const SERIES: SeriesState[] = [
  * the month grid, on live state so the story can be logged into. */
 function Tracker({ series: initial, width }: { series: SeriesState[]; width: number }) {
   const [series, setSeries] = React.useState(initial)
-  const [day, setDay] = React.useState(TODAY)
   const setEntry = (seriesId: string, date: string, value: boolean | number | null) =>
     setSeries((prev) =>
       prev.map((state) => {
@@ -91,22 +91,9 @@ function Tracker({ series: initial, width }: { series: SeriesState[]; width: num
     )
   return (
     <div className="flex flex-col gap-4 bg-bg p-4" style={{ width }}>
-      <TodayStrip
-        series={series}
-        day={day}
-        today={TODAY}
-        onSetEntry={setEntry}
-        onBackToToday={() => setDay(TODAY)}
-      />
+      <TodayStrip series={series} today={TODAY} onSetEntry={setEntry} />
       <h2 className="font-bold">{rangeLabel("month", TODAY)}</h2>
-      <MonthGrid
-        series={series}
-        start={TODAY}
-        today={TODAY}
-        selectedDay={day}
-        onToggle={(seriesId, cellDay, done) => setEntry(seriesId, cellDay, done ? true : null)}
-        onPickDay={(cellDay) => setDay(cellDay)}
-      />
+      <MonthGrid series={series} start={TODAY} today={TODAY} onOpenDay={() => {}} />
     </div>
   )
 }

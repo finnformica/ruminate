@@ -21,6 +21,7 @@ const BASE: Series = {
   target: null,
   period: "day",
   rollup: "sum",
+  goal: "do",
 }
 
 function stateOf(series: Partial<Series>, logged: Record<string, boolean | number>): SeriesState {
@@ -38,16 +39,7 @@ const RUN = stateOf(
 
 describe("MonthGrid", () => {
   it("draws one card per series, seven columns from Monday, with every day of the month", () => {
-    render(
-      <MonthGrid
-        series={[READ, RUN]}
-        start="2026-10-01"
-        today={TODAY}
-        selectedDay={TODAY}
-        onToggle={() => {}}
-        onPickDay={() => {}}
-      />,
-    )
+    render(<MonthGrid series={[READ, RUN]} start="2026-10-01" today={TODAY} onOpenDay={() => {}} />)
     const cards = screen.getAllByTestId("series-card")
     expect(cards).toHaveLength(2)
     const read = within(cards[0])
@@ -72,19 +64,9 @@ describe("MonthGrid", () => {
   })
 
   it("fills a logged day, marks today, and disables the days after it", () => {
-    render(
-      <MonthGrid
-        series={[READ]}
-        start="2026-10-01"
-        today={TODAY}
-        selectedDay={TODAY}
-        onToggle={() => {}}
-        onPickDay={() => {}}
-      />,
-    )
+    render(<MonthGrid series={[READ]} start="2026-10-01" today={TODAY} onOpenDay={() => {}} />)
     const done = screen.getByRole("button", { name: "Mon 26 Oct: done" })
     expect(done.getAttribute("data-level")).toBe("4")
-    expect(done.getAttribute("aria-pressed")).toBe("true")
     const today = screen.getByRole("button", { name: "Tue 27 Oct: nothing" })
     expect(today.getAttribute("aria-current")).toBe("date")
     expect(today.getAttribute("data-level")).toBe("0")
@@ -93,16 +75,7 @@ describe("MonthGrid", () => {
   })
 
   it("shows the streak, the month's rollup and the target's progress", () => {
-    render(
-      <MonthGrid
-        series={[READ, RUN]}
-        start="2026-10-01"
-        today={TODAY}
-        selectedDay={TODAY}
-        onToggle={() => {}}
-        onPickDay={() => {}}
-      />,
-    )
+    render(<MonthGrid series={[READ, RUN]} start="2026-10-01" today={TODAY} onOpenDay={() => {}} />)
     const [read, run] = screen.getAllByTestId("series-card")
     // Two days in a row up to yesterday, two ticks this month.
     expect(within(read).getByText("2d")).toBeTruthy()
@@ -118,42 +91,41 @@ describe("MonthGrid", () => {
     expect(within(run).getByText("4/10 km this week")).toBeTruthy()
   })
 
-  it("toggles a check series's day and picks a number series's day", () => {
-    const onToggle = vi.fn()
-    const onPickDay = vi.fn()
+  it("opens the day editor on any day up to today, on any series", () => {
+    const onOpenDay = vi.fn()
     render(
-      <MonthGrid
-        series={[READ, RUN]}
-        start="2026-10-01"
-        today={TODAY}
-        selectedDay={TODAY}
-        onToggle={onToggle}
-        onPickDay={onPickDay}
-      />,
+      <MonthGrid series={[READ, RUN]} start="2026-10-01" today={TODAY} onOpenDay={onOpenDay} />,
     )
     const [read, run] = screen.getAllByTestId("series-card")
     fireEvent.click(within(read).getByRole("button", { name: "Mon 26 Oct: done" }))
-    expect(onToggle).toHaveBeenCalledWith("s1", "2026-10-26", false)
-    fireEvent.click(within(read).getByRole("button", { name: "Sat 24 Oct: nothing" }))
-    expect(onToggle).toHaveBeenCalledWith("s1", "2026-10-24", true)
-    fireEvent.click(within(run).getByRole("button", { name: "Mon 26 Oct: nothing" }))
-    expect(onPickDay).toHaveBeenCalledWith("2026-10-26")
-    expect(onToggle).toHaveBeenCalledTimes(2)
+    expect(onOpenDay).toHaveBeenLastCalledWith("2026-10-26")
+    fireEvent.click(within(run).getByRole("button", { name: "Sat 24 Oct: nothing" }))
+    expect(onOpenDay).toHaveBeenLastCalledWith("2026-10-24")
+    expect(onOpenDay).toHaveBeenCalledTimes(2)
+  })
+
+  it("names a series to avoid, counts its clean streak and marks a slip", () => {
+    const smoke = stateOf(
+      { id: "s3", name: "Smoke", goal: "avoid", colour: "red" },
+      { "2026-10-24": true },
+    )
+    render(
+      <MonthGrid series={[READ, smoke]} start="2026-10-01" today={TODAY} onOpenDay={() => {}} />,
+    )
+    const card = screen.getAllByTestId("series-card")[1]
+    expect(within(card).getByText("Avoid")).toBeTruthy()
+    // Clean on the 25th, the 26th and today, the 27th.
+    expect(within(card).getByText("3d").parentElement?.title).toBe("Clean days in a row")
+    const slip = within(card).getByRole("button", { name: "Sat 24 Oct: done" })
+    expect(slip.querySelector("[data-slip]")).toBeTruthy()
+    expect(card.querySelectorAll("[data-slip]")).toHaveLength(1)
   })
 })
 
 describe("TodayStrip", () => {
   it("ticks and clears a check series on the day", () => {
     const onSetEntry = vi.fn()
-    render(
-      <TodayStrip
-        series={[READ]}
-        day={TODAY}
-        today={TODAY}
-        onSetEntry={onSetEntry}
-        onBackToToday={() => {}}
-      />,
-    )
+    render(<TodayStrip series={[READ]} today={TODAY} onSetEntry={onSetEntry} />)
     expect(screen.getByRole("heading", { name: "Today" })).toBeTruthy()
     const pill = screen.getByTestId("check-control")
     expect(pill.getAttribute("aria-pressed")).toBe("false")
@@ -163,15 +135,7 @@ describe("TodayStrip", () => {
 
   it("steps a number series by its step, within its bounds, and takes a typed value", () => {
     const onSetEntry = vi.fn()
-    render(
-      <TodayStrip
-        series={[RUN]}
-        day={TODAY}
-        today={TODAY}
-        onSetEntry={onSetEntry}
-        onBackToToday={() => {}}
-      />,
-    )
+    render(<TodayStrip series={[RUN]} today={TODAY} onSetEntry={onSetEntry} />)
     fireEvent.click(screen.getByRole("button", { name: "More Run" }))
     expect(onSetEntry).toHaveBeenLastCalledWith("s2", TODAY, 4.5)
     fireEvent.click(screen.getByRole("button", { name: "Less Run" }))
@@ -186,19 +150,10 @@ describe("TodayStrip", () => {
     expect(onSetEntry).toHaveBeenLastCalledWith("s2", TODAY, null)
   })
 
-  it("names a picked day and offers the way back to today", () => {
-    const onBackToToday = vi.fn()
-    render(
-      <TodayStrip
-        series={[READ]}
-        day="2026-10-20"
-        today={TODAY}
-        onSetEntry={() => {}}
-        onBackToToday={onBackToToday}
-      />,
-    )
-    expect(screen.getByRole("heading", { name: "Tue 20 Oct" })).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "Today" }))
-    expect(onBackToToday).toHaveBeenCalled()
+  it("logs today only: no day arrows and no Yesterday", () => {
+    render(<TodayStrip series={[READ]} today={TODAY} onSetEntry={() => {}} />)
+    expect(screen.getByRole("heading", { name: "Today" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Yesterday" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Previous day" })).toBeNull()
   })
 })

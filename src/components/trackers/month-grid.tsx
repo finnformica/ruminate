@@ -2,15 +2,17 @@ import React from "react"
 import {
   WEEKDAY_LABELS,
   cellLevel,
+  cleanSummary,
   dayLabel,
   formatAmount,
-  isDone,
+  isLogged,
   monthGrid,
   monthOf,
   rangeDays,
   rollup,
   streak,
   targetProgress,
+  trackingStart,
   type DayString,
   type SeriesState,
   type TrackerColour,
@@ -37,6 +39,43 @@ export function ColourDot({ colour }: { colour: TrackerColour }) {
   )
 }
 
+/** The palette names whose solid step reads with dark marks on it, as
+ * Radix's own guidance has it; the rest take white. */
+const DARK_ON: readonly TrackerColour[] = ["amber", "yellow"]
+
+/**
+ * A slip on a series to avoid (`goal: avoid`, Finn 2026-11-03): a cross
+ * over the day's fill, so a day it was logged on reads as a bad day in the
+ * heatmap and on its card. Drawn in the colour that reads on `colour`'s
+ * solid step. Its parent is `relative`.
+ */
+export function SlipMark({ colour }: { colour: TrackerColour }) {
+  return (
+    <svg
+      aria-hidden
+      data-slip
+      viewBox="0 0 10 10"
+      className="pointer-events-none absolute inset-0 m-auto size-3/5"
+      fill="none"
+      stroke={DARK_ON.includes(colour) ? "rgb(0 0 0 / 0.75)" : "white"}
+      strokeWidth={1.5}
+      strokeLinecap="round"
+    >
+      <path d="M2 2l6 6M8 2l-6 6" />
+    </svg>
+  )
+}
+
+/** A series to avoid, named as one beside its name: in the cards, the
+ * stats row and the heatmap's legend. */
+export function AvoidTag() {
+  return (
+    <span className="shrink-0 rounded-sm border border-border px-1 text-xs leading-4 font-normal text-text-secondary">
+      Avoid
+    </span>
+  )
+}
+
 const WEEKDAY_NAMES = [
   "Monday",
   "Tuesday",
@@ -55,32 +94,29 @@ const WEEKDAY_NAMES = [
  * and, with a target, how far towards it. The cards flow into as many
  * columns as fit, so on a phone they stack and nothing scrolls sideways.
  *
- * A tap on a cell: a check series toggles the day; a number series picks
- * the day, which the Today strip then logs. A day after today is not
- * loggable and is drawn faint.
+ * A tap on a cell opens the day editor for that day (day-dialog.tsx, Finn
+ * 2026-11-03), where every series's value on it can be added, changed or
+ * cleared. A day after today cannot be opened and is drawn faint. A series
+ * to avoid counts its streak in clean days (`cleanSummary`) and marks a
+ * slip with a cross.
  */
 export function MonthGrid({
   series,
   start,
   today,
-  selectedDay,
-  onToggle,
-  onPickDay,
+  onOpenDay,
 }: {
   series: readonly SeriesState[]
   /** Any day in the month shown. */
   start: DayString
   today: DayString
-  /** The day the strip is logging, when it is not today. */
-  selectedDay: DayString
-  /** A check series's cell was tapped: tick or clear that day. */
-  onToggle: (seriesId: string, day: DayString, done: boolean) => void
-  /** A number series's cell was tapped: log that day in the strip. */
-  onPickDay: (day: DayString) => void
+  /** A cell was tapped: open the day editor on that day. */
+  onOpenDay: (day: DayString) => void
 }) {
   const month = monthOf(start)
   const days = React.useMemo(() => rangeDays("month", start), [start])
   const rows = React.useMemo(() => monthGrid(month), [month])
+  const tracked = React.useMemo(() => trackingStart(series), [series])
   return (
     <div
       data-testid="month-grid"
@@ -93,9 +129,8 @@ export function MonthGrid({
           rows={rows}
           days={days}
           today={today}
-          selectedDay={selectedDay}
-          onToggle={onToggle}
-          onPickDay={onPickDay}
+          tracked={tracked}
+          onOpenDay={onOpenDay}
         />
       ))}
     </div>
@@ -107,22 +142,22 @@ function SeriesCard({
   rows,
   days,
   today,
-  selectedDay,
-  onToggle,
-  onPickDay,
+  tracked,
+  onOpenDay,
 }: {
   state: SeriesState
   /** The weeks of the month, rows of seven from Monday. */
   rows: (DayString | null)[][]
   days: DayString[]
   today: DayString
-  selectedDay: DayString
-  onToggle: (seriesId: string, day: DayString, done: boolean) => void
-  onPickDay: (day: DayString) => void
+  /** The tracker's first entry (`trackingStart`): where clean days start. */
+  tracked: DayString | null
+  onOpenDay: (day: DayString) => void
 }) {
   const { series } = state
   const name = series.name.trim() || "Untitled"
-  const run = streak(state, today)
+  const avoid = series.goal === "avoid"
+  const run = avoid ? cleanSummary(state, tracked, today).streak : streak(state, today)
   const total = rollup(state, days)
   const progress = targetProgress(state, today)
   return (
@@ -136,15 +171,22 @@ function SeriesCard({
         <h2 className="flex min-w-0 items-center gap-2 font-bold leading-4">
           <ColourDot colour={series.colour} />
           <span className="truncate">{name}</span>
+          {avoid ? <AvoidTag /> : null}
         </h2>
         <dl className="flex shrink-0 gap-3 text-sm text-text-secondary tabular-nums">
-          <div className="flex gap-1" title="Days in a row">
+          <div className="flex gap-1" title={avoid ? "Clean days in a row" : "Days in a row"}>
             <dt className="sr-only">Streak</dt>
             <dd>{run}d</dd>
           </div>
           <div
             className="flex gap-1"
-            title={series.kind === "check" ? "Days this month" : "This month"}
+            title={
+              avoid
+                ? "Days logged this month"
+                : series.kind === "check"
+                  ? "Days this month"
+                  : "This month"
+            }
           >
             <dt className="sr-only">This month</dt>
             <dd>
@@ -223,9 +265,7 @@ function SeriesCard({
                   day={day}
                   days={days}
                   today={today}
-                  selected={day === selectedDay && selectedDay !== today}
-                  onToggle={onToggle}
-                  onPickDay={onPickDay}
+                  onOpenDay={onOpenDay}
                 />
               ),
             )}
@@ -237,34 +277,30 @@ function SeriesCard({
 }
 
 /**
- * One day of one series: a cell of its card. A tap on a
- * check series toggles the day; on a number series it picks the day for the
- * Today strip. A day after today is faint and not loggable.
+ * One day of one series: a cell of its card. A tap opens the day editor on
+ * that day. A day after today is faint and cannot be opened. A slip on a
+ * series to avoid wears a cross.
  */
 function DayCell({
   state,
   day,
   days,
   today,
-  selected,
-  onToggle,
-  onPickDay,
+  onOpenDay,
 }: {
   state: SeriesState
   day: DayString
   /** The days shown: a number cell is scaled against their best. */
   days: readonly DayString[]
   today: DayString
-  selected: boolean
-  onToggle: (seriesId: string, day: DayString, done: boolean) => void
-  onPickDay: (day: DayString) => void
+  onOpenDay: (day: DayString) => void
 }) {
   const { series } = state
   const level = cellLevel(state, day, days)
   const entry = state.entries.get(day)
   const future = day > today
   const check = series.kind === "check"
-  const done = isDone(state, day)
+  const slip = series.goal === "avoid" && isLogged(state, day)
   const logged =
     entry === undefined
       ? "nothing"
@@ -276,27 +312,28 @@ function DayCell({
       <button
         type="button"
         aria-label={`${dayLabel(day)}: ${logged}`}
-        aria-pressed={check ? done : undefined}
+        aria-haspopup="dialog"
         aria-current={day === today ? "date" : undefined}
         data-testid="day-cell"
         data-day={day}
         data-series={series.id}
         data-level={level}
         disabled={future}
-        onClick={() => (check ? onToggle(series.id, day, !done) : onPickDay(day))}
+        onClick={() => onOpenDay(day)}
         // The wall's tile, at a day's size: the one focus ring, the control
-        // radius, the hover tint on an empty day, the selected ring, and the
-        // disabled fade on a day that has not come.
+        // radius, the hover tint on an empty day, and the disabled fade on a
+        // day that has not come.
         className={cx(
-          "focus-ring block size-full cursor-pointer rounded bg-bg-secondary disabled:cursor-default disabled:opacity-50",
+          "focus-ring relative block size-full cursor-pointer rounded bg-bg-secondary disabled:cursor-default disabled:opacity-50",
           level === 0 && "enabled:hover:bg-bg-hover",
           day === today && "ring-2 ring-border",
-          selected && "ring-2 ring-border-selected",
         )}
         style={
           level > 0 ? { backgroundColor: colourVar(series.colour, LEVEL_STEPS[level]) } : undefined
         }
-      />
+      >
+        {slip ? <SlipMark colour={series.colour} /> : null}
+      </button>
     </div>
   )
 }

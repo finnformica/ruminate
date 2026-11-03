@@ -66,6 +66,7 @@ const SERIES: SeriesState = {
     target: null,
     period: "day",
     rollup: "sum",
+    goal: "do",
   },
   entries: new Map(),
 }
@@ -94,6 +95,18 @@ describe("SeriesDialog on a phone", () => {
     expect(item.closest(".z-modal")).not.toBeNull()
     tap(item)
     expect(writes.updateSeries).toHaveBeenCalledWith("s1", { colour: "blue" })
+  })
+
+  it("sets a series to avoid, and back to do by clearing the key", async () => {
+    const writes = renderDialog()
+    await frames()
+    tap(screen.getByRole("button", { name: "Goal" }))
+    tap(await screen.findByRole("menuitem", { name: "Avoid" }))
+    expect(writes.updateSeries).toHaveBeenLastCalledWith("s1", { goal: "avoid" })
+    await frames()
+    tap(screen.getByRole("button", { name: "Goal" }))
+    tap(await screen.findByRole("menuitem", { name: "Do" }))
+    expect(writes.updateSeries).toHaveBeenLastCalledWith("s1", { goal: null })
   })
 
   it("takes a tap on Cancel and on Remove in the confirmation", async () => {

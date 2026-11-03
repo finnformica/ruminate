@@ -1,9 +1,11 @@
 import React from "react"
 import {
+  SERIES_GOALS,
   SERIES_KINDS,
   SERIES_PERIODS,
   SERIES_ROLLUPS,
   TRACKER_PALETTE,
+  type SeriesGoal,
   type SeriesKind,
   type SeriesPatch,
   type SeriesPeriod,
@@ -28,6 +30,7 @@ import { ColourDot } from "./month-grid"
 const KIND_LABELS: Record<SeriesKind, string> = { check: "Check", number: "Number" }
 const PERIOD_LABELS: Record<SeriesPeriod, string> = { day: "Day", week: "Week", month: "Month" }
 const ROLLUP_LABELS: Record<SeriesRollup, string> = { sum: "Sum", avg: "Average" }
+const GOAL_LABELS: Record<SeriesGoal, string> = { do: "Do", avoid: "Avoid" }
 const COLOUR_LABELS: Record<TrackerColour, string> = {
   amber: "Amber",
   blue: "Blue",
@@ -44,7 +47,8 @@ const COLOUR_LABELS: Record<TrackerColour, string> = {
 /**
  * **Series** in a tracker's ⋯ menu (docs/trackers.md, "Series"): the
  * tracker's series as a list of cards, one each in the page's order — the
- * name, the kind, the colour, a target and the period it is for, and for a
+ * name, the kind, the colour, a target and the period it is for, the goal
+ * (a habit to keep or one to avoid), and for a
  * number series its unit, how it adds up, step, min and max. Every change
  * is written as it is made, through the tracker's own writes, and the page
  * shows it. **Add series** makes a check series named "New series" with its
@@ -183,6 +187,16 @@ function SeriesForm({
           options={SERIES_PERIODS}
           labels={PERIOD_LABELS}
           onPick={(period) => update({ period })}
+        />
+        {/* A habit to avoid counts clean days in its stats. Do is the
+            default, so it clears the key. */}
+        <Picker
+          id={field("goal")}
+          label="Goal"
+          value={series.goal}
+          options={SERIES_GOALS}
+          labels={GOAL_LABELS}
+          onPick={(goal) => update({ goal: goal === "avoid" ? "avoid" : null })}
         />
         {isNumber ? (
           <>

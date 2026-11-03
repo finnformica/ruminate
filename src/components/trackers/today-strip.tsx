@@ -1,6 +1,5 @@
 import React from "react"
 import {
-  dayLabel,
   formatAmount,
   isDone,
   stepValue,
@@ -15,43 +14,56 @@ import { TextInput } from "../ui/text-input"
 import { ColourDot } from "./month-grid"
 
 /**
- * The Today strip (docs/trackers.md): one control per series to log the day
+ * The Today strip (docs/trackers.md): one control per series to log today
  * fast. A check series is a pill that ticks and clears the day — pressed, it
  * wears the pill's applied state, as a scope pill does. A number series is
  * a field with − and + by the series's `step`, laid out as the app's forms
- * are. The series's colour is the dot beside its name and nothing else.
- * Today by default; a tap on a number series's cell in the grid points the
- * strip at that day instead, named in the heading, with **Today** to come
- * back. The controls wrap, so on a phone the strip grows down rather than
- * sideways.
+ * are. The series's colour is the dot beside its name and nothing else. A
+ * past day is logged in the day editor (day-dialog.tsx), from a tap on the
+ * day in the heatmap or on a card. The controls wrap, so on a phone the
+ * strip grows down rather than sideways.
  */
 export function TodayStrip({
   series,
-  day,
   today,
   onSetEntry,
-  onBackToToday,
 }: {
   series: readonly SeriesState[]
-  /** The day being logged. */
-  day: DayString
   today: DayString
-  onSetEntry: (seriesId: string, day: DayString, value: boolean | number | null) => void
-  onBackToToday: () => void
+  onSetEntry: SetEntry
 }) {
-  const isToday = day === today
+  return (
+    <section data-testid="today-strip" className="flex flex-col gap-4">
+      <h2 className="font-bold leading-4">Today</h2>
+      <DayControls series={series} day={today} onSetEntry={onSetEntry} idPrefix="today" />
+    </section>
+  )
+}
+
+/** A day's value on a series: `null` or `false` clears the day. */
+type SetEntry = (seriesId: string, day: DayString, value: boolean | number | null) => void
+
+/**
+ * One control per series for one day: the check pills in a row, then the
+ * number fields. The Today strip and the day editor (day-dialog.tsx) both
+ * draw these, and both write through the same `onSetEntry`. `idPrefix`
+ * keeps the fields' ids apart when both are on the page.
+ */
+export function DayControls({
+  series,
+  day,
+  onSetEntry,
+  idPrefix,
+}: {
+  series: readonly SeriesState[]
+  day: DayString
+  onSetEntry: SetEntry
+  idPrefix: string
+}) {
   const checks = series.filter((state) => state.series.kind === "check")
   const numbers = series.filter((state) => state.series.kind === "number")
   return (
-    <section data-testid="today-strip" className="flex flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <h2 className="font-bold leading-4">{isToday ? "Today" : dayLabel(day)}</h2>
-        {isToday ? null : (
-          <PillButton variant="dashed" onClick={onBackToToday}>
-            Today
-          </PillButton>
-        )}
-      </div>
+    <>
       {checks.length > 0 ? (
         <ul className="flex flex-wrap gap-2">
           {checks.map((state) => (
@@ -64,13 +76,20 @@ export function TodayStrip({
       {numbers.length > 0 ? (
         <ul className="flex flex-wrap gap-4">
           {numbers.map((state) => (
-            <li key={state.series.id} className="min-w-0 max-w-full">
-              <NumberControl state={state} day={day} onSetEntry={onSetEntry} />
+            // Keyed by the day too, so a value typed and not yet committed
+            // does not follow the field to another day.
+            <li key={`${state.series.id}-${day}`} className="min-w-0 max-w-full">
+              <NumberControl
+                state={state}
+                day={day}
+                onSetEntry={onSetEntry}
+                id={`${idPrefix}-${state.series.id}`}
+              />
             </li>
           ))}
         </ul>
       ) : null}
-    </section>
+    </>
   )
 }
 
@@ -81,7 +100,7 @@ function CheckControl({
 }: {
   state: SeriesState
   day: DayString
-  onSetEntry: (seriesId: string, day: DayString, value: boolean | number | null) => void
+  onSetEntry: SetEntry
 }) {
   const { series } = state
   const done = isDone(state, day)
@@ -104,16 +123,18 @@ function NumberControl({
   state,
   day,
   onSetEntry,
+  id,
 }: {
   state: SeriesState
   day: DayString
-  onSetEntry: (seriesId: string, day: DayString, value: boolean | number | null) => void
+  onSetEntry: SetEntry
+  /** The field's id, for its label. */
+  id: string
 }) {
   const { series } = state
   const entry = state.entries.get(day)
   const current = typeof entry?.value === "number" ? entry.value : 0
   const name = series.name.trim() || "Untitled"
-  const id = `today-${series.id}`
   // What is typed, until it is committed on blur or Enter.
   const [draft, setDraft] = React.useState<string | null>(null)
   const commit = () => {
