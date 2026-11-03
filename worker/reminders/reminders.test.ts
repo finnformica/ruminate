@@ -47,7 +47,13 @@ const child = (source: string, destination: string, sortKey: string): LinkRow =>
 async function seedTracker(
   userId: number,
   tracker: { id: string; title: string },
-  series: { id: string; name: string; kind: "check" | "number"; entries: [string, string][] }[],
+  series: {
+    id: string
+    name: string
+    kind: "check" | "number"
+    goal?: "avoid"
+    entries: [string, string][]
+  }[],
   extra: { nodes?: NodeRow[]; links?: LinkRow[] } = {},
 ): Promise<void> {
   const nodes: NodeRow[] = [node(tracker.id, "tracker", tracker.title)]
@@ -55,7 +61,7 @@ async function seedTracker(
   series.forEach((one, at) => {
     nodes.push(
       node(one.id, "ul", one.name, {
-        props: JSON.stringify({ kind: one.kind }),
+        props: JSON.stringify(one.goal ? { kind: one.kind, goal: one.goal } : { kind: one.kind }),
         notes_id: tracker.id,
       }),
     )
@@ -94,6 +100,8 @@ beforeAll(async () => {
       { id: "ser_run", name: "Run", kind: "number", entries: [["text", `${TODAY} · 5 km`]] },
       { id: "ser_stretch", name: "Stretch", kind: "number", entries: [["text", `${TODAY} · 0`]] },
       { id: "ser_water", name: "Water", kind: "check", entries: [] },
+      // A habit to avoid, nothing logged today: a clean day, not a missing one.
+      { id: "ser_smoke", name: "Smoke", kind: "check", goal: "avoid", entries: [] },
     ],
     {
       // A child of the tracker that is not a series, and a day-titled row
@@ -115,7 +123,7 @@ beforeAll(async () => {
 })
 
 describe("the missing habits", () => {
-  it("are the series with nothing logged today: an open to-do, a zero, or no entry", async () => {
+  it("are the series to keep with nothing logged today: an open to-do, a zero, or no entry", async () => {
     const { habits, missing } = await checkHabits(harness.tenant(USER), TODAY)
     expect(habits.map((habit) => habit.name)).toEqual([
       "Read",
@@ -242,7 +250,7 @@ describe("the plans", () => {
       recorded[1].params,
     )
     expect(entriesPlan.map((row) => String(row.detail)).join("\n")).toContain(
-      "nodes_tenant_day_text",
+      "events_log_cache_day_text",
     )
   })
 

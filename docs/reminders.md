@@ -62,41 +62,48 @@ gone, failed, rowsRead}`.
 
 ### What a missing habit is
 
-A series of a live tracker (a child of the tracker whose props carry
-`kind`) with nothing logged today: no entry of the day, an open to-do, or a
-zero. That is `isLogged` of src/data/tracker.ts, the tracker page's own
-question.
+A series to keep (`goal: do`, the default) of a live tracker with nothing
+logged today: no entry of the day, an open to-do, or a zero. A series is a
+child of the tracker whose props carry `kind`. That is `isLogged` of
+src/data/tracker.ts, the tracker page's own question. A series to avoid
+(`goal: avoid`, docs/trackers.md) is never missing: a logged day is a slip
+there, and an empty day is a clean one.
 
 ### The reads, and their cost
 
-Both reads go through the projections of the log: `nodes`, `link`, and a
-block's props as its `delta_mat_values` rows (docs/event-sourcing.md). Each
-is bounded by its question:
+Both reads go through the cache of the log, `events_log_cache`
+(docs/events-log-cache.md), the way the Worker's other readers do
+(`worker/handlers/cache-reads.ts`, `worker/mcp/graph-load.ts`): hops on the
+`source_id` and `destination_id` indexes, child links named by
+`GLOB '*|child'`, and liveness from the `deleted` key. Each read is bounded
+by its question:
 
-- **The series**: the live trackers on `nodes_tenant_type`, one hop down on
-  `link_tenant_source`, then primary-key seeks for each child and its
-  `kind` key in `delta_mat_values`.
+- **The series**: the live trackers on the `type` index, one hop down on
+  the `source_id` index, then primary-key seeks for each child's `kind`,
+  `goal`, text and liveness.
 - **Today's entries**: the live blocks whose text begins with today, on the
-  partial index `nodes_tenant_day_text` (migrations/0033), then one hop up
-  on `link_tenant_destination`. The index holds only live text that begins
-  with a year. Its condition is on `substr(text, 1, 4)`, not on `text`:
-  SQLite turns `text GLOB '[0-9]…'` into the range `'0' <= text < ':'` and
-  seeks on that instead of on the day, which reads every entry of every day.
+  partial index `events_log_cache_day_text` (migrations/0033), then one hop
+  up on the `destination_id` index. The index holds only text that begins
+  with a year. Its condition is on `substr(value, 1, 5)`, not on `value`:
+  SQLite turns `value GLOB '"[0-9]…'` into the range `'"' <= value < '#'`
+  and seeks on that instead of on the day, which reads every entry of every
+  day.
 
-When the cache of the log lands (PR #310, `events_log_cache`), these reads
-move to the cache table, and the index moves with them.
+Neither read is a compound SELECT.
 
-Measured on a local miniflare D1 (2026-11-02, main's schema). Each reader
-has two trackers of four series, a year of entries in each, and 2,000 other
-blocks (4,956 blocks each). Each reader has two devices due.
+Measured on a local miniflare D1 (2026-11-03, main with #310). Each reader
+has two trackers of four series, a year of entries in each, and 2,000
+other blocks (4,956 blocks each). Each reader has two devices due.
 
 | run                              | blocks | rows read |
 | -------------------------------- | ------ | --------- |
-| 1 reader due (2 subscriptions)   | 4,956  | 52        |
-| 5 readers due (10 subscriptions) | 24,780 | 268       |
+| 1 reader due (2 subscriptions)   | 4,956  | 118       |
+| 5 readers due (10 subscriptions) | 24,780 | 598       |
 | nothing due                      | 24,780 | 1         |
 
-About 53 rows per reader due, whatever the size of the corpus.
+About 120 rows per reader due, whatever the size of the corpus. The cache
+holds one row per key, so each block and link is a few seeks rather than
+one.
 
 ## Web Push
 
