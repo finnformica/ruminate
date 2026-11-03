@@ -15,13 +15,21 @@ import {
   type ActiveSummary,
   type DayString,
   type MonthString,
+  type Series,
   type SeriesState,
-  type TrackerColour,
 } from "../../data/tracker"
 import { cx } from "../../utils/cx"
 import { Button } from "../ui/button"
 import { Surface } from "../ui/surface"
-import { AvoidTag, ColourDot, DAY_RADIUS, DaySquare, colourVar, dayRadius } from "./month-grid"
+import {
+  AvoidTag,
+  ColourDot,
+  DAY_RADIUS,
+  DayDots,
+  DaySquare,
+  type DayDot,
+  dayRadius,
+} from "./month-grid"
 import { fitMonthLabels } from "./month-labels"
 
 /**
@@ -146,22 +154,6 @@ function StatList({ summary, avoiding }: { summary: ActiveSummary; avoiding: str
   )
 }
 
-/** A cell's fill for the colours of the series on its day: the one colour,
- * or the colours side by side in diagonal bands. */
-function cellFill(colours: readonly TrackerColour[]): React.CSSProperties | undefined {
-  if (colours.length === 0) return undefined
-  if (colours.length === 1) return { backgroundColor: colourVar(colours[0], 9) }
-  const band = 100 / colours.length
-  const stops = colours.map(
-    (colour, i) => `${colourVar(colour, 9)} ${i * band}% ${(i + 1) * band}%`,
-  )
-  return { backgroundImage: `linear-gradient(135deg, ${stops.join(", ")})` }
-}
-
-/** How strongly a placeholder takes the colours of its day: a faint wash,
- * so the real day beside it still stands out. */
-const PLACEHOLDER_TINT = 22
-
 const WEEKDAY_NAMES = [
   "Monday",
   "Tuesday",
@@ -189,6 +181,12 @@ const HEATMAP_GAP = 4
  * cell's: the names' size sets the day axis's width and so a cell's, never
  * the grid's. A phone's grid is about 330 px wide, a desktop's about 680. */
 const LARGE_GRID = 480
+
+/** A line of text trimmed to its capitals and its baseline, so the card's
+ * padding is the space seen above the month names and below the legend, as
+ * at the sides (Finn, 2026-11-03: the label rows "centre their text in tall
+ * containers"). An engine without `text-box` keeps the line's own height. */
+const TRIM_TEXT = "[text-box:trim-both_cap_alphabetic]"
 
 /**
  * The heatmap's text and lines at each size. `labelWidth` is a month's short
@@ -297,30 +295,18 @@ function stripes(scale: number): string {
   return `repeating-linear-gradient(135deg, ${PLACEHOLDER_LINE} 0 ${line}px, transparent ${line}px ${period}px)`
 }
 
-/**
- * A placeholder's look: the outline and the stripes over a faint wash of
- * the colours of the day it holds the place of (Finn, 2026-11-03), so what
- * was logged on a split week's days reads across the month's divider. One
- * colour is a flat wash; more are bands, as a day's own fill is.
- */
-function placeholderStyle(colours: readonly TrackerColour[], scale: number): React.CSSProperties {
-  const tint = (colour: TrackerColour) =>
-    `color-mix(in srgb, ${colourVar(colour, 9)} ${PLACEHOLDER_TINT}%, transparent)`
-  const lines = stripes(scale)
-  if (colours.length === 0) return { borderColor: PLACEHOLDER_LINE, backgroundImage: lines }
-  if (colours.length === 1) {
-    return {
-      borderColor: PLACEHOLDER_LINE,
-      backgroundImage: lines,
-      backgroundColor: tint(colours[0]),
-    }
-  }
-  const band = 100 / colours.length
-  const stops = colours.map((colour, i) => `${tint(colour)} ${i * band}% ${(i + 1) * band}%`)
-  return {
-    borderColor: PLACEHOLDER_LINE,
-    backgroundImage: `${lines}, linear-gradient(135deg, ${stops.join(", ")})`,
-  }
+/** The dots for the series on a day: a slip on a series to avoid wears a
+ * cross on its own dot. */
+function dayDots(on: readonly Series[]): DayDot[] {
+  return on.map((s) => ({ colour: s.colour, slip: s.goal === "avoid" }))
+}
+
+/** A placeholder's look: the outline and the stripes. The dots of the day
+ * it holds the place of are drawn faint over them (`DayDots`), so what was
+ * logged on a split week's days reads across the month's divider (Finn,
+ * 2026-11-03). */
+function placeholderStyle(scale: number): React.CSSProperties {
+  return { borderColor: PLACEHOLDER_LINE, backgroundImage: stripes(scale) }
 }
 
 /** A day still to come: a dashed outline, 1 px wide, inside the day
@@ -353,10 +339,12 @@ function FutureOutline({ cellSize }: { cellSize: number | null }) {
 /**
  * The heatmap: one column a week, one row a weekday from Monday, the week
  * today is in at the right edge (`heatmapWeeks`). A cell is a rounded
- * square filled in the colour of the series logged that day, split into
- * bands when there is more than one. Today has a ring, its weekday is named
- * in bold and a dot sits under its column; the days of this week still to
- * come have a dashed outline. A week that runs into a new month is split in
+ * tile with a dot in the colour of each series logged that day, the same
+ * for one series and for many: up to 4 in a 2×2 grid, 5 to 9 smaller in a
+ * 3×3 (`DayDots`, `dotLayout`). Today has a ring,
+ * its weekday and its month are named in bold (Finn, 2026-11-03: no dot
+ * under its column); the days of this week still to come have a faint grey fill and a
+ * dashed outline. A week that runs into a new month is split in
  * two columns (`heatmapColumns`), the other month's days drawn as hollow
  * striped placeholders (no data), so one straight line divides the months: a
  * single element in a narrow track of its own between the two months, from
@@ -371,7 +359,7 @@ function FutureOutline({ cellSize }: { cellSize: number | null }) {
  * desktop the cells grow to fill the card. A tap on a day up to today opens
  * the day editor on it (`onOpenDay`, Finn 2026-11-03); the arrow keys move
  * between days, one tab stop for the grid. A slip on a series to avoid
- * wears a cross. Below it, a legend of the series.
+ * wears a cross on its dot. Below it, a legend of the series.
  */
 function ActivityHeatmap({
   series,
@@ -465,8 +453,8 @@ function ActivityHeatmap({
 
   const weekdays = axisWeekdays(cellSize, todayWeekday)
 
-  // Every item has its place: rows are the names (1), Monday to Sunday (2
-  // to 8) and today's dot (9).
+  // Every item has its place: rows are the names (1) and Monday to Sunday
+  // (2 to 8).
   const at = (column: number, row: number | string): React.CSSProperties => ({
     gridColumn: column,
     gridRow: row,
@@ -486,7 +474,7 @@ function ActivityHeatmap({
         style={{
           gap: HEATMAP_GAP,
           gridTemplateColumns: template,
-          gridTemplateRows: cellSize === null ? undefined : `auto repeat(7, ${cellSize}px) auto`,
+          gridTemplateRows: cellSize === null ? undefined : `auto repeat(7, ${cellSize}px)`,
         }}
       >
         {/* The names: over its divider for a month that starts in the
@@ -502,7 +490,12 @@ function ActivityHeatmap({
                 // Over a divider, the name starts at its track's left edge:
                 // the track is about a letter wide, so the first letter sits
                 // over the line, and the name reads on to the right.
-                className={cx("overflow-visible whitespace-nowrap text-text-secondary", size.month)}
+                className={cx(
+                  "overflow-visible whitespace-nowrap",
+                  TRIM_TEXT,
+                  size.month,
+                  month === monthOf(today) ? "font-bold text-text" : "text-text-secondary",
+                )}
                 style={at(column > 0 ? track[column] - 1 : track[column], 1)}
               >
                 {monthShortLabel(month)}
@@ -532,29 +525,29 @@ function ActivityHeatmap({
               if (day === null) {
                 // Another month's day, in a split week: holds the place as a
                 // hollow square, a hairline outline with hairline stripes
-                // inside in the same solid colour (Finn, 2026-11-02), over a
-                // faint wash of the colours of the day it stands for (Finn,
-                // 2026-11-03).
+                // inside in the same solid colour (Finn, 2026-11-02), under
+                // the faint dots of the day it stands for (Finn, 2026-11-03).
                 const held = column.week[d]
-                const colours = held > today ? [] : seriesOnDay(series, held).map((s) => s.colour)
+                const dots = held > today ? [] : dayDots(seriesOnDay(series, held))
                 return (
                   <div
                     key={`${c}-${d}`}
                     role="gridcell"
                     aria-hidden
                     data-placeholder
-                    data-tint={colours.length}
-                    className="aspect-square border-[0.5px]"
+                    data-tint={dots.length}
+                    className="relative aspect-square border-[0.5px]"
                     style={{
                       ...at(track[c], d + 2),
                       borderRadius: dayRadius,
-                      ...placeholderStyle(colours, cellScale(cellSize)),
+                      ...placeholderStyle(cellScale(cellSize)),
                     }}
-                  />
+                  >
+                    {dots.length > 0 ? <DayDots dots={dots} side={cellSize} faint /> : null}
+                  </div>
                 )
               }
               const on = seriesOnDay(series, day)
-              const slip = on.find((s) => s.goal === "avoid")
               const future = day > today
               const label = `${dayLabel(day)}: ${
                 future
@@ -585,10 +578,11 @@ function ActivityHeatmap({
                     onFocus={() => setFocusDay(day)}
                     today={day === today}
                     toCome={future ? "outline" : undefined}
-                    fill={future ? undefined : cellFill(on.map((s) => s.colour))}
-                    slip={slip?.colour}
                   >
                     {future ? <FutureOutline cellSize={cellSize} /> : null}
+                    {!future && on.length > 0 ? (
+                      <DayDots dots={dayDots(on)} side={cellSize} />
+                    ) : null}
                   </DaySquare>
                 </div>
               )
@@ -606,44 +600,21 @@ function ActivityHeatmap({
             style={at(track[column] - 1, "2 / 9")}
           />
         ))}
-        {/* Under today's column, a dot: where you are. */}
-        {columns.map((column, c) =>
-          column.days.includes(today) ? (
-            <div
-              key={c}
-              aria-hidden
-              data-testid="heatmap-today-mark"
-              data-column={c}
-              className="flex h-1.5 justify-center"
-              style={at(track[c], 9)}
-            >
-              <span className="size-1.5 rounded-full bg-text-secondary" />
-            </div>
-          ) : null,
-        )}
       </div>
       {series.length > 0 ? (
         <ul
           aria-label="Series"
-          className={cx("flex flex-wrap gap-x-4 gap-y-1 text-text-secondary", size.legend)}
+          className={cx("flex flex-wrap gap-x-4 gap-y-2 text-text-secondary", size.legend)}
         >
           {series.map(({ series: s }) => (
             <li key={s.id} className="flex min-w-0 items-center gap-2">
               <ColourDot colour={s.colour} />
-              <span className="truncate">{s.name.trim() || "Untitled"}</span>
+              <span className={cx("overflow-x-clip text-ellipsis whitespace-nowrap", TRIM_TEXT)}>
+                {s.name.trim() || "Untitled"}
+              </span>
               {s.goal === "avoid" ? <AvoidTag /> : null}
             </li>
           ))}
-          {series.length > 1 ? (
-            <li className="flex items-center gap-2">
-              <span
-                aria-hidden
-                className="size-2.5 shrink-0 rounded-full"
-                style={cellFill(series.slice(0, 2).map((s) => s.series.colour))}
-              />
-              <span>More than one</span>
-            </li>
-          ) : null}
         </ul>
       ) : null}
     </div>
