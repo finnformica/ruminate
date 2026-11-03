@@ -434,37 +434,91 @@ const RUN: SeriesState = {
 }
 
 describe("a day with more than one series", () => {
-  it("grows the grid: one square, a 2×2 up to 4, a 3×3 from 5, each filling its cell", () => {
+  it("fills the space: rows of 2 up to 4, rows of 3 from 5, no empty cell", () => {
     expect(dotLayout(0)).toEqual([])
-    const size = (n: number) => new Set(dotLayout(n).map((place) => place.d.toFixed(2)))
-    // One series: one square that fills the space inside the 10% margin.
-    expect(dotLayout(1)).toEqual([{ x: 50, y: 50, d: 80 }])
-    // 2 to 4: one size, two cells and a 6% gap across the 80.
-    for (const n of [2, 3, 4]) {
-      expect(dotLayout(n)).toHaveLength(n)
-      expect([...size(n)]).toEqual(["37.00"])
-    }
-    // Two side by side; two over one; four in the corners, at the margin.
-    expect(dotLayout(2).map((place) => place.y)).toEqual([50, 50])
+    // One series fills the space inside the 10% margin.
+    expect(dotLayout(1)).toEqual([{ x: 10, y: 10, w: 80, h: 80 }])
+    // Two side by side, each the full height.
+    expect(dotLayout(2)).toEqual([
+      { x: 10, y: 10, w: 37, h: 80 },
+      { x: 53, y: 10, w: 37, h: 80 },
+    ])
+    // Three: two over one, the one the full width.
     const three = dotLayout(3)
-    expect(three[0].y).toBe(three[1].y)
-    expect(three[2].x).toBe(50)
-    const four = dotLayout(4)
-    expect(four[0].x - four[0].d / 2).toBe(10)
-    expect(four[3].x + four[3].d / 2).toBe(90)
-    expect(four[1].x - four[1].d / 2 - (four[0].x + four[0].d / 2)).toBeCloseTo(6)
-    // 5 to 9: smaller squares, row by row in a 3×3.
-    for (const n of [5, 6, 7, 8, 9]) {
-      expect(dotLayout(n)).toHaveLength(n)
-      expect(dotLayout(n)[0].d).toBeCloseTo(22.67)
-      expect(dotLayout(n).some((place) => place.more)).toBe(false)
+    expect(three.map((place) => place.w)).toEqual([37, 37, 80])
+    expect(three[2].y).toBe(53)
+    // Each count fills the space: the cells of each row end at the margin.
+    for (const n of [2, 3, 4, 5, 6, 7, 8, 9]) {
+      const places = dotLayout(n)
+      expect(places).toHaveLength(n)
+      const bottom = Math.max(...places.map((place) => place.y + place.h))
+      expect(bottom).toBeCloseTo(90)
+      for (const y of new Set(places.map((place) => place.y))) {
+        const row = places.filter((place) => place.y === y)
+        expect(row[0].x).toBeCloseTo(10)
+        expect(row[row.length - 1].x + row[row.length - 1].w).toBeCloseTo(90)
+      }
     }
-    expect(new Set(dotLayout(9).map((place) => place.x)).size).toBe(3)
-    expect(dotLayout(9)[8].x + dotLayout(9)[8].d / 2).toBeCloseTo(90)
-    // More than 9: eight squares and an outline for the rest.
+    // Rows of 3 from 5: 5 is three over two, 7 three, three and one.
+    expect(dotLayout(5).map((place) => place.w.toFixed(1))).toEqual([
+      "22.7",
+      "22.7",
+      "22.7",
+      "37.0",
+      "37.0",
+    ])
+    expect(dotLayout(7)[6].w).toBe(80)
+    // More than 9: eight cells and an outline for the rest.
     const twelve = dotLayout(12)
     expect(twelve).toHaveLength(9)
     expect(twelve.filter((place) => place.more)).toEqual([twelve[8]])
+  })
+
+  it("puts every edge on a device pixel and keeps the margins equal when snapped", () => {
+    for (const side of [13, 14, 15, 28, 29, 39, 42, 43, 117]) {
+      for (let n = 1; n <= 12; n++) {
+        const places = dotLayout(n, side, side, true)
+        for (const { x, y, w, h } of places) {
+          for (const v of [x, y, w, h]) expect(Number.isInteger(v)).toBe(true)
+        }
+        // Centred: the margin on the right is the margin on the left, the
+        // margin at the foot the margin at the top.
+        const left = Math.min(...places.map((place) => place.x))
+        const right = side - Math.max(...places.map((place) => place.x + place.w))
+        const top = Math.min(...places.map((place) => place.y))
+        const foot = side - Math.max(...places.map((place) => place.y + place.h))
+        expect([side, n, right]).toEqual([side, n, left])
+        expect([side, n, foot]).toEqual([side, n, top])
+      }
+    }
+    // A 14 px phone day: one 12 px square, 1 px clear of each edge.
+    expect(dotLayout(1, 14, 14, true)).toEqual([{ x: 1, y: 1, w: 12, h: 12 }])
+  })
+
+  it("draws the squares in the tile's device pixels, once measured", () => {
+    // A 14.3 px tile at a fractional place, at DPR 2: its edges paint on
+    // pixels 201 and 229, so the tile is 28 device pixels.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      left: 100.4,
+      right: 114.7,
+      top: 50.2,
+      bottom: 64.5,
+      width: 14.3,
+      height: 14.3,
+    } as DOMRect)
+    vi.stubGlobal("devicePixelRatio", 2)
+    render(<ActivityCard series={[READ]} today="2026-10-29" />)
+    const svg = cell("2026-10-28").querySelector("svg")!
+    expect(svg.getAttribute("viewBox")).toBe("0 0 28 29")
+    // Drawn at that size, so one unit of the view box is one device pixel.
+    expect(svg.style.width).toBe("14px")
+    expect(svg.style.height).toBe("14.5px")
+    const square = svg.querySelector("[data-dot]")!
+    expect(square.getAttribute("x")).toBe("3")
+    expect(square.getAttribute("width")).toBe("22")
+    expect(square.getAttribute("y")).toBe("3")
+    expect(square.getAttribute("height")).toBe("23")
+    vi.unstubAllGlobals()
   })
 
   it("draws a dot a series in the heatmap, and the legend has no item for a mix", () => {
@@ -520,30 +574,18 @@ const SMOKE: SeriesState = {
 }
 
 describe("a series to avoid", () => {
-  it("marks a slip in the heatmap with a cross, and names the series in the legend", () => {
+  it("draws a slip in the heatmap as a plain square, and names the series in the legend", () => {
     render(<ActivityCard series={[READ, SMOKE]} today="2026-10-29" />)
-    expect(cell("2026-10-27").querySelector("[data-slip]")).toBeTruthy()
+    // No cross and no outline (Finn, 2026-11-03): a filled square in the
+    // series's colour. The label still names the series as one to avoid.
+    const slip = cell("2026-10-27").querySelector("[data-dot]")!
+    expect(slip.getAttribute("data-dot")).toBe("red")
+    expect(slip.getAttribute("fill")).toContain("--red-9")
+    expect(cell("2026-10-27").querySelector("path")).toBeNull()
+    expect(document.querySelectorAll("[data-day] [data-slip]")).toHaveLength(0)
     expect(cell("2026-10-27").getAttribute("aria-label")).toBe("Tue 27 Oct: Smoke (avoid)")
-    expect(cell("2026-10-28").querySelector("[data-slip]")).toBeNull()
-    expect(document.querySelectorAll("[data-day] [data-slip]")).toHaveLength(1)
     const legend = screen.getByRole("list", { name: "Series" })
     expect(within(legend).getByText("Avoid")).toBeTruthy()
-  })
-
-  it("draws a slip as a square with a cross, or an outline when the square is too small", () => {
-    // A desktop day: a 40 px tile, a square of about 15 px with a white cross.
-    measureCells(40)
-    render(<ActivityCard series={[READ, SMOKE]} today="2026-10-29" />)
-    const large = cell("2026-10-27").querySelector("[data-slip]")!
-    expect(large.querySelector("path")!.getAttribute("stroke")).toBe("white")
-    cleanup()
-    // A 7 px tile: the one square is under 6 px, so an outline in the colour.
-    // (On a 14 px phone day one square is 11 px, and keeps its cross.)
-    measureCells(7)
-    render(<ActivityCard series={[READ, SMOKE]} today="2026-10-29" />)
-    const small = cell("2026-10-27").querySelector("[data-slip] rect")!
-    expect(small.getAttribute("fill")).toBe("none")
-    expect(small.getAttribute("stroke")).toContain("--red-9")
   })
 
   it("has a stats group of its own, in clean days, and stays out of the active days", () => {

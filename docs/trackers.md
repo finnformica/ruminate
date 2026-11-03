@@ -181,13 +181,18 @@ has no keys to validate.
   column a week from Monday with this week at the right edge, a cell is the
   grey tile with a small square in the colour of each series logged that
   day (`seriesOnDay`, `DayDots`), the same design for one series and for
-  many (Finn, 2026-11-03: squares, not dots). Each square fills its cell of
-  a grid inside a 10 % margin (`DOT_MARGIN`), with a 6 % gap between cells
-  (`DOT_GAP`) and a small corner radius (20 % of its side): one series is a
-  1×1 grid, 2 to 4 a 2×2, 5 to 9 a 3×3, and past 9 eight squares and a grey
-  outline for the rest (`dotLayout`, Finn 2026-11-03: "grow the grid"). A
-  slip on a series to avoid is its square with a white cross, or an outline
-  in its colour when the square is under 6 px. Today
+  many (Finn, 2026-11-03: squares, not dots). The squares sit in rows inside
+  a 10 % margin (`DOT_MARGIN`), with a 6 % gap between them (`DOT_GAP`) and
+  a small corner radius (20 % of the shorter side), and fill the space: one
+  series fills it, 2 to 4 are rows of 2, 5 to 9 rows of 3, and a short last
+  row's squares widen to the full width (3 is two over one, 7 three, three
+  and one), so no cell is left empty. Past 9, eight squares and a grey
+  outline for the rest (`dotLayout`, Finn 2026-11-03: "grow the grid", "fill
+  the space"). A slip on a series to avoid is a plain square: the Heatmap
+  has no slip mark (Finn, 2026-11-03). A tile is measured in device pixels
+  and its squares drawn on whole pixels, the margins equal each side: a
+  phone's 14 px tiles sit at fractions of a pixel, and an edge inside a
+  pixel showed one soft side and looked off centre. Today
   with a ring and the rest of this week dashed over a faint grey. A tap on a day up to today opens the day editor on it;
   the grid is one tab stop, and the arrow keys move a day (up, down) or a
   week (left, right). A week that runs into a new month is split into two
@@ -244,8 +249,9 @@ from. Its entries are written as any series's are: a logged day is a
   (`trackingStart`, over every series: a block holds no date of its own, so
   that is where the tracker was first in use). No day before it counts.
 - Its card's streak is the clean streak.
-- In the heatmap and on its card a slip keeps the series's colour and wears
-  a cross (`SlipMark`), so it reads as a bad day. The other way, filling
+- On its card a slip keeps the series's colour and wears a cross
+  (`SlipMark`), so it reads as a bad day. In the heatmap it is a plain
+  square in the series's colour, with no mark (Finn, 2026-11-03). The other way, filling
   every clean day, was not taken: an avoided habit is clean on most days,
   and its colour on every cell would drown the habits to keep.
 

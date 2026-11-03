@@ -74,155 +74,183 @@ export const DAY_RADIUS = 0.25
 /** The radius as CSS: a percentage of the square's own side. */
 export const dayRadius = `${DAY_RADIUS * 100}%`
 
-/** A series logged on a day, as one square: its colour, and whether it is
- * a slip on a series to avoid. */
-export type DayDot = { colour: TrackerColour; slip?: boolean }
+/** A series logged on a day, as one square in its colour. A slip on a
+ * series to avoid is a plain square too: the Heatmap has no slip mark (Finn,
+ * 2026-11-03); the cards keep theirs. */
+export type DayDot = { colour: TrackerColour }
 
-/** A square's centre and side, in hundredths of the day's side. `more` is
- * the grey outline that stands for the series not shown. */
-export type DotPlace = { x: number; y: number; d: number; more?: boolean }
+/** A cell's top left corner and size, in the units `dotLayout` was given.
+ * `more` is the grey outline that stands for the series not shown. */
+export type DotPlace = { x: number; y: number; w: number; h: number; more?: boolean }
 
-/** The margin round the squares and the gap between them, in hundredths of
- * the side (Finn, 2026-11-03: the 10 margin of the dots). */
-const DOT_MARGIN = 10
-const DOT_GAP = 6
+/** The margin round the cells and the gap between them, as a share of the
+ * side (Finn, 2026-11-03: the 10 % margin of the dots). */
+const DOT_MARGIN = 0.1
+const DOT_GAP = 0.06
 
-/** A square's corner radius, as a share of its side: small, so a square
- * reads as a square. */
+/** A cell's corner radius, as a share of its shorter side. */
 const SQUARE_RADIUS = 0.2
 
-/** Where the squares of 2 to 4 series go in a 2×2 grid: two side by side,
- * two over one, four in the corners. */
-const SMALL_GRID: Record<number, readonly (readonly [number, number])[]> = {
-  2: [
-    [0, 0.5],
-    [1, 0.5],
-  ],
-  3: [
-    [0, 0],
-    [1, 0],
-    [0.5, 1],
-  ],
-  4: [
-    [0, 0],
-    [1, 0],
-    [0, 1],
-    [1, 1],
-  ],
+/** The cells in each row: full rows of 2 (up to 4 series) or 3 (5 to 9),
+ * then the rest. One series is one row of one. */
+function rowsOf(count: number): number[] {
+  const n = Math.min(count, 9)
+  const k = n === 1 ? 1 : n <= 4 ? 2 : 3
+  const rows: number[] = []
+  for (let left = n; left > 0; left -= k) rows.push(Math.min(k, left))
+  return rows
+}
+
+/** `length` split in `parts` cells, the margin each side and the gap between:
+ * each cell's start and size. With `snap`, every value is a whole unit (a
+ * device pixel) and the cells are placed so the margins stay equal: a spare
+ * pixel goes to the middle cell, two go to the end cells, and with two cells
+ * the gap takes one. */
+function split(length: number, parts: number, snap: boolean): [number, number][] {
+  const margin = snap ? Math.round(length * DOT_MARGIN) : length * DOT_MARGIN
+  let gap = parts === 1 ? 0 : snap ? Math.max(1, Math.round(length * DOT_GAP)) : length * DOT_GAP
+  let room = length - 2 * margin - (parts - 1) * gap
+  if (snap && parts === 2 && room % 2 === 1) {
+    gap += gap > 1 ? -1 : 1
+    room = length - 2 * margin - gap
+  }
+  const base = snap ? Math.floor(room / parts) : room / parts
+  const spare = room - base * parts
+  const sizes = Array.from({ length: parts }, () => base)
+  if (spare % 2 === 1) sizes[Math.floor(parts / 2)] += 1
+  for (let i = 0; i < Math.floor(spare / 2); i++) {
+    sizes[i] += 1
+    sizes[parts - 1 - i] += 1
+  }
+  let at = margin
+  return sizes.map((size) => {
+    const cell: [number, number] = [at, size]
+    at += size + gap
+    return cell
+  })
 }
 
 /**
- * The squares of a day with `count` series (Finn, 2026-11-03: "grow the
- * grid"), each filling its cell of the space inside the margin, with a small
- * gap between cells. 1: one square in a 1×1 grid, the same design as the
- * others. 2 to 4: a 2×2 grid. 5 to 9: a 3×3 grid, row by row. More than 9:
- * eight squares and a grey outline for the rest; the day editor lists them
- * all.
+ * The cells of a day with `count` series, in a tile `width` by `height`
+ * (Finn, 2026-11-03: "grow the grid", and fill the space). The cells sit in
+ * rows inside the margin, with a gap between: 1 series fills the space, 2
+ * to 4 are rows of 2, 5 to 9 rows of 3, and a short last row's cells widen
+ * to fill the width (3 is two over one). No cell is left empty. More than 9:
+ * eight cells and a grey outline for the rest; the day editor lists them
+ * all. With `snap` the units are device pixels and every edge is on one, so
+ * the cells are sharp and centred.
  */
-export function dotLayout(count: number): DotPlace[] {
+export function dotLayout(count: number, width = 100, height = width, snap = false): DotPlace[] {
   if (count <= 0) return []
-  const k = count === 1 ? 1 : count <= 4 ? 2 : 3
-  const step = (100 - 2 * DOT_MARGIN + DOT_GAP) / k
-  const d = step - DOT_GAP
-  const at = (c: number, r: number): DotPlace => ({
-    x: DOT_MARGIN + step * c + d / 2,
-    y: DOT_MARGIN + step * r + d / 2,
-    d,
-  })
-  if (count === 1) return [at(0, 0)]
-  if (count <= 4) return SMALL_GRID[count].map(([c, r]) => at(c, r))
-  const places = Array.from({ length: Math.min(count, 9) }, (_, i) => at(i % 3, Math.floor(i / 3)))
+  const rows = rowsOf(count)
+  const ys = split(height, rows.length, snap)
+  const places = rows.flatMap((parts, r) =>
+    split(width, parts, snap).map(([x, w]) => ({ x, y: ys[r][0], w, h: ys[r][1] })),
+  )
   if (count > 9) places[8] = { ...places[8], more: true }
   return places
 }
 
-/** Under this size, in px, a cross on a square does not read: a slip is
- * then an outline in its colour. */
-const SLIP_RING_BELOW = 6
+/** A tile's size in device pixels, as painted (each edge on the nearest
+ * pixel), and one device pixel in the tile's own CSS pixels. Null before it
+ * is measured, and where nothing is laid out. It is measured after each
+ * render, as the grid's tracks can move a tile without a change of size,
+ * and again when the fonts are in. */
+type PixelBox = { w: number; h: number; unit: number }
 
-/** A square's outline, inset so the stroke stays inside its cell. */
-function SquareOutline({ x, y, d, stroke }: DotPlace & { stroke: string }) {
-  const side = d - 2
-  return (
-    <rect
-      x={x - side / 2}
-      y={y - side / 2}
-      width={side}
-      height={side}
-      rx={side * SQUARE_RADIUS}
-      fill="none"
-      stroke={stroke}
-      strokeWidth={1.2}
-      vectorEffect="non-scaling-stroke"
-    />
-  )
+function usePixelBox(ref: React.RefObject<HTMLElement | null>) {
+  const [box, setBox] = React.useState<PixelBox | null>(null)
+  const measure = React.useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const dpr = window.devicePixelRatio || 1
+    const w = Math.round(rect.right * dpr) - Math.round(rect.left * dpr)
+    const h = Math.round(rect.bottom * dpr) - Math.round(rect.top * dpr)
+    // The tile's scale on the page: more than 1 under a CSS zoom.
+    const scale = rect.width / parseFloat(getComputedStyle(el).width) || 1
+    const unit = 1 / (dpr * scale)
+    setBox((old) =>
+      !(w > 0 && h > 0)
+        ? null
+        : old && old.w === w && old.h === h && old.unit === unit
+          ? old
+          : { w, h, unit },
+    )
+  }, [ref])
+  React.useLayoutEffect(measure)
+  React.useEffect(() => {
+    let live = true
+    void document.fonts?.ready.then(() => live && measure())
+    return () => {
+      live = false
+    }
+  }, [measure])
+  return box
 }
 
 /**
  * A day's series as squares on the day's tile (`dotLayout`), in their
- * colours: the one look for a day with one series and with many. A slip on
- * a series to avoid is its square with a white cross, or an outline when the
- * square is small. `side` is the day's measured side, if known; `faint`
- * draws the squares of a placeholder. Its parent is `relative`.
+ * colours: the one look for a day with one series and with many. A tile of
+ * a phone's Heatmap is a fraction of a pixel in size and place, and a cell
+ * with an edge inside a pixel shows one soft side and looks off centre.
+ * So the tile is measured in device pixels, the drawing is given that size
+ * exactly (the browser puts its corner on a pixel, but scales its view box
+ * to its CSS size), and every edge is on a whole pixel. `faint` draws the
+ * squares of a placeholder. Its parent is `relative`.
  */
-export function DayDots({
-  dots,
-  side,
-  faint = false,
-}: {
-  dots: readonly DayDot[]
-  side: number | null
-  faint?: boolean
-}) {
-  const places = dotLayout(dots.length)
+export function DayDots({ dots, faint = false }: { dots: readonly DayDot[]; faint?: boolean }) {
+  const ref = React.useRef<HTMLSpanElement>(null)
+  const box = usePixelBox(ref)
+  const width = box?.w ?? 100
+  const height = box?.h ?? 100
+  const places = dotLayout(dots.length, width, height, box !== null)
+  // The outline past 9: one CSS pixel, on whole device pixels when measured.
+  const stroke = box ? Math.max(1, Math.round(1 / box.unit)) : 1.2
   return (
-    <svg
-      aria-hidden
-      data-dots={dots.length}
-      viewBox="0 0 100 100"
-      className={cx("pointer-events-none absolute inset-0 size-full", faint && "opacity-40")}
-    >
-      {places.map((place, i) => {
-        const { x, y, d, more } = place
-        if (more) {
-          return (
-            <g key={i} data-more>
-              <SquareOutline {...place} stroke="var(--neutral-9)" />
-            </g>
-          )
-        }
-        const { colour, slip } = dots[i]
-        const fill = colourVar(colour, 9)
-        if (slip && side !== null && (d / 100) * side < SLIP_RING_BELOW) {
-          return (
-            <g key={i} data-dot={colour} data-slip>
-              <SquareOutline {...place} stroke={fill} />
-            </g>
-          )
-        }
-        const c = Math.min(d * 0.22, 9)
-        return (
-          <g key={i} data-dot={colour} data-slip={slip || undefined}>
-            <rect
-              x={x - d / 2}
-              y={y - d / 2}
-              width={d}
-              height={d}
-              rx={d * SQUARE_RADIUS}
-              fill={fill}
-            />
-            {slip ? (
-              <path
-                d={`M${x - c} ${y - c}L${x + c} ${y + c}M${x + c} ${y - c}L${x - c} ${y + c}`}
-                stroke="white"
-                strokeWidth={Math.min(d * 0.12, 5)}
-                strokeLinecap="round"
+    <span ref={ref} aria-hidden className="pointer-events-none absolute inset-0">
+      <svg
+        data-dots={dots.length}
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        className={cx("absolute top-0 left-0", !box && "size-full", faint && "opacity-40")}
+        style={box ? { width: box.w * box.unit, height: box.h * box.unit } : undefined}
+      >
+        {places.map(({ x, y, w, h, more }, i) => {
+          if (more) {
+            const inset = box ? stroke / 2 : 1
+            return (
+              <rect
+                key={i}
+                data-more
+                x={x + inset}
+                y={y + inset}
+                width={w - 2 * inset}
+                height={h - 2 * inset}
+                rx={(Math.min(w, h) - 2 * inset) * SQUARE_RADIUS}
+                fill="none"
+                stroke="var(--neutral-9)"
+                strokeWidth={stroke}
+                vectorEffect={box ? undefined : "non-scaling-stroke"}
               />
-            ) : null}
-          </g>
-        )
-      })}
-    </svg>
+            )
+          }
+          const { colour } = dots[i]
+          return (
+            <rect
+              key={i}
+              data-dot={colour}
+              x={x}
+              y={y}
+              width={w}
+              height={h}
+              rx={Math.min(w, h) * SQUARE_RADIUS}
+              fill={colourVar(colour, 9)}
+            />
+          )
+        })}
+      </svg>
+    </span>
   )
 }
 

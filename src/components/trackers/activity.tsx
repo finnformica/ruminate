@@ -298,10 +298,10 @@ function stripes(scale: number): string {
   return `repeating-linear-gradient(135deg, ${PLACEHOLDER_LINE} 0 ${line}px, transparent ${line}px ${period}px)`
 }
 
-/** The squares for the series on a day: a slip on a series to avoid wears
- * a cross on its own square. */
+/** The squares for the series on a day. A slip on a series to avoid is a
+ * plain square: the Heatmap has no slip mark (Finn, 2026-11-03). */
 function dayDots(on: readonly Series[]): DayDot[] {
-  return on.map((s) => ({ colour: s.colour, slip: s.goal === "avoid" }))
+  return on.map((s) => ({ colour: s.colour }))
 }
 
 /** A placeholder's look: the outline and the stripes. The squares of the day
@@ -343,8 +343,9 @@ function FutureOutline({ cellSize }: { cellSize: number | null }) {
  * The heatmap: one column a week, one row a weekday from Monday, the week
  * today is in at the right edge (`heatmapWeeks`). A cell is a rounded
  * tile with a square in the colour of each series logged that day, the
- * same for one series and for many: one fills a 1×1 grid, up to 4 a 2×2,
- * 5 to 9 a 3×3 (`DayDots`, `dotLayout`). Today has a ring,
+ * same for one series and for many: one fills the space, up to 4 are rows
+ * of 2, 5 to 9 rows of 3, a short last row filling the width (`DayDots`,
+ * `dotLayout`). Today has a ring,
  * its weekday and its month are named in bold (Finn, 2026-11-03: no dot
  * under its column); the days of this week still to come have a faint grey fill and a
  * dashed outline. A week that runs into a new month is split in
@@ -362,7 +363,7 @@ function FutureOutline({ cellSize }: { cellSize: number | null }) {
  * desktop the cells grow to fill the card. A tap on a day up to today opens
  * the day editor on it (`onOpenDay`, Finn 2026-11-03); the arrow keys move
  * between days, one tab stop for the grid. A slip on a series to avoid
- * wears a cross on its square. Below it, a legend of the series.
+ * is a plain square, with no mark. Below it, a legend of the series.
  */
 function ActivityHeatmap({
   series,
@@ -546,7 +547,7 @@ function ActivityHeatmap({
                       ...placeholderStyle(cellScale(cellSize)),
                     }}
                   >
-                    {dots.length > 0 ? <DayDots dots={dots} side={cellSize} faint /> : null}
+                    {dots.length > 0 ? <DayDots dots={dots} faint /> : null}
                   </div>
                 )
               }
@@ -583,9 +584,7 @@ function ActivityHeatmap({
                     toCome={future ? "outline" : undefined}
                   >
                     {future ? <FutureOutline cellSize={cellSize} /> : null}
-                    {!future && on.length > 0 ? (
-                      <DayDots dots={dayDots(on)} side={cellSize} />
-                    ) : null}
+                    {!future && on.length > 0 ? <DayDots dots={dayDots(on)} /> : null}
                   </DaySquare>
                 </div>
               )
