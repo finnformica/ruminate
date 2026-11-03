@@ -49,7 +49,7 @@ const DARK_ON: readonly TrackerColour[] = ["amber", "yellow"]
  * heatmap and on its card. Drawn in the colour that reads on `colour`'s
  * solid step. Its parent is `relative`.
  */
-export function SlipMark({ colour }: { colour: TrackerColour }) {
+function SlipMark({ colour }: { colour: TrackerColour }) {
   return (
     <svg
       aria-hidden
@@ -63,6 +63,57 @@ export function SlipMark({ colour }: { colour: TrackerColour }) {
     >
       <path d="M2 2l6 6M8 2l-6 6" />
     </svg>
+  )
+}
+
+/** A day square's corner radius, as a share of its side: one shape at
+ * every size, so a desktop Heatmap's larger days are as round as a card's
+ * (Finn, 2026-11-03). */
+export const DAY_RADIUS = 0.25
+
+/** The radius as CSS: a percentage of the square's own side. */
+export const dayRadius = `${DAY_RADIUS * 100}%`
+
+/**
+ * A day as a square, the one look for the cards and the Heatmap: the focus
+ * ring, the radius, the fill in the day's colours (`fill`) or the empty
+ * tile with a hover tint, the ring on today and the cross on a slip. A day
+ * to come is a faint tile on a card (`toCome: "faint"`) and an outline of
+ * its own in the Heatmap (`toCome: "outline"`, drawn as `children`). It
+ * fills its grid cell.
+ */
+export function DaySquare({
+  fill,
+  today,
+  toCome,
+  slip,
+  children,
+  ...button
+}: Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "className" | "style" | "type"> & {
+  /** The day's colours; none for a day with nothing logged. */
+  fill?: React.CSSProperties
+  today: boolean
+  toCome?: "faint" | "outline"
+  /** The colour of a series to avoid that was logged on the day. */
+  slip?: TrackerColour
+}) {
+  return (
+    <button
+      type="button"
+      aria-current={today ? "date" : undefined}
+      {...button}
+      className={cx(
+        "focus-ring relative block size-full cursor-pointer disabled:cursor-default",
+        toCome !== "outline" && "bg-bg-secondary",
+        toCome === "faint" && "opacity-50",
+        !fill && !toCome && "enabled:hover:bg-bg-hover",
+        today && "ring-2 ring-border",
+      )}
+      style={{ borderRadius: dayRadius, ...fill }}
+    >
+      {children}
+      {slip ? <SlipMark colour={slip} /> : null}
+    </button>
   )
 }
 
@@ -309,31 +360,22 @@ function DayCell({
         : formatAmount(series, typeof entry.value === "number" ? entry.value : 0)
   return (
     <div role="gridcell" className="aspect-square">
-      <button
-        type="button"
+      <DaySquare
         aria-label={`${dayLabel(day)}: ${logged}`}
         aria-haspopup="dialog"
-        aria-current={day === today ? "date" : undefined}
         data-testid="day-cell"
         data-day={day}
         data-series={series.id}
         data-level={level}
         disabled={future}
         onClick={() => onOpenDay(day)}
-        // The wall's tile, at a day's size: the one focus ring, the control
-        // radius, the hover tint on an empty day, and the disabled fade on a
-        // day that has not come.
-        className={cx(
-          "focus-ring relative block size-full cursor-pointer rounded bg-bg-secondary disabled:cursor-default disabled:opacity-50",
-          level === 0 && "enabled:hover:bg-bg-hover",
-          day === today && "ring-2 ring-border",
-        )}
-        style={
+        today={day === today}
+        toCome={future ? "faint" : undefined}
+        fill={
           level > 0 ? { backgroundColor: colourVar(series.colour, LEVEL_STEPS[level]) } : undefined
         }
-      >
-        {slip ? <SlipMark colour={series.colour} /> : null}
-      </button>
+        slip={slip ? series.colour : undefined}
+      />
     </div>
   )
 }

@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { heatmapWeeks, type Series, type SeriesState } from "../../data/tracker"
 import { ActivityCard, TrackerStats, axisWeekdays, heatmapColumns } from "./activity"
+import { MonthGrid } from "./month-grid"
 
 afterEach(() => {
   cleanup()
@@ -115,9 +116,13 @@ describe("ActivityHeatmap", () => {
     for (const header of screen.getAllByRole("rowheader")) {
       expect(header.className).toContain("h-0")
     }
-    for (const cell of document.querySelectorAll('[role="gridcell"]')) {
-      expect(cell.className).toContain("rounded-sm")
-      expect(cell.className).not.toMatch(/rounded(-full|-lg)?( |$)/)
+    // A quarter of the side, the cards' shape at any size.
+    for (const cell of document.querySelectorAll<HTMLElement>('[role="gridcell"]')) {
+      expect(cell.style.borderRadius).toBe("25%")
+      expect(cell.className).not.toMatch(/rounded/)
+    }
+    for (const day of document.querySelectorAll<HTMLElement>("button[data-day]")) {
+      expect(day.style.borderRadius).toBe("25%")
     }
   })
 
@@ -268,13 +273,16 @@ describe("ActivityHeatmap", () => {
   })
 })
 
-/** jsdom draws nothing: give every cell a side of `size` px, and run the
- * observer's callback as soon as it observes. */
+/** jsdom draws nothing: give every cell a side of `size` px and the grid
+ * sixteen cells' width, and run the observer's callback as soon as it
+ * observes. */
 function measureCells(size: number) {
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-    width: size,
-    height: size,
-  } as DOMRect)
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    const width = this.dataset.testid === "activity-heatmap" ? size * 16 : size
+    return { width, height: size } as DOMRect
+  })
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -294,6 +302,64 @@ describe("the heatmap's rows", () => {
     const grid = screen.getByTestId("activity-heatmap")
     expect(grid.style.gridTemplateRows).toBe("auto repeat(7, 20px) auto")
     expect(grid.style.gap).toBe("4px")
+  })
+})
+
+describe("one day square for the heatmap and the cards", () => {
+  it("draws a day, today and an empty day in the same way in both", () => {
+    render(
+      <>
+        <div data-testid="cards">
+          <MonthGrid series={[READ]} start="2026-10-01" today="2026-10-29" onOpenDay={() => {}} />
+        </div>
+        <ActivityCard series={[READ]} today="2026-10-29" onOpenDay={() => {}} />
+      </>,
+    )
+    const cards = screen.getByTestId("cards")
+    const heat = screen.getByTestId("activity-heatmap")
+    const pair = (day: string) =>
+      [cards, heat].map((view) => view.querySelector<HTMLElement>(`[data-day="${day}"]`)!)
+    // Today: the cards' ring, in both.
+    const [cardToday, heatToday] = pair("2026-10-29")
+    expect(heatToday.className).toBe(cardToday.className)
+    expect(heatToday.className).toContain("ring-2 ring-border")
+    // An empty day, with its hover tint, and a logged day.
+    for (const day of ["2026-10-27", "2026-10-28"]) {
+      const [card, heatDay] = pair(day)
+      expect(heatDay.className).toBe(card.className)
+      expect(heatDay.style.borderRadius).toBe(card.style.borderRadius)
+    }
+  })
+})
+
+describe("the heatmap on a large screen", () => {
+  it("keeps a phone's small text and hairline divider on a phone-sized grid", () => {
+    measureCells(16)
+    heatmap("2026-10-29")
+    expect(screen.getByTestId("activity-heatmap").dataset.size).toBe("small")
+    expect(document.querySelector("[data-month-label]")!.className).toContain("text-[11px]")
+    expect(screen.getAllByRole("rowheader")[0].className).toContain("text-[10px]")
+    expect(document.querySelector("[data-month-divider]")!.className).toContain("w-px")
+    expect(screen.getByRole("list", { name: "Series" }).className).toContain("text-sm")
+  })
+
+  it("draws the names, the legend and the dividers larger on a desktop-sized grid", () => {
+    measureCells(40)
+    heatmap("2026-10-29")
+    expect(screen.getByTestId("activity-heatmap").dataset.size).toBe("large")
+    // The cards' sizes: 14 px for the names, 16 px for the series.
+    for (const label of document.querySelectorAll("[data-month-label]")) {
+      expect(label.className).toContain("text-sm")
+    }
+    for (const header of screen.getAllByRole("rowheader")) {
+      expect(header.className).toContain("text-sm")
+    }
+    expect(screen.getByRole("list", { name: "Series" }).className).toContain("text-base")
+    for (const divider of document.querySelectorAll("[data-month-divider]")) {
+      expect(divider.className).toContain("w-0.5")
+    }
+    // The month names still fit: Sept, Oct and Nov, each on its divider.
+    expect(labels()).toEqual(["Sept", "Oct", "Nov"])
   })
 })
 

@@ -186,9 +186,14 @@ has no keys to validate.
   week (left, right). A week that runs into a new month is split into two
   columns (`heatmapColumns`), the other month's days drawn as hollow placeholders, a 0.5 px outline and 0.5 px stripes in one solid colour (`--neutral-6`) over a faint wash (22 %) of the colours of the day each holds the place of (Finn, 2026-11-03: so data reads across the divider; not tappable), so a straight line divides the
   months: one element per boundary, in a narrow track of its own with a gap
-  each side, from the Monday row down to Sunday. A cell is a rounded square
-  (`rounded-sm`: the theme's `rounded` is 8 px, a circle at this size).
-  Each month's short name ("Oct", 11 px) sits above its divider, its first
+  each side, from the Monday row down to Sunday. A day is the cards' own
+  square (`DaySquare` in `month-grid.tsx`: one radius, a quarter of the
+  side at any size, one today ring, one fill and hover), the days to come
+  drawn with a dashed outline and the placeholders with stripes, both
+  grown with the cell (`cellScale`). On a large grid (`LARGE_GRID`, a
+  desktop) the text is at the cards' sizes and the month line is 2 px
+  (`HEATMAP_SIZES`, Finn 2026-11-03).
+  Each month's short name ("Oct", 11 px; 14 px on a large grid) sits above its divider, its first
   letter over the line. A weekday's name takes no height, so each row is
   exactly a cell high and the cells read as squares. Each weekday's row is
   set to the measured cell width, and one gap serves both ways, so the gap
