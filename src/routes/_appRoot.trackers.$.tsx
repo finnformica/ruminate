@@ -98,10 +98,6 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
   // The first day of the month shown: the one today is in until the arrows
   // say otherwise.
   const [start, setStart] = React.useState(() => rangeStart(RANGE, today))
-  // The day the strip logs: today, or a day its arrows or **Yesterday** pick.
-  const [pickedDay, setPickedDay] = React.useState<DayString | null>(null)
-  const day = pickedDay !== null && pickedDay < today ? pickedDay : today
-  const pickDay = (next: DayString) => setPickedDay(next >= today ? null : next)
   // The day open in the day editor, from a tap in the heatmap or the cards.
   const [openDay, setOpenDay] = React.useState<DayString | null>(null)
   const current = rangeStart(RANGE, today)
@@ -154,13 +150,7 @@ function TrackerPage({ trackerId }: { trackerId: string }) {
         ) : (
           <>
             {series.length > 0 ? <TrackerStats series={series} today={today} /> : null}
-            <TodayStrip
-              series={series}
-              day={day}
-              today={today}
-              onSetEntry={writes.setEntry}
-              onDayChange={pickDay}
-            />
+            <TodayStrip series={series} today={today} onSetEntry={writes.setEntry} />
             {series.length === 0 ? (
               <div className="flex flex-col items-center gap-3 py-12 text-center text-text-secondary">
                 <p>No series yet. Add one to start logging.</p>

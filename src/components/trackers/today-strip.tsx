@@ -1,7 +1,5 @@
 import React from "react"
 import {
-  addDays,
-  dayLabel,
   formatAmount,
   isDone,
   stepValue,
@@ -9,68 +7,35 @@ import {
   type SeriesState,
 } from "../../data/tracker"
 import { FormControl } from "../form-control"
-import { ChevronLeftIcon16, ChevronRightIcon16, MinusIcon16, PlusIcon16 } from "../icons"
+import { MinusIcon16, PlusIcon16 } from "../icons"
 import { IconButton } from "../ui/icon-button"
 import { PillButton } from "../ui/pill-button"
 import { TextInput } from "../ui/text-input"
 import { ColourDot } from "./month-grid"
 
 /**
- * The Today strip (docs/trackers.md): one control per series to log the day
+ * The Today strip (docs/trackers.md): one control per series to log today
  * fast. A check series is a pill that ticks and clears the day — pressed, it
  * wears the pill's applied state, as a scope pill does. A number series is
  * a field with − and + by the series's `step`, laid out as the app's forms
- * are. The series's colour is the dot beside its name and nothing else.
- * Today by default; the arrows beside the heading step it back a day at a
- * time, and **Yesterday** goes straight to the day before (Finn,
- * 2026-11-03: an activity done in the evening is often logged the next
- * morning), with **Today** to come back. A day after today cannot be
- * picked. The controls wrap, so on a phone the strip grows down rather than
- * sideways.
+ * are. The series's colour is the dot beside its name and nothing else. A
+ * past day is logged in the day editor (day-dialog.tsx), from a tap on the
+ * day in the heatmap or on a card. The controls wrap, so on a phone the
+ * strip grows down rather than sideways.
  */
 export function TodayStrip({
   series,
-  day,
   today,
   onSetEntry,
-  onDayChange,
 }: {
   series: readonly SeriesState[]
-  /** The day being logged. */
-  day: DayString
   today: DayString
   onSetEntry: SetEntry
-  onDayChange: (day: DayString) => void
 }) {
-  const isToday = day === today
-  const yesterday = addDays(today, -1)
   return (
     <section data-testid="today-strip" className="flex flex-col gap-4">
-      <div className="flex min-w-0 items-center gap-1">
-        <IconButton aria-label="Previous day" onClick={() => onDayChange(addDays(day, -1))}>
-          <ChevronLeftIcon16 />
-        </IconButton>
-        <h2 className="min-w-0 truncate font-bold leading-4">
-          {isToday ? "Today" : day === yesterday ? "Yesterday" : dayLabel(day)}
-        </h2>
-        <IconButton
-          aria-label="Next day"
-          disabled={day >= today}
-          onClick={() => onDayChange(addDays(day, 1))}
-        >
-          <ChevronRightIcon16 />
-        </IconButton>
-        {isToday ? (
-          <PillButton variant="dashed" onClick={() => onDayChange(yesterday)}>
-            Yesterday
-          </PillButton>
-        ) : (
-          <PillButton variant="dashed" onClick={() => onDayChange(today)}>
-            Today
-          </PillButton>
-        )}
-      </div>
-      <DayControls series={series} day={day} onSetEntry={onSetEntry} idPrefix="today" />
+      <h2 className="font-bold leading-4">Today</h2>
+      <DayControls series={series} day={today} onSetEntry={onSetEntry} idPrefix="today" />
     </section>
   )
 }

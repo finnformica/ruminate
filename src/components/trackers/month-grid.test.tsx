@@ -125,15 +125,7 @@ describe("MonthGrid", () => {
 describe("TodayStrip", () => {
   it("ticks and clears a check series on the day", () => {
     const onSetEntry = vi.fn()
-    render(
-      <TodayStrip
-        series={[READ]}
-        day={TODAY}
-        today={TODAY}
-        onSetEntry={onSetEntry}
-        onDayChange={() => {}}
-      />,
-    )
+    render(<TodayStrip series={[READ]} today={TODAY} onSetEntry={onSetEntry} />)
     expect(screen.getByRole("heading", { name: "Today" })).toBeTruthy()
     const pill = screen.getByTestId("check-control")
     expect(pill.getAttribute("aria-pressed")).toBe("false")
@@ -143,15 +135,7 @@ describe("TodayStrip", () => {
 
   it("steps a number series by its step, within its bounds, and takes a typed value", () => {
     const onSetEntry = vi.fn()
-    render(
-      <TodayStrip
-        series={[RUN]}
-        day={TODAY}
-        today={TODAY}
-        onSetEntry={onSetEntry}
-        onDayChange={() => {}}
-      />,
-    )
+    render(<TodayStrip series={[RUN]} today={TODAY} onSetEntry={onSetEntry} />)
     fireEvent.click(screen.getByRole("button", { name: "More Run" }))
     expect(onSetEntry).toHaveBeenLastCalledWith("s2", TODAY, 4.5)
     fireEvent.click(screen.getByRole("button", { name: "Less Run" }))
@@ -166,55 +150,10 @@ describe("TodayStrip", () => {
     expect(onSetEntry).toHaveBeenLastCalledWith("s2", TODAY, null)
   })
 
-  it("names a picked day and offers the way back to today", () => {
-    const onDayChange = vi.fn()
-    render(
-      <TodayStrip
-        series={[READ]}
-        day="2026-10-20"
-        today={TODAY}
-        onSetEntry={() => {}}
-        onDayChange={onDayChange}
-      />,
-    )
-    expect(screen.getByRole("heading", { name: "Tue 20 Oct" })).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "Today" }))
-    expect(onDayChange).toHaveBeenLastCalledWith(TODAY)
-    fireEvent.click(screen.getByRole("button", { name: "Next day" }))
-    expect(onDayChange).toHaveBeenLastCalledWith("2026-10-21")
-  })
-
-  it("goes to yesterday in one tap, steps back a day, and never past today", () => {
-    const onDayChange = vi.fn()
-    const onSetEntry = vi.fn()
-    const { rerender } = render(
-      <TodayStrip
-        series={[READ]}
-        day={TODAY}
-        today={TODAY}
-        onSetEntry={onSetEntry}
-        onDayChange={onDayChange}
-      />,
-    )
-    expect((screen.getByRole("button", { name: "Next day" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Previous day" }))
-    expect(onDayChange).toHaveBeenLastCalledWith("2026-10-26")
-    fireEvent.click(screen.getByRole("button", { name: "Yesterday" }))
-    expect(onDayChange).toHaveBeenLastCalledWith("2026-10-26")
-    rerender(
-      <TodayStrip
-        series={[READ]}
-        day="2026-10-26"
-        today={TODAY}
-        onSetEntry={onSetEntry}
-        onDayChange={onDayChange}
-      />,
-    )
-    expect(screen.getByRole("heading", { name: "Yesterday" })).toBeTruthy()
-    // Yesterday is ticked: a tap clears it, through the same write.
-    fireEvent.click(screen.getByTestId("check-control"))
-    expect(onSetEntry).toHaveBeenLastCalledWith("s1", "2026-10-26", null)
+  it("logs today only: no day arrows and no Yesterday", () => {
+    render(<TodayStrip series={[READ]} today={TODAY} onSetEntry={() => {}} />)
+    expect(screen.getByRole("heading", { name: "Today" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Yesterday" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Previous day" })).toBeNull()
   })
 })

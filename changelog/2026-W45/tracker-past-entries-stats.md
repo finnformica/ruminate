@@ -1,6 +1,6 @@
 ### Added
 
-- Log a past day on a tracker. Tap a day on the Heatmap or a card to add, change or clear each series's value on it; **Yesterday** beside the Today heading logs last night's activity in one tap, and the arrows step back further. Days to come stay locked.
+- Log a past day on a tracker. Tap a day on the Heatmap or a card to add, change or clear each series's value on it. Arrows in the editor step a day back or on, and days to come stay locked.
 - Mark a tracker series as a habit to avoid. Set its **Goal** to **Avoid** in **Series**: its stats count the clean days, in a group of their own beside the active days, and a day it was logged on wears a cross on the Heatmap and its card.
 
 ### Changed

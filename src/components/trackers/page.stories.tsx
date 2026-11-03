@@ -85,7 +85,6 @@ const SERIES: SeriesState[] = [
  * window shows one of the two, as the ⋯ menu's display options pick. */
 function Page({ view = "heatmap", open = null }: { view?: TrackerView; open?: string | null }) {
   const [series, setSeries] = React.useState(SERIES)
-  const [day, setDay] = React.useState(TODAY)
   const [openDay, setOpenDay] = React.useState<string | null>(open)
   const setEntry = (seriesId: string, date: string, value: boolean | number | null) =>
     setSeries((prev) =>
@@ -100,13 +99,7 @@ function Page({ view = "heatmap", open = null }: { view?: TrackerView; open?: st
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 bg-bg p-4">
       <TrackerStats series={series} today={TODAY} />
-      <TodayStrip
-        series={series}
-        day={day}
-        today={TODAY}
-        onSetEntry={setEntry}
-        onDayChange={setDay}
-      />
+      <TodayStrip series={series} today={TODAY} onSetEntry={setEntry} />
       <div className="flex min-w-0 flex-col gap-4">
         <ActivityCard
           series={series}

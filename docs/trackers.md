@@ -120,12 +120,9 @@ has no keys to validate.
   series is a pill that ticks and clears the day; a number series shows its
   value with − and + by its `step`, held within `min` and `max`, and the
   value itself is a field to type into (empty or `0` clears). The controls
-  wrap, so on a phone the strip grows down. The strip logs today; the
-  arrows beside its heading step it a day back or on (never past today), and
-  **Yesterday** goes straight to the day before (Finn, 2026-11-03: an
-  activity done in the evening is often logged the next morning). Off today
-  the heading names the day ("Yesterday", or the date) with **Today** to
-  come back.
+  wrap, so on a phone the strip grows down. The strip logs today only; a
+  past day is logged in the day editor (Finn, 2026-11-03, who asked for no
+  shortcut to yesterday: a tap on the day is the one way).
 - **The day editor** (`day-dialog.tsx`, Finn 2026-11-03): a tap on a day in
   the heatmap or on a card opens that day, with the strip's controls for
   every series (`DayControls`), so any past value can be added, changed or
