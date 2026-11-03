@@ -157,7 +157,11 @@ has no keys to validate.
   card across the page above the cards, with the heatmap two thirds of the
   card and Recent beside it, so the heatmap's cells are large (Finn,
   2026-11-03: "on desktop i think the heat map should be larger"; it was a
-  320 px column beside the cards). Its menu has no display options. The week, the year and the journal
+  320 px column beside the cards). The heatmap sets the card's height:
+  Recent fills it and scrolls within it, with a fade at its foot. When the
+  list set the height, a longer list left 33 px under the heatmap's legend,
+  not the card's 16 (Finn, 2026-11-03: "too much vertical padding inside
+  the Heatmap container"). Its menu has no display options. The week, the year and the journal
   grid (a row per day, a column per series) were removed with their menu
   rows; the range helpers in `src/data/tracker.ts` (`rangeDays`,
   `rangeStart`, `shiftRange`, `rangeLabel`) are still there, used with

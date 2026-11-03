@@ -645,7 +645,10 @@ function RecentEntries({ series, today }: { series: readonly SeriesState[]; toda
 /** The heatmap and the Recent list on one card: the phone's default view.
  * On a desktop (`lg`) the card runs the page's width over the cards, the
  * heatmap two thirds of it and the Recent list beside it, so the heatmap's
- * cells are large (Finn, 2026-11-03). */
+ * cells are large (Finn, 2026-11-03). The heatmap sets the card's height:
+ * the Recent list fills it and scrolls within it, so a long list adds no
+ * space under the heatmap (Finn, 2026-11-03: "too much vertical padding
+ * inside the Heatmap container"). */
 export function ActivityCard({
   series,
   today,
@@ -663,13 +666,18 @@ export function ActivityCard({
       tier="card"
       motion={false}
       data-testid="activity-card"
-      className={cx("flex flex-col gap-4 p-4 lg:flex-row lg:items-start lg:gap-8", className)}
+      className={cx("flex flex-col gap-4 p-4 lg:flex-row lg:gap-8", className)}
     >
-      <div className="min-w-0 lg:flex-[2]">
+      <div data-testid="activity-heatmap-column" className="min-w-0 lg:flex-[2] lg:self-start">
         <ActivityHeatmap series={series} today={today} onOpenDay={onOpenDay} />
       </div>
-      <div className="min-w-0 lg:flex-1">
-        <RecentEntries series={series} today={today} />
+      {/* On a desktop the list is out of the flow, so the row is as tall as
+          the heatmap; a little inset keeps focus rings clear of its edge,
+          and a fade at its foot says there is more below. */}
+      <div data-testid="activity-recent-column" className="relative min-w-0 lg:flex-1">
+        <div className="lg:absolute lg:-inset-1 lg:overflow-y-auto lg:p-1 lg:pb-6 lg:[mask-image:linear-gradient(to_bottom,black_calc(100%-24px),transparent)]">
+          <RecentEntries series={series} today={today} />
+        </div>
       </div>
     </Surface>
   )
