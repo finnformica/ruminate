@@ -1,3 +1,4 @@
+import React from "react"
 import { addDays, dayLabel, type DayString, type SeriesState } from "../../data/tracker"
 import { useCoarsePointer } from "../../hooks/coarse-pointer"
 import { ChevronLeftIcon16, ChevronRightIcon16 } from "../icons"
@@ -31,6 +32,9 @@ export function DayDialog({
   onClose: () => void
 }) {
   const coarse = useCoarsePointer()
+  // Focus opens on the day's controls, not on the header's arrows, whose
+  // tooltip would cover them.
+  const bodyRef = React.useRef<HTMLDivElement>(null)
   const onOpenChange = (next: boolean) => (next ? undefined : onClose())
   if (day === null || day > today) return null
   const title = day === today ? "Today" : day === addDays(today, -1) ? "Yesterday" : dayLabel(day)
@@ -49,7 +53,13 @@ export function DayDialog({
     </>
   )
   const body = (
-    <div data-testid="day-editor" data-day={day} className="flex flex-col gap-4">
+    <div
+      ref={bodyRef}
+      tabIndex={-1}
+      data-testid="day-editor"
+      data-day={day}
+      className="flex flex-col gap-4 focus:outline-hidden"
+    >
       {title === dayLabel(day) ? null : (
         <p className="text-sm text-text-secondary">{dayLabel(day)}</p>
       )}
@@ -67,7 +77,7 @@ export function DayDialog({
   }
   return (
     <Dialog open onOpenChange={onOpenChange}>
-      <Dialog.Content title={title} actions={actions}>
+      <Dialog.Content title={title} actions={actions} initialFocus={bodyRef}>
         {body}
       </Dialog.Content>
     </Dialog>

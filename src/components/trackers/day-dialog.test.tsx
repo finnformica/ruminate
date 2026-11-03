@@ -65,6 +65,7 @@ describe("DayDialog", () => {
       await frames()
       expect(screen.getByTestId("day-editor").dataset.day).toBe("2026-10-27")
       expect(screen.getByText("Tue 27 Oct")).toBeTruthy()
+      if (!coarse) expect(document.activeElement).toBe(screen.getByTestId("day-editor"))
       // The day is ticked on Read: a tap clears it.
       const pill = screen.getByTestId("check-control")
       expect(pill.getAttribute("aria-pressed")).toBe("true")
