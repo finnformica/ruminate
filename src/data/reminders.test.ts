@@ -93,7 +93,17 @@ describe("turning reminders on", () => {
     const cause = new DOMException("Registration failed - push service error", "AbortError")
     browser.subscribe.mockRejectedValue(cause)
     const error = await enableReminders("20:00").catch((caught: unknown) => caught)
-    expect(error).toMatchObject({ reason: "push-blocked", cause })
+    expect(error).toMatchObject({ reason: "push-blocked", detail: undefined, cause })
+  })
+
+  it("says Brave when Brave's push service refused", async () => {
+    Object.defineProperty(navigator, "brave", { configurable: true, value: {} })
+    browser.subscribe.mockRejectedValue(new DOMException("push service error", "AbortError"))
+    expect(await failureOf(enableReminders("20:00"))).toEqual({
+      reason: "push-blocked",
+      detail: "brave",
+    })
+    delete (navigator as { brave?: unknown }).brave
   })
 
   it("asks for an update when the worker cannot subscribe and a newer one waits", async () => {

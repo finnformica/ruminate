@@ -27,8 +27,8 @@ export type ReminderFailure =
   /** The Worker has no VAPID keys. */
   | "not-configured"
   /** `pushManager.subscribe` threw `AbortError`: the browser's push service
-   * refused or is off (Brave without "Use Google services for push
-   * messaging", a network that blocks the push service). */
+   * refused or is off; `detail` is "brave" in Brave, which has it off until
+   * "Use Google services for push messaging" is on. */
   | "push-blocked"
   /** No service worker came within READY_TIMEOUT_MS. */
   | "worker-missing"
@@ -88,8 +88,11 @@ function subscribeErrorOf(error: unknown, registration: ServiceWorkerRegistratio
         : name === "InvalidStateError" || registration.waiting !== null
           ? "worker-outdated"
           : null
+  // Brave keeps push off until "Use Google services for push messaging" is
+  // on; it says so with `navigator.brave`.
+  const detail = reason === "push-blocked" && "brave" in navigator ? "brave" : undefined
   return reason
-    ? new ReminderError(reason, undefined, { cause: error })
+    ? new ReminderError(reason, detail, { cause: error })
     : new ReminderError("failed", name, { cause: error })
 }
 
@@ -244,10 +247,10 @@ export async function disableReminders(): Promise<void> {
 }
 
 /**
- * Send a test reminder to this device now: the cron's check, run for the
- * reader at once, sent even when every habit is logged. When the push
- * service says the subscription is gone, the server has deleted it and the
- * browser's copy goes too.
+ * Send a test reminder to every device of the reader now: the cron's check,
+ * run at once, sent even when every habit is logged. The result is what each
+ * push service said. When this browser's subscription is gone, the server
+ * has deleted it and the browser's copy goes too.
  */
 export async function sendTestReminder(): Promise<ReminderTestResult> {
   const subscription = await currentSubscription()
@@ -258,9 +261,10 @@ export async function sendTestReminder(): Promise<ReminderTestResult> {
   })
   if (res.status === 501) throw new ReminderError("not-configured")
   if (res.status === 404) throw new ReminderError("unsubscribed")
-  // A push service's answer comes back as 410 or 502, with a result.
-  if (!res.ok && res.status !== 410 && res.status !== 502) throw await rejection(res)
+  if (!res.ok) throw await rejection(res)
   const result = (await res.json()) as ReminderTestResult
-  if (result.outcome === "gone") await subscription.unsubscribe()
+  if (result.devices.some((device) => device.self && device.outcome === "gone")) {
+    await subscription.unsubscribe()
+  }
   return result
 }

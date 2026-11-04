@@ -13,23 +13,26 @@ import {
   sendTestReminder,
   type ReminderFailure,
 } from "../../data/reminders"
-import type { ReminderSettings } from "../../data/reminders-api"
+import type { ReminderSettings, ReminderTestResult } from "../../data/reminders-api"
 import { usePending } from "../../hooks/pending"
 import { AsyncButton } from "../ui/async-button"
 import { Select, type SelectOption } from "../ui/select"
 import { Switch } from "../ui/switch"
 import { SettingsSection } from "../settings-section"
 
-/** What the card says when a step fails; `detail` is the server's status
- * for "rejected" and the error's name for "failed". */
+/** What the card says when a step fails; `detail` is "brave" for
+ * "push-blocked" in Brave, the server's status for "rejected" and the
+ * error's name for "failed". */
 const FAILURE: Record<ReminderFailure, (detail?: string) => string> = {
   unsupported: () =>
     "This browser can't show reminders. On an iPhone, add Ruminate to the Home Screen.",
   denied: () => "Notifications are blocked for Ruminate. Allow them in the browser's settings.",
   dismissed: () => "Choose Allow when the browser asks to show notifications.",
   "not-configured": () => "Reminders aren't set up on this server yet.",
-  "push-blocked": () =>
-    "The browser's push service refused. In Brave, turn on Use Google services for push messaging in Settings, then try again.",
+  "push-blocked": (detail) =>
+    detail === "brave"
+      ? "Brave blocks push by default. Turn on Settings > Privacy and security > Use Google services for push messaging, then try again."
+      : "The browser's push service refused. Allow push messages in the browser's settings, then try again.",
   "worker-missing": () => "Ruminate's service worker isn't running. Reload the page and try again.",
   "worker-outdated": () =>
     "This tab runs an older Ruminate. Choose Update Ruminate, then try again.",
@@ -46,6 +49,23 @@ function failureOf(error: unknown): ReminderError {
   const failure = reminderErrorOf(error)
   console.error("Habit reminders:", failure, failure.cause ?? "")
   return failure
+}
+
+/** What a test reminder did, per device: "Sent to 2 devices.", or the count
+ * sent and each device that failed, this browser by that name and another
+ * device by its push service's host. */
+function testSummary({ devices }: ReminderTestResult): string {
+  const sent = devices.filter((device) => device.outcome === "sent").length
+  const plural = (n: number) => (n === 1 ? "device" : "devices")
+  if (sent === devices.length) return `Sent to ${sent} ${plural(sent)}.`
+  const failures = devices
+    .filter((device) => device.outcome !== "sent")
+    .map((device) => {
+      const name = device.self ? "This browser" : device.host
+      const status = device.status > 0 ? `${device.status} ` : ""
+      return `${name}: ${status}${device.reason}.`
+    })
+  return [`Sent to ${sent} of ${devices.length} ${plural(devices.length)}.`, ...failures].join(" ")
 }
 
 const pad2 = (n: number) => String(n).padStart(2, "0")
@@ -137,11 +157,14 @@ export function RemindersSection() {
     setFailure(null)
     try {
       const result = await sendTestReminder()
-      if (result.outcome === "sent") toast.success("Test reminder sent.")
-      else if (result.outcome === "gone") {
+      const summary = testSummary(result)
+      const self = result.devices.find((device) => device.self)
+      if (self?.outcome === "gone") {
         setReminder(null)
-        toast.error("This device's subscription has ended. Turn reminders on again.")
-      } else toast.error(`The push service refused the reminder (${result.status}).`)
+        toast.error(`${summary} Turn reminders on again.`)
+      } else if (result.devices.every((device) => device.outcome === "sent")) {
+        toast.success(summary)
+      } else toast.error(summary)
     } catch (error) {
       setFailure(failureOf(error))
     }

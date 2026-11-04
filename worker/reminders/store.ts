@@ -42,6 +42,16 @@ export async function subscriptionOf(
   return row ? toSubscription(row) : null
 }
 
+/** Every subscription of the user, oldest first: the devices a test
+ * reminder goes to. */
+export async function subscriptionsOf(driver: SqlDriver, userId: number): Promise<Subscription[]> {
+  const rows = await driver.exec(
+    `SELECT ${COLUMNS} FROM push_subscriptions WHERE user_id = ?1 ORDER BY created_at, endpoint`,
+    [userId],
+  )
+  return rows.map(toSubscription)
+}
+
 /**
  * Save a subscription and its reminder for the user. A subscription saved
  * again keeps the day it last dealt with, so a change of time does not send

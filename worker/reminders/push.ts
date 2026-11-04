@@ -111,17 +111,62 @@ export async function vapidKeys(env: Env): Promise<VapidKeys | null> {
   return checked.ok ? { publicKey, privateKey } : null
 }
 
-/** What the push service said: taken, gone (the subscription is dead and is
- * to be deleted: 404 or 410), or any other failure. */
-export type PushOutcome = "sent" | "gone" | "failed"
+/** What the push service said: taken (2xx), gone (404 or 410: the
+ * subscription is dead and is to be deleted), the VAPID key refused (401 or
+ * 403: the key the browser subscribed with is not the one that signed), or
+ * any other failure. */
+export type PushOutcome = "sent" | "gone" | "vapid" | "failed"
 
-/** Send one reminder to one subscription. */
+/** One send's result: the outcome, the push service's status (0 when no
+ * answer came) and a short reason for a person. */
+export interface PushResult {
+  outcome: PushOutcome
+  status: number
+  reason: string
+}
+
+/** The result of a push service's answer (RFC 8030 §5, RFC 8292 §4). */
+export function pushResultOf(status: number): PushResult {
+  if (status >= 200 && status < 300) return { outcome: "sent", status, reason: "sent" }
+  if (status === 404 || status === 410) {
+    return { outcome: "gone", status, reason: "subscription gone" }
+  }
+  if (status === 401 || status === 403) {
+    return { outcome: "vapid", status, reason: "VAPID key refused" }
+  }
+  const reason =
+    status === 0
+      ? "no answer"
+      : status === 400
+        ? "request refused"
+        : status === 413
+          ? "payload too large"
+          : status === 429
+            ? "too many requests"
+            : "push service error"
+  return { outcome: "failed", status, reason }
+}
+
+/** The push service's host, for a log line: never the whole endpoint, whose
+ * path is the device's address. */
+export const endpointHost = (endpoint: string): string => {
+  try {
+    return new URL(endpoint).host
+  } catch {
+    return "invalid"
+  }
+}
+
+/** Send one reminder to one subscription. A failure is logged with the
+ * push service's host, status and the start of its answer. */
 export async function sendPush(
   keys: VapidKeys,
   target: PushTarget,
   payload: ReminderPayload,
   fetchImpl: typeof fetch = fetch,
-): Promise<{ outcome: PushOutcome; status: number }> {
+): Promise<PushResult> {
+  let result: PushResult
+  let detail = ""
   try {
     const request = await buildPushPayload(
       {
@@ -141,10 +186,21 @@ export async function sendPush(
       headers: request.headers,
       body: request.body,
     })
-    const { status } = response
-    if (status === 404 || status === 410) return { outcome: "gone", status }
-    return { outcome: response.ok ? "sent" : "failed", status }
-  } catch {
-    return { outcome: "failed", status: 0 }
+    result = pushResultOf(response.status)
+    if (result.outcome !== "sent") detail = (await response.text().catch(() => "")).slice(0, 200)
+  } catch (error) {
+    result = pushResultOf(0)
+    detail = error instanceof Error ? error.message : String(error)
   }
+  if (result.outcome !== "sent") {
+    console.error(
+      JSON.stringify({
+        event: "push_failed",
+        host: endpointHost(target.endpoint),
+        ...result,
+        detail,
+      }),
+    )
+  }
+  return result
 }

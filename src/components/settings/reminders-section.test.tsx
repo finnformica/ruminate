@@ -12,6 +12,8 @@ const api = vi.hoisted(() => ({
   loadReminder: vi.fn(),
   saveReminderTime: vi.fn(),
   enableReminders: vi.fn(),
+  sendTestReminder: vi.fn(),
+  toast: { success: vi.fn(), error: vi.fn() },
   deviceTimeZone: vi.fn(() => "Europe/London"),
 }))
 
@@ -20,9 +22,12 @@ vi.mock("../../data/reminders", async (importOriginal) => ({
   loadReminder: api.loadReminder,
   saveReminderTime: api.saveReminderTime,
   enableReminders: api.enableReminders,
+  sendTestReminder: api.sendTestReminder,
   deviceTimeZone: api.deviceTimeZone,
   pushSupported: () => true,
 }))
+
+vi.mock("sonner", () => ({ toast: api.toast }))
 
 const { RemindersSection } = await import("./reminders-section")
 const { ReminderError } = await import("../../data/reminders")
@@ -37,6 +42,9 @@ beforeEach(() => {
   api.loadReminder.mockReset()
   api.saveReminderTime.mockReset()
   api.enableReminders.mockReset()
+  api.sendTestReminder.mockReset()
+  api.toast.success.mockReset()
+  api.toast.error.mockReset()
 })
 
 afterEach(() => cleanup())
@@ -98,7 +106,10 @@ describe("a failure to turn reminders on", () => {
     const cause = new DOMException("Registration failed - push service error", "AbortError")
     const blocked = await shown(new ReminderError("push-blocked", undefined, { cause }))
     expect(blocked.text).toBe(
-      "The browser's push service refused. In Brave, turn on Use Google services for push messaging in Settings, then try again.",
+      "The browser's push service refused. Allow push messages in the browser's settings, then try again.",
+    )
+    expect((await shown(new ReminderError("push-blocked", "brave"))).text).toBe(
+      "Brave blocks push by default. Turn on Settings > Privacy and security > Use Google services for push messaging, then try again.",
     )
     expect(blocked.logged[0]).toContain(cause)
 
@@ -117,5 +128,67 @@ describe("a failure to turn reminders on", () => {
     expect((await shown(new RangeError("x"))).text).toBe(
       "Couldn't save that (RangeError). Try again.",
     )
+  })
+})
+
+describe("a test reminder", () => {
+  const device = (
+    host: string,
+    self: boolean,
+    outcome: string,
+    status: number,
+    reason: string,
+  ) => ({
+    host,
+    self,
+    outcome,
+    status,
+    reason,
+  })
+
+  const sent = async (devices: ReturnType<typeof device>[]) => {
+    api.loadReminder.mockResolvedValue({ configured: true, reminder: held("Europe/London") })
+    api.sendTestReminder.mockResolvedValue({ devices, body: "Test reminder." })
+    render(<RemindersSection />)
+    fireEvent.click(await screen.findByRole("button", { name: "Send a test reminder now" }))
+    await waitFor(() => expect(api.sendTestReminder).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(api.toast.success.mock.calls.length + api.toast.error.mock.calls.length).toBe(1),
+    )
+  }
+
+  it("says how many devices it reached", async () => {
+    await sent([
+      device("web.push.apple.com", false, "sent", 201, "sent"),
+      device("fcm.googleapis.com", true, "sent", 201, "sent"),
+    ])
+    expect(api.toast.success).toHaveBeenCalledWith("Sent to 2 devices.")
+  })
+
+  it("names this browser, and another device by its host, when a push fails", async () => {
+    await sent([
+      device("web.push.apple.com", false, "sent", 201, "sent"),
+      device("fcm.googleapis.com", true, "vapid", 403, "VAPID key refused"),
+    ])
+    expect(api.toast.error).toHaveBeenCalledWith(
+      "Sent to 1 of 2 devices. This browser: 403 VAPID key refused.",
+    )
+    cleanup()
+    api.toast.error.mockReset()
+    await sent([
+      device("web.push.apple.com", false, "failed", 0, "no answer"),
+      device("fcm.googleapis.com", true, "sent", 201, "sent"),
+    ])
+    expect(api.toast.error).toHaveBeenCalledWith(
+      "Sent to 1 of 2 devices. web.push.apple.com: no answer.",
+    )
+  })
+
+  it("turns the switch off when this browser's subscription is gone", async () => {
+    await sent([device("fcm.googleapis.com", true, "gone", 410, "subscription gone")])
+    expect(api.toast.error).toHaveBeenCalledWith(
+      "Sent to 0 of 1 device. This browser: 410 subscription gone. Turn reminders on again.",
+    )
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("false")
   })
 })

@@ -20,9 +20,21 @@ export interface ReminderBody {
   reminder: ReminderSettings | null
 }
 
-/** `POST /test`: what the push service said, and the body that was sent. */
-export interface ReminderTestResult {
-  outcome: "sent" | "gone" | "failed"
+/** One device's answer to a test reminder: the push service's host, whether
+ * it is the browser that asked, and what the push service said
+ * (worker/reminders/push.ts, `pushResultOf`). A gone device's subscription
+ * is deleted. */
+export interface ReminderDeviceResult {
+  host: string
+  self: boolean
+  outcome: "sent" | "gone" | "vapid" | "failed"
   status: number
+  reason: string
+}
+
+/** `POST /test`: one result per device of the reader, and the body that was
+ * sent. */
+export interface ReminderTestResult {
+  devices: ReminderDeviceResult[]
   body: string
 }

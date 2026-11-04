@@ -7,8 +7,10 @@
 //   subscription and its reminder.
 // - `DELETE { endpoint }`: turn this device's reminders off.
 // - `POST /test { endpoint }`: run the cron's check for the caller now and
-//   send the result to this device, even when every habit is logged (the
-//   body says so). Cron does not run on preview versions; this does.
+//   send the result to every device of the caller, even when every habit is
+//   logged (the body says so), with what each push service said. `endpoint`
+//   names the browser that asked. Cron does not run on preview versions;
+//   this does.
 
 import {
   DEFAULT_REMINDER_TIME,
@@ -18,11 +20,12 @@ import {
 } from "../reminders/schedule"
 import { checkHabits } from "../reminders/habits"
 import { reminderMessage } from "../reminders/message"
-import { sendPush, vapidKeys } from "../reminders/push"
+import { endpointHost, sendPush, vapidKeys } from "../reminders/push"
 import {
   deleteSubscription,
   saveSubscription,
   subscriptionOf,
+  subscriptionsOf,
   type Subscription,
 } from "../reminders/store"
 import { controlPlaneDriver, corpusDriver, forTenant } from "../tenancy-db"
@@ -30,6 +33,7 @@ import type { Env } from "../types"
 import { requireSession } from "./replica"
 import type {
   ReminderBody,
+  ReminderDeviceResult,
   ReminderSettings,
   ReminderTestResult,
 } from "../../src/data/reminders-api"
@@ -151,11 +155,19 @@ export async function reminders(
     const tenant = forTenant(corpusDriver(env), session)
     const { habits, missing } = await checkHabits(tenant, day)
     const message = reminderMessage(habits, missing, { test: true })
-    const { outcome, status } = await sendPush(keys, held, message, fetchImpl)
-    // A gone subscription is deleted, as the cron does; the card turns off.
-    if (outcome === "gone") await deleteSubscription(control, endpoint, session.id)
-    const body: ReminderTestResult = { outcome, status, body: message.body }
-    return json(body, outcome === "sent" ? 200 : outcome === "gone" ? 410 : 502)
+    const devices: ReminderDeviceResult[] = []
+    for (const device of await subscriptionsOf(control, session.id)) {
+      const result = await sendPush(keys, device, message, fetchImpl)
+      // A gone subscription is deleted, as the cron does.
+      if (result.outcome === "gone") await deleteSubscription(control, device.endpoint, session.id)
+      devices.push({
+        host: endpointHost(device.endpoint),
+        self: device.endpoint === endpoint,
+        ...result,
+      })
+    }
+    const body: ReminderTestResult = { devices, body: message.body }
+    return json(body)
   }
 
   return json({ error: "method_not_allowed" }, 405)
