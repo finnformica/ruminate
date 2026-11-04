@@ -29,6 +29,13 @@ Requested by Finn, 2026-11-04.
    orca-shot http://127.0.0.1:4791/settings/account --viewport 390x844 --wait 15000
    ```
 
+   The demo reminder is on. To shoot Settings > Notifications with the
+   switch off, click it. The mock answers the write, and the card shows off:
+
+   ```bash
+   orca-shot http://127.0.0.1:4791/settings/notifications --viewport 1440x900 --wait 15000 --click "#habit-reminders" --wait 2000
+   ```
+
 4. Look for gaps. A request the mock layer cannot answer shows in red in
    `/tmp/shots.log` as `[shots] UNMOCKED <method> <path>`, and in the
    browser console (`orca-shot --console`). Add the route to

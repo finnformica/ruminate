@@ -33,11 +33,13 @@ export function shotsPlugin(): Plugin {
     name: "ruminate-shots",
     apply: (_config, env) => isShotsRun(env),
     // Compile the app's modules at start, not on the first shot's load. The
-    // service worker's packages are scanned too: found late, they make Vite
-    // reload the page in the middle of the first shot.
+    // service worker's packages (src/sw.ts) are bundled at start too: found
+    // late, they make Vite reload the page in the middle of the first shot.
+    // Named, not scanned: a scan of src/sw.ts takes the server past the
+    // box's 1 GB cap for a served job.
     config: () => ({
       server: { warmup: { clientFiles: ["./src/index.tsx"] } },
-      optimizeDeps: { entries: ["index.html", "src/sw.ts"] },
+      optimizeDeps: { include: ["workbox-precaching", "workbox-routing"] },
     }),
     configResolved(config) {
       file = fixturesFile(path.resolve(config.root, process.env.SHOTS_FIXTURES || "shots/demo"))
