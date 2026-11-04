@@ -446,18 +446,31 @@ describe("a day with more than one series", () => {
     // Read, Swim and Run on the 28th: a 2×2, filled in reading order, the
     // last cell empty.
     const dots = cell("2026-10-28").querySelector<HTMLElement>("[data-dots]")!
-    expect(dots.className).toContain("place-items-center")
     const grid = dots.querySelector<HTMLElement>("[data-dot-grid]")!
     expect(grid.dataset.dotGrid).toBe("2")
     expect(grid.children).toHaveLength(3)
-    // Both tracks are the one whole-pixel side, so the squares are equal.
+    // Inset by one whole-pixel margin on all four sides, so each side rounds
+    // the same way as the tile's edge.
+    expect(grid.style.inset).toBe("var(--dot-margin)")
+    expect(grid.style.getPropertyValue("--dot-margin")).toBe("round(10cqw, 1px)")
+    // Both tracks are the one whole-pixel side, the squares at the corners.
     expect(grid.style.gridTemplateColumns).toBe("repeat(2, var(--dot))")
     expect(grid.style.gridTemplateRows).toBe("repeat(2, var(--dot))")
+    expect(grid.style.justifyContent).toBe("space-between")
+    expect(grid.style.alignContent).toBe("space-between")
     expect(grid.style.getPropertyValue("--dot")).toBe(
-      "round(down, (80cqw - 1 * var(--dot-gap)) / 2, 1px)",
+      "round(down, (100cqw - 2 * var(--dot-margin) - 1 * var(--dot-gap)) / 2, 1px)",
     )
     expect(grid.style.getPropertyValue("--dot-gap")).toBe("max(1px, round(6cqw, 1px))")
     expect(dots.querySelector("svg")).toBeNull()
+  })
+
+  it("fills the inset box with the one square of a day with one series", () => {
+    render(<ActivityCard series={[READ]} today="2026-10-29" />)
+    const grid = cell("2026-10-28").querySelector<HTMLElement>("[data-dot-grid]")!
+    expect(grid.dataset.dotGrid).toBe("1")
+    expect(grid.style.gridTemplateColumns).toBe("1fr")
+    expect(grid.style.gridTemplateRows).toBe("1fr")
   })
 
   it("draws a grey outline past 9 series", () => {

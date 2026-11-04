@@ -98,54 +98,68 @@ export function dotGrid(count: number): number {
   return count <= 0 ? 0 : count === 1 ? 1 : count <= 4 ? 2 : 3
 }
 
+/** The margin as CSS, in whole pixels. The grid is inset by it on all four
+ * sides: the tile's edges and the grid's edges then sit at the same
+ * fraction of a pixel and round the same way, so the margin is the same on
+ * each side. (Centred at a fractional offset, a 14.37 px phone day showed
+ * 1 px of margin on one side and 2 px on the other.) */
+const DOT_MARGIN_CSS = `round(${DOT_MARGIN}cqw, 1px)`
+
 /** The gap as CSS, in whole pixels and never under one: a phone's 14 px day
  * has 0.84 px of gap, which can round away and join two squares. */
 const DOT_GAP_CSS = `max(1px, round(${DOT_GAP}cqw, 1px))`
 
 /** A square's side as CSS for a grid of `k`: its share of the room inside
- * the margin, rounded down to a whole pixel. Every square and gap is whole
- * pixels, so all edges sit at the same fraction of a pixel and snap the
- * same way: no square is a pixel wider than another. */
+ * the margin, rounded down to a whole pixel, so no square is a pixel wider
+ * than another. The squares sit at the corners of the grid and the gaps
+ * take what is left over. */
 const dotSideCss = (k: number) =>
-  `round(down, (${100 - 2 * DOT_MARGIN}cqw - ${k - 1} * var(--dot-gap)) / ${k}, 1px)`
+  `round(down, (100cqw - 2 * var(--dot-margin) - ${k - 1} * var(--dot-gap)) / ${k}, 1px)`
 
 /**
  * A day's series as squares on the day's tile, in their colours: the one
- * look for a day with one series and with many. Plain CSS layout: the tile
- * is a size container, and the squares a fixed k×k grid (`dotGrid`) of equal
- * whole-pixel tracks with the gap between, centred in it by the browser
- * (lengths in `cqw`, hundredths of the tile's side). A slip on a series to
- * avoid is a plain square: the Heatmap has no slip mark (Finn, 2026-11-03).
+ * look for a day with one series and with many. Plain CSS layout, no
+ * measure: the tile is a size container, and the squares a fixed k×k grid
+ * (`dotGrid`) inset by the same whole-pixel margin on all four sides (lengths
+ * in `cqw`, hundredths of the tile's side). One series fills the inset box;
+ * in a 2×2 or 3×3 every square is the same whole-pixel side, the outer
+ * squares on the box's edges (`space-between`). A slip on a series to avoid
+ * is a plain square: the Heatmap has no slip mark (Finn, 2026-11-03).
  * `faint` draws the squares of a placeholder. Its parent is `relative`.
  */
 export function DayDots({ dots, faint = false }: { dots: readonly DayDot[]; faint?: boolean }) {
   const k = dotGrid(dots.length)
   const cells = Math.min(dots.length, k * k)
+  const track = k === 1 ? "1fr" : `repeat(${k}, var(--dot))`
+  const radius = k === 1 ? `${SQUARE_RADIUS * 100}%` : `calc(var(--dot) * ${SQUARE_RADIUS})`
   return (
     <span
       aria-hidden
       data-dots={dots.length}
       className={cx(
-        "pointer-events-none absolute inset-0 grid place-items-center [container-type:size]",
+        "pointer-events-none absolute inset-0 [container-type:size]",
         faint && "opacity-40",
       )}
     >
       <span
         data-dot-grid={k}
-        className="grid"
+        className="absolute grid"
         style={
           {
+            "--dot-margin": DOT_MARGIN_CSS,
             "--dot-gap": DOT_GAP_CSS,
             "--dot": dotSideCss(k),
-            gridTemplateColumns: `repeat(${k}, var(--dot))`,
-            gridTemplateRows: `repeat(${k}, var(--dot))`,
+            inset: "var(--dot-margin)",
+            gridTemplateColumns: track,
+            gridTemplateRows: track,
             gap: "var(--dot-gap)",
+            justifyContent: "space-between",
+            alignContent: "space-between",
           } as React.CSSProperties
         }
       >
         {Array.from({ length: cells }, (_, at) => {
           const more = at === 8 && dots.length > 9
-          const radius = `calc(var(--dot) * ${SQUARE_RADIUS})`
           return more ? (
             <span
               key={at}

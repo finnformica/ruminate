@@ -190,9 +190,15 @@ has no keys to validate.
   outline for the rest. A slip on a series to avoid is a plain square: the
   Heatmap has no slip mark (Finn, 2026-11-03). The squares are plain CSS
   layout, with no measure: the tile is a size container, and the squares a
-  CSS grid centred in it, its tracks and gap each a whole pixel (CSS
-  `round()`, lengths in `cqw`), so every edge snaps the same way and no
-  square is a pixel wider than another. Today
+  CSS grid inset by one whole-pixel margin on all four sides (CSS `round()`,
+  lengths in `cqw`). A phone's day is a fraction of a pixel wide (14.37 px
+  at 390); a grid centred in it rounded 1 px one side and 2 px the other,
+  but an inset rounds as the tile's own edge does, so the margins are
+  equal. Each square is the same whole-pixel side, the outer ones on the
+  inset box's edges (`space-between`), so no square is a pixel wider than
+  another; in a 3×3 the two gaps can differ by a pixel (14 px less three 3
+  px squares leaves 5 px, which two equal margins and two equal gaps cannot
+  share). Today
   with a ring and the rest of this week dashed over a faint grey. A tap on a day up to today opens the day editor on it;
   the grid is one tab stop, and the arrow keys move a day (up, down) or a
   week (left, right). A week that runs into a new month is split into two
