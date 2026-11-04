@@ -1,6 +1,7 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router"
 import { SettingsIcon16 } from "../components/icons"
 import { PageLayout } from "../components/page-layout"
+import { RootLink } from "../components/root-link"
 import { useCurrentSettingsPage } from "../components/settings/settings-nav"
 
 /**
@@ -30,7 +31,12 @@ function RouteComponent() {
           ) : null}
         </span>
       }
-      icon={<SettingsIcon16 />}
+      // The settings icon leads back to Root, as a note's or a board's does.
+      icon={
+        <RootLink>
+          <SettingsIcon16 />
+        </RootLink>
+      }
       disableGuard
     >
       <div className="p-4 pb-6">
