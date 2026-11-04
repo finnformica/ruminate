@@ -37,7 +37,10 @@ export function DayDialog({
   const bodyRef = React.useRef<HTMLDivElement>(null)
   const onOpenChange = (next: boolean) => (next ? undefined : onClose())
   if (day === null || day > today) return null
-  const title = day === today ? "Today" : day === addDays(today, -1) ? "Yesterday" : dayLabel(day)
+  // The date as every other date header has it, and the day's name beside it
+  // when it has one (Finn 2026-11-04). A day to come cannot open: no Tomorrow.
+  const relative = day === today ? "Today" : day === addDays(today, -1) ? "Yesterday" : null
+  const title = relative ? `${dayLabel(day)} (${relative})` : dayLabel(day)
   const actions = (
     <>
       <IconButton aria-label="Previous day" onClick={() => onDayChange(addDays(day, -1))}>
@@ -60,9 +63,6 @@ export function DayDialog({
       data-day={day}
       className="flex flex-col gap-4 focus:outline-hidden"
     >
-      {title === dayLabel(day) ? null : (
-        <p className="text-sm text-text-secondary">{dayLabel(day)}</p>
-      )}
       <DayControls series={series} day={day} onSetEntry={onSetEntry} idPrefix="day" />
     </div>
   )

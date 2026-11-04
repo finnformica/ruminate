@@ -84,14 +84,16 @@ describe("DayDialog", () => {
     pointer(false)
     renderDay(TODAY)
     await frames()
-    expect(screen.getByText("Today")).toBeTruthy()
+    expect(screen.getByText("Thu 29 Oct (Today)")).toBeTruthy()
     expect((screen.getByRole("button", { name: "Next day" }) as HTMLButtonElement).disabled).toBe(
       true,
     )
     cleanup()
     renderDay("2026-10-28")
     await frames()
-    expect(screen.getByText("Yesterday")).toBeTruthy()
+    expect(screen.getByText("Wed 28 Oct (Yesterday)")).toBeTruthy()
+    // One date in the dialog: the header's.
+    expect(screen.getAllByText(/28 Oct/)).toHaveLength(1)
   })
 
   it("opens nothing for no day or a day to come", () => {
