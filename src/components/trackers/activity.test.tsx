@@ -494,16 +494,25 @@ describe("a day with more than one series", () => {
     // Inset by one whole-pixel margin on all four sides, so each side rounds
     // the same way as the tile's edge.
     expect(grid.style.inset).toBe("var(--dot-margin)")
-    expect(grid.style.getPropertyValue("--dot-margin")).toBe("round(10cqw, 1px)")
+    expect(grid.style.getPropertyValue("--dot-margin")).toBe("round(10cqw, var(--dot-u, 1px))")
     // Both tracks are the one whole-pixel side, the squares at the corners.
     expect(grid.style.gridTemplateColumns).toBe("repeat(2, var(--dot))")
     expect(grid.style.gridTemplateRows).toBe("repeat(2, var(--dot))")
     expect(grid.style.justifyContent).toBe("space-between")
     expect(grid.style.alignContent).toBe("space-between")
     expect(grid.style.getPropertyValue("--dot")).toBe(
-      "round(down, (100cqw - 2 * var(--dot-margin) - 1 * var(--dot-gap)) / 2, 1px)",
+      "round(down, (100cqw - 2 * var(--dot-margin) - 1 * var(--dot-gap)) / 2 + 0.01px, var(--dot-u, 1px))",
     )
-    expect(grid.style.getPropertyValue("--dot-gap")).toBe("max(1px, round(6cqw, 1px))")
+    expect(grid.style.getPropertyValue("--dot-gap")).toBe(
+      "max(1px, round(6cqw, var(--dot-u, 1px)))",
+    )
+    // The tile is a whole number of device pixels, centred in its cell.
+    const tile = cell("2026-10-28").parentElement!
+    expect(tile.style.width).toBe("round(down, 100cqw + 0.01px, var(--dot-u, 1px))")
+    expect(tile.parentElement!.className).toContain("[container-type:inline-size]")
+    expect(screen.getByRole("grid").className).toContain(
+      "[@media(min-resolution:3dppx)]:[--dot-u:calc(1px/3)]",
+    )
     expect(dots.querySelector("svg")).toBeNull()
   })
 
@@ -513,6 +522,19 @@ describe("a day with more than one series", () => {
     expect(grid.dataset.dotGrid).toBe("1")
     expect(grid.style.gridTemplateColumns).toBe("1fr")
     expect(grid.style.gridTemplateRows).toBe("1fr")
+  })
+
+  it("gives a 3×3's squares the tile's parity, so its two gaps are equal", () => {
+    const many: SeriesState[] = Array.from({ length: 9 }, (_, i) => ({
+      ...READ,
+      series: { ...READ.series, id: `p${i}` },
+    }))
+    render(<ActivityCard series={many} today="2026-10-29" />)
+    const grid = cell("2026-10-28").querySelector<HTMLElement>("[data-dot-grid]")!
+    expect(grid.dataset.dotGrid).toBe("3")
+    expect(grid.style.getPropertyValue("--dot")).toBe(
+      "calc(round(down, (100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap)) / 3 - mod(100cqw, 2 * var(--dot-u, 1px)) + 0.01px, 2 * var(--dot-u, 1px)) + mod(100cqw, 2 * var(--dot-u, 1px)))",
+    )
   })
 
   it("draws a grey outline past 9 series", () => {
