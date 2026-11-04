@@ -112,9 +112,10 @@ const singles = (k: number, count: number, row = 1): DotCell[] =>
  * - 2: two halves, one over the other. 3: a half on top, two quarters
  *   below ("one of the activities takes up half and the other two take up
  *   a quarter each"). 4: four quarters.
- * - 5: three over two, the last two down to the foot: a tall one and a
- *   2×2 square. 6: three over three, the last three down to the foot. 7:
- *   the last spans the last row. 8: the last spans two cells. 9: nine cells.
+ * - 5: three over two full-width rows (Finn, 2026-11-04: "5a as that makes
+ *   most sense to me"). 6: three over three, the last three down to the
+ *   foot. 7: the last spans the last row. 8: the last spans two cells. 9:
+ *   nine cells.
  */
 const DOT_CELLS: Record<number, readonly DotCell[]> = {
   1: [[1, 1, 1, 1]],
@@ -124,7 +125,7 @@ const DOT_CELLS: Record<number, readonly DotCell[]> = {
   ],
   3: [[1, 1, 2, 1], ...singles(2, 2, 2)],
   4: singles(2, 4),
-  5: [...singles(3, 3), [1, 2, 1, 2], [2, 2, 2, 2]],
+  5: [...singles(3, 3), [1, 2, 3, 1], [1, 3, 3, 1]],
   6: [...singles(3, 3), [1, 2, 1, 2], [2, 2, 1, 2], [3, 2, 1, 2]],
   7: [...singles(3, 6), [1, 3, 3, 1]],
   8: [...singles(3, 7), [2, 3, 2, 1]],

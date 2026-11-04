@@ -190,7 +190,7 @@ has no keys to validate.
   between too, so the block keeps one shape (`dotCells`, Finn 2026-11-03:
   "empty space should be filled by the closest square"). 2 is two halves,
   one over the other; 3 a half on top and two quarters below; 5 three over
-  a tall mark and a 2×2 square; 6 three over three tall marks; 7 six over a
+  two full-width rows (Finn, 2026-11-04: option 5a); 6 three over three tall marks; 7 six over a
   full row; 8 seven, the last two cells wide. Past 9, eight squares and a
   grey outline for the rest. A slip on a series to avoid is a plain square: the
   Heatmap has no slip mark (Finn, 2026-11-03). The squares are plain CSS

@@ -469,6 +469,11 @@ describe("a day with more than one series", () => {
       [1, 2, 2, 1],
     ])
     expect(dotCells(8)[7]).toEqual([2, 3, 2, 1])
+    // Five: three squares over two full-width rows (Finn's option 5a).
+    expect(dotCells(5).slice(3)).toEqual([
+      [1, 2, 3, 1],
+      [1, 3, 3, 1],
+    ])
     expect(dotCells(7)[6]).toEqual([1, 3, 3, 1])
     // More than 9: the nine cells of a 3×3.
     expect(dotCells(12)).toEqual(dotCells(9))
