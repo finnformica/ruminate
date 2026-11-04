@@ -504,7 +504,7 @@ describe("a day with more than one series", () => {
       "round(down, (100cqw - 2 * var(--dot-margin) - 1 * var(--dot-gap)) / 2 + 0.01px, var(--dot-u, 1px))",
     )
     expect(grid.style.getPropertyValue("--dot-gap")).toBe(
-      "max(1px, round(6cqw, var(--dot-u, 1px)))",
+      "max(var(--dot-u, 1px), round(6cqw, var(--dot-u, 1px)))",
     )
     // The tile is a whole number of device pixels, centred in its cell.
     const tile = cell("2026-10-28").parentElement!
@@ -524,7 +524,7 @@ describe("a day with more than one series", () => {
     expect(grid.style.gridTemplateRows).toBe("1fr")
   })
 
-  it("gives a 3×3's squares the tile's parity, so its two gaps are equal", () => {
+  it("gives a 3×3's middle column and row what is left, so its two gaps are the gap", () => {
     const many: SeriesState[] = Array.from({ length: 9 }, (_, i) => ({
       ...READ,
       series: { ...READ.series, id: `p${i}` },
@@ -533,7 +533,17 @@ describe("a day with more than one series", () => {
     const grid = cell("2026-10-28").querySelector<HTMLElement>("[data-dot-grid]")!
     expect(grid.dataset.dotGrid).toBe("3")
     expect(grid.style.getPropertyValue("--dot")).toBe(
-      "calc(round(down, (100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap)) / 3 - mod(100cqw, 2 * var(--dot-u, 1px)) + 0.01px, 2 * var(--dot-u, 1px)) + mod(100cqw, 2 * var(--dot-u, 1px)))",
+      "round((100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap)) / 3, var(--dot-u, 1px))",
+    )
+    expect(grid.style.getPropertyValue("--dot-middle")).toBe(
+      "calc(100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap) - 2 * var(--dot))",
+    )
+    expect(grid.style.gridTemplateColumns).toBe("var(--dot) var(--dot-middle) var(--dot)")
+    expect(grid.style.gridTemplateRows).toBe("var(--dot) var(--dot-middle) var(--dot)")
+    // The single square's corner, at most a third of the short side.
+    const mark = grid.firstElementChild as HTMLElement
+    expect(mark.style.borderRadius).toBe(
+      "max(var(--dot-u, 1px), min(round((100cqw - 2 * var(--dot-margin)) * 0.2, var(--dot-u, 1px)), round(var(--dot) / 3, var(--dot-u, 1px))))",
     )
   })
 

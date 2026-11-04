@@ -84,8 +84,8 @@ export type DayDot = { colour: TrackerColour }
 const DOT_MARGIN = 10
 const DOT_GAP = 6
 
-/** A mark's corner radius, as a share of its short side: the single
- * square's look (Finn, 2026-11-04). */
+/** The single square's corner radius, as a share of its side (Finn,
+ * 2026-11-04: the look of every mark's corner). */
 const SQUARE_RADIUS = 0.2
 
 /**
@@ -168,33 +168,39 @@ export const dayTileSide = `round(down, 100cqw + ${EPSILON}, ${U})`
  * 1 px of margin on one side and 2 px on the other.) */
 const DOT_MARGIN_CSS = `round(${DOT_MARGIN}cqw, ${U})`
 
-/** The gap as CSS, in whole device pixels and never under one CSS pixel: a
- * phone's 14 px day has 0.84 px of gap, which can round away and join two
- * squares. */
-const DOT_GAP_CSS = `max(1px, round(${DOT_GAP}cqw, ${U}))`
+/** The gap as CSS, in whole device pixels and never under one: a phone's
+ * 14 px day has 0.84 px of gap, which can round away and join two squares
+ * (3 device px at DPR 3, 2 at DPR 2). */
+const DOT_GAP_CSS = `max(${U}, round(${DOT_GAP}cqw, ${U}))`
 
 /** A square's side as CSS for a grid of `k`: its share of the room inside
- * the margin, rounded down to a whole device pixel, so no square is a pixel
- * wider than another. The outer squares sit on the grid's edges and the gaps
- * take what is left over. In a 3×3 that is two gaps: the side takes the
- * tile's parity (in device pixels), so what is left over is even and the
- * two gaps are equal (14.37 px at DPR 3 is a 43 px tile: margins 4, squares
- * 9, gaps 4). */
+ * the margin less the gaps, in whole device pixels. In a 2×2 it rounds down
+ * and the one gap takes what is left over, so both squares are the same. In
+ * a 3×3 it rounds to the nearest and the middle column and row take what is
+ * left over (`dotMiddleCss`), so the two gaps are the gap and the grid stays
+ * symmetric (Finn, 2026-11-04: "tighten it up a little"). 14.37 px at DPR 3
+ * is a 43 px tile: margins 4, squares 10, 9 and 10, gaps 3. */
 const dotSideCss = (k: number) =>
   k === 1
     ? "calc(100cqw - 2 * var(--dot-margin))"
     : k === 3
-      ? `calc(round(down, (100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap)) / 3 - mod(100cqw, 2 * ${U}) + ${EPSILON}, 2 * ${U}) + mod(100cqw, 2 * ${U}))`
+      ? `round((100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap)) / 3, ${U})`
       : `round(down, (100cqw - 2 * var(--dot-margin) - ${k - 1} * var(--dot-gap)) / ${k} + ${EPSILON}, ${U})`
 
-/** A mark's corner radius as CSS: a share of its short side (`--dot`, or
- * a span of `n` cells and the gaps between them), in whole device pixels and
- * at least one. One length for x and y, so every corner is a circle, and
- * marks of the same short side have the same corners. */
+/** The middle column and row of a 3×3: what is left of the room inside the
+ * margin, at most one device pixel more or less than the others. */
+const dotMiddleCss = "calc(100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap) - 2 * var(--dot))"
+
+/** A mark's corner radius as CSS: the single square's corner (a share of
+ * the room inside the margin), but at most a third of the mark's short side
+ * (`--dot`, or a span of `n` cells and the gaps between them), so a small
+ * square is not a circle (Finn, 2026-11-04). In whole device pixels and at
+ * least one. One length for x and y, so every corner is a circle. */
 const dotRadiusCss = (columns: number, rows: number) => {
   const n = Math.min(columns, rows)
   const side = n === 1 ? "var(--dot)" : `(${n} * var(--dot) + ${n - 1} * var(--dot-gap))`
-  return `max(${U}, round(${side} * ${SQUARE_RADIUS}, ${U}))`
+  const single = `round((100cqw - 2 * var(--dot-margin)) * ${SQUARE_RADIUS}, ${U})`
+  return `max(${U}, min(${single}, round(${side} / 3, ${U})))`
 }
 
 /**
@@ -203,8 +209,8 @@ const dotRadiusCss = (columns: number, rows: number) => {
  * measure: the tile is a size container, and the squares a fixed k×k grid
  * (`dotGrid`) inset by the same whole-device-pixel margin on all four sides
  * (lengths in `cqw`, hundredths of the tile's side). One series fills the
- * inset box; in a 2×2 or 3×3 every cell is the same whole-device-pixel
- * side, and the gaps are equal when the tile is whole (`dayTileSide`), the outer cells
+ * inset box; in a 2×2 or 3×3 every cell is a whole-device-pixel side (a
+ * 3×3's middle one pixel more or less), and the gaps are equal when the tile is whole (`dayTileSide`), the outer cells
  * on the box's edges (`space-between`), and a mark spans the cells of
  * `dotCells`, the gaps between them too. A slip on a series to avoid
  * is a plain square: the Heatmap has no slip mark (Finn, 2026-11-03).
@@ -212,7 +218,12 @@ const dotRadiusCss = (columns: number, rows: number) => {
  */
 export function DayDots({ dots, faint = false }: { dots: readonly DayDot[]; faint?: boolean }) {
   const k = dotGrid(dots.length)
-  const track = k === 1 ? "1fr" : `repeat(${k}, var(--dot))`
+  const track =
+    k === 1
+      ? "1fr"
+      : k === 3
+        ? "var(--dot) var(--dot-middle) var(--dot)"
+        : `repeat(${k}, var(--dot))`
   return (
     <span
       aria-hidden
@@ -230,6 +241,7 @@ export function DayDots({ dots, faint = false }: { dots: readonly DayDot[]; fain
             "--dot-margin": DOT_MARGIN_CSS,
             "--dot-gap": DOT_GAP_CSS,
             "--dot": dotSideCss(k),
+            "--dot-middle": dotMiddleCss,
             inset: "var(--dot-margin)",
             gridTemplateColumns: track,
             gridTemplateRows: track,
