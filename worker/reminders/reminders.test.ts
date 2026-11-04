@@ -182,12 +182,14 @@ describe("the message", () => {
   it("names the missing habits and opens the first one's tracker", () => {
     const habits = [habit("Read"), habit("Run", "trk_b")]
     expect(reminderMessage(habits, habits.slice(1))).toEqual({
-      title: "Today's habits",
+      title: "Ruminate",
       body: "Not logged yet: Run.",
       url: "/trackers/trk_b",
       tag: "habit-reminder",
     })
     expect(reminderMessage(habits, habits).body).toBe("Not logged yet: Read and Run.")
+    const three = [habit("Run"), habit("Read"), habit("Walk")]
+    expect(reminderMessage(three, three).body).toBe("Not logged yet: Run, Read and Walk.")
   })
 
   it("counts the rest after five", () => {
@@ -426,16 +428,19 @@ describe("the cron", () => {
 
   it("sends nothing to a reader with every habit logged, and still marks the day", async () => {
     await subscribe(OTHER, "https://push.test/other")
+    // In the same run, USER has a habit missing: only USER gets a push.
+    await subscribe(USER, "https://push.test/phone")
     // OTHER's one habit is missing; log it.
     await seedTracker(OTHER, { id: "trk_other", title: "Theirs" }, [
       { id: "ser_other", name: "Other", kind: "check", entries: [["done", TODAY]] },
     ])
     const service = pushService()
     expect(await runReminders(vapidEnv, EVENING, service.fetchImpl)).toMatchObject({
-      due: 1,
-      sent: 0,
+      due: 2,
+      checked: 2,
+      sent: 1,
     })
-    expect(service.calls).toEqual([])
+    expect(service.calls.map((call) => call.endpoint)).toEqual(["https://push.test/phone"])
     const row = await subscriptionOf(harness.control, OTHER, "https://push.test/other")
     expect(row?.lastSentDay).toBe(TODAY)
   })

@@ -1,5 +1,6 @@
 // What a habit reminder says (docs/reminders.md): the payload the service
-// worker shows (src/sw.ts) — a title, a body that names the habits not yet
+// worker shows (src/sw.ts) — the app's name as the title (docs/reminders.md,
+// The title on each platform), a body that names the habits not yet
 // logged, and the page a tap opens.
 
 import type { Habit } from "./habits"
@@ -14,7 +15,7 @@ export interface ReminderPayload {
   tag: string
 }
 
-const TITLE = "Today's habits"
+const TITLE = "Ruminate"
 const TAG = "habit-reminder"
 /** Habits named before the rest are counted. */
 const NAMED = 5
