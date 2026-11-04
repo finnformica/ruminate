@@ -15,8 +15,8 @@ import {
 import type { ReminderSettings } from "../../data/reminders-api"
 import { usePending } from "../../hooks/pending"
 import { AsyncButton } from "../ui/async-button"
-import { Checkbox } from "../ui/checkbox"
-import { TextInput } from "../ui/text-input"
+import { Select, type SelectOption } from "../ui/select"
+import { Switch } from "../ui/switch"
 import { SettingsSection } from "../settings-section"
 
 /** What the card says when a step fails. */
@@ -30,11 +30,35 @@ const FAILURE: Record<ReminderFailure, string> = {
 const failureOf = (error: unknown): ReminderFailure =>
   error instanceof ReminderError ? error.reason : "failed"
 
+const pad2 = (n: number) => String(n).padStart(2, "0")
+
+/** Every quarter hour of the day, 00:00 to 23:45: the cron's step
+ * (worker/reminders/schedule.ts). */
+const QUARTER_HOURS: readonly SelectOption[] = Array.from({ length: 96 }, (_, at) => {
+  const time = `${pad2(Math.floor(at / 4))}:${pad2((at % 4) * 15)}`
+  return { value: time, label: time }
+})
+
+/** The choices, with a stored time that is not on a quarter hour (saved
+ * before the list) kept among them so the field shows it. */
+function timeOptions(time: string): readonly SelectOption[] {
+  if (QUARTER_HOURS.some((option) => option.value === time)) return QUARTER_HOURS
+  return [...QUARTER_HOURS, { value: time, label: time }].sort((a, b) =>
+    a.value.localeCompare(b.value),
+  )
+}
+
 /**
- * Habit reminders (docs/reminders.md): a push on this device when today's
- * habits are not all logged by the time chosen here. Per device, as a push
- * subscription is. Labels and nothing under them (docs/settings.md); a line
- * appears only to say why something did not work.
+ * Habit reminders (docs/reminders.md), on the Notifications page: a push on
+ * this device when today's habits are not all logged by the time chosen
+ * here. Per device, as a push subscription is. Labels and nothing under
+ * them (docs/settings.md); a line appears only to say why something did not
+ * work.
+ *
+ * The time zone is not shown. The Worker's cron sends the push, not the
+ * device, so the server holds the zone the time is in: every save sends the
+ * browser's (src/data/reminders.ts), and on load a zone that differs from
+ * the stored one is saved again, with no word to the reader.
  */
 export function RemindersSection() {
   const [loaded, setLoaded] = useState(false)
@@ -50,6 +74,14 @@ export function RemindersSection() {
         setReminder(held)
         if (held) setTime(held.reminderTime)
         if (!configured) setFailure("not-configured")
+        // The browser moved to another zone (a trip, a new device clock):
+        // keep the server's copy in step. A failure here changes nothing the
+        // reader sees; the next save tries again.
+        if (held && configured && held.timeZone !== deviceTimeZone()) {
+          saveReminderTime(held.reminderTime)
+            .then((saved) => live && setReminder(saved))
+            .catch(() => {})
+        }
       })
       .catch((error: unknown) => live && setFailure(failureOf(error)))
       .finally(() => live && setLoaded(true))
@@ -72,7 +104,8 @@ export function RemindersSection() {
   })
 
   const [saveTime, savingTime] = usePending(async (next: string) => {
-    if (!reminder || next === reminder.reminderTime || !/^\d{2}:\d{2}$/.test(next)) return
+    setTime(next)
+    if (!reminder || next === reminder.reminderTime) return
     setFailure(null)
     try {
       setReminder(await saveReminderTime(next))
@@ -101,8 +134,8 @@ export function RemindersSection() {
 
   return (
     <SettingsSection title="Reminders">
-      <div className="flex items-center gap-2 leading-4">
-        <Checkbox
+      <div className="flex items-center gap-3 leading-4">
+        <Switch
           id="habit-reminders"
           checked={on}
           disabled={!loaded || toggling || !supported}
@@ -112,20 +145,16 @@ export function RemindersSection() {
           Remind me to log my habits
         </label>
       </div>
-      <div className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-3">
+      <div className="flex items-center gap-4">
         <label htmlFor="habit-reminder-time">Time</label>
-        <TextInput
+        <Select
           id="habit-reminder-time"
-          type="time"
-          step={900}
           className="w-32"
           value={time}
+          onValueChange={(next) => saveTime(next)}
+          options={timeOptions(time)}
           disabled={savingTime || toggling}
-          onChange={(event) => setTime(event.target.value)}
-          onBlur={() => saveTime(time)}
         />
-        <span>Time zone</span>
-        <span className="text-text-secondary">{reminder?.timeZone ?? deviceTimeZone()}</span>
       </div>
       {on ? (
         <div>

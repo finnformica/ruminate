@@ -36,9 +36,10 @@ export function SettingsPageContent({ id }: { id: SettingsPageId }) {
           <AppearanceSection />
           <EditorSection />
           {githubUser ? <ChangelogSection /> : null}
-          {githubUser ? <RemindersSection /> : null}
         </>
       )
+    case "notifications":
+      return githubUser ? <RemindersSection /> : null
     case "sharing":
       return <SharingSection />
     case "mcp":

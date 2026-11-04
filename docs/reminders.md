@@ -6,21 +6,29 @@ Requested by Finn, 2026-11-02.
 
 ## The setting
 
-**Settings → Preferences → Reminders** (`src/components/settings/reminders-section.tsx`,
-drawn signed in only):
+**Settings → Notifications → Reminders** (`/settings/notifications`; the
+card is `src/components/settings/reminders-section.tsx`, drawn signed in
+only). Finn, 2026-11-04: a page of its own, and the app's own controls
+rather than native form fields (`Switch` and `Select` in
+`src/components/ui/`, the shadcn components on Base UI).
 
-- **Remind me to log my habits**: on asks for notification permission,
-  subscribes with `PushManager` using the server's VAPID public key, and
-  saves the subscription with the time and the time zone. Off deletes the
-  subscription on the server, then in the browser.
-- **Time**: `HH:MM`, 20:00 by default, in 15-minute steps (the cron's step).
-- **Time zone**: the browser's (`Intl.DateTimeFormat().resolvedOptions()`),
-  stored with the subscription and shown. A change of time saves the
-  browser's zone again.
-- **Send a test reminder now**: runs the cron's check for the reader at once
-  and sends the result to this device, even when every habit is logged (the
-  body says "Test reminder."). Cron does not run on preview versions; this
-  is how a preview is tested.
+- **Remind me to log my habits** (a `Switch`): on asks for notification
+  permission, subscribes with `PushManager` using the server's VAPID public
+  key, and saves the subscription with the time and the time zone. Off
+  deletes the subscription on the server, then in the browser.
+- **Time** (a `Select`): every quarter hour from 00:00 to 23:45, 20:00 by
+  default. The cron runs on the quarter hour. A change saves at once.
+- **Send a test reminder now** (a `Button`): runs the cron's check for the
+  reader at once and sends the result to this device, even when every
+  habit is logged (the body says "Test reminder."). Cron does not run on
+  preview versions; this is how a preview is tested.
+
+**The time zone is not shown.** The push comes from the Worker's cron, not
+from the device, so the server must know which zone the reader's 20:00 is
+in. Every save sends the browser's zone
+(`Intl.DateTimeFormat().resolvedOptions().timeZone`). When the card loads
+and the browser's zone is not the stored one (a trip, a new clock), it
+saves the same time again with the new zone and says nothing.
 
 The setting is per device: a reminder belongs to a push subscription, and a
 subscription to one browser. The browser half is `src/data/reminders.ts`.
