@@ -58,10 +58,11 @@ const SETTINGS_PAGES: SettingsPage[] = [
     description: "Theme and accent colour, how notes open, and the changelog.",
   },
   {
-    // Habit reminders, a push to this device (docs/reminders.md). No
-    // description yet: its words wait on the owner (docs/settings.md, Copy).
+    // Habit reminders, a push to this device (docs/reminders.md). The line
+    // agreed with Finn, 2026-11-04 (docs/settings.md, Copy).
     id: "notifications",
     label: "Notifications",
+    description: "Reminders sent to this device.",
     signedIn: true,
   },
   {

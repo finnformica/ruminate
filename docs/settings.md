@@ -58,6 +58,8 @@ The one line of descriptive copy a page carries is its description under
 the heading (and under its row on a phone): one line, naming what the page
 holds. A new page goes without the line until the owner
 has agreed its words (`description` is optional in `settings-nav.tsx`).
+Notifications went without one until Finn agreed "Reminders sent to this
+device." on 2026-11-04.
 
 **Descriptive copy on a setting needs sign-off.** Do not add a line under a
 setting, or change the one on a page, on your own judgement: propose the
