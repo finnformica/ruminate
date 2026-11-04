@@ -84,7 +84,8 @@ export type DayDot = { colour: TrackerColour }
 const DOT_MARGIN = 10
 const DOT_GAP = 6
 
-/** A square's corner radius, as a share of its side. */
+/** A mark's corner radius, as a share of its short side: the single
+ * square's look (Finn, 2026-11-04). */
 const SQUARE_RADIUS = 0.2
 
 /**
@@ -180,9 +181,21 @@ const DOT_GAP_CSS = `max(1px, round(${DOT_GAP}cqw, ${U}))`
  * two gaps are equal (14.37 px at DPR 3 is a 43 px tile: margins 4, squares
  * 9, gaps 4). */
 const dotSideCss = (k: number) =>
-  k === 3
-    ? `calc(round(down, (100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap)) / 3 - mod(100cqw, 2 * ${U}) + ${EPSILON}, 2 * ${U}) + mod(100cqw, 2 * ${U}))`
-    : `round(down, (100cqw - 2 * var(--dot-margin) - ${k - 1} * var(--dot-gap)) / ${k} + ${EPSILON}, ${U})`
+  k === 1
+    ? "calc(100cqw - 2 * var(--dot-margin))"
+    : k === 3
+      ? `calc(round(down, (100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap)) / 3 - mod(100cqw, 2 * ${U}) + ${EPSILON}, 2 * ${U}) + mod(100cqw, 2 * ${U}))`
+      : `round(down, (100cqw - 2 * var(--dot-margin) - ${k - 1} * var(--dot-gap)) / ${k} + ${EPSILON}, ${U})`
+
+/** A mark's corner radius as CSS: a share of its short side (`--dot`, or
+ * a span of `n` cells and the gaps between them), in whole device pixels and
+ * at least one. One length for x and y, so every corner is a circle, and
+ * marks of the same short side have the same corners. */
+const dotRadiusCss = (columns: number, rows: number) => {
+  const n = Math.min(columns, rows)
+  const side = n === 1 ? "var(--dot)" : `(${n} * var(--dot) + ${n - 1} * var(--dot-gap))`
+  return `max(${U}, round(${side} * ${SQUARE_RADIUS}, ${U}))`
+}
 
 /**
  * A day's series as squares on the day's tile, in their colours: the one
@@ -200,7 +213,6 @@ const dotSideCss = (k: number) =>
 export function DayDots({ dots, faint = false }: { dots: readonly DayDot[]; faint?: boolean }) {
   const k = dotGrid(dots.length)
   const track = k === 1 ? "1fr" : `repeat(${k}, var(--dot))`
-  const radius = k === 1 ? `${SQUARE_RADIUS * 100}%` : `calc(var(--dot) * ${SQUARE_RADIUS})`
   return (
     <span
       aria-hidden
@@ -232,7 +244,7 @@ export function DayDots({ dots, faint = false }: { dots: readonly DayDot[]; fain
           const place = {
             gridColumn: `${column} / span ${columns}`,
             gridRow: `${row} / span ${rows}`,
-            borderRadius: radius,
+            borderRadius: dotRadiusCss(columns, rows),
           }
           return more ? (
             <span

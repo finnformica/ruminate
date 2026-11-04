@@ -183,7 +183,9 @@ has no keys to validate.
   day (`seriesOnDay`, `DayDots`), the same design for one series and for
   many (Finn, 2026-11-03: squares, not dots). The marks sit on a fixed grid
   of equal square cells inside a 10 % margin (`DOT_MARGIN`), with a 6 % gap,
-  at least 1 px (`DOT_GAP`), and a corner radius of 20 % of a cell: one
+  at least 1 px (`DOT_GAP`), and a circular corner of 20 % of each mark's
+  short side, in whole device pixels (Finn 2026-11-04: the single square's
+  look on every mark): one
   series is one square, 2 to 4 a 2×2, 5 to 9 a 3×3, in reading order
   (`dotGrid`, Finn 2026-11-03: "grow the grid", "prefer using the square
   shape"). No cell is left empty: the nearest mark spans it, the gap
