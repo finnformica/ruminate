@@ -37,8 +37,9 @@ import type {
 export const REMINDERS_PATH = "/api/reminders"
 const TEST_PATH = `${REMINDERS_PATH}/test`
 
-/** Push service endpoints are URLs well under this. */
-const MAX_ENDPOINT_LENGTH = 1024
+/** Push service endpoints are URLs under this: a Windows (WNS) channel URI,
+ * Edge's endpoint, can be up to 2048 characters. */
+const MAX_ENDPOINT_LENGTH = 2048
 const MAX_KEY_LENGTH = 256
 
 const json = (body: unknown, status = 200): Response =>
@@ -66,6 +67,35 @@ const settingsOf = (subscription: Subscription | null): ReminderSettings | null 
     lastSentDay: subscription.lastSentDay,
   }
 
+/**
+ * A `PUT` body as what `saveSubscription` takes, or the 400's error code.
+ * The subscription is `PushSubscription.toJSON()`: `endpoint`,
+ * `expirationTime` (null, or a time; not stored) and `keys`.
+ */
+export function saveInputOf(
+  raw: Record<string, unknown> | null,
+):
+  | { endpoint: string; p256dh: string; auth: string; reminderTime: string; timeZone: string }
+  | { error: "invalid_subscription" | "invalid_time" | "invalid_time_zone" } {
+  const subscription = raw?.subscription as
+    { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } | null } | null | undefined
+  const endpoint = subscription?.endpoint
+  const p256dh = subscription?.keys?.p256dh
+  const auth = subscription?.keys?.auth
+  const reminderTime = raw?.reminderTime ?? DEFAULT_REMINDER_TIME
+  const timeZone = raw?.timeZone
+  if (!isEndpoint(endpoint) || !isKey(p256dh) || !isKey(auth)) {
+    return { error: "invalid_subscription" }
+  }
+  if (typeof reminderTime !== "string" || reminderMinutes(reminderTime) === null) {
+    return { error: "invalid_time" }
+  }
+  if (typeof timeZone !== "string" || !isTimeZone(timeZone)) {
+    return { error: "invalid_time_zone" }
+  }
+  return { endpoint, p256dh, auth, reminderTime, timeZone }
+}
+
 async function readBody(request: Request): Promise<Record<string, unknown> | null> {
   const raw = (await request.json().catch(() => null)) as unknown
   return typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : null
@@ -92,23 +122,9 @@ export async function reminders(
 
   if (pathname === REMINDERS_PATH && request.method === "PUT") {
     if (keys === null) return json({ error: "push_not_configured" }, 501)
-    const raw = await readBody(request)
-    const subscription = raw?.subscription as
-      { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } } | undefined
-    const endpoint = subscription?.endpoint
-    const p256dh = subscription?.keys?.p256dh
-    const auth = subscription?.keys?.auth
-    const reminderTime = raw?.reminderTime ?? DEFAULT_REMINDER_TIME
-    const timeZone = raw?.timeZone
-    if (!isEndpoint(endpoint) || !isKey(p256dh) || !isKey(auth)) {
-      return json({ error: "invalid_subscription" }, 400)
-    }
-    if (typeof reminderTime !== "string" || reminderMinutes(reminderTime) === null) {
-      return json({ error: "invalid_time" }, 400)
-    }
-    if (typeof timeZone !== "string" || !isTimeZone(timeZone)) {
-      return json({ error: "invalid_time_zone" }, 400)
-    }
+    const input = saveInputOf(await readBody(request))
+    if ("error" in input) return json(input, 400)
+    const { endpoint, p256dh, auth, reminderTime, timeZone } = input
     const saved = await saveSubscription(
       control,
       { endpoint, userId: session.id, p256dh, auth, reminderTime, timeZone },

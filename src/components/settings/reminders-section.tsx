@@ -8,6 +8,7 @@ import {
   enableReminders,
   loadReminder,
   pushSupported,
+  reminderErrorOf,
   saveReminderTime,
   sendTestReminder,
   type ReminderFailure,
@@ -19,16 +20,33 @@ import { Select, type SelectOption } from "../ui/select"
 import { Switch } from "../ui/switch"
 import { SettingsSection } from "../settings-section"
 
-/** What the card says when a step fails. */
-const FAILURE: Record<ReminderFailure, string> = {
-  unsupported: "This browser can't show reminders. On an iPhone, add Ruminate to the Home Screen.",
-  denied: "Notifications are blocked for Ruminate. Allow them in the browser's settings.",
-  "not-configured": "Reminders aren't set up on this server yet.",
-  failed: "Couldn't save that — check your connection and try again.",
+/** What the card says when a step fails; `detail` is the server's status
+ * for "rejected" and the error's name for "failed". */
+const FAILURE: Record<ReminderFailure, (detail?: string) => string> = {
+  unsupported: () =>
+    "This browser can't show reminders. On an iPhone, add Ruminate to the Home Screen.",
+  denied: () => "Notifications are blocked for Ruminate. Allow them in the browser's settings.",
+  dismissed: () => "Choose Allow when the browser asks to show notifications.",
+  "not-configured": () => "Reminders aren't set up on this server yet.",
+  "push-blocked": () =>
+    "The browser's push service refused. In Brave, turn on Use Google services for push messaging in Settings, then try again.",
+  "worker-missing": () => "Ruminate's service worker isn't running. Reload the page and try again.",
+  "worker-outdated": () =>
+    "This tab runs an older Ruminate. Choose Update Ruminate, then try again.",
+  unsubscribed: () => "This device's subscription has ended. Turn reminders on again.",
+  "signed-out": () => "Your sign-in has ended. Sign in again and try again.",
+  rejected: (detail) => `The server refused to save this device (${detail}).`,
+  offline: () => "Couldn't save that — check your connection and try again.",
+  failed: (detail) => `Couldn't save that (${detail}). Try again.`,
 }
 
-const failureOf = (error: unknown): ReminderFailure =>
-  error instanceof ReminderError ? error.reason : "failed"
+/** The failure to show, with the cause written to the console: the card
+ * shows a reason, the console keeps the browser's own error. */
+function failureOf(error: unknown): ReminderError {
+  const failure = reminderErrorOf(error)
+  console.error("Habit reminders:", failure, failure.cause ?? "")
+  return failure
+}
 
 const pad2 = (n: number) => String(n).padStart(2, "0")
 
@@ -64,7 +82,7 @@ export function RemindersSection() {
   const [loaded, setLoaded] = useState(false)
   const [reminder, setReminder] = useState<ReminderSettings | null>(null)
   const [time, setTime] = useState(DEFAULT_REMINDER_TIME)
-  const [failure, setFailure] = useState<ReminderFailure | null>(null)
+  const [failure, setFailure] = useState<ReminderError | null>(null)
 
   useEffect(() => {
     let live = true
@@ -73,7 +91,7 @@ export function RemindersSection() {
         if (!live) return
         setReminder(held)
         if (held) setTime(held.reminderTime)
-        if (!configured) setFailure("not-configured")
+        if (!configured) setFailure(new ReminderError("not-configured"))
         // The browser moved to another zone (a trip, a new device clock):
         // keep the server's copy in step. A failure here changes nothing the
         // reader sees; the next save tries again.
@@ -162,9 +180,11 @@ export function RemindersSection() {
         </div>
       ) : null}
       {!supported ? (
-        <span className="text-sm leading-4 text-text-danger">{FAILURE.unsupported}</span>
+        <span className="text-sm leading-4 text-text-danger">{FAILURE.unsupported()}</span>
       ) : failure ? (
-        <span className="text-sm leading-4 text-text-danger">{FAILURE[failure]}</span>
+        <span className="text-sm leading-4 text-text-danger">
+          {FAILURE[failure.reason](failure.detail)}
+        </span>
       ) : null}
     </SettingsSection>
   )

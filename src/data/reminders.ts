@@ -15,14 +15,90 @@ import type { ReminderBody, ReminderSettings, ReminderTestResult } from "./remin
 
 export const DEFAULT_REMINDER_TIME = "20:00"
 
-/** Why turning reminders on did not work, for the card to say. */
-export type ReminderFailure = "unsupported" | "denied" | "not-configured" | "failed"
+/** Why a step did not work, for the card to say (FAILURE in
+ * src/components/settings/reminders-section.tsx). */
+export type ReminderFailure =
+  /** No push in this browser. */
+  | "unsupported"
+  /** Notifications are blocked for the site. */
+  | "denied"
+  /** The permission prompt was closed with no answer. */
+  | "dismissed"
+  /** The Worker has no VAPID keys. */
+  | "not-configured"
+  /** `pushManager.subscribe` threw `AbortError`: the browser's push service
+   * refused or is off (Brave without "Use Google services for push
+   * messaging", a network that blocks the push service). */
+  | "push-blocked"
+  /** No service worker came within READY_TIMEOUT_MS. */
+  | "worker-missing"
+  /** The service worker could not subscribe and a newer one is waiting:
+   * the build in control predates reminders. */
+  | "worker-outdated"
+  /** This browser holds no subscription, or the server has none for it. */
+  | "unsubscribed"
+  /** The GitHub session ended and could not be refreshed. */
+  | "signed-out"
+  /** The server answered with an error; `detail` is its status and code. */
+  | "rejected"
+  /** The request did not reach the server. */
+  | "offline"
+  /** Anything else; `detail` is the error's name. */
+  | "failed"
 
 export class ReminderError extends Error {
-  constructor(readonly reason: ReminderFailure) {
-    super(reason)
+  constructor(
+    readonly reason: ReminderFailure,
+    readonly detail?: string,
+    options?: { cause?: unknown },
+  ) {
+    super(detail ? `${reason}: ${detail}` : reason, options)
     this.name = "ReminderError"
   }
+}
+
+const errorName = (error: unknown): string =>
+  error instanceof Error || error instanceof DOMException ? error.name : typeof error
+
+/** Any error from the reminder calls as a ReminderError, with the original
+ * as its `cause`. */
+export function reminderErrorOf(error: unknown): ReminderError {
+  if (error instanceof ReminderError) return error
+  const status = (error as { status?: unknown } | null)?.status
+  if (errorName(error) === "SessionExpiredError" || status === 401) {
+    return new ReminderError("signed-out", undefined, { cause: error })
+  }
+  if (typeof status === "number") {
+    return new ReminderError("rejected", String(status), { cause: error })
+  }
+  // fetch rejects with a TypeError when the request never reaches the server.
+  if (error instanceof TypeError) return new ReminderError("offline", undefined, { cause: error })
+  return new ReminderError("failed", errorName(error), { cause: error })
+}
+
+/** The error `pushManager.subscribe` threw, as a ReminderError. The names
+ * are the Push API's (https://w3c.github.io/push-api/#subscribe-method). */
+function subscribeErrorOf(error: unknown, registration: ServiceWorkerRegistration): ReminderError {
+  const name = errorName(error)
+  const reason: ReminderFailure | null =
+    name === "AbortError"
+      ? "push-blocked"
+      : name === "NotAllowedError"
+        ? "denied"
+        : name === "InvalidStateError" || registration.waiting !== null
+          ? "worker-outdated"
+          : null
+  return reason
+    ? new ReminderError(reason, undefined, { cause: error })
+    : new ReminderError("failed", name, { cause: error })
+}
+
+/** A response that is not ok, as a ReminderError: its status and the
+ * error code in its body, when it has one. */
+async function rejection(res: Response): Promise<ReminderError> {
+  const body = (await res.json().catch(() => null)) as { error?: unknown } | null
+  const code = typeof body?.error === "string" ? ` ${body.error}` : ""
+  return new ReminderError("rejected", `${res.status}${code}`)
 }
 
 /** The time zone this browser is in, as an IANA name. */
@@ -42,7 +118,7 @@ const READY_TIMEOUT_MS = 10_000
 
 async function registration(): Promise<ServiceWorkerRegistration> {
   const timeout = new Promise<never>((_, reject) =>
-    window.setTimeout(() => reject(new ReminderError("unsupported")), READY_TIMEOUT_MS),
+    window.setTimeout(() => reject(new ReminderError("worker-missing")), READY_TIMEOUT_MS),
   )
   return Promise.race([navigator.serviceWorker.ready, timeout])
 }
@@ -73,7 +149,7 @@ async function request(path: string, init: RequestInit): Promise<Response> {
 async function readServer(endpoint: string | null): Promise<ReminderBody> {
   const query = endpoint ? `?endpoint=${encodeURIComponent(endpoint)}` : ""
   const res = await request(`/api/reminders${query}`, { method: "GET" })
-  if (!res.ok) throw new ReminderError("failed")
+  if (!res.ok) throw await rejection(res)
   return (await res.json()) as ReminderBody
 }
 
@@ -113,9 +189,9 @@ async function save(
     }),
   })
   if (res.status === 501) throw new ReminderError("not-configured")
-  if (!res.ok) throw new ReminderError("failed")
+  if (!res.ok) throw await rejection(res)
   const body = (await res.json()) as ReminderBody
-  if (body.reminder === null) throw new ReminderError("failed")
+  if (body.reminder === null) throw new ReminderError("rejected", `${res.status} no reminder`)
   return body.reminder
 }
 
@@ -127,24 +203,30 @@ async function save(
 export async function enableReminders(reminderTime: string): Promise<ReminderSettings> {
   if (!pushSupported()) throw new ReminderError("unsupported")
   const permission = await Notification.requestPermission()
+  if (permission === "default") throw new ReminderError("dismissed")
   if (permission !== "granted") throw new ReminderError("denied")
   const { publicKey } = await readServer(null)
   if (publicKey === null) throw new ReminderError("not-configured")
   const applicationServerKey = keyBytes(publicKey)
-  const { pushManager } = await registration()
+  const worker = await registration()
+  const { pushManager } = worker
   let subscription = await pushManager.getSubscription()
   if (subscription && !sameKey(subscription.options.applicationServerKey, applicationServerKey)) {
     await subscription.unsubscribe()
     subscription = null
   }
-  subscription ??= await pushManager.subscribe({ userVisibleOnly: true, applicationServerKey })
+  subscription ??= await pushManager
+    .subscribe({ userVisibleOnly: true, applicationServerKey })
+    .catch((error: unknown) => {
+      throw subscribeErrorOf(error, worker)
+    })
   return save(subscription, reminderTime)
 }
 
 /** Change this device's reminder time; the time zone is read again. */
 export async function saveReminderTime(reminderTime: string): Promise<ReminderSettings> {
   const subscription = await currentSubscription()
-  if (subscription === null) throw new ReminderError("failed")
+  if (subscription === null) throw new ReminderError("unsubscribed")
   return save(subscription, reminderTime)
 }
 
@@ -157,7 +239,7 @@ export async function disableReminders(): Promise<void> {
     method: "DELETE",
     body: JSON.stringify({ endpoint: subscription.endpoint }),
   })
-  if (!res.ok) throw new ReminderError("failed")
+  if (!res.ok) throw await rejection(res)
   await subscription.unsubscribe()
 }
 
@@ -169,13 +251,15 @@ export async function disableReminders(): Promise<void> {
  */
 export async function sendTestReminder(): Promise<ReminderTestResult> {
   const subscription = await currentSubscription()
-  if (subscription === null) throw new ReminderError("failed")
+  if (subscription === null) throw new ReminderError("unsubscribed")
   const res = await request("/api/reminders/test", {
     method: "POST",
     body: JSON.stringify({ endpoint: subscription.endpoint }),
   })
   if (res.status === 501) throw new ReminderError("not-configured")
-  if (res.status === 404) throw new ReminderError("failed")
+  if (res.status === 404) throw new ReminderError("unsubscribed")
+  // A push service's answer comes back as 410 or 502, with a result.
+  if (!res.ok && res.status !== 410 && res.status !== 502) throw await rejection(res)
   const result = (await res.json()) as ReminderTestResult
   if (result.outcome === "gone") await subscription.unsubscribe()
   return result

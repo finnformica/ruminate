@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ReminderSettings } from "../../data/reminders-api"
 
@@ -11,6 +11,7 @@ import type { ReminderSettings } from "../../data/reminders-api"
 const api = vi.hoisted(() => ({
   loadReminder: vi.fn(),
   saveReminderTime: vi.fn(),
+  enableReminders: vi.fn(),
   deviceTimeZone: vi.fn(() => "Europe/London"),
 }))
 
@@ -18,11 +19,13 @@ vi.mock("../../data/reminders", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../data/reminders")>()),
   loadReminder: api.loadReminder,
   saveReminderTime: api.saveReminderTime,
+  enableReminders: api.enableReminders,
   deviceTimeZone: api.deviceTimeZone,
   pushSupported: () => true,
 }))
 
 const { RemindersSection } = await import("./reminders-section")
+const { ReminderError } = await import("../../data/reminders")
 
 const held = (timeZone: string): ReminderSettings => ({
   reminderTime: "20:00",
@@ -33,6 +36,7 @@ const held = (timeZone: string): ReminderSettings => ({
 beforeEach(() => {
   api.loadReminder.mockReset()
   api.saveReminderTime.mockReset()
+  api.enableReminders.mockReset()
 })
 
 afterEach(() => cleanup())
@@ -70,5 +74,48 @@ describe("the reminders card", () => {
       expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"),
     )
     expect(api.saveReminderTime).not.toHaveBeenCalled()
+  })
+})
+
+describe("a failure to turn reminders on", () => {
+  const shown = async (error: unknown) => {
+    api.loadReminder.mockResolvedValue({ configured: true, reminder: null })
+    api.enableReminders.mockRejectedValue(error)
+    const log = vi.spyOn(console, "error").mockImplementation(() => {})
+    const { container } = render(<RemindersSection />)
+    const toggle = screen.getByRole("switch")
+    await waitFor(() => expect(toggle.hasAttribute("data-disabled")).toBe(false))
+    fireEvent.click(toggle)
+    await waitFor(() => expect(container.querySelector(".text-text-danger")).toBeTruthy())
+    const text = container.querySelector(".text-text-danger")?.textContent
+    const logged = log.mock.calls
+    log.mockRestore()
+    cleanup()
+    return { text, logged }
+  }
+
+  it("says what went wrong, and logs the browser's error", async () => {
+    const cause = new DOMException("Registration failed - push service error", "AbortError")
+    const blocked = await shown(new ReminderError("push-blocked", undefined, { cause }))
+    expect(blocked.text).toBe(
+      "The browser's push service refused. In Brave, turn on Use Google services for push messaging in Settings, then try again.",
+    )
+    expect(blocked.logged[0]).toContain(cause)
+
+    expect((await shown(new ReminderError("rejected", "400 invalid_subscription"))).text).toBe(
+      "The server refused to save this device (400 invalid_subscription).",
+    )
+    expect((await shown(new ReminderError("worker-outdated"))).text).toBe(
+      "This tab runs an older Ruminate. Choose Update Ruminate, then try again.",
+    )
+    expect((await shown(new ReminderError("dismissed"))).text).toBe(
+      "Choose Allow when the browser asks to show notifications.",
+    )
+    expect((await shown(new TypeError("Failed to fetch"))).text).toBe(
+      "Couldn't save that — check your connection and try again.",
+    )
+    expect((await shown(new RangeError("x"))).text).toBe(
+      "Couldn't save that (RangeError). Try again.",
+    )
   })
 })
