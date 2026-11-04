@@ -79,21 +79,35 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
   return Response.json(answer.body, { status: answer.status })
 }
 
-// A headless browser has no push subscription; give it one, so the
-// reminder card asks for (and shows) this device's reminder.
-if ("PushManager" in window) {
-  const subscription = {
-    endpoint: "https://push.invalid/shots",
-    options: { applicationServerKey: null, userVisibleOnly: true },
-    getKey: () => null,
-    toJSON: () => ({ endpoint: "https://push.invalid/shots" }),
-    unsubscribe: () => Promise.resolve(true),
-  }
-  PushManager.prototype.getSubscription = () =>
-    Promise.resolve(subscription as unknown as PushSubscription)
-  PushManager.prototype.subscribe = () =>
-    Promise.resolve(subscription as unknown as PushSubscription)
-  PushManager.prototype.permissionState = () => Promise.resolve("granted" as PermissionState)
+// Push, as a phone that said yes has it. A headless browser has no push
+// service, may have no `Notification` or `PushManager`, and its dev service
+// worker may never be ready; so the reminder card reads a fixed
+// subscription from a fixed registration, and asks for (and shows) this
+// device's reminder.
+const subscription = {
+  endpoint: "https://push.invalid/shots",
+  expirationTime: null,
+  options: { applicationServerKey: null, userVisibleOnly: true },
+  getKey: () => null,
+  toJSON: () => ({ endpoint: "https://push.invalid/shots" }),
+  unsubscribe: () => Promise.resolve(true),
+}
+const pushManager = {
+  getSubscription: () => Promise.resolve(subscription),
+  subscribe: () => Promise.resolve(subscription),
+  permissionState: () => Promise.resolve("granted"),
+}
+const globals = window as unknown as Record<string, unknown>
+globals.PushManager ??= function PushManager() {}
+globals.Notification ??= Object.assign(function Notification() {}, {
+  permission: "granted",
+  requestPermission: () => Promise.resolve("granted"),
+})
+if ("serviceWorker" in navigator) {
+  Object.defineProperty(navigator.serviceWorker, "ready", {
+    configurable: true,
+    get: () => Promise.resolve({ pushManager, scope: `${window.location.origin}/` }),
+  })
 }
 
 console.info(`[shots] signed in as ${config.user.login}, serving the ${config.kind} fixtures`)

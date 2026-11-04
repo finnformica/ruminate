@@ -37,7 +37,7 @@ Requested by Finn, 2026-11-04.
 5. Stop the server:
 
    ```bash
-   pkill -f "vite --mode shots"
+   pkill -f "[v]ite --mode shots"
    ```
 
 The port is 4791. Give `--port <n>` to use another one.
@@ -108,8 +108,10 @@ npm run shots:serve -- --data profile --fixtures /home/orca/ruminate-prod-clone/
   `/__shots/fixtures.json`, and prints the gaps the browser posts to
   `/__shots/log`.
 - `src/shots/install.ts` runs before the app. It writes the user as the
-  stored GitHub session, replaces `window.fetch` for the app's routes, and
-  gives the browser a fixed push subscription.
+  stored GitHub session, and replaces `window.fetch` for the app's routes.
+  It also fakes push (`Notification`, `PushManager`, and a ready service
+  worker registration with a fixed subscription), so the reminder card
+  reads the fixture's reminder as this device's.
 - `src/shots/mock-api.ts` answers each route. The replica routes fold the
   cache from the fixture log with the app's own fold (`foldEventsToCache`).
   Writes answer success and change nothing.
