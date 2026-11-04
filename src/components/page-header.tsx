@@ -81,7 +81,7 @@ export function PageHeader({
             >
               <ArrowRightIcon16 className="transition-transform group-active:translate-x-0.5" />
             </IconButton>
-            <NewMenu />
+            <NewMenu on="wide" />
           </div>
         ) : null}
         {/* The rule between the nav buttons and the title, whether or not

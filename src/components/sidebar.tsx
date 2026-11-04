@@ -50,7 +50,7 @@ export function Sidebar() {
           >
             <ArrowRightIcon16 className="transition-transform group-active:translate-x-0.5" />
           </IconButton>
-          <NewMenu />
+          <NewMenu on="wide" />
         </div>
       </div>
       <div className="relative flex scroll-py-2 flex-col gap-2 overflow-auto p-2 pt-0">

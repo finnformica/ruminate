@@ -887,9 +887,7 @@ function NotePage({
                   (`page-header.tsx`'s nav icons, `sm:flex`): this is a phone's
                   only way to it, so it sits here too, beside Sort and
                   Filter, from `sm` down. */}
-              <div className="sm:hidden">
-                <NewMenu />
-              </div>
+              <NewMenu on="phone" />
               {/* Each pane's frame has its own filter and sort, Root's too. */}
               <SortMenu sort={sort} onSortChange={(next) => setNarrowing({ sort: next })} />
               <FilterMenu
