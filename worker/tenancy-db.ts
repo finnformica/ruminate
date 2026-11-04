@@ -109,8 +109,8 @@ function makeTenantDb(driver: SqlDriver, userId: number, includingDeleted: boole
 /**
  * Mint a tenant handle from a **verified** identity — the identity type only
  * `requireSession` produces, from GitHub's answer to our own token check. This
- * is the ONLY mint there is — grep for it and you have found every way a
- * corpus is addressed.
+ * and `forSubscriber` (the reminders cron, below) are the only mints — grep
+ * for the two and you have found every way a corpus is addressed.
  */
 export function forTenant(driver: SqlDriver, identity: VerifiedIdentity): TenantDb {
   if (!Number.isSafeInteger(identity.id)) {
@@ -118,6 +118,26 @@ export function forTenant(driver: SqlDriver, identity: VerifiedIdentity): Tenant
   }
   return makeTenantDb(driver, identity.id, false)
 }
+
+/**
+ * The reminders cron's mint (worker/reminders/cron.ts, docs/reminders.md):
+ * a tenant handle for the owner of a push subscription. The cron has no
+ * session to verify; the id comes from `push_subscriptions.user_id`, which
+ * only a verified session writes (`PUT /api/reminders`, its own id). The
+ * cron reads that tenant's trackers and nothing else.
+ */
+export function forSubscriber(driver: SqlDriver, subscriberId: number): TenantDb {
+  if (!Number.isSafeInteger(subscriberId)) {
+    throw new TenantScopeError("subscription has a non-integer user id", String(subscriberId))
+  }
+  return makeTenantDb(driver, subscriberId, false)
+}
+
+/** The one database, behind the shared seam, with every statement's
+ * `rows_read` handed to `onRowsRead`: for the cron, which reports its cost
+ * per run. Corpus statements still go through a `TenantDb` over it. */
+export const meteredDriver = (env: Env, onRowsRead: (rowsRead: number) => void): SqlDriver =>
+  createD1SqlDriver(env.DB, onRowsRead)
 
 /** The corpus database, behind the shared `SqlDriver` seam. The only read of
  * `env.DB` for tenant data — everything downstream goes through `forTenant`. */

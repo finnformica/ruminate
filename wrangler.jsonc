@@ -29,6 +29,10 @@
       // The account's preferences — the settings that follow the account
       // rather than the device (src/data/preferences.ts).
       "/api/preferences",
+      // Habit reminders: this device's push subscription and its reminder
+      // time, and the test button (docs/reminders.md).
+      "/api/reminders",
+      "/api/reminders/*",
       // Tagging a board's pictures with Claude (docs/boards.md): the user's
       // own Anthropic API key, and the route that asks the model.
       "/api/anthropic-key",
@@ -120,6 +124,11 @@
       "simple": { "limit": 120, "period": 60 },
     },
   ],
+  // Habit reminders (docs/reminders.md): every 15 minutes the Worker's
+  // `scheduled` handler sends a push to each subscription whose reminder is
+  // due (worker/reminders/cron.ts). Cron does not run on preview versions;
+  // the settings card's test button runs the same check at once.
+  "triggers": { "crons": ["*/15 * * * *"] },
   "workers_dev": true,
   // Preview versions land on this same Worker (a branch alias URL each), but
   // NOT on this database: the Workers Builds preview command is
@@ -170,6 +179,7 @@
       "ALLOWED_GITHUB_ID": "42536816",
       "SIGNUP_MODE": "invite",
       "VITE_IMAGES_ENABLED": "true",
+      "VAPID_PUBLIC_KEY": "BJi3MWqzpp5H-6v6jBS3GDRXm0aMccdEyi4QpMbTSIHXaeKd3ci2fc-WyY_G5E17j_hq65i-LfKqNS3n2bVOmG4",
     },
   },
   // The GitHub OAuth client id is public (it's already baked into the frontend
@@ -206,5 +216,12 @@
     // Image uploads: the Worker's half of the switch (the client's half is the
     // same variable in .env.production). Both are "true"; see the binding above.
     "VITE_IMAGES_ENABLED": "true",
+    // Habit reminders' VAPID public key: the uncompressed P-256 point,
+    // base64url (worker/reminders/push.ts). The browser subscribes with it.
+    // Its private half is the secret VAPID_PRIVATE_KEY (the raw scalar `d`,
+    // base64url), already set on this Worker; never commit it. The two must
+    // be one pair, or reminders stay off and the Worker logs
+    // `vapid_key_mismatch`. To rotate, see scripts/vapid-keys.mjs.
+    "VAPID_PUBLIC_KEY": "BJi3MWqzpp5H-6v6jBS3GDRXm0aMccdEyi4QpMbTSIHXaeKd3ci2fc-WyY_G5E17j_hq65i-LfKqNS3n2bVOmG4",
   },
 }

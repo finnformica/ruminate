@@ -21,14 +21,23 @@ import { ChevronLeftIcon16, ChevronRightIcon16 } from "../icons"
  * the always-mounted sidebar carries the list without the cards.
  */
 export type SettingsPageId =
-  "account" | "preferences" | "sharing" | "mcp" | "ai" | "data" | "about" | "admin"
+  | "account"
+  | "preferences"
+  | "notifications"
+  | "sharing"
+  | "mcp"
+  | "ai"
+  | "data"
+  | "about"
+  | "admin"
 
 export interface SettingsPage {
   id: SettingsPageId
   label: string
   /** The line under the page's heading, and under its row on a phone — the
-   * one line of descriptive copy a page carries (docs/settings.md). */
-  description: string
+   * one line of descriptive copy a page carries (docs/settings.md). Left
+   * out until the owner has agreed the words: the page then has none. */
+  description?: string
   /** Listed only while this account may use the feature. */
   feature?: FeatureKey
   /** Listed only signed in. */
@@ -47,6 +56,14 @@ const SETTINGS_PAGES: SettingsPage[] = [
     id: "preferences",
     label: "Preferences",
     description: "Theme and accent colour, how notes open, and the changelog.",
+  },
+  {
+    // Habit reminders, a push to this device (docs/reminders.md). The line
+    // agreed with Finn, 2026-11-04 (docs/settings.md, Copy).
+    id: "notifications",
+    label: "Notifications",
+    description: "Reminders sent to this device.",
+    signedIn: true,
   },
   {
     id: "sharing",
@@ -178,9 +195,11 @@ function SettingsIndexRows({ pages }: { pages: SettingsPage[] }) {
           >
             <span className="flex w-0 grow flex-col gap-0.5">
               <span className="truncate leading-5">{page.label}</span>
-              <span className="line-clamp-2 text-sm leading-4 text-text-secondary">
-                {page.description}
-              </span>
+              {page.description ? (
+                <span className="line-clamp-2 text-sm leading-4 text-text-secondary">
+                  {page.description}
+                </span>
+              ) : null}
             </span>
             <ChevronRightIcon16 className="shrink-0 text-text-tertiary" />
           </Link>
@@ -214,7 +233,9 @@ export function SettingsPageBody({
         </Link>
         <div className="flex flex-col gap-1">
           <h2 className="text-lg font-bold leading-6">{page.label}</h2>
-          <p className="leading-5 text-text-secondary">{page.description}</p>
+          {page.description ? (
+            <p className="leading-5 text-text-secondary">{page.description}</p>
+          ) : null}
         </div>
       </div>
       {children}

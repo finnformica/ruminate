@@ -63,7 +63,14 @@ function auditRowsRead(sql: string, meta: QueryMeta | undefined): void {
   )
 }
 
-export function createD1SqlDriver(db: D1Database): SqlDriver {
+/**
+ * `onRowsRead` hears every statement's `rows_read`: how a caller that must
+ * report its own cost counts it (the reminders cron, worker/reminders/cron.ts).
+ */
+export function createD1SqlDriver(
+  db: D1Database,
+  onRowsRead?: (rowsRead: number) => void,
+): SqlDriver {
   return {
     exec: async (sql, params = []) => {
       const result = await db
@@ -71,6 +78,7 @@ export function createD1SqlDriver(db: D1Database): SqlDriver {
         .bind(...params)
         .all()
       auditRowsRead(sql, result.meta as QueryMeta | undefined)
+      onRowsRead?.((result.meta as QueryMeta | undefined)?.rows_read ?? 0)
       return result.results as Record<string, SqlValue>[]
     },
     batch: async (statements) => {
@@ -80,9 +88,10 @@ export function createD1SqlDriver(db: D1Database): SqlDriver {
       )
       // Each statement reports its own meta; a batch is the write path, so a
       // read blow-up here would be a lookup inside a write plan.
-      results.forEach((result, index) =>
-        auditRowsRead(statements[index].sql, result.meta as QueryMeta | undefined),
-      )
+      results.forEach((result, index) => {
+        auditRowsRead(statements[index].sql, result.meta as QueryMeta | undefined)
+        onRowsRead?.((result.meta as QueryMeta | undefined)?.rows_read ?? 0)
+      })
     },
     execScript: async (sql) => {
       await db.exec(sql)

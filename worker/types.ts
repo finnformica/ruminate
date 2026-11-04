@@ -68,4 +68,14 @@ export interface Env {
    * path answers 501 and the Anthropic path is unaffected.
    */
   AI?: Ai
+  /**
+   * Habit reminders (docs/reminders.md, worker/reminders/push.ts). The
+   * VAPID private key: the raw P-256 scalar `d`, base64url (32 bytes). A
+   * secret, already set on the Worker. Without it reminders are off and the
+   * settings card says so.
+   */
+  VAPID_PRIVATE_KEY?: string
+  /** The VAPID public key: the uncompressed point, base64url (65 bytes). A
+   * wrangler var; it must be the pair of the private key. */
+  VAPID_PUBLIC_KEY?: string
 }

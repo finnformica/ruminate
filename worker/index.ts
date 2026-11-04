@@ -18,10 +18,12 @@ import { images } from "./handlers/images"
 import { mcp, MCP_PATH } from "./handlers/mcp"
 import { mcpTokens, MCP_TOKENS_PREFIX } from "./handlers/mcp-tokens"
 import { preferences, PREFERENCES_PATH } from "./handlers/preferences"
+import { reminders, REMINDERS_PATH } from "./handlers/reminders"
 import { replica } from "./handlers/replica"
 import { shares, SHARES_PREFIX } from "./handlers/shares"
 import { isSocialPath, withSocialMeta } from "./handlers/social"
 import { unfurl, UNFURL_PATH } from "./handlers/unfurl"
+import { runReminders } from "./reminders/cron"
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -43,6 +45,9 @@ export default {
     if (pathname === UNFURL_PATH) return unfurl(request, env)
     if (pathname === FEATURES_PATH) return features(request, env)
     if (pathname === PREFERENCES_PATH) return preferences(request, env)
+    if (pathname === REMINDERS_PATH || pathname.startsWith(`${REMINDERS_PATH}/`)) {
+      return reminders(request, env)
+    }
     if (pathname === ANTHROPIC_KEY_PATH) return anthropicKey(request, env)
     if (pathname === BOARD_TAG_PATH) return boardTag(request, env)
     if (pathname === BOARD_NOTES_PATH) return boardNotes(request, env)
@@ -59,5 +64,11 @@ export default {
 
     // Everything else: static assets (index.html fallback for SPA routes).
     return env.ASSETS.fetch(request)
+  },
+
+  // The Cron Trigger (wrangler.jsonc, `triggers`): habit reminders, every 15
+  // minutes (worker/reminders/cron.ts, docs/reminders.md).
+  async scheduled(_controller, env, ctx): Promise<void> {
+    ctx.waitUntil(runReminders(env).then(() => undefined))
   },
 } satisfies ExportedHandler<Env>

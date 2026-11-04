@@ -13,6 +13,7 @@ import { ChangelogSection } from "./changelog-section"
 import { EditorSection } from "./editor-section"
 import { FeaturesSection } from "./features-section"
 import { InvitesSection } from "./invites-section"
+import { RemindersSection } from "./reminders-section"
 import type { SettingsPageId } from "./settings-nav"
 
 /**
@@ -37,6 +38,8 @@ export function SettingsPageContent({ id }: { id: SettingsPageId }) {
           {githubUser ? <ChangelogSection /> : null}
         </>
       )
+    case "notifications":
+      return githubUser ? <RemindersSection /> : null
     case "sharing":
       return <SharingSection />
     case "mcp":
