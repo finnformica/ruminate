@@ -115,7 +115,7 @@ export async function vapidKeys(env: Env): Promise<VapidKeys | null> {
  * subscription is dead and is to be deleted), the VAPID key refused (401 or
  * 403: the key the browser subscribed with is not the one that signed), or
  * any other failure. */
-export type PushOutcome = "sent" | "gone" | "vapid" | "failed"
+type PushOutcome = "sent" | "gone" | "vapid" | "failed"
 
 /** One send's result: the outcome, the push service's status (0 when no
  * answer came) and a short reason for a person. */
