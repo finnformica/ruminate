@@ -88,14 +88,54 @@ const DOT_GAP = 6
 const SQUARE_RADIUS = 0.2
 
 /**
- * The side of a day's fixed grid of squares for `count` series (Finn,
- * 2026-11-03: true squares, the grid of the dots): 1 for one series, 2 (a
- * 2×2) for 2 to 4, 3 (a 3×3) for 5 to 9. The squares fill the cells in
- * reading order and the other cells stay empty. More than 9 is a 3×3, the
- * last cell a grey outline for the rest; the day editor lists them all.
+ * The side of a day's grid for `count` series (Finn, 2026-11-03: the grid
+ * of the dots): 1 for one series, 2 (a 2×2) for 2 to 4, 3 (a 3×3) for 5 to
+ * 9 and more.
  */
 export function dotGrid(count: number): number {
   return count <= 0 ? 0 : count === 1 ? 1 : count <= 4 ? 2 : 3
+}
+
+/** A mark's place in the day's grid: its first column and row (from 1), and
+ * how many columns and rows it spans. */
+type DotCell = readonly [column: number, row: number, columns: number, rows: number]
+
+/** One cell of each row of a grid of `k`, row by row from `row`. */
+const singles = (k: number, count: number, row = 1): DotCell[] =>
+  Array.from({ length: count }, (_, i) => [(i % k) + 1, row + Math.floor(i / k), 1, 1] as const)
+
+/**
+ * The marks of a day with 1 to 9 series, in reading order (Finn,
+ * 2026-11-03: "empty space should be filled by the closest square"). No
+ * cell is left empty: a mark next to an empty cell spans it, with the gap
+ * between, so the block keeps one shape.
+ * - 2: two halves, one over the other. 3: a half on top, two quarters
+ *   below ("one of the activities takes up half and the other two take up
+ *   a quarter each"). 4: four quarters.
+ * - 5: three over two, the last two down to the foot: a tall one and a
+ *   2×2 square. 6: three over three, the last three down to the foot. 7:
+ *   the last spans the last row. 8: the last spans two cells. 9: nine cells.
+ */
+const DOT_CELLS: Record<number, readonly DotCell[]> = {
+  1: [[1, 1, 1, 1]],
+  2: [
+    [1, 1, 2, 1],
+    [1, 2, 2, 1],
+  ],
+  3: [[1, 1, 2, 1], ...singles(2, 2, 2)],
+  4: singles(2, 4),
+  5: [...singles(3, 3), [1, 2, 1, 2], [2, 2, 2, 2]],
+  6: [...singles(3, 3), [1, 2, 1, 2], [2, 2, 1, 2], [3, 2, 1, 2]],
+  7: [...singles(3, 6), [1, 3, 3, 1]],
+  8: [...singles(3, 7), [2, 3, 2, 1]],
+  9: singles(3, 9),
+}
+
+/** The marks of a day with `count` series. More than 9 is the nine cells
+ * of a 3×3, the last a grey outline for the rest; the day editor lists them
+ * all. */
+export function dotCells(count: number): readonly DotCell[] {
+  return count <= 0 ? [] : DOT_CELLS[Math.min(count, 9)]
 }
 
 /** The margin as CSS, in whole pixels. The grid is inset by it on all four
@@ -122,14 +162,14 @@ const dotSideCss = (k: number) =>
  * measure: the tile is a size container, and the squares a fixed k×k grid
  * (`dotGrid`) inset by the same whole-pixel margin on all four sides (lengths
  * in `cqw`, hundredths of the tile's side). One series fills the inset box;
- * in a 2×2 or 3×3 every square is the same whole-pixel side, the outer
- * squares on the box's edges (`space-between`). A slip on a series to avoid
+ * in a 2×2 or 3×3 every cell is the same whole-pixel side, the outer cells
+ * on the box's edges (`space-between`), and a mark spans the cells of
+ * `dotCells`, the gaps between them too. A slip on a series to avoid
  * is a plain square: the Heatmap has no slip mark (Finn, 2026-11-03).
  * `faint` draws the squares of a placeholder. Its parent is `relative`.
  */
 export function DayDots({ dots, faint = false }: { dots: readonly DayDot[]; faint?: boolean }) {
   const k = dotGrid(dots.length)
-  const cells = Math.min(dots.length, k * k)
   const track = k === 1 ? "1fr" : `repeat(${k}, var(--dot))`
   const radius = k === 1 ? `${SQUARE_RADIUS * 100}%` : `calc(var(--dot) * ${SQUARE_RADIUS})`
   return (
@@ -158,20 +198,25 @@ export function DayDots({ dots, faint = false }: { dots: readonly DayDot[]; fain
           } as React.CSSProperties
         }
       >
-        {Array.from({ length: cells }, (_, at) => {
+        {dotCells(dots.length).map(([column, row, columns, rows], at) => {
           const more = at === 8 && dots.length > 9
+          const place = {
+            gridColumn: `${column} / span ${columns}`,
+            gridRow: `${row} / span ${rows}`,
+            borderRadius: radius,
+          }
           return more ? (
             <span
               key={at}
               data-more
               className="border"
-              style={{ borderRadius: radius, borderColor: "var(--neutral-9)" }}
+              style={{ ...place, borderColor: "var(--neutral-9)" }}
             />
           ) : (
             <span
               key={at}
               data-dot={dots[at].colour}
-              style={{ borderRadius: radius, backgroundColor: colourVar(dots[at].colour, 9) }}
+              style={{ ...place, backgroundColor: colourVar(dots[at].colour, 9) }}
             />
           )
         })}

@@ -181,13 +181,18 @@ has no keys to validate.
   column a week from Monday with this week at the right edge, a cell is the
   grey tile with a small square in the colour of each series logged that
   day (`seriesOnDay`, `DayDots`), the same design for one series and for
-  many (Finn, 2026-11-03: squares, not dots). Every mark is a true square,
-  in a fixed grid inside a 10 % margin (`DOT_MARGIN`), with a 6 % gap, at
-  least 1 px (`DOT_GAP`), and a corner radius of 20 % of its side: one
-  series is one square, 2 to 4 a 2×2, 5 to 9 a 3×3, filled in reading order,
-  the other cells left empty (`dotGrid`, Finn 2026-11-03: "grow the grid",
-  then "prefer using the square shape"). Past 9, eight squares and a grey
-  outline for the rest. A slip on a series to avoid is a plain square: the
+  many (Finn, 2026-11-03: squares, not dots). The marks sit on a fixed grid
+  of equal square cells inside a 10 % margin (`DOT_MARGIN`), with a 6 % gap,
+  at least 1 px (`DOT_GAP`), and a corner radius of 20 % of a cell: one
+  series is one square, 2 to 4 a 2×2, 5 to 9 a 3×3, in reading order
+  (`dotGrid`, Finn 2026-11-03: "grow the grid", "prefer using the square
+  shape"). No cell is left empty: the nearest mark spans it, the gap
+  between too, so the block keeps one shape (`dotCells`, Finn 2026-11-03:
+  "empty space should be filled by the closest square"). 2 is two halves,
+  one over the other; 3 a half on top and two quarters below; 5 three over
+  a tall mark and a 2×2 square; 6 three over three tall marks; 7 six over a
+  full row; 8 seven, the last two cells wide. Past 9, eight squares and a
+  grey outline for the rest. A slip on a series to avoid is a plain square: the
   Heatmap has no slip mark (Finn, 2026-11-03). The squares are plain CSS
   layout, with no measure: the tile is a size container, and the squares a
   CSS grid inset by one whole-pixel margin on all four sides (CSS `round()`,

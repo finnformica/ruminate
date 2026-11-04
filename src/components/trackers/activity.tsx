@@ -344,8 +344,8 @@ function FutureOutline({ cellSize }: { cellSize: number | null }) {
  * today is in at the right edge (`heatmapWeeks`). A cell is a rounded
  * tile with a square in the colour of each series logged that day, the
  * same for one series and for many: one square, up to 4 in a 2×2, 5 to 9
- * in a 3×3, every square the same size (`DayDots`, `dotGrid`). Today has a
- * ring,
+ * in a 3×3, a mark spanning the empty cells next to it (`DayDots`,
+ * `dotGrid`, `dotCells`). Today has a ring,
  * its weekday and its month are named in bold (Finn, 2026-11-03: no dot
  * under its column); the days of this week still to come have a faint grey fill and a
  * dashed outline. A week that runs into a new month is split in

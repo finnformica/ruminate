@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { heatmapWeeks, type Series, type SeriesState } from "../../data/tracker"
 import { ActivityCard, TrackerStats, axisWeekdays, heatmapColumns } from "./activity"
-import { MonthGrid, dotGrid } from "./month-grid"
+import { MonthGrid, dotCells, dotGrid } from "./month-grid"
 
 afterEach(() => {
   cleanup()
@@ -441,14 +441,51 @@ describe("a day with more than one series", () => {
     for (const n of [5, 6, 7, 8, 9, 12]) expect(dotGrid(n)).toBe(3)
   })
 
+  it("leaves no cell empty: each mark spans the empty cells next to it", () => {
+    expect(dotCells(0)).toEqual([])
+    for (let n = 1; n <= 9; n++) {
+      const k = dotGrid(n)
+      const cells = dotCells(n)
+      expect(cells).toHaveLength(n)
+      // Every cell of the k×k grid is covered once.
+      const covered = new Map<string, number>()
+      for (const [column, row, columns, rows] of cells) {
+        for (let c = column; c < column + columns; c++)
+          for (let r = row; r < row + rows; r++)
+            covered.set(`${c},${r}`, (covered.get(`${c},${r}`) ?? 0) + 1)
+      }
+      expect([n, covered.size]).toEqual([n, k * k])
+      expect([...covered.values()].every((times) => times === 1)).toBe(true)
+    }
+    // Finn's rule: three is a half on top and two quarters below.
+    expect(dotCells(3)).toEqual([
+      [1, 1, 2, 1],
+      [1, 2, 1, 1],
+      [2, 2, 1, 1],
+    ])
+    // Two is two halves; eight's last mark spans two cells, seven's three.
+    expect(dotCells(2)).toEqual([
+      [1, 1, 2, 1],
+      [1, 2, 2, 1],
+    ])
+    expect(dotCells(8)[7]).toEqual([2, 3, 2, 1])
+    expect(dotCells(7)[6]).toEqual([1, 3, 3, 1])
+    // More than 9: the nine cells of a 3×3.
+    expect(dotCells(12)).toEqual(dotCells(9))
+  })
+
   it("lays the squares out as a fixed grid of equal whole-pixel squares, with CSS", () => {
     render(<ActivityCard series={[READ, SWIM, RUN]} today="2026-10-29" />)
-    // Read, Swim and Run on the 28th: a 2×2, filled in reading order, the
-    // last cell empty.
+    // Read, Swim and Run on the 28th: a 2×2, a half on top and two quarters.
     const dots = cell("2026-10-28").querySelector<HTMLElement>("[data-dots]")!
     const grid = dots.querySelector<HTMLElement>("[data-dot-grid]")!
     expect(grid.dataset.dotGrid).toBe("2")
-    expect(grid.children).toHaveLength(3)
+    const marks = [...grid.children] as HTMLElement[]
+    expect(marks.map((mark) => `${mark.style.gridColumn} ${mark.style.gridRow}`)).toEqual([
+      "1 / span 2 1 / span 1",
+      "1 / span 1 2 / span 1",
+      "2 / span 1 2 / span 1",
+    ])
     // Inset by one whole-pixel margin on all four sides, so each side rounds
     // the same way as the tile's edge.
     expect(grid.style.inset).toBe("var(--dot-margin)")
