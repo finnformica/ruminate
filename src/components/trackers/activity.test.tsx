@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { heatmapWeeks, type Series, type SeriesState } from "../../data/tracker"
 import { ActivityCard, TrackerStats, axisWeekdays, heatmapColumns } from "./activity"
-import { MonthGrid, dotLayout } from "./month-grid"
+import { MonthGrid, dotCells, dotGrid } from "./month-grid"
 
 afterEach(() => {
   cleanup()
@@ -160,7 +160,7 @@ describe("ActivityHeatmap", () => {
     expect(tinted.map((placeholder) => placeholder.style.gridColumn)).toEqual(["13", "19"])
     for (const placeholder of tinted) {
       expect(placeholder.style.gridRow).toBe("4")
-      const dots = placeholder.querySelector("svg[data-dots]")!
+      const dots = placeholder.querySelector("[data-dots]")!
       expect(dots.getAttribute("class")).toContain("opacity-40")
       expect(dots.querySelector("[data-dot]")!.getAttribute("data-dot")).toBe("green")
     }
@@ -333,7 +333,7 @@ describe("one day square for the heatmap and the cards", () => {
     expect(heatLogged.style.borderRadius).toBe(cardLogged.style.borderRadius)
     expect(cardLogged.style.backgroundColor).toContain("--green-")
     expect(heatLogged.style.backgroundColor).toBe("")
-    expect(heatLogged.querySelector("svg[data-dots]")!.getAttribute("data-dots")).toBe("1")
+    expect(heatLogged.querySelector("[data-dots]")!.getAttribute("data-dots")).toBe("1")
   })
 })
 
@@ -434,38 +434,91 @@ const RUN: SeriesState = {
 }
 
 describe("a day with more than one series", () => {
-  it("grows the grid: one larger dot, medium dots in a 2×2 up to 4, smaller in a 3×3 from 5", () => {
-    expect(dotLayout(0)).toEqual([])
-    const size = (n: number) => new Set(dotLayout(n).map((place) => place.d.toFixed(2)))
-    // One series: one dot in the centre, a little larger than a 2×2 dot.
-    expect(dotLayout(1)).toEqual([{ x: 50, y: 50, d: 34 }])
-    // 2 to 4: one medium size.
-    for (const n of [2, 3, 4]) {
-      expect(dotLayout(n)).toHaveLength(n)
-      expect([...size(n)]).toEqual(["31.20"])
+  it("grows the grid: one square, a 2×2 up to 4, a 3×3 from 5", () => {
+    expect(dotGrid(0)).toBe(0)
+    expect(dotGrid(1)).toBe(1)
+    for (const n of [2, 3, 4]) expect(dotGrid(n)).toBe(2)
+    for (const n of [5, 6, 7, 8, 9, 12]) expect(dotGrid(n)).toBe(3)
+  })
+
+  it("leaves no cell empty: each mark spans the empty cells next to it", () => {
+    expect(dotCells(0)).toEqual([])
+    for (let n = 1; n <= 9; n++) {
+      const k = dotGrid(n)
+      const cells = dotCells(n)
+      expect(cells).toHaveLength(n)
+      // Every cell of the k×k grid is covered once.
+      const covered = new Map<string, number>()
+      for (const [column, row, columns, rows] of cells) {
+        for (let c = column; c < column + columns; c++)
+          for (let r = row; r < row + rows; r++)
+            covered.set(`${c},${r}`, (covered.get(`${c},${r}`) ?? 0) + 1)
+      }
+      expect([n, covered.size]).toEqual([n, k * k])
+      expect([...covered.values()].every((times) => times === 1)).toBe(true)
     }
-    const medium = dotLayout(2)[0].d
-    expect(dotLayout(1)[0].d).toBeGreaterThan(medium)
-    expect(dotLayout(1)[0].d).toBeLessThan(medium * 1.2)
-    // Two side by side; two over one; four corners, 10% clear of the edge.
-    expect(dotLayout(2).map((place) => place.y)).toEqual([50, 50])
-    const three = dotLayout(3)
-    expect(three[0].y).toBe(three[1].y)
-    expect(three[2].x).toBe(50)
-    const [first] = dotLayout(4)
-    expect(first.x).toBe(30)
-    expect(first.x - first.d / 2).toBeGreaterThan(10)
-    // 5 to 9: smaller dots, row by row in a 3×3.
-    for (const n of [5, 6, 7, 8, 9]) {
-      expect(dotLayout(n)).toHaveLength(n)
-      expect(dotLayout(n)[0].d).toBeCloseTo(20.8)
-      expect(dotLayout(n).some((place) => place.more)).toBe(false)
-    }
-    expect(new Set(dotLayout(9).map((place) => place.x)).size).toBe(3)
-    // More than 9: eight dots and a ring for the rest.
-    const twelve = dotLayout(12)
-    expect(twelve).toHaveLength(9)
-    expect(twelve.filter((place) => place.more)).toEqual([twelve[8]])
+    // Finn's rule: three is a half on top and two quarters below.
+    expect(dotCells(3)).toEqual([
+      [1, 1, 2, 1],
+      [1, 2, 1, 1],
+      [2, 2, 1, 1],
+    ])
+    // Two is two halves; eight's last mark spans two cells, seven's three.
+    expect(dotCells(2)).toEqual([
+      [1, 1, 2, 1],
+      [1, 2, 2, 1],
+    ])
+    expect(dotCells(8)[7]).toEqual([2, 3, 2, 1])
+    expect(dotCells(7)[6]).toEqual([1, 3, 3, 1])
+    // More than 9: the nine cells of a 3×3.
+    expect(dotCells(12)).toEqual(dotCells(9))
+  })
+
+  it("lays the squares out as a fixed grid of equal whole-pixel squares, with CSS", () => {
+    render(<ActivityCard series={[READ, SWIM, RUN]} today="2026-10-29" />)
+    // Read, Swim and Run on the 28th: a 2×2, a half on top and two quarters.
+    const dots = cell("2026-10-28").querySelector<HTMLElement>("[data-dots]")!
+    const grid = dots.querySelector<HTMLElement>("[data-dot-grid]")!
+    expect(grid.dataset.dotGrid).toBe("2")
+    const marks = [...grid.children] as HTMLElement[]
+    expect(marks.map((mark) => `${mark.style.gridColumn} ${mark.style.gridRow}`)).toEqual([
+      "1 / span 2 1 / span 1",
+      "1 / span 1 2 / span 1",
+      "2 / span 1 2 / span 1",
+    ])
+    // Inset by one whole-pixel margin on all four sides, so each side rounds
+    // the same way as the tile's edge.
+    expect(grid.style.inset).toBe("var(--dot-margin)")
+    expect(grid.style.getPropertyValue("--dot-margin")).toBe("round(10cqw, 1px)")
+    // Both tracks are the one whole-pixel side, the squares at the corners.
+    expect(grid.style.gridTemplateColumns).toBe("repeat(2, var(--dot))")
+    expect(grid.style.gridTemplateRows).toBe("repeat(2, var(--dot))")
+    expect(grid.style.justifyContent).toBe("space-between")
+    expect(grid.style.alignContent).toBe("space-between")
+    expect(grid.style.getPropertyValue("--dot")).toBe(
+      "round(down, (100cqw - 2 * var(--dot-margin) - 1 * var(--dot-gap)) / 2, 1px)",
+    )
+    expect(grid.style.getPropertyValue("--dot-gap")).toBe("max(1px, round(6cqw, 1px))")
+    expect(dots.querySelector("svg")).toBeNull()
+  })
+
+  it("fills the inset box with the one square of a day with one series", () => {
+    render(<ActivityCard series={[READ]} today="2026-10-29" />)
+    const grid = cell("2026-10-28").querySelector<HTMLElement>("[data-dot-grid]")!
+    expect(grid.dataset.dotGrid).toBe("1")
+    expect(grid.style.gridTemplateColumns).toBe("1fr")
+    expect(grid.style.gridTemplateRows).toBe("1fr")
+  })
+
+  it("draws a grey outline past 9 series", () => {
+    const many: SeriesState[] = Array.from({ length: 12 }, (_, i) => ({
+      ...READ,
+      series: { ...READ.series, id: `m${i}` },
+    }))
+    render(<ActivityCard series={many} today="2026-10-29" />)
+    const day = cell("2026-10-28")
+    expect(day.querySelectorAll("[data-dot]")).toHaveLength(8)
+    expect(day.querySelectorAll("[data-more]")).toHaveLength(1)
   })
 
   it("draws a dot a series in the heatmap, and the legend has no item for a mix", () => {
@@ -521,30 +574,18 @@ const SMOKE: SeriesState = {
 }
 
 describe("a series to avoid", () => {
-  it("marks a slip in the heatmap with a cross, and names the series in the legend", () => {
+  it("draws a slip in the heatmap as a plain square, and names the series in the legend", () => {
     render(<ActivityCard series={[READ, SMOKE]} today="2026-10-29" />)
-    expect(cell("2026-10-27").querySelector("[data-slip]")).toBeTruthy()
+    // No cross and no outline (Finn, 2026-11-03): a filled square in the
+    // series's colour. The label still names the series as one to avoid.
+    const slip = cell("2026-10-27").querySelector("[data-dot]")!
+    expect(slip.getAttribute("data-dot")).toBe("red")
+    expect((slip as HTMLElement).style.backgroundColor).toContain("--red-9")
+    expect(slip.childElementCount).toBe(0)
+    expect(document.querySelectorAll("[data-day] [data-slip]")).toHaveLength(0)
     expect(cell("2026-10-27").getAttribute("aria-label")).toBe("Tue 27 Oct: Smoke (avoid)")
-    expect(cell("2026-10-28").querySelector("[data-slip]")).toBeNull()
-    expect(document.querySelectorAll("[data-day] [data-slip]")).toHaveLength(1)
     const legend = screen.getByRole("list", { name: "Series" })
     expect(within(legend).getByText("Avoid")).toBeTruthy()
-  })
-
-  it("draws a slip as a dot with a cross, or a ring when the dot is too small", () => {
-    // A desktop day: a 40 px tile, a dot of about 10 px with a white cross.
-    measureCells(40)
-    render(<ActivityCard series={[READ, SMOKE]} today="2026-10-29" />)
-    const large = cell("2026-10-27").querySelector("[data-slip]")!
-    expect(large.querySelector("path")!.getAttribute("stroke")).toBe("white")
-    cleanup()
-    // A phone day: a 14 px tile, a dot under 6 px: a ring in the colour.
-    measureCells(14)
-    render(<ActivityCard series={[READ, SMOKE]} today="2026-10-29" />)
-    const small = cell("2026-10-27").querySelector("[data-slip]")!
-    expect(small.tagName.toLowerCase()).toBe("circle")
-    expect(small.getAttribute("fill")).toBe("none")
-    expect(small.getAttribute("stroke")).toContain("--red-9")
   })
 
   it("has a stats group of its own, in clean days, and stays out of the active days", () => {
