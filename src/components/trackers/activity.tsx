@@ -639,7 +639,9 @@ const MORE_DAYS = 10
  * 2026-11-02): the day named once at the left, then a line per series
  * logged on it, with the entry's text after the day (muted, wrapping). A
  * divider runs between two days, never inside one. Five days, and **Show
- * more** for the rest.
+ * more** for the rest. On a desktop the list scrolls in its own box, and a
+ * day's name sticks to the box's top while its entries pass under it, until
+ * the next day's name pushes it out (Finn 2026-11-04).
  */
 function RecentEntries({ series, today }: { series: readonly SeriesState[]; today: DayString }) {
   const days = React.useMemo(() => {
@@ -667,7 +669,7 @@ function RecentEntries({ series, today }: { series: readonly SeriesState[]; toda
               data-recent-day={day}
               className="flex gap-3 border-t border-border-secondary py-2 first:border-t-0"
             >
-              <span className="w-14 shrink-0 text-text-secondary tabular-nums">
+              <span className="w-14 shrink-0 bg-bg-card text-text-secondary tabular-nums lg:sticky lg:top-0 lg:self-start">
                 {shortDayLabel(day)}
               </span>
               <ul aria-label={dayLabel(day)} className="flex min-w-0 flex-1 flex-col gap-1">

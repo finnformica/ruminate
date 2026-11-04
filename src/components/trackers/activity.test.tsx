@@ -426,6 +426,13 @@ describe("the Recent list", () => {
     // The divider is the group's top border: none inside a day.
     for (const line of lines) expect(line.className).not.toContain("border-t")
   })
+
+  it("sticks each day's date to the top of the list on a desktop, on a solid ground", () => {
+    render(<ActivityCard series={[READ, SWIM]} today="2026-10-29" />)
+    const label = screen.getAllByText("28 Oct")[0]
+    expect(label.className).toContain("lg:sticky lg:top-0 lg:self-start")
+    expect(label.className).toContain("bg-bg-card")
+  })
 })
 
 const RUN: SeriesState = {
