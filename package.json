@@ -30,7 +30,10 @@
     "test:vr:update": "concurrently -k -s first -n \"storybook,vr\" -c \"magenta,blue\" \"npm run build:storybook --quiet && npx http-server storybook-static --port 6011 --silent\" \"npx wait-on tcp:127.0.0.1:6011 && node e2e/visual-regression.mjs --update\"",
     "postinstall": "patch-package",
     "test:vr:accept": "node e2e/vr-accept.mjs",
-    "check:changelog": "vite-node scripts/check-changelog.ts"
+    "check:changelog": "vite-node scripts/check-changelog.ts",
+    "shots:serve": "node scripts/shots-serve.mjs",
+    "shots:demo": "vite-node scripts/shots-demo.ts",
+    "shots:profile": "node scripts/shots-profile.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

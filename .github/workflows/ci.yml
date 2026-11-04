@@ -141,3 +141,5 @@ jobs:
           cache: "npm"
       - run: npm ci
       - run: npm run build
+      # The shots mock layer (docs/screenshots.md) must not be in the bundle.
+      - run: npx vitest run src/shots/bundle-guard.test.ts
