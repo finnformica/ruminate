@@ -182,12 +182,13 @@ has no keys to validate.
   grey tile with a small square in the colour of each series logged that
   day (`seriesOnDay`, `DayDots`), the same design for one series and for
   many (Finn, 2026-11-03: squares, not dots). The marks sit on a fixed grid
-  of square cells inside a 10 % margin (`DOT_MARGIN`), with one gap for
-  every layout, 4 % and at least two device pixels (`DOT_GAP`; Finn
-  2026-11-04: "reduce the gap further", "consistent across all
-  configurations"), and a circular corner: the single square's (20 % of
-  its side), but at most a third of the mark's own short side,
-  in whole device pixels (Finn 2026-11-04: more round, but not circles): one
+  of square cells inside a 10 % margin (`DOT_MARGIN`), with the
+  smallest gap that keeps each layout symmetric, at least 4 % and two
+  device pixels (`DOT_GAP`; Finn 2026-11-04: "reduce the gap further",
+  "different gap sizes depending on the number of activities"), and one
+  circular corner for every mark of a tile: the single square's (20 % of
+  its side), but at most a third of the tile's smallest mark, in whole
+  device pixels (Finn 2026-11-04: more round, but not circles): one
   series is one square, 2 to 4 a 2×2, 5 to 9 a 3×3, in reading order
   (`dotGrid`, Finn 2026-11-03: "grow the grid", "prefer using the square
   shape"). No cell is left empty: the nearest mark spans it, the gap
@@ -205,14 +206,14 @@ has no keys to validate.
   resolution media queries, `DEVICE_PIXEL_CLASS`), and each day's tile is
   its cell's width rounded down to it, centred in the cell (`dayTileSide`).
   A phone's day is a fraction of a pixel wide (14.37 px at 390); an inset
-  rounds as the tile's own edge does, so the margins are equal. The marks,
-  not the gaps, take the odd pixels, so every gap is the one gap: in a 2×2
-  the side rounds down and the second column and row take what is left; in
-  a 3×3 it rounds to the nearest and the middle column and row take what
-  is left, so the grid stays symmetric. What is left is at most one device
-  pixel more or less (`--dot-rest`). A 43 px tile (14.37 px at DPR 3) is
-  margins 4, gaps 2, squares 16 and 17 in a 2×2, 10, 11 and 10 in a 3×3; a
-  28 px tile (DPR 2) is margins 3, gaps 2, squares 10 and 10, 6, 6 and 6.
+  rounds as the tile's own edge does, so the margins are equal. Every
+  layout is symmetric. In a 2×2 the side rounds down from the smallest gap,
+  both squares the same, and the gap takes what is left (`--dot-gap`). In a
+  3×3 the side rounds to the nearest, the gaps are the smallest, and the
+  middle column and row take what is left, one device pixel more or less
+  (`--dot-rest`). A 43 px tile (14.37 px at DPR 3) is margins 4; a 2×2
+  squares 16, gap 3; a 3×3 squares 10, 11 and 10, gaps 2. A 28 px tile
+  (DPR 2) is margins 3, gaps 2; a 2×2 squares 10, a 3×3 squares 6.
   Today
   with a ring and the rest of this week dashed over a faint grey. A tap on a day up to today opens the day editor on it;
   the grid is one tab stop, and the arrow keys move a day (up, down) or a
