@@ -479,7 +479,7 @@ describe("a day with more than one series", () => {
     expect(dotCells(12)).toEqual(dotCells(9))
   })
 
-  it("lays the squares out as a fixed grid of equal whole-pixel squares, with CSS", () => {
+  it("lays the squares out as a fixed grid of whole-pixel squares, with CSS", () => {
     render(<ActivityCard series={[READ, SWIM, RUN]} today="2026-10-29" />)
     // Read, Swim and Run on the 28th: a 2×2, a half on top and two quarters.
     const dots = cell("2026-10-28").querySelector<HTMLElement>("[data-dots]")!
@@ -495,17 +495,27 @@ describe("a day with more than one series", () => {
     // the same way as the tile's edge.
     expect(grid.style.inset).toBe("var(--dot-margin)")
     expect(grid.style.getPropertyValue("--dot-margin")).toBe("round(10cqw, var(--dot-u, 1px))")
-    // Both tracks are the one whole-pixel side, the squares at the corners.
+    // Two equal whole-pixel tracks, the squares at the corners.
     expect(grid.style.gridTemplateColumns).toBe("repeat(2, var(--dot))")
     expect(grid.style.gridTemplateRows).toBe("repeat(2, var(--dot))")
     expect(grid.style.justifyContent).toBe("space-between")
     expect(grid.style.alignContent).toBe("space-between")
+    // The smallest gap, at least two device pixels.
+    expect(grid.style.getPropertyValue("--dot-gap-min")).toBe(
+      "max(2 * var(--dot-u, 1px), round(4cqw, var(--dot-u, 1px)))",
+    )
     expect(grid.style.getPropertyValue("--dot")).toBe(
-      "round(down, (100cqw - 2 * var(--dot-margin) - 1 * var(--dot-gap)) / 2 + 0.01px, var(--dot-u, 1px))",
+      "round(down, (100cqw - 2 * var(--dot-margin) - 1 * var(--dot-gap-min)) / 2 + 0.01px, var(--dot-u, 1px))",
     )
+    // The gap takes what is left, so both squares are the same.
     expect(grid.style.getPropertyValue("--dot-gap")).toBe(
-      "max(1px, round(6cqw, var(--dot-u, 1px)))",
+      "calc(100cqw - 2 * var(--dot-margin) - 2 * var(--dot))",
     )
+    // One corner for the tile, from its smallest mark.
+    expect(grid.style.getPropertyValue("--dot-radius")).toBe(
+      "max(var(--dot-u, 1px), min(round((100cqw - 2 * var(--dot-margin) - 0 * var(--dot-gap-min)) * 0.2, var(--dot-u, 1px)), round(var(--dot) / 3, var(--dot-u, 1px))))",
+    )
+    expect(marks.map((mark) => mark.style.borderRadius)).toEqual(Array(3).fill("var(--dot-radius)"))
     // The tile is a whole number of device pixels, centred in its cell.
     const tile = cell("2026-10-28").parentElement!
     expect(tile.style.width).toBe("round(down, 100cqw + 0.01px, var(--dot-u, 1px))")
@@ -524,7 +534,7 @@ describe("a day with more than one series", () => {
     expect(grid.style.gridTemplateRows).toBe("1fr")
   })
 
-  it("gives a 3×3's squares the tile's parity, so its two gaps are equal", () => {
+  it("gives a 3×3's middle column and row what is left, so its gaps are the smallest", () => {
     const many: SeriesState[] = Array.from({ length: 9 }, (_, i) => ({
       ...READ,
       series: { ...READ.series, id: `p${i}` },
@@ -533,7 +543,17 @@ describe("a day with more than one series", () => {
     const grid = cell("2026-10-28").querySelector<HTMLElement>("[data-dot-grid]")!
     expect(grid.dataset.dotGrid).toBe("3")
     expect(grid.style.getPropertyValue("--dot")).toBe(
-      "calc(round(down, (100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap)) / 3 - mod(100cqw, 2 * var(--dot-u, 1px)) + 0.01px, 2 * var(--dot-u, 1px)) + mod(100cqw, 2 * var(--dot-u, 1px)))",
+      "round((100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap-min)) / 3, var(--dot-u, 1px))",
+    )
+    expect(grid.style.getPropertyValue("--dot-rest")).toBe(
+      "calc((100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap-min)) - 2 * var(--dot))",
+    )
+    expect(grid.style.getPropertyValue("--dot-gap")).toBe("var(--dot-gap-min)")
+    expect(grid.style.gridTemplateColumns).toBe("var(--dot) var(--dot-rest) var(--dot)")
+    expect(grid.style.gridTemplateRows).toBe("var(--dot) var(--dot-rest) var(--dot)")
+    // One corner for the tile, from its smallest mark: the side or the middle.
+    expect(grid.style.getPropertyValue("--dot-radius")).toBe(
+      "max(var(--dot-u, 1px), min(round((100cqw - 2 * var(--dot-margin) - 0 * var(--dot-gap-min)) * 0.2, var(--dot-u, 1px)), round(min(var(--dot), var(--dot-rest)) / 3, var(--dot-u, 1px))))",
     )
   })
 
