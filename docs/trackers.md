@@ -190,20 +190,23 @@ has no keys to validate.
   between too, so the block keeps one shape (`dotCells`, Finn 2026-11-03:
   "empty space should be filled by the closest square"). 2 is two halves,
   one over the other; 3 a half on top and two quarters below; 5 three over
-  a tall mark and a 2×2 square; 6 three over three tall marks; 7 six over a
+  two full-width rows (Finn, 2026-11-04: option 5a); 6 three over three tall marks; 7 six over a
   full row; 8 seven, the last two cells wide. Past 9, eight squares and a
   grey outline for the rest. A slip on a series to avoid is a plain square: the
   Heatmap has no slip mark (Finn, 2026-11-03). The squares are plain CSS
   layout, with no measure: the tile is a size container, and the squares a
-  CSS grid inset by one whole-pixel margin on all four sides (CSS `round()`,
-  lengths in `cqw`). A phone's day is a fraction of a pixel wide (14.37 px
-  at 390); a grid centred in it rounded 1 px one side and 2 px the other,
-  but an inset rounds as the tile's own edge does, so the margins are
-  equal. Each square is the same whole-pixel side, the outer ones on the
-  inset box's edges (`space-between`), so no square is a pixel wider than
-  another; in a 3×3 the two gaps can differ by a pixel (14 px less three 3
-  px squares leaves 5 px, which two equal margins and two equal gaps cannot
-  share). Today
+  CSS grid inset by one margin on all four sides (CSS `round()`, lengths
+  in `cqw`). Every length is a whole number of device pixels: `--dot-u` is
+  one device pixel (1/3 px at 3 dppx, 1/2 px at 2 dppx, set on the grid by
+  resolution media queries, `DEVICE_PIXEL_CLASS`), and each day's tile is
+  its cell's width rounded down to it, centred in the cell (`dayTileSide`).
+  A phone's day is a fraction of a pixel wide (14.37 px at 390); an inset
+  rounds as the tile's own edge does, so the margins are equal. Each square
+  is the same side, the outer ones on the inset box's edges
+  (`space-between`), and the gaps take what is left. In a 3×3 the side
+  takes the tile's parity, so what is left is even and the two gaps are
+  equal: a 43 px tile (14.37 px at DPR 3) is margins 4, squares 9, gaps 4.
+  Today
   with a ring and the rest of this week dashed over a faint grey. A tap on a day up to today opens the day editor on it;
   the grid is one tab stop, and the arrow keys move a day (up, down) or a
   week (left, right). A week that runs into a new month is split into two

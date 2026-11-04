@@ -25,10 +25,12 @@ import {
   AvoidTag,
   ColourDot,
   DAY_RADIUS,
+  DEVICE_PIXEL_CLASS,
   DayDots,
   DaySquare,
   type DayDot,
   dayRadius,
+  dayTileSide,
 } from "./month-grid"
 import { fitMonthLabels } from "./month-labels"
 
@@ -471,7 +473,7 @@ function ActivityHeatmap({
         aria-label="Active days, by week"
         data-testid="activity-heatmap"
         data-size={size === HEATMAP_SIZES.large ? "large" : "small"}
-        className="grid items-center"
+        className={cx("grid items-center", DEVICE_PIXEL_CLASS)}
         // Focusable for its keys, but not a tab stop: its days are.
         tabIndex={-1}
         onKeyDown={onKeyDown}
@@ -564,28 +566,32 @@ function ActivityHeatmap({
                       .join(", ") || "nothing"
               }`
               return (
+                // The tile is a whole number of device pixels, centred in its
+                // cell, so its marks share it out exactly (`dayTileSide`).
                 <div
                   key={day}
                   role="gridcell"
-                  className="aspect-square"
+                  className="grid aspect-square place-items-center [container-type:inline-size]"
                   style={{ ...at(track[c], d + 2), borderRadius: dayRadius }}
                 >
-                  <DaySquare
-                    aria-label={label}
-                    aria-haspopup="dialog"
-                    title={label}
-                    data-day={day}
-                    data-series={on.length}
-                    disabled={future || !onOpenDay}
-                    tabIndex={day === tabDay ? 0 : -1}
-                    onClick={() => onOpenDay?.(day)}
-                    onFocus={() => setFocusDay(day)}
-                    today={day === today}
-                    toCome={future ? "outline" : undefined}
-                  >
-                    {future ? <FutureOutline cellSize={cellSize} /> : null}
-                    {!future && on.length > 0 ? <DayDots dots={dayDots(on)} /> : null}
-                  </DaySquare>
+                  <span className="block" style={{ width: dayTileSide, height: dayTileSide }}>
+                    <DaySquare
+                      aria-label={label}
+                      aria-haspopup="dialog"
+                      title={label}
+                      data-day={day}
+                      data-series={on.length}
+                      disabled={future || !onOpenDay}
+                      tabIndex={day === tabDay ? 0 : -1}
+                      onClick={() => onOpenDay?.(day)}
+                      onFocus={() => setFocusDay(day)}
+                      today={day === today}
+                      toCome={future ? "outline" : undefined}
+                    >
+                      {future ? <FutureOutline cellSize={cellSize} /> : null}
+                      {!future && on.length > 0 ? <DayDots dots={dayDots(on)} /> : null}
+                    </DaySquare>
+                  </span>
                 </div>
               )
             })}

@@ -112,9 +112,10 @@ const singles = (k: number, count: number, row = 1): DotCell[] =>
  * - 2: two halves, one over the other. 3: a half on top, two quarters
  *   below ("one of the activities takes up half and the other two take up
  *   a quarter each"). 4: four quarters.
- * - 5: three over two, the last two down to the foot: a tall one and a
- *   2×2 square. 6: three over three, the last three down to the foot. 7:
- *   the last spans the last row. 8: the last spans two cells. 9: nine cells.
+ * - 5: three over two full-width rows (Finn, 2026-11-04: "5a as that makes
+ *   most sense to me"). 6: three over three, the last three down to the
+ *   foot. 7: the last spans the last row. 8: the last spans two cells. 9:
+ *   nine cells.
  */
 const DOT_CELLS: Record<number, readonly DotCell[]> = {
   1: [[1, 1, 1, 1]],
@@ -124,7 +125,7 @@ const DOT_CELLS: Record<number, readonly DotCell[]> = {
   ],
   3: [[1, 1, 2, 1], ...singles(2, 2, 2)],
   4: singles(2, 4),
-  5: [...singles(3, 3), [1, 2, 1, 2], [2, 2, 2, 2]],
+  5: [...singles(3, 3), [1, 2, 3, 1], [1, 3, 3, 1]],
   6: [...singles(3, 3), [1, 2, 1, 2], [2, 2, 1, 2], [3, 2, 1, 2]],
   7: [...singles(3, 6), [1, 3, 3, 1]],
   8: [...singles(3, 7), [2, 3, 2, 1]],
@@ -138,31 +139,59 @@ export function dotCells(count: number): readonly DotCell[] {
   return count <= 0 ? [] : DOT_CELLS[Math.min(count, 9)]
 }
 
-/** The margin as CSS, in whole pixels. The grid is inset by it on all four
- * sides: the tile's edges and the grid's edges then sit at the same
+/** One device pixel, in CSS pixels: `--dot-u`, set by the Heatmap from the
+ * screen's resolution (`DEVICE_PIXEL_CLASS`), else one CSS pixel. Every
+ * length of a day's marks is a whole number of these, so each edge falls on
+ * a device pixel. */
+const U = "var(--dot-u, 1px)"
+
+/** Added before each `round(down, …)`: far under a device pixel, but more
+ * than the error of the browser's sums, so a size of exactly 3 px (14 px
+ * less the margins and gaps, over 3) is not 2.99999 px rounded down to 2. */
+const EPSILON = "0.01px"
+
+/** Sets `--dot-u` to one device pixel at 2 and 3 dppx (a phone draws two or
+ * three device pixels a CSS pixel). */
+export const DEVICE_PIXEL_CLASS =
+  "[@media(min-resolution:2dppx)]:[--dot-u:0.5px] [@media(min-resolution:3dppx)]:[--dot-u:calc(1px/3)]"
+
+/** A Heatmap day's side as CSS, in a cell that is an inline-size container:
+ * the cell's width rounded down to a whole device pixel. A tile of a known
+ * whole size lets its marks share it out exactly (`DayDots`). */
+export const dayTileSide = `round(down, 100cqw + ${EPSILON}, ${U})`
+
+/** The margin as CSS, in whole device pixels. The grid is inset by it on all
+ * four sides: the tile's edges and the grid's edges then sit at the same
  * fraction of a pixel and round the same way, so the margin is the same on
  * each side. (Centred at a fractional offset, a 14.37 px phone day showed
  * 1 px of margin on one side and 2 px on the other.) */
-const DOT_MARGIN_CSS = `round(${DOT_MARGIN}cqw, 1px)`
+const DOT_MARGIN_CSS = `round(${DOT_MARGIN}cqw, ${U})`
 
-/** The gap as CSS, in whole pixels and never under one: a phone's 14 px day
- * has 0.84 px of gap, which can round away and join two squares. */
-const DOT_GAP_CSS = `max(1px, round(${DOT_GAP}cqw, 1px))`
+/** The gap as CSS, in whole device pixels and never under one CSS pixel: a
+ * phone's 14 px day has 0.84 px of gap, which can round away and join two
+ * squares. */
+const DOT_GAP_CSS = `max(1px, round(${DOT_GAP}cqw, ${U}))`
 
 /** A square's side as CSS for a grid of `k`: its share of the room inside
- * the margin, rounded down to a whole pixel, so no square is a pixel wider
- * than another. The squares sit at the corners of the grid and the gaps
- * take what is left over. */
+ * the margin, rounded down to a whole device pixel, so no square is a pixel
+ * wider than another. The outer squares sit on the grid's edges and the gaps
+ * take what is left over. In a 3×3 that is two gaps: the side takes the
+ * tile's parity (in device pixels), so what is left over is even and the
+ * two gaps are equal (14.37 px at DPR 3 is a 43 px tile: margins 4, squares
+ * 9, gaps 4). */
 const dotSideCss = (k: number) =>
-  `round(down, (100cqw - 2 * var(--dot-margin) - ${k - 1} * var(--dot-gap)) / ${k}, 1px)`
+  k === 3
+    ? `calc(round(down, (100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap)) / 3 - mod(100cqw, 2 * ${U}) + ${EPSILON}, 2 * ${U}) + mod(100cqw, 2 * ${U}))`
+    : `round(down, (100cqw - 2 * var(--dot-margin) - ${k - 1} * var(--dot-gap)) / ${k} + ${EPSILON}, ${U})`
 
 /**
  * A day's series as squares on the day's tile, in their colours: the one
  * look for a day with one series and with many. Plain CSS layout, no
  * measure: the tile is a size container, and the squares a fixed k×k grid
- * (`dotGrid`) inset by the same whole-pixel margin on all four sides (lengths
- * in `cqw`, hundredths of the tile's side). One series fills the inset box;
- * in a 2×2 or 3×3 every cell is the same whole-pixel side, the outer cells
+ * (`dotGrid`) inset by the same whole-device-pixel margin on all four sides
+ * (lengths in `cqw`, hundredths of the tile's side). One series fills the
+ * inset box; in a 2×2 or 3×3 every cell is the same whole-device-pixel
+ * side, and the gaps are equal when the tile is whole (`dayTileSide`), the outer cells
  * on the box's edges (`space-between`), and a mark spans the cells of
  * `dotCells`, the gaps between them too. A slip on a series to avoid
  * is a plain square: the Heatmap has no slip mark (Finn, 2026-11-03).
