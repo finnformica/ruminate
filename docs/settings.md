@@ -55,11 +55,13 @@ is a patch over that rather than a fix. The reader is here to set
 something, not to read about it.
 
 The one line of descriptive copy a page carries is its description under
-the heading (and under its row on a phone): one line, naming what the page
-holds. A new page goes without the line until the owner
-has agreed its words (`description` is optional in `settings-nav.tsx`).
-Notifications went without one until Finn agreed "Reminders sent to this
-device." on 2026-11-04.
+the heading: one line, naming what the page holds. A new page goes without
+the line until the owner has agreed its words (`description` is optional
+in `settings-nav.tsx`). Notifications went without one until Finn agreed
+"Reminders sent to this device." on 2026-11-04. The phone's list of pages
+(`SettingsIndexList`) carries no description under a row, the same as the
+sidebar's list on a wider screen — by Finn's choice on 2026-11-04, the two
+lists read the same.
 
 **Descriptive copy on a setting needs sign-off.** Do not add a line under a
 setting, or change the one on a page, on your own judgement: propose the

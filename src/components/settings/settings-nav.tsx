@@ -34,9 +34,9 @@ export type SettingsPageId =
 export interface SettingsPage {
   id: SettingsPageId
   label: string
-  /** The line under the page's heading, and under its row on a phone — the
-   * one line of descriptive copy a page carries (docs/settings.md). Left
-   * out until the owner has agreed the words: the page then has none. */
+  /** The line under the page's heading — the one line of descriptive copy a
+   * page carries (docs/settings.md). Left out until the owner has agreed
+   * the words: the page then has none. */
   description?: string
   /** Listed only while this account may use the feature. */
   feature?: FeatureKey
@@ -165,8 +165,8 @@ function SettingsNavRows({ pages, size }: { pages: SettingsPage[]; size: "medium
 
 /**
  * The same pages as a list of rows, for a phone, where there is no room for
- * a column beside the page: each row is a page, with its description under
- * its name and a chevron at its end, in the size the phone's drawer uses.
+ * a column beside the page: each row is a page's name and a chevron at its
+ * end, in the size the phone's drawer uses.
  */
 export function SettingsIndexList() {
   const pages = useSettingsPages()
@@ -193,14 +193,7 @@ function SettingsIndexRows({ pages }: { pages: SettingsPage[] }) {
             className="nav-item h-auto! py-2"
             data-size="large"
           >
-            <span className="flex w-0 grow flex-col gap-0.5">
-              <span className="truncate leading-5">{page.label}</span>
-              {page.description ? (
-                <span className="line-clamp-2 text-sm leading-4 text-text-secondary">
-                  {page.description}
-                </span>
-              ) : null}
-            </span>
+            <span className="w-0 grow truncate leading-5">{page.label}</span>
             <ChevronRightIcon16 className="shrink-0 text-text-tertiary" />
           </Link>
         </li>
