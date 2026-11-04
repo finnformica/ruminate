@@ -479,7 +479,7 @@ describe("a day with more than one series", () => {
     expect(dotCells(12)).toEqual(dotCells(9))
   })
 
-  it("lays the squares out as a fixed grid of equal whole-pixel squares, with CSS", () => {
+  it("lays the squares out as a fixed grid of whole-pixel squares, with CSS", () => {
     render(<ActivityCard series={[READ, SWIM, RUN]} today="2026-10-29" />)
     // Read, Swim and Run on the 28th: a 2×2, a half on top and two quarters.
     const dots = cell("2026-10-28").querySelector<HTMLElement>("[data-dots]")!
@@ -495,16 +495,24 @@ describe("a day with more than one series", () => {
     // the same way as the tile's edge.
     expect(grid.style.inset).toBe("var(--dot-margin)")
     expect(grid.style.getPropertyValue("--dot-margin")).toBe("round(10cqw, var(--dot-u, 1px))")
-    // Both tracks are the one whole-pixel side, the squares at the corners.
-    expect(grid.style.gridTemplateColumns).toBe("repeat(2, var(--dot))")
-    expect(grid.style.gridTemplateRows).toBe("repeat(2, var(--dot))")
+    // Whole-pixel tracks, the second what is left, the squares at the corners.
+    expect(grid.style.gridTemplateColumns).toBe("var(--dot) var(--dot-rest)")
+    expect(grid.style.gridTemplateRows).toBe("var(--dot) var(--dot-rest)")
     expect(grid.style.justifyContent).toBe("space-between")
     expect(grid.style.alignContent).toBe("space-between")
     expect(grid.style.getPropertyValue("--dot")).toBe(
       "round(down, (100cqw - 2 * var(--dot-margin) - 1 * var(--dot-gap)) / 2 + 0.01px, var(--dot-u, 1px))",
     )
+    expect(grid.style.getPropertyValue("--dot-rest")).toBe(
+      "calc((100cqw - 2 * var(--dot-margin) - 1 * var(--dot-gap)) - 1 * var(--dot))",
+    )
+    // One gap for every layout, at least two device pixels.
     expect(grid.style.getPropertyValue("--dot-gap")).toBe(
-      "max(var(--dot-u, 1px), round(6cqw, var(--dot-u, 1px)))",
+      "max(2 * var(--dot-u, 1px), round(4cqw, var(--dot-u, 1px)))",
+    )
+    // The half on top: the corner from its own short side, its height.
+    expect(marks[0].style.borderRadius).toBe(
+      "max(var(--dot-u, 1px), min(round((100cqw - 2 * var(--dot-margin) - 0 * var(--dot-gap)) * 0.2, var(--dot-u, 1px)), round(min((var(--dot) + var(--dot-rest) + 1 * var(--dot-gap)), var(--dot)) / 3, var(--dot-u, 1px))))",
     )
     // The tile is a whole number of device pixels, centred in its cell.
     const tile = cell("2026-10-28").parentElement!
@@ -524,7 +532,7 @@ describe("a day with more than one series", () => {
     expect(grid.style.gridTemplateRows).toBe("1fr")
   })
 
-  it("gives a 3×3's middle column and row what is left, so its two gaps are the gap", () => {
+  it("gives a 3×3's middle column and row what is left, so every gap is the one gap", () => {
     const many: SeriesState[] = Array.from({ length: 9 }, (_, i) => ({
       ...READ,
       series: { ...READ.series, id: `p${i}` },
@@ -535,15 +543,21 @@ describe("a day with more than one series", () => {
     expect(grid.style.getPropertyValue("--dot")).toBe(
       "round((100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap)) / 3, var(--dot-u, 1px))",
     )
-    expect(grid.style.getPropertyValue("--dot-middle")).toBe(
-      "calc(100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap) - 2 * var(--dot))",
+    expect(grid.style.getPropertyValue("--dot-rest")).toBe(
+      "calc((100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap)) - 2 * var(--dot))",
     )
-    expect(grid.style.gridTemplateColumns).toBe("var(--dot) var(--dot-middle) var(--dot)")
-    expect(grid.style.gridTemplateRows).toBe("var(--dot) var(--dot-middle) var(--dot)")
-    // The single square's corner, at most a third of the short side.
-    const mark = grid.firstElementChild as HTMLElement
-    expect(mark.style.borderRadius).toBe(
-      "max(var(--dot-u, 1px), min(round((100cqw - 2 * var(--dot-margin)) * 0.2, var(--dot-u, 1px)), round(var(--dot) / 3, var(--dot-u, 1px))))",
+    expect(grid.style.gridTemplateColumns).toBe("var(--dot) var(--dot-rest) var(--dot)")
+    expect(grid.style.gridTemplateRows).toBe("var(--dot) var(--dot-rest) var(--dot)")
+    // The single square's corner, at most a third of the mark's own short
+    // side: a corner square's is the side, the middle square's what is left.
+    const marks = [...grid.children] as HTMLElement[]
+    const single =
+      "round((100cqw - 2 * var(--dot-margin) - 0 * var(--dot-gap)) * 0.2, var(--dot-u, 1px))"
+    expect(marks[0].style.borderRadius).toBe(
+      `max(var(--dot-u, 1px), min(${single}, round(var(--dot) / 3, var(--dot-u, 1px))))`,
+    )
+    expect(marks[4].style.borderRadius).toBe(
+      `max(var(--dot-u, 1px), min(${single}, round(var(--dot-rest) / 3, var(--dot-u, 1px))))`,
     )
   })
 

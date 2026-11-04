@@ -82,7 +82,7 @@ export type DayDot = { colour: TrackerColour }
 /** The margin round the squares and the gap between them, in hundredths of
  * the tile's side (Finn, 2026-11-03: the 10 % margin of the dots). */
 const DOT_MARGIN = 10
-const DOT_GAP = 6
+const DOT_GAP = 4
 
 /** The single square's corner radius, as a share of its side (Finn,
  * 2026-11-04: the look of every mark's corner). */
@@ -168,38 +168,57 @@ export const dayTileSide = `round(down, 100cqw + ${EPSILON}, ${U})`
  * 1 px of margin on one side and 2 px on the other.) */
 const DOT_MARGIN_CSS = `round(${DOT_MARGIN}cqw, ${U})`
 
-/** The gap as CSS, in whole device pixels and never under one: a phone's
- * 14 px day has 0.84 px of gap, which can round away and join two squares
- * (3 device px at DPR 3, 2 at DPR 2). */
-const DOT_GAP_CSS = `max(${U}, round(${DOT_GAP}cqw, ${U}))`
+/** The gap as CSS: one gap for every layout of a tile, in whole device
+ * pixels and never under two (Finn, 2026-11-04: "reduce the gap further",
+ * "consistent across all configurations"). A phone's 14 px day has 2 device
+ * px at DPR 3 and at DPR 2; a larger desktop day has more. */
+const DOT_GAP_CSS = `max(2 * ${U}, round(${DOT_GAP}cqw, ${U}))`
 
-/** A square's side as CSS for a grid of `k`: its share of the room inside
- * the margin less the gaps, in whole device pixels. In a 2×2 it rounds down
- * and the one gap takes what is left over, so both squares are the same. In
- * a 3×3 it rounds to the nearest and the middle column and row take what is
- * left over (`dotMiddleCss`), so the two gaps are the gap and the grid stays
- * symmetric (Finn, 2026-11-04: "tighten it up a little"). 14.37 px at DPR 3
- * is a 43 px tile: margins 4, squares 10, 9 and 10, gaps 3. */
+/** The room inside the margin less the gaps of a grid of `k`. */
+const roomCss = (k: number) => `(100cqw - 2 * var(--dot-margin) - ${k - 1} * var(--dot-gap))`
+
+/** A square's side as CSS for a grid of `k`, in whole device pixels: its
+ * share of the room. One series fills the room. In a 2×2 the side rounds
+ * down and the second column and row take what is left (`--dot-rest`); in a
+ * 3×3 it rounds to the nearest and the middle column and row take what is
+ * left, so the grid stays symmetric. The left over is at most one device
+ * pixel, so the gaps are all the one gap. 14.37 px at DPR 3 is a 43 px tile:
+ * margins 4, gaps 2, squares 16 and 17 in a 2×2, 10, 11 and 10 in a 3×3. */
 const dotSideCss = (k: number) =>
   k === 1
-    ? "calc(100cqw - 2 * var(--dot-margin))"
+    ? roomCss(1)
     : k === 3
-      ? `round((100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap)) / 3, ${U})`
-      : `round(down, (100cqw - 2 * var(--dot-margin) - ${k - 1} * var(--dot-gap)) / ${k} + ${EPSILON}, ${U})`
+      ? `round(${roomCss(3)} / 3, ${U})`
+      : `round(down, ${roomCss(k)} / ${k} + ${EPSILON}, ${U})`
 
-/** The middle column and row of a 3×3: what is left of the room inside the
- * margin, at most one device pixel more or less than the others. */
-const dotMiddleCss = "calc(100cqw - 2 * var(--dot-margin) - 2 * var(--dot-gap) - 2 * var(--dot))"
+/** What is left of the room for the other column and row (`dotSideCss`). */
+const dotRestCss = (k: number) => `calc(${roomCss(k)} - ${k - 1} * var(--dot))`
+
+/** The tracks of a grid of `k`, from the first. */
+const dotTracks = (k: number): readonly string[] =>
+  k === 1
+    ? ["var(--dot)"]
+    : k === 2
+      ? ["var(--dot)", "var(--dot-rest)"]
+      : ["var(--dot)", "var(--dot-rest)", "var(--dot)"]
+
+/** The length of `n` tracks of a grid of `k` from track `start` (from 1),
+ * with the gaps between them. */
+const spanCss = (k: number, start: number, n: number) => {
+  const tracks = dotTracks(k).slice(start - 1, start - 1 + n)
+  return n === 1 ? tracks[0] : `(${tracks.join(" + ")} + ${n - 1} * var(--dot-gap))`
+}
 
 /** A mark's corner radius as CSS: the single square's corner (a share of
- * the room inside the margin), but at most a third of the mark's short side
- * (`--dot`, or a span of `n` cells and the gaps between them), so a small
- * square is not a circle (Finn, 2026-11-04). In whole device pixels and at
- * least one. One length for x and y, so every corner is a circle. */
-const dotRadiusCss = (columns: number, rows: number) => {
-  const n = Math.min(columns, rows)
-  const side = n === 1 ? "var(--dot)" : `(${n} * var(--dot) + ${n - 1} * var(--dot-gap))`
-  const single = `round((100cqw - 2 * var(--dot-margin)) * ${SQUARE_RADIUS}, ${U})`
+ * the room inside the margin), but at most a third of the mark's own short
+ * side, so a small square is not a circle (Finn, 2026-11-04). In whole
+ * device pixels and at least one. One length for x and y, so every corner
+ * is a circle. */
+const dotRadiusCss = (k: number, [column, row, columns, rows]: DotCell) => {
+  const width = spanCss(k, column, columns)
+  const height = spanCss(k, row, rows)
+  const side = width === height ? width : `min(${width}, ${height})`
+  const single = `round(${roomCss(1)} * ${SQUARE_RADIUS}, ${U})`
   return `max(${U}, min(${single}, round(${side} / 3, ${U})))`
 }
 
@@ -209,8 +228,9 @@ const dotRadiusCss = (columns: number, rows: number) => {
  * measure: the tile is a size container, and the squares a fixed k×k grid
  * (`dotGrid`) inset by the same whole-device-pixel margin on all four sides
  * (lengths in `cqw`, hundredths of the tile's side). One series fills the
- * inset box; in a 2×2 or 3×3 every cell is a whole-device-pixel side (a
- * 3×3's middle one pixel more or less), and the gaps are equal when the tile is whole (`dayTileSide`), the outer cells
+ * inset box; in a 2×2 or 3×3 every cell is a whole-device-pixel side (one
+ * column and row one pixel more or less), and the one gap is between every
+ * two marks when the tile is whole (`dayTileSide`), the outer cells
  * on the box's edges (`space-between`), and a mark spans the cells of
  * `dotCells`, the gaps between them too. A slip on a series to avoid
  * is a plain square: the Heatmap has no slip mark (Finn, 2026-11-03).
@@ -218,12 +238,7 @@ const dotRadiusCss = (columns: number, rows: number) => {
  */
 export function DayDots({ dots, faint = false }: { dots: readonly DayDot[]; faint?: boolean }) {
   const k = dotGrid(dots.length)
-  const track =
-    k === 1
-      ? "1fr"
-      : k === 3
-        ? "var(--dot) var(--dot-middle) var(--dot)"
-        : `repeat(${k}, var(--dot))`
+  const track = k === 1 ? "1fr" : dotTracks(k).join(" ")
   return (
     <span
       aria-hidden
@@ -241,7 +256,7 @@ export function DayDots({ dots, faint = false }: { dots: readonly DayDot[]; fain
             "--dot-margin": DOT_MARGIN_CSS,
             "--dot-gap": DOT_GAP_CSS,
             "--dot": dotSideCss(k),
-            "--dot-middle": dotMiddleCss,
+            "--dot-rest": dotRestCss(k),
             inset: "var(--dot-margin)",
             gridTemplateColumns: track,
             gridTemplateRows: track,
@@ -251,12 +266,13 @@ export function DayDots({ dots, faint = false }: { dots: readonly DayDot[]; fain
           } as React.CSSProperties
         }
       >
-        {dotCells(dots.length).map(([column, row, columns, rows], at) => {
+        {dotCells(dots.length).map((cell, at) => {
+          const [column, row, columns, rows] = cell
           const more = at === 8 && dots.length > 9
           const place = {
             gridColumn: `${column} / span ${columns}`,
             gridRow: `${row} / span ${rows}`,
-            borderRadius: dotRadiusCss(columns, rows),
+            borderRadius: dotRadiusCss(k, cell),
           }
           return more ? (
             <span
