@@ -1,6 +1,6 @@
 // tenant-guard: exempt — this suite reads query PLANS and seeds control-plane
 // rows by hand.
-import { beforeAll, beforeEach, describe, expect, it } from "vitest"
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import migration0033 from "../../migrations/0033_push_subscriptions.sql?raw"
 import type { SqlDriver, SqlValue } from "../../src/data/sql-driver"
 import { corpusPut } from "../handlers/replica-corpus"
@@ -11,7 +11,8 @@ import type { Env } from "../types"
 import { runReminders } from "./cron"
 import { checkHabits, missingHabits, readDayEntries, readHabits, type Habit } from "./habits"
 import { reminderMessage } from "./message"
-import { vapidKeys } from "./push"
+import { reminders } from "../handlers/reminders"
+import { pushResultOf, sendPush, vapidKeys } from "./push"
 import { dueSubscriptions, saveSubscription, subscriptionOf } from "./store"
 
 const USER = 31
@@ -453,5 +454,273 @@ describe("the cron", () => {
     const service = pushService()
     expect(await runReminders(harness.env, EVENING, service.fetchImpl)).toMatchObject({ due: 0 })
     expect(service.calls).toEqual([])
+  })
+})
+
+// -----------------------------------------------------------------------------
+// One push, as a push service reads it
+// -----------------------------------------------------------------------------
+
+const fromBase64Url = (value: string) =>
+  Uint8Array.from(atob(value.replace(/-/g, "+").replace(/_/g, "/")), (char) => char.charCodeAt(0))
+
+const hmac = async (key: Uint8Array, data: Uint8Array) =>
+  new Uint8Array(
+    await crypto.subtle.sign(
+      "HMAC",
+      await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]),
+      data,
+    ),
+  )
+
+const concat = (...parts: Uint8Array[]) => {
+  const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0))
+  let at = 0
+  for (const part of parts) {
+    out.set(part, at)
+    at += part.length
+  }
+  return out
+}
+
+const text = (value: string) => new TextEncoder().encode(value)
+
+/** Decrypt an aes128gcm push body (RFC 8188, RFC 8291 §3.4) with the
+ * browser's private key, as the browser does. */
+async function decrypt(
+  body: Uint8Array,
+  browser: CryptoKeyPair,
+  authSecret: Uint8Array,
+): Promise<string> {
+  const salt = body.slice(0, 16)
+  const keyLength = body[20]
+  const serverPublic = body.slice(21, 21 + keyLength)
+  const record = body.slice(21 + keyLength)
+  const browserPublic = new Uint8Array(
+    (await crypto.subtle.exportKey("raw", browser.publicKey)) as ArrayBuffer,
+  )
+  const serverKey = await crypto.subtle.importKey(
+    "raw",
+    serverPublic,
+    { name: "ECDH", namedCurve: "P-256" },
+    false,
+    [],
+  )
+  const shared = new Uint8Array(
+    // The Workers types spell ECDH's `public` as `$public`; Node reads `public`.
+    await crypto.subtle.deriveBits(
+      { name: "ECDH", public: serverKey } as unknown as SubtleCryptoDeriveKeyAlgorithm,
+      browser.privateKey,
+      256,
+    ),
+  )
+  const one = new Uint8Array([1])
+  const ikm = await hmac(
+    await hmac(authSecret, shared),
+    concat(text("WebPush: info\0"), browserPublic, serverPublic, one),
+  )
+  const prk = await hmac(salt, ikm)
+  const cek = (await hmac(prk, concat(text("Content-Encoding: aes128gcm\0"), one))).slice(0, 16)
+  const nonce = (await hmac(prk, concat(text("Content-Encoding: nonce\0"), one))).slice(0, 12)
+  const plain = new Uint8Array(
+    await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: nonce },
+      await crypto.subtle.importKey("raw", cek, "AES-GCM", false, ["decrypt"]),
+      record,
+    ),
+  )
+  // The last record ends at its 0x02 delimiter; zeroes pad after it.
+  return new TextDecoder().decode(plain.slice(0, plain.lastIndexOf(2)))
+}
+
+describe("one push", () => {
+  it("is a request FCM takes: headers, VAPID claims for its origin, and a body Brave decrypts", async () => {
+    const browser = (await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
+      "deriveBits",
+    ])) as CryptoKeyPair
+    const authSecret = crypto.getRandomValues(new Uint8Array(16))
+    const b64 = (bytes: Uint8Array) =>
+      btoa(String.fromCharCode(...bytes))
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "")
+    const target = {
+      endpoint: "https://fcm.googleapis.com/fcm/send/dxyz:APA91bH",
+      p256dh: b64(
+        new Uint8Array((await crypto.subtle.exportKey("raw", browser.publicKey)) as ArrayBuffer),
+      ),
+      auth: b64(authSecret),
+    }
+    let sent: { url: string; headers: Headers; body: Uint8Array } | null = null
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      sent = {
+        url: String(input),
+        headers: new Headers(init?.headers),
+        body: new Uint8Array(init?.body as Uint8Array),
+      }
+      return new Response(null, { status: 201 })
+    }) as typeof fetch
+    const keys = (await vapidKeys(vapidEnv))!
+    const payload = reminderMessage([], [], { test: true })
+    expect(await sendPush(keys, target, payload, fetchImpl)).toEqual({
+      outcome: "sent",
+      status: 201,
+      reason: "sent",
+    })
+    const request = sent as unknown as { url: string; headers: Headers; body: Uint8Array }
+    expect(request.url).toBe(target.endpoint)
+    const { headers } = request
+    expect(headers.get("content-encoding")).toBe("aes128gcm")
+    expect(headers.get("content-type")).toBe("application/octet-stream")
+    expect(headers.get("ttl")).toBe(String(4 * 60 * 60))
+    expect(headers.get("urgency")).toBe("normal")
+    // RFC 8030 §5.4: a topic is at most 32 base64url characters.
+    expect(headers.get("topic")).toMatch(/^[A-Za-z0-9_-]{1,32}$/)
+    // FCM takes at most 4096 bytes of body.
+    expect(request.body.byteLength).toBeLessThanOrEqual(4096)
+    expect(headers.get("content-length")).toBe(String(request.body.byteLength))
+
+    const [, jwt, key] = /^vapid t=([^,]+), k=(.+)$/.exec(headers.get("authorization") ?? "")!
+    expect(key).toBe(vapidEnv.VAPID_PUBLIC_KEY)
+    const [header, claims, signature] = jwt.split(".")
+    const parsed = JSON.parse(new TextDecoder().decode(fromBase64Url(claims))) as {
+      aud: string
+      exp: number
+      sub: string
+    }
+    // RFC 8292 §2: `aud` is the push service's origin; `exp` is within 24 hours.
+    expect(parsed.aud).toBe("https://fcm.googleapis.com")
+    expect(parsed.exp - Date.now() / 1000).toBeLessThanOrEqual(24 * 60 * 60)
+    expect(parsed.sub).toBe("https://ruminate.finnformica.workers.dev")
+    const point = fromBase64Url(vapidEnv.VAPID_PUBLIC_KEY!)
+    const verifier = await crypto.subtle.importKey(
+      "jwk",
+      { kty: "EC", crv: "P-256", x: b64(point.slice(1, 33)), y: b64(point.slice(33, 65)) },
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["verify"],
+    )
+    expect(
+      await crypto.subtle.verify(
+        { name: "ECDSA", hash: "SHA-256" },
+        verifier,
+        fromBase64Url(signature),
+        text(`${header}.${claims}`),
+      ),
+    ).toBe(true)
+
+    expect(JSON.parse(await decrypt(request.body, browser, authSecret))).toEqual(payload)
+  })
+
+  it("names each answer of a push service", () => {
+    expect(pushResultOf(201)).toEqual({ outcome: "sent", status: 201, reason: "sent" })
+    expect(pushResultOf(410).outcome).toBe("gone")
+    expect(pushResultOf(404).outcome).toBe("gone")
+    expect(pushResultOf(403)).toEqual({
+      outcome: "vapid",
+      status: 403,
+      reason: "VAPID key refused",
+    })
+    expect(pushResultOf(413)).toEqual({
+      outcome: "failed",
+      status: 413,
+      reason: "payload too large",
+    })
+    expect(pushResultOf(0).reason).toBe("no answer")
+    expect(pushResultOf(500).reason).toBe("push service error")
+  })
+})
+
+describe("the test reminder", () => {
+  /** GitHub signs the caller in as USER; every other URL is a push service
+   * that answers as told. */
+  function services(answers: Record<string, number>) {
+    const push = pushService(answers)
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input) === "https://api.github.com/user"
+        ? new Response(JSON.stringify({ id: USER, login: "finn" }))
+        : push.fetchImpl(input, init)) as typeof fetch
+    return { calls: push.calls, fetchImpl }
+  }
+
+  const testRequest = (endpoint: string) =>
+    new Request("https://ruminate.test/api/reminders/test", {
+      method: "POST",
+      headers: { Cookie: "gh_refresh=session", Authorization: "Bearer good" },
+      body: JSON.stringify({ endpoint }),
+    })
+
+  it("goes to every device of the reader and says what each push service answered", async () => {
+    await subscribe(USER, "https://web.push.apple.com/phone")
+    await subscribe(USER, "https://fcm.googleapis.com/fcm/send/brave")
+    await subscribe(USER, "https://updates.push.services.mozilla.com/wpush/v2/gone")
+    await subscribe(OTHER, "https://push.test/theirs")
+    const log = vi.spyOn(console, "error").mockImplementation(() => {})
+    const { calls, fetchImpl } = services({
+      "https://fcm.googleapis.com/fcm/send/brave": 403,
+      "https://updates.push.services.mozilla.com/wpush/v2/gone": 410,
+    })
+    const response = await reminders(
+      testRequest("https://fcm.googleapis.com/fcm/send/brave"),
+      vapidEnv,
+      fetchImpl,
+      EVENING,
+    )
+    const logged = log.mock.calls.map(([line]) => JSON.parse(String(line)))
+    log.mockRestore()
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as { devices: unknown[] }
+    // Saved at one instant, so in endpoint order.
+    expect(body.devices).toEqual([
+      {
+        host: "fcm.googleapis.com",
+        self: true,
+        outcome: "vapid",
+        status: 403,
+        reason: "VAPID key refused",
+      },
+      {
+        host: "updates.push.services.mozilla.com",
+        self: false,
+        outcome: "gone",
+        status: 410,
+        reason: "subscription gone",
+      },
+      { host: "web.push.apple.com", self: false, outcome: "sent", status: 201, reason: "sent" },
+    ])
+    expect(calls.map((call) => call.endpoint)).not.toContain("https://push.test/theirs")
+    // A gone device is deleted; the others stay.
+    expect(
+      await subscriptionOf(
+        harness.control,
+        USER,
+        "https://updates.push.services.mozilla.com/wpush/v2/gone",
+      ),
+    ).toBeNull()
+    expect(
+      await subscriptionOf(harness.control, USER, "https://fcm.googleapis.com/fcm/send/brave"),
+    ).not.toBeNull()
+    // Each failure is logged with the host, never the whole endpoint.
+    expect(logged).toEqual([
+      expect.objectContaining({ event: "push_failed", host: "fcm.googleapis.com", status: 403 }),
+      expect.objectContaining({
+        event: "push_failed",
+        host: "updates.push.services.mozilla.com",
+        status: 410,
+      }),
+    ])
+    expect(JSON.stringify(logged)).not.toContain("/fcm/send/brave")
+  })
+
+  it("refuses a browser the server holds no subscription for", async () => {
+    await subscribe(USER, "https://web.push.apple.com/phone")
+    const { fetchImpl } = services({})
+    const response = await reminders(
+      testRequest("https://fcm.googleapis.com/fcm/send/unknown"),
+      vapidEnv,
+      fetchImpl,
+      EVENING,
+    )
+    expect(response.status).toBe(404)
   })
 })

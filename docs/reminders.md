@@ -19,9 +19,13 @@ rather than native form fields (`Switch` and `Select` in
 - **Time** (a `Select`): every quarter hour from 00:00 to 23:45, 20:00 by
   default. The cron runs on the quarter hour. A change saves at once.
 - **Send a test reminder now** (a `Button`): runs the cron's check for the
-  reader at once and sends the result to this device, even when every
-  habit is logged (the body says "Test reminder."). Cron does not run on
-  preview versions; this is how a preview is tested.
+  reader at once and sends the result to every device of the reader, even
+  when every habit is logged (the body says "Test reminder."). Cron does not
+  run on preview versions; this is how a preview is tested. The toast says
+  what each push service answered: "Sent to 2 devices.", or "Sent to 1 of 2
+  devices. This browser: 403 VAPID key refused." A device other than this
+  browser is named by its push service's host. A gone device (404 or 410)
+  is deleted; when it is this browser, the switch turns off.
 
 **The time zone is not shown.** The push comes from the Worker's cron, not
 from the device, so the server must know which zone the reader's 20:00 is
@@ -35,6 +39,36 @@ subscription to one browser. The browser half is `src/data/reminders.ts`.
 
 On an iPhone a push reaches only a Home Screen app, on iOS 16.4 or later. In
 Safari's tab the card says the browser cannot show reminders.
+
+### When a step fails
+
+Each failure is a `ReminderError` with a `reason` (`src/data/reminders.ts`),
+and the card shows one line for it. The card also writes the error and the
+browser's own error (its `cause`) to the console, with `Habit reminders:`.
+
+| `reason`          | When                                                                   |
+| ----------------- | ---------------------------------------------------------------------- |
+| `dismissed`       | The permission prompt was closed (`default`)                           |
+| `denied`          | Notifications are blocked, or `subscribe` threw `NotAllowedError`      |
+| `push-blocked`    | `subscribe` threw `AbortError`: the push service refused or is off     |
+| `worker-outdated` | `subscribe` threw `InvalidStateError`, or failed with a worker waiting |
+| `worker-missing`  | No service worker was ready in 10 seconds                              |
+| `rejected`        | The server answered an error; the line shows its status and code       |
+| `signed-out`      | A 401, or the session could not be refreshed                           |
+| `offline`         | `fetch` threw: the request did not reach the server                    |
+| `failed`          | Anything else; the line shows the error's name                         |
+
+Brave's `AbortError` ("Registration failed - push service error") is the
+usual desktop case: Brave has push off until **Use Google services for push
+messaging** is on in `brave://settings/privacy`. In Brave (`navigator.brave`)
+the `push-blocked` line names that setting.
+
+Each push that fails is logged by the Worker as `push_failed`, with the push
+service's host, its status, the reason and the start of its answer, never
+the whole endpoint (`worker/reminders/push.ts`).
+
+The server takes an endpoint of up to 2048 characters: Edge's endpoint is a
+Windows (WNS) channel URI, which can be that long.
 
 ## Storage
 
