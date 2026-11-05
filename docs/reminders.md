@@ -154,12 +154,13 @@ one.
 `worker/reminders/message.ts`. Finn, 2026-11-04: plain and clear about what
 is missing, with the app's name as the only title.
 
-| case                       | title    | body                                              |
-| -------------------------- | -------- | ------------------------------------------------- |
-| 1 missing                  | Ruminate | Not logged yet: Run.                              |
-| 3 missing                  | Ruminate | Not logged yet: Run, Read and Walk.               |
-| 7 missing                  | Ruminate | Not logged yet: Run, Read, Walk, Swim, Stretch and 2 more. |
-| test button, none missing  | Ruminate | Test reminder. All habits for today are logged.   |
+| case                      | title    | body                                                                 |
+| ------------------------- | -------- | -------------------------------------------------------------------- |
+| 1 missing                 | Ruminate | Not logged yet: Run.                                                 |
+| 3 missing                 | Ruminate | Not logged yet: Run, Read and Walk.                                  |
+| 7 missing                 | Ruminate | Not logged yet: Run, Read, Walk, Swim, Stretch and 2 more.           |
+| test button, none missing | Ruminate | Test reminder. All habits for today are logged.                      |
+| test button, no habits    | Ruminate | Test reminder. You have no habits to log. Add a series to a tracker. |
 
 The list names five habits, then counts the rest. A tap opens the tracker
 of the first missing habit.
