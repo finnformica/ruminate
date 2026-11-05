@@ -1,3 +1,3 @@
 ### Changed
 
-- The title of a habit reminder is now just **Ruminate**. The text still names the habits you have not logged today, for example "Not logged yet: Run, Read and Walk."
+- Habit reminders read more like a person wrote them. Each one asks or reminds you about the habits you have not logged today, for example "Have you done Run and Read today?" or "Time to log Walk." The title is now just **Ruminate**.

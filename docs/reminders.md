@@ -151,19 +151,31 @@ one.
 
 ## The message
 
-`worker/reminders/message.ts`. Finn, 2026-11-04: plain and clear about what
-is missing, with the app's name as the only title.
+`worker/reminders/message.ts`. Finn, 2026-11-04 and 2026-11-05: short,
+friendly and clear about what is missing, with the app's name as the only
+title.
 
-| case                      | title    | body                                                                 |
-| ------------------------- | -------- | -------------------------------------------------------------------- |
-| 1 missing                 | Ruminate | Not logged yet: Run.                                                 |
-| 3 missing                 | Ruminate | Not logged yet: Run, Read and Walk.                                  |
-| 7 missing                 | Ruminate | Not logged yet: Run, Read, Walk, Swim, Stretch and 2 more.           |
-| test button, none missing | Ruminate | Test reminder. All habits for today are logged.                      |
-| test button, no habits    | Ruminate | Test reminder. You have no habits to log. Add a series to a tracker. |
+The body is one of four templates (`TEMPLATES`), picked with `Math.random`
+for each reminder. Nothing is stored and no order is kept. `{habits}` is the
+list of missing habits: five names, then "and N more".
 
-The list names five habits, then counts the rest. A tap opens the tracker
-of the first missing habit.
+| template | body                          |
+| -------- | ----------------------------- |
+| A        | Have you done {habits} today? |
+| B        | Don't forget {habits} today.  |
+| C        | Still to log today: {habits}. |
+| D        | Time to log {habits}.         |
+
+| case                      | title    | body                                                              |
+| ------------------------- | -------- | ----------------------------------------------------------------- |
+| 1 missing (A)             | Ruminate | Have you done Run today?                                          |
+| 3 missing (B)             | Ruminate | Don't forget Run, Read and Walk today.                            |
+| 7 missing (C)             | Ruminate | Still to log today: Run, Read, Walk, Swim, Stretch and 2 more.    |
+| test button, missing (A)  | Ruminate | Test reminder. Have you done Run and Read today?                  |
+| test button, none missing | Ruminate | Test reminder. All your habits are logged today.                  |
+| test button, no habits    | Ruminate | Test reminder. No habits yet. Add a series to a tracker to start. |
+
+A tap opens the tracker of the first missing habit.
 
 ### The title on each platform
 
