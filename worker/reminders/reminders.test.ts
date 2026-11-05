@@ -10,7 +10,7 @@ import { forSubscriber, type TenantDb } from "../tenancy-db"
 import type { Env } from "../types"
 import { runReminders } from "./cron"
 import { checkHabits, missingHabits, readDayEntries, readHabits, type Habit } from "./habits"
-import { reminderMessage } from "./message"
+import { reminderMessage, TEMPLATES } from "./message"
 import { reminders } from "../handlers/reminders"
 import { pushResultOf, sendPush, vapidKeys } from "./push"
 import { dueSubscriptions, saveSubscription, subscriptionOf } from "./store"
@@ -179,25 +179,54 @@ describe("the message", () => {
     sortKey: "a0",
   })
 
+  /** A random source that picks template `index` of the four. */
+  const pick = (index: number) => () => (index + 0.5) / TEMPLATES.length
+
   it("names the missing habits and opens the first one's tracker", () => {
     const habits = [habit("Read"), habit("Run", "trk_b")]
-    expect(reminderMessage(habits, habits.slice(1))).toEqual({
-      title: "Today's habits",
-      body: "Not logged yet: Run.",
+    expect(reminderMessage(habits, habits.slice(1), { random: pick(3) })).toEqual({
+      title: "Ruminate",
+      body: "Time to log Run.",
       url: "/trackers/trk_b",
       tag: "habit-reminder",
     })
-    expect(reminderMessage(habits, habits).body).toBe("Not logged yet: Read and Run.")
   })
 
-  it("counts the rest after five", () => {
-    const habits = ["A", "B", "C", "D", "E", "F", "G"].map((name) => habit(name))
-    expect(reminderMessage(habits, habits).body).toBe("Not logged yet: A, B, C, D, E and 2 more.")
+  it("renders every template for 1, 3 and 7 missing habits", () => {
+    const names = ["Run", "Read", "Walk", "Swim", "Stretch", "Draw", "Sing"]
+    const habits = names.map((name) => habit(name))
+    const body = (index: number, count: number) =>
+      reminderMessage(habits, habits.slice(0, count), { random: pick(index) }).body
+    const lists = ["Run", "Run, Read and Walk", "Run, Read, Walk, Swim, Stretch and 2 more"]
+    const expected = [
+      lists.map((list) => `Have you done ${list} today?`),
+      lists.map((list) => `Don't forget ${list} today.`),
+      lists.map((list) => `Still to log today: ${list}.`),
+      lists.map((list) => `Time to log ${list}.`),
+    ]
+    expect(TEMPLATES).toHaveLength(4)
+    TEMPLATES.forEach((_, index) => {
+      expect([1, 3, 7].map((count) => body(index, count))).toEqual(expected[index])
+    })
+    // The ends of the random range stay in the list.
+    expect(reminderMessage(habits, habits.slice(0, 1), { random: () => 0 }).body).toBe(
+      "Have you done Run today?",
+    )
+    expect(reminderMessage(habits, habits.slice(0, 1), { random: () => 0.9999 }).body).toBe(
+      "Time to log Run.",
+    )
   })
 
-  it("says a test is one, and says so when nothing is missing", () => {
+  it("says a test is one, and says so when nothing is missing or there are no habits", () => {
+    const habits = [habit("Run"), habit("Read")]
+    expect(reminderMessage(habits, habits, { test: true, random: pick(0) }).body).toBe(
+      "Test reminder. Have you done Run and Read today?",
+    )
     expect(reminderMessage([habit("Read")], [], { test: true }).body).toBe(
-      "Test reminder. All habits for today are logged.",
+      "Test reminder. All your habits are logged today.",
+    )
+    expect(reminderMessage([], [], { test: true }).body).toBe(
+      "Test reminder. No habits yet. Add a series to a tracker to start.",
     )
   })
 })
@@ -426,16 +455,19 @@ describe("the cron", () => {
 
   it("sends nothing to a reader with every habit logged, and still marks the day", async () => {
     await subscribe(OTHER, "https://push.test/other")
+    // In the same run, USER has a habit missing: only USER gets a push.
+    await subscribe(USER, "https://push.test/phone")
     // OTHER's one habit is missing; log it.
     await seedTracker(OTHER, { id: "trk_other", title: "Theirs" }, [
       { id: "ser_other", name: "Other", kind: "check", entries: [["done", TODAY]] },
     ])
     const service = pushService()
     expect(await runReminders(vapidEnv, EVENING, service.fetchImpl)).toMatchObject({
-      due: 1,
-      sent: 0,
+      due: 2,
+      checked: 2,
+      sent: 1,
     })
-    expect(service.calls).toEqual([])
+    expect(service.calls.map((call) => call.endpoint)).toEqual(["https://push.test/phone"])
     const row = await subscriptionOf(harness.control, OTHER, "https://push.test/other")
     expect(row?.lastSentDay).toBe(TODAY)
   })

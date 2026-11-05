@@ -96,7 +96,9 @@ handler, `worker/reminders/cron.ts`:
    (`worker/reminders/habits.ts`) through a tenant handle minted for the
    subscription's owner (`forSubscriber`, worker/tenancy-db.ts).
 4. When a habit is missing, send one push to each due subscription. A 404
-   or 410 from the push service deletes the subscription.
+   or 410 from the push service deletes the subscription. When every habit
+   is logged, send nothing (the test "sends nothing to a reader with every
+   habit logged"). Only the test button sends with nothing missing.
 5. Mark the day dealt with, sent or not, and store the next due instant.
 
 Each run logs one line, `{"event":"habit_reminders", due, checked, sent,
@@ -146,6 +148,73 @@ other blocks (4,956 blocks each). Each reader has two devices due.
 About 120 rows per reader due, whatever the size of the corpus. The cache
 holds one row per key, so each block and link is a few seeks rather than
 one.
+
+## The message
+
+`worker/reminders/message.ts`. Finn, 2026-11-04 and 2026-11-05: short,
+friendly and clear about what is missing, with the app's name as the only
+title.
+
+The body is one of four templates (`TEMPLATES`), picked with `Math.random`
+for each reminder. Nothing is stored and no order is kept. `{habits}` is the
+list of missing habits: five names, then "and N more".
+
+| template | body                          |
+| -------- | ----------------------------- |
+| A        | Have you done {habits} today? |
+| B        | Don't forget {habits} today.  |
+| C        | Still to log today: {habits}. |
+| D        | Time to log {habits}.         |
+
+| case                      | title    | body                                                              |
+| ------------------------- | -------- | ----------------------------------------------------------------- |
+| 1 missing (A)             | Ruminate | Have you done Run today?                                          |
+| 3 missing (B)             | Ruminate | Don't forget Run, Read and Walk today.                            |
+| 7 missing (C)             | Ruminate | Still to log today: Run, Read, Walk, Swim, Stretch and 2 more.    |
+| test button, missing (A)  | Ruminate | Test reminder. Have you done Run and Read today?                  |
+| test button, none missing | Ruminate | Test reminder. All your habits are logged today.                  |
+| test button, no habits    | Ruminate | Test reminder. No habits yet. Add a series to a tracker to start. |
+
+A tap opens the tracker of the first missing habit.
+
+### The title on each platform
+
+Checked 2026-11-04. Finn's iPhone (a Home Screen web app) showed the old
+title, "Today's habits", with "from Ruminate" under it.
+
+- **iOS and iPadOS 16.4+, Home Screen web app**: iOS shows the title, then
+  a line "from <name>", where the name is the app's name on the Home
+  Screen. Nothing in the payload removes that line
+  ([Progressier](https://intercom.help/progressier/en/articles/13421891-can-i-remove-the-from-app-name-line-from-pwa-push-notifications)).
+  The line is in English on every device language
+  ([Progressier](https://intercom.help/progressier/en/articles/12646294-the-from-string-in-pwa-ios-push-notifications-isn-t-properly-localized)).
+  A title equal to the app name is reported to show the name twice
+  ([borso.fr #243](https://github.com/hugoleborso/borso.fr/pull/243)).
+  WebKit says only that the notifications work as other apps' do
+  ([WebKit blog](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)).
+- **An empty title**: the spec allows `""` (`showNotification`'s title is a
+  required DOMString with no check for empty,
+  [Notifications API](https://notifications.spec.whatwg.org/)). No source
+  measures what iOS shows for it. Native iOS apps without a title show the
+  app name, but that is APNs, not Web Push
+  ([phonegap-plugin-push #1282](https://github.com/phonegap/phonegap-plugin-push/issues/1282)).
+- **Chrome, Android and desktop**: the title shows as sent, with the site
+  or the installed app's name as Chrome's own label
+  ([web.dev](https://web.dev/articles/push-notifications-display-a-notification)).
+  An empty title there is not documented and can show a blank first line.
+
+So no title is known to give just "Ruminate" once on iOS. The title is
+`Ruminate`: correct on Chrome, and the best known value on iOS. On an
+iPhone expect:
+
+> **Ruminate**
+> from Ruminate
+> Not logged yet: Run, Read and Walk.
+
+To try an empty title, change `TITLE` in `message.ts` to `""`, deploy a
+preview, and press **Send a test reminder now** on an iPhone. The service
+worker keeps an empty title as sent (`src/sw.ts` falls back to "Ruminate"
+only when the payload has no title).
 
 ## Web Push
 
