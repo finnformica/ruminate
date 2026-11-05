@@ -12,6 +12,7 @@ import { defineConfig } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import { VitePWA } from "vite-plugin-pwa"
 import { defaultExclude } from "vitest/config"
+import { shotsPlugin } from "./scripts/shots-vite-plugin"
 
 /**
  * What build of the changelog this is, as `<newest week>.<hash>`.
@@ -112,6 +113,9 @@ export default defineConfig({
         type: "module",
       },
     }),
+    // Shots mode (docs/screenshots.md): applies only to `vite --mode shots`
+    // under `vite dev`, never to a build.
+    shotsPlugin(),
     // Fixes isomorphic-git Buffer error
     // https://github.com/isomorphic-git/isomorphic-git/issues/1753
     nodePolyfills(),

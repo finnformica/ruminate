@@ -25,6 +25,10 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 - `npm run test:vr` - Visual regression against the committed baselines (CI's platform is authoritative; see docs/visual-regression.md)
 - `npm run test:fold` / `npm run test:select` - The fold's motion, and the multi-block selection's keys, in a real browser over the Storybook build (`e2e/`)
 
+### Screenshots
+
+- `npm run shots:serve` - The app signed in with demo data, under Vite only (no Worker, no database), for `orca-shot` of signed-in pages. UI workers: follow docs/screenshots.md. Never post a `--data profile` shot in a PR
+
 ### Code Quality
 
 - `npm run lint` - Run ESLint on source files
